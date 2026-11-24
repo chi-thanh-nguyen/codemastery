@@ -126,4 +126,102 @@ class NextLessonResolverTest {
                         + "and its prerequisite \"Conditions\" is not yet Mastered.")),
                 result.recommendations());
     }
+
+    // ADR011 §10 rule oracles on the standard fixture: L1-L3 map S1-S3; S2 -> S1 and S3 -> S2.
+
+    private static final UUID COURSE = new UUID(0, 0x900), LEARNER = new UUID(0, 0x901);
+    // UUIDs deliberately invert the canonical order so that only the specified orders can pass.
+    private static final UUID S1 = new UUID(0, 0x73), S2 = new UUID(0, 0x72), S3 = new UUID(0, 0x71);
+    private static final UUID L1 = new UUID(0, 0x803), L2 = new UUID(0, 0x802), L3 = new UUID(0, 0x801);
+    private static final Map<UUID, String> NAMES = Map.of(S1, "Variables", S2, "Loops", S3, "Arrays");
+
+    @Test
+    void b6R04TheWeakSkillWithTheSmallerLessonIndexIsExaminedFirst() {
+        var context = new DecisionContext(COURSE, LEARNER, standardLessons(false, false, false),
+                Map.of(S1, MasteryState.UNKNOWN, S2, MasteryState.WEAK, S3, MasteryState.WEAK),
+                List.of(new PrerequisiteInput(S2, S1), new PrerequisiteInput(S3, S2)), NAMES);
+
+        assertEquals(List.of(new Recommendation(RecommendationType.REMEDIAL, L1,
+                        "Review this lesson first: your skill \"Loops\" is Weak and its prerequisite \"Variables\" is not yet Mastered.")),
+                new AdaptiveDecisionEngine().decide(context).recommendations());
+    }
+
+    @Test
+    void b6R05AmongUnmasteredPrerequisitesTheEarliestTargetWinsWhateverTheUuidOrder() {
+        // S3 requires both S1 and S2; S1's Lesson comes first although S2 has the smaller UUID.
+        var context = new DecisionContext(COURSE, LEARNER, standardLessons(false, false, false),
+                Map.of(S1, MasteryState.LEARNING, S2, MasteryState.UNKNOWN, S3, MasteryState.WEAK),
+                List.of(new PrerequisiteInput(S3, S2), new PrerequisiteInput(S3, S1)), NAMES);
+
+        assertEquals(new Recommendation(RecommendationType.REMEDIAL, L1,
+                        "Review this lesson first: your skill \"Arrays\" is Weak and its prerequisite \"Variables\" is not yet Mastered."),
+                new AdaptiveDecisionEngine().decide(context).recommendations().getFirst());
+    }
+
+    @Test
+    void b6R06APrerequisiteWithoutAPublishedLessonIsNeverATarget() {
+        // L1 is hidden and therefore absent from the snapshot; S1 has no published Lesson.
+        var context = new DecisionContext(COURSE, LEARNER,
+                List.of(new LessonInput(L2, false, Set.of(S2)), new LessonInput(L3, false, Set.of(S3))),
+                Map.of(S1, MasteryState.UNKNOWN, S2, MasteryState.WEAK, S3, MasteryState.UNKNOWN),
+                List.of(new PrerequisiteInput(S2, S1), new PrerequisiteInput(S3, S2)), NAMES);
+
+        var decision = new AdaptiveDecisionEngine().decide(context);
+
+        assertEquals(List.of(new Recommendation(RecommendationType.CONTINUE, L2,
+                "Continue with the next lesson in the course order.")), decision.recommendations());
+        assertTrue(decision.recommendations().stream().noneMatch(draft -> draft.targetLessonId().equals(L1)));
+    }
+
+    @Test
+    void anIncompleteLessonOfThePrerequisiteIsPreferredOverAnEarlierCompletedOne() {
+        UUID secondVariablesLesson = new UUID(0, 0x804);
+        var context = new DecisionContext(COURSE, LEARNER,
+                List.of(new LessonInput(L1, true, Set.of(S1)), new LessonInput(L2, false, Set.of(S2)),
+                        new LessonInput(secondVariablesLesson, false, Set.of(S1))),
+                Map.of(S1, MasteryState.WEAK, S2, MasteryState.WEAK, S3, MasteryState.UNKNOWN),
+                List.of(new PrerequisiteInput(S2, S1)), NAMES);
+
+        assertEquals(secondVariablesLesson,
+                new AdaptiveDecisionEngine().decide(context).recommendations().getFirst().targetLessonId());
+    }
+
+    @Test
+    void unknownNeverTriggersRemedialAndOnlyDirectPrerequisitesAreCandidates() {
+        // S3 is Weak; its direct prerequisite S2 is Mastered, the indirect S1 is Unknown -> no remedial.
+        var context = new DecisionContext(COURSE, LEARNER, standardLessons(false, false, false),
+                Map.of(S1, MasteryState.UNKNOWN, S2, MasteryState.MASTERED, S3, MasteryState.WEAK),
+                List.of(new PrerequisiteInput(S2, S1), new PrerequisiteInput(S3, S2)), NAMES);
+
+        var decision = new AdaptiveDecisionEngine().decide(context);
+
+        assertEquals(List.of(L2), decision.testOutLessonIds());
+        assertEquals(new Recommendation(RecommendationType.CONTINUE, L1, "Continue with the next lesson in the course order."),
+                decision.recommendations().getLast());
+    }
+
+    @Test
+    void b6R14ACompletedReviewStaysSelectedUntilTheWeakSkillChanges() {
+        var edges = List.of(new PrerequisiteInput(S2, S1));
+        var weak = Map.of(S1, MasteryState.UNKNOWN, S2, MasteryState.WEAK);
+        var remedial = new Recommendation(RecommendationType.REMEDIAL, L1,
+                "Review this lesson first: your skill \"Loops\" is Weak and its prerequisite \"Variables\" is not yet Mastered.");
+        var engine = new AdaptiveDecisionEngine();
+
+        assertEquals(List.of(remedial), engine.decide(new DecisionContext(COURSE, LEARNER,
+                twoLessons(true, false), weak, edges, NAMES)).recommendations());
+        assertEquals(List.of(remedial), engine.decide(new DecisionContext(COURSE, LEARNER,
+                twoLessons(true, true), weak, edges, NAMES)).recommendations());
+        assertTrue(engine.decide(new DecisionContext(COURSE, LEARNER, twoLessons(true, true),
+                Map.of(S1, MasteryState.UNKNOWN, S2, MasteryState.LEARNING), edges, NAMES)).recommendations().isEmpty());
+    }
+
+    private static List<LessonInput> standardLessons(boolean c1, boolean c2, boolean c3) {
+        return List.of(new LessonInput(L1, c1, Set.of(S1)), new LessonInput(L2, c2, Set.of(S2)),
+                new LessonInput(L3, c3, Set.of(S3)));
+    }
+
+    private static List<LessonInput> twoLessons(boolean c1, boolean c2) {
+        return List.of(new LessonInput(L1, c1, Set.of(S1)), new LessonInput(L2, c2, Set.of(S2)));
+    }
 }
