@@ -343,6 +343,29 @@ DELETE FROM public.enrollments WHERE course_id='20000000-0000-0000-0000-00000000
 UPDATE public.courses SET publication_status='hidden' WHERE id='20000000-0000-0000-0000-0000000000c3';
 SQL
 
+echo "== IN10 audit read (r10: audit_logs SELECT, INSERT; users SELECT for actor names)"
+# The account is registered, then promoted by the bootstrap administrator, which also stands in for the
+# audited Administrator actions (IN11/IN20/IN21 add their HTTP mutations and real-backend cases later).
+call POST /api/auth/register "" "{\"email\":\"admin.in10@example.test\",\"password\":\"$password\",\"displayName\":\"IN10 admin\"}"
+check "register the IN10 administrator" "$STATUS" 201
+psql_admin >/dev/null <<<"UPDATE public.users SET role='admin' WHERE email='admin.in10@example.test';"
+call POST /api/auth/login "" "{\"email\":\"admin.in10@example.test\",\"password\":\"$password\"}"
+check "login the IN10 administrator" "$STATUS" 200
+token_adm="$(field accessToken)"
+admin_id="$(psql_admin <<<"SELECT id FROM public.users WHERE email='admin.in10@example.test';")"
+psql_admin >/dev/null <<SQL
+INSERT INTO public.audit_logs VALUES
+ (gen_random_uuid(),'$admin_id','user_locked','user','10000000-0000-0000-0000-0000000000a1','2026-11-24T01:00:00.123456Z'),
+ (gen_random_uuid(),'$admin_id','course_hidden','course','$hidden','2026-11-24T01:00:01Z');
+SQL
+call GET "/api/admin/audit-logs?actorId=$admin_id" "$token_adm"
+check "administrator reads the audit log newest first (SELECT)" "$STATUS/$(field totalElements)/$(field content.0.action)/$(field content.0.actorDisplayName)" "200/2/course_hidden/IN10 admin"
+call GET "/api/admin/audit-logs?actorId=$admin_id&occurredFrom=2026-11-24T01:00:00.123456Z&occurredTo=2026-11-24T01:00:01Z" "$token_adm"
+check "inclusive occurredFrom, exclusive occurredTo" "$STATUS/$(field totalElements)/$(field content.0.targetReference)" "200/1/10000000-0000-0000-0000-0000000000a1"
+call GET "/api/admin/audit-logs" "$token_a"; check "a learner is refused the audit log" "$STATUS" 403
+call GET "/api/admin/audit-logs?size=0" "$token_a"; check "a malformed query is 400 before the role check" "$STATUS" 400
+check "the audit read wrote nothing" "$(psql_admin <<<"SELECT count(*) FROM public.audit_logs;")" 2
+
 echo "== current account state is enforced (users SELECT on every protected request)"
 psql_admin >/dev/null <<<"UPDATE public.users SET account_status='locked' WHERE email='learner.c@example.test';"
 call GET "/api/me/courses" "$token_c"; check "locked account's existing token is rejected" "$STATUS" 401
@@ -407,7 +430,7 @@ check "backend log never contains a recipient address" "$(docker logs "$backend"
 echo "== no permission failure anywhere, and the matrix is unchanged"
 check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank and AS06 quiz composition under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank, AS06 quiz composition and the IN10 audit read under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE=codemastery-backend:privilege-test \
