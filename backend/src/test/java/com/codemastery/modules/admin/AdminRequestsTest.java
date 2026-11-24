@@ -68,6 +68,18 @@ class AdminRequestsTest {
     }
 
     @Test
+    void acceptsRfc3339LowerCaseSeparatorsAndFractionDigits() {
+        AuditLogSearch search = AuditLogSearch.parse(params(
+                "occurredFrom", "2026-11-18t01:00:00.5z",
+                "occurredTo", "2026-11-18T01:00:00.123456789-01:30"));
+
+        assertAll(
+                () -> assertEquals(Instant.parse("2026-11-18T01:00:00.500Z"), search.occurredFrom()),
+                // Precision beyond microseconds is parsed here and rejected by the audit service.
+                () -> assertEquals(Instant.parse("2026-11-18T02:30:00.123456789Z"), search.occurredTo()));
+    }
+
+    @Test
     void rejectsMalformedQueriesWithBadRequest() {
         MultiValueMap<String, String> duplicate = params("action", "user_locked");
         duplicate.add("action", "user_unlocked");
@@ -81,6 +93,16 @@ class AdminRequestsTest {
                 params("occurredFrom", "yesterday"),
                 params("occurredTo", "2026-11-18 01:00:00Z"),
                 params("occurredFrom", "2026-11-18T01:00:00"),
+                // Accepted by ISO-8601 parsing but outside RFC 3339 date-time.
+                params("occurredFrom", "2026-11-18T01:00Z"),
+                params("occurredFrom", "2026-11-18T08:00:00+07"),
+                params("occurredFrom", "2026-11-18T08:00:00+0700"),
+                params("occurredFrom", "2026-11-18T08:00:00+07:00:30"),
+                params("occurredFrom", "+12026-11-18T01:00:00Z"),
+                params("occurredFrom", "2026-11-18T01:00:00.Z"),
+                params("occurredFrom", "2026-11-18T01:00:00Z[UTC]"),
+                params("occurredFrom", "2026-02-30T01:00:00Z"),
+                params("occurredTo", "2026-11-18T24:00:00Z"),
                 params("page", "-1"),
                 params("page", "1.5"),
                 params("size", "ten"),

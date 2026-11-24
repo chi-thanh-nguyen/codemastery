@@ -178,9 +178,9 @@ class AuditLogServiceTest {
         assertEquals(PageRequest.of(0, 20), pageable.getValue());
     }
 
+    /** ADR012 section 12: invalid query values (stage 2) are decided before the role (stage 3) and any lookup. */
     @Test
-    void searchRejectsInvalidValuesBeforeQueryingAnything() {
-        signedInAs(IdentityRole.ADMINISTRATOR);
+    void searchRejectsInvalidValuesBeforeTheRoleCheckAndBeforeQueryingAnything() {
         Instant from = Instant.parse("2026-11-18T01:00:00Z");
         List<Executable> invalid = List.of(
                 () -> service.search(null, "nope", null, null, null, null, null, null),
@@ -198,16 +198,19 @@ class AuditLogServiceTest {
             BusinessRuleException thrown = assertThrows(BusinessRuleException.class, call);
             assertEquals(HttpStatus.BAD_REQUEST, thrown.getStatus());
         }
-        verifyNoInteractions(repository);
+        verifyNoInteractions(repository, identities);
     }
 
     @ParameterizedTest
     @EnumSource(value = IdentityRole.class, names = {"LEARNER", "INSTRUCTOR"})
-    void searchRejectsEveryNonAdministrator(IdentityRole role) {
+    void searchRejectsEveryNonAdministratorBeforeAnyLookup(IdentityRole role) {
         signedInAs(role);
 
         assertThrows(AccessDeniedException.class, () -> service.search(null, null, null, null, null, null, null, null));
+        assertThrows(AccessDeniedException.class, () -> service.search(UUID.randomUUID(), "user_locked", "user",
+                UUID.randomUUID(), Instant.parse("2026-11-18T01:00:00Z"), Instant.parse("2026-11-18T02:00:00Z"), 0, 100));
 
         verifyNoInteractions(repository);
+        verify(identities, never()).userSummaries(any());
     }
 }

@@ -6,7 +6,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -67,7 +66,7 @@ public class UserAccountService {
         for (UUID id : userIds) {
             Objects.requireNonNull(id, "userId");
             users.findById(id).ifPresent(user -> summaries.put(id,
-                    new UserSummary(id, user.displayName(), user.role().name().toLowerCase(Locale.ROOT))));
+                    new UserSummary(id, user.displayName(), user.role().getCode())));
         }
         return Map.copyOf(summaries);
     }

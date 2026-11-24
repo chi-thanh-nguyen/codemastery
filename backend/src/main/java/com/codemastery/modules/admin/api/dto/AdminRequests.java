@@ -7,6 +7,7 @@ import org.springframework.util.MultiValueMap;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -28,6 +29,9 @@ public final class AdminRequests {
                 "actorId", "action", "targetType", "targetReference", "occurredFrom", "occurredTo", "page", "size");
         private static final Pattern UUID_TEXT = Pattern.compile(
                 "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+        /** RFC 3339 section 5.6 date-time; "T" and "Z" may be lower case (section 5.6, note). */
+        private static final Pattern RFC_3339_DATE_TIME = Pattern.compile(
+                "[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?([Zz]|[+-][0-9]{2}:[0-9]{2})");
 
         public static AuditLogSearch parse(MultiValueMap<String, String> params) {
             if (!PARAMETERS.containsAll(params.keySet())
@@ -69,8 +73,13 @@ public final class AdminRequests {
             if (value == null) {
                 return null;
             }
+            // ISO-8601 parsing alone also accepts forms RFC 3339 excludes (no seconds, "+07" or
+            // second-precision offsets, signed years beyond four digits), so the grammar is checked first.
+            if (!RFC_3339_DATE_TIME.matcher(value).matches()) {
+                throw invalid();
+            }
             try {
-                return OffsetDateTime.parse(value).toInstant();
+                return OffsetDateTime.parse(value.toUpperCase(Locale.ROOT)).toInstant();
             } catch (DateTimeParseException exception) {
                 throw invalid();
             }

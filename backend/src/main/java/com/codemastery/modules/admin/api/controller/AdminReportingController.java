@@ -32,7 +32,11 @@ public class AdminReportingController {
         this.auditLogs = auditLogs;
     }
 
-    /** CT31.read: Administrator only (SecurityConfig and AuditLogService both enforce it). */
+    /**
+     * CT31.read, ADR012 section 12 stage order: SecurityConfig requires authentication (401), the query
+     * is parsed here and validated by AuditLogService (400), which then requires an Administrator (403)
+     * before any lookup.
+     */
     @GetMapping(AUDIT_LOGS_PATH)
     public ResponseEntity<PageResponse<AuditLogEntry>> listAuditLogs(
             @RequestParam MultiValueMap<String, String> params) {

@@ -59,9 +59,12 @@ public class AuditLogService {
             String targetReference, Instant occurredAt) {}
 
     /**
-     * Records one actual change by the authenticated Administrator. Callers must not call this
-     * for no-ops, reads, denied or failed attempts. {@code MANDATORY} makes a call outside the
-     * caller's transaction fail instead of committing an audit row on its own.
+     * Records one actual change by the authenticated Administrator (CT31.actions, CT31.consistency).
+     * Callers must not call this for no-ops, reads, denied or failed attempts, and call it after their
+     * own change and locks. {@code MANDATORY} makes a call outside the caller's transaction fail instead
+     * of committing an audit row on its own; the insert is executed before this method returns, so an
+     * insert failure (including a read-only caller transaction) surfaces here and rolls back the
+     * caller's whole unit.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     public AuditLog record(AuditAction action, UUID targetId) {
@@ -81,14 +84,14 @@ public class AuditLogService {
     /**
      * CT31.read: Administrator-only, AND-combined optional filters, newest first. {@code occurredFrom}
      * is inclusive and {@code occurredTo} exclusive, both at most microsecond precision and
-     * {@code occurredFrom < occurredTo} when both are given. Invalid values are 400. A null
-     * {@code page} or {@code size} uses the approved paging defaults.
+     * {@code occurredFrom < occurredTo} when both are given. A null {@code page} or {@code size} uses
+     * the approved paging defaults. ADR012 section 12 stage order: invalid query values are 400
+     * (stage 2) before the role 403 (stage 3), and both are decided before any lookup.
      */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResponse<AuditLogView> search(
             UUID actorId, String action, String targetType, UUID targetReference,
             Instant occurredFrom, Instant occurredTo, Integer page, Integer size) {
-        requireAdministrator();
         int pageNumber = page == null ? PageResponse.DEFAULT_PAGE : page;
         int pageSize = size == null ? PageResponse.DEFAULT_SIZE : size;
         PageResponse.validateRequest(pageNumber, pageSize);
@@ -104,6 +107,7 @@ public class AuditLogService {
         if (occurredFrom != null && occurredTo != null && !occurredFrom.isBefore(occurredTo)) {
             throw invalid();
         }
+        requireAdministrator();
         AuditLogFilter filter = new AuditLogFilter(actorId, action, targetType,
                 targetReference == null ? null : targetReference.toString(), occurredFrom, occurredTo);
         Page<AuditLog> result = auditLogs.search(filter, PageRequest.of(pageNumber, pageSize));
