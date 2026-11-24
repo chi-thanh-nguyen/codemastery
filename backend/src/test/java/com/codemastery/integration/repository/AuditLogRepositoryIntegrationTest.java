@@ -8,6 +8,7 @@ import com.codemastery.modules.admin.domain.model.AuditAction;
 import com.codemastery.modules.admin.domain.model.AuditLog;
 import com.codemastery.modules.admin.domain.repository.AuditLogRepository;
 import com.codemastery.modules.admin.domain.repository.AuditLogRepository.AuditLogFilter;
+import com.codemastery.modules.admin.infrastructure.persistence.repository.AuditLogJpaRepository;
 import com.codemastery.modules.auth.domain.model.Role;
 import com.codemastery.modules.auth.infrastructure.security.AuthenticatedUser;
 import jakarta.persistence.EntityManager;
@@ -36,7 +37,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.repository.CrudRepository;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -47,19 +52,24 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.lang.reflect.Method;
 import java.security.SecureRandom;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -108,6 +118,9 @@ class AuditLogRepositoryIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private AuditLogService auditService;
+
+    @Autowired
+    private AuditLogJpaRepository auditJpa;
 
     @Autowired
     private WebApplicationContext context;
@@ -256,6 +269,26 @@ class AuditLogRepositoryIntegrationTest extends AbstractIntegrationTest {
         }));
 
         assertTrue(causeMessages(thrown).contains("pk_audit_logs"), () -> "unexpected failure " + causeMessages(thrown));
+    }
+
+    /**
+     * CT31.actions: no update or delete operation exists. The domain port only appends and searches, and the
+     * Spring Data interface exposes exactly the two Specification reads, not {@code JpaSpecificationExecutor}
+     * (whose bulk {@code update} and {@code delete} would otherwise be callable) or any CRUD interface.
+     */
+    @Test
+    void theAuditRepositoriesExposeNoUpdateOrDeleteOperation() throws NoSuchMethodException {
+        assertEquals(Set.of("append", "search"),
+                Arrays.stream(AuditLogRepository.class.getMethods()).map(Method::getName).collect(Collectors.toSet()));
+        assertEquals(Set.of(
+                        AuditLogJpaRepository.class.getMethod("findAll", Specification.class, Pageable.class),
+                        AuditLogJpaRepository.class.getMethod("count", Specification.class)),
+                Set.of(AuditLogJpaRepository.class.getMethods()));
+        assertFalse(JpaSpecificationExecutor.class.isAssignableFrom(AuditLogJpaRepository.class));
+        assertFalse(CrudRepository.class.isAssignableFrom(AuditLogJpaRepository.class));
+        // The runtime Spring Data proxy implements neither, so no bulk operation is reachable by a cast.
+        assertFalse(auditJpa instanceof JpaSpecificationExecutor<?>);
+        assertFalse(auditJpa instanceof CrudRepository<?, ?>);
     }
 
     @Test
