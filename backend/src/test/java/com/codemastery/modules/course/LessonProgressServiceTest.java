@@ -20,6 +20,12 @@ import com.codemastery.modules.course.domain.repository.EnrollmentRepository.Les
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository.LessonFlags;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository.ProgressSummary;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository.VisitPosition;
+import com.sun.source.tree.IdentifierTree;
+import com.sun.source.tree.MemberReferenceTree;
+import com.sun.source.tree.MemberSelectTree;
+import com.sun.source.tree.MethodInvocationTree;
+import com.sun.source.util.JavacTask;
+import com.sun.source.util.TreeScanner;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,16 +47,23 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.lang.reflect.Method;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import javax.tools.Diagnostic;
+import javax.tools.DiagnosticCollector;
+import javax.tools.JavaFileObject;
+import javax.tools.SimpleJavaFileObject;
+import javax.tools.ToolProvider;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -508,10 +521,10 @@ class LessonProgressServiceTest {
                 root.resolve("modules/adaptive/application/mastery/PlacementDiagnosticService.java"));
         try (var files = Files.walk(root)) {
             var callers = files.filter(file -> file.toString().endsWith(".java")).filter(file -> {
-                try { return Files.readString(file).contains("readLearnerState("); }
+                try { return calledMethods(Files.readString(file)).contains("readLearnerState"); }
                 catch (java.io.IOException e) { throw new java.io.UncheckedIOException(e); }
             }).toList();
-            assertFalse(callers.isEmpty());
+            // No production caller is required before upstream integration; declarations are not callers.
             assertTrue(allowed.containsAll(callers), () -> "Unapproved CT33 learner state callers: " + callers);
         }
     }
@@ -611,6 +624,47 @@ class LessonProgressServiceTest {
         verify(repository, never()).updateStatus(any(), any());
     }
 
+    @Test void partialMasterySkipsKeepActiveMembershipWithoutRedundantWritesOnRepeat() {
+        heldRoot(); adaptive();
+        when(repository.lockEnrollment(actor, course)).thenReturn(Optional.of(enrollment(EnrollmentStatus.ACTIVE, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(
+                List.of(placed(a, 1, true, false), placed(b, 2, false, false), placed(c, 3, false, false)),
+                List.of(placed(a, 1, true, false), placed(b, 2, true, true), placed(c, 3, false, false)));
+        var expected = new LessonProgressService.LearnerCourseState(course, actor, row, "active", true, settings, List.of(
+                new LessonProgressService.LessonState(a, chapter, 1, 1, true, false),
+                new LessonProgressService.LessonState(b, chapter, 1, 2, true, true),
+                new LessonProgressService.LessonState(c, chapter, 1, 3, false, false)));
+        assertEquals(expected, service.applyMasterySkips(course, actor, Set.of(a, b)));
+        assertEquals(expected, service.applyMasterySkips(course, actor, Set.of(a, b)));
+        verify(repository, times(1)).markMasterySkipped(row, b);
+        verify(repository, times(1)).markMasterySkipped(any(), any());
+        verify(repository, never()).markCompleted(any(), any());
+        verify(repository, never()).updateStatus(any(), any());
+        verifyNoInteractions(identities, access);
+    }
+
+    @Test void partialMasterySkipsReconcileStaleCompletedMembershipToActiveExactlyOnce() {
+        heldRoot(); adaptive();
+        when(repository.lockEnrollment(actor, course)).thenReturn(
+                Optional.of(enrollment(EnrollmentStatus.COMPLETED, null)),
+                Optional.of(enrollment(EnrollmentStatus.ACTIVE, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(
+                List.of(placed(a, 1, false, false), placed(b, 2, false, false), placed(c, 3, true, false)),
+                List.of(placed(a, 1, true, true), placed(b, 2, false, false), placed(c, 3, true, false)));
+        var expected = new LessonProgressService.LearnerCourseState(course, actor, row, "active", true, settings, List.of(
+                new LessonProgressService.LessonState(a, chapter, 1, 1, true, true),
+                new LessonProgressService.LessonState(b, chapter, 1, 2, false, false),
+                new LessonProgressService.LessonState(c, chapter, 1, 3, true, false)));
+        assertEquals(expected, service.applyMasterySkips(course, actor, Set.of(a, c)));
+        assertEquals(expected, service.applyMasterySkips(course, actor, Set.of(a, c)));
+        verify(repository, times(1)).markMasterySkipped(row, a);
+        verify(repository, times(1)).markMasterySkipped(any(), any());
+        verify(repository, never()).markCompleted(any(), any());
+        verify(repository, times(1)).updateStatus(row, EnrollmentStatus.ACTIVE);
+        verify(repository, times(1)).updateStatus(any(), any());
+        verifyNoInteractions(identities, access);
+    }
+
     @Test void emptySetIsANoOp() {
         heldRoot(); adaptive();
         when(repository.lockEnrollment(actor, course)).thenReturn(Optional.of(enrollment(EnrollmentStatus.ACTIVE, null)));
@@ -657,13 +711,63 @@ class LessonProgressServiceTest {
         try (var files = Files.walk(root)) {
             var callers = files.filter(file -> file.toString().endsWith(".java")).filter(file -> {
                 try {
-                    String source = Files.readString(file);
-                    return source.contains("readExecutionState(") || source.contains("applyMasterySkips(");
+                    var calls = calledMethods(Files.readString(file));
+                    return calls.contains("readExecutionState") || calls.contains("applyMasterySkips");
                 } catch (java.io.IOException e) { throw new java.io.UncheckedIOException(e); }
             }).toList();
-            assertFalse(callers.isEmpty());
+            // No production caller is required before upstream integration; declarations are not callers.
             assertTrue(allowed.containsAll(callers), () -> "Unapproved CT22.atomic callers: " + callers);
         }
+    }
+
+    /** Parse only: no dependency resolution or compilation; declarations and non-code text are not calls. */
+    private static Set<String> calledMethods(String source) throws java.io.IOException {
+        var compiler = ToolProvider.getSystemJavaCompiler();
+        assertNotNull(compiler, "Caller allowlist tests require the project's JDK");
+        var diagnostics = new DiagnosticCollector<JavaFileObject>();
+        var input = new SimpleJavaFileObject(URI.create("string:///Caller.java"), JavaFileObject.Kind.SOURCE) {
+            @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) { return source; }
+        };
+        try (var fileManager = compiler.getStandardFileManager(diagnostics, null, null)) {
+            var task = (JavacTask) compiler.getTask(null, fileManager, diagnostics, List.of("-proc:none"), null, List.of(input));
+            Set<String> calls = new HashSet<>();
+            var scanner = new TreeScanner<Void, Void>() {
+                @Override public Void visitMethodInvocation(MethodInvocationTree node, Void unused) {
+                    if (node.getMethodSelect() instanceof MemberSelectTree member) calls.add(member.getIdentifier().toString());
+                    else if (node.getMethodSelect() instanceof IdentifierTree identifier) calls.add(identifier.getName().toString());
+                    return super.visitMethodInvocation(node, unused);
+                }
+                @Override public Void visitMemberReference(MemberReferenceTree node, Void unused) {
+                    calls.add(node.getName().toString());
+                    return super.visitMemberReference(node, unused);
+                }
+            };
+            for (var unit : task.parse()) scanner.scan(unit, null);
+            assertFalse(diagnostics.getDiagnostics().stream().anyMatch(d -> d.getKind() == Diagnostic.Kind.ERROR),
+                    () -> "Cannot parse Java source for caller allowlist: " + diagnostics.getDiagnostics());
+            return calls;
+        }
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"readLearnerState", "readExecutionState", "applyMasterySkips"})
+    void callerScanDetectsInvocationsAndReferencesWithoutMatchingDeclarationsOrNonCode(String method) throws Exception {
+        for (String expression : List.of("service." + method + "(id)", method + "(id)",
+                "service :: " + method, "service :: <UUID> " + method)) {
+            assertTrue(calledMethods("class Caller { void run() { var result = " + expression + "; } }").contains(method), expression);
+        }
+        var nonCalls = """
+                class Caller {
+                    Object %1$s(Object id) { return null; }
+                    // service.%1$s(id); service::%1$s
+                    /* service.%1$s(id); service::%1$s */
+                    String literal = "service.%1$s(id); service::%1$s";
+                    String block = \"\"\"
+                            service.%1$s(id); service::%1$s
+                            \"\"\";
+                    void other() { service.%1$sSuffix(id); }
+                }
+                """.formatted(method);
+        assertFalse(calledMethods(nonCalls).contains(method));
     }
 
     @Test void participantMethodsDeclareNoOwnTransaction() throws Exception {
