@@ -8,9 +8,7 @@ mastery: learners receive explainable guidance to continue, test out, or revisit
 prerequisites, while instructors follow their progress. That adaptive journey is
 still being built; the implemented capabilities are listed below.
 
-[![Backend](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-backend.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-backend.yml)
-[![Frontend](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-frontend.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-frontend.yml)
-[![E2E](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-e2e.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-e2e.yml)
+[![Backend](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-backend.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-backend.yml) [![Frontend](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-frontend.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-frontend.yml) [![E2E](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-e2e.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-e2e.yml) [![VM](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-vm.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-vm.yml) [![CodeQL](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/github-code-scanning/codeql/badge.svg?branch=main)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/github-code-scanning/codeql) [![MIT License](https://img.shields.io/github/license/chi-thanh-nguyen/codemastery?style=flat)](LICENSE)
 
 [Setup](docs/setup.md#prerequisites) · [Contributing](CONTRIBUTING.md) ·
 [Documentation](#documentation-index) · [Security](SECURITY.md)
@@ -32,6 +30,16 @@ still being built; the implemented capabilities are listed below.
 Adaptive learning is rule-based inside the Java backend. It uses no ML model,
 external AI inference service or separate Python service. Python Fundamentals is
 sample course content, not the backend language.
+
+## Quick links
+
+| Resource | Where to start |
+| --- | --- |
+| Getting started | [Local quick start](#quick-start) and [development setup](docs/setup.md#prerequisites) |
+| Documentation | [Documentation index](#documentation-index) and [architecture](docs/architecture.md) |
+| Contributing | [Contributor workflow](CONTRIBUTING.md) |
+| Testing | [Commands and evidence](docs/testing.md) |
+| Policies | [Security reporting](SECURITY.md) and [license scope](#contributing-security-and-license) |
 
 ## Current project status
 
@@ -59,16 +67,33 @@ missing contracts or functionality.
 ### Releases and deployment
 
 The published `v0.1.0-preview.1` is a prerelease. At this snapshot,
-`v0.1.0-rc.2` is a draft, not a published production release. See
-[GitHub Releases](https://github.com/chi-thanh-nguyen/codemastery/releases).
+`v0.1.0-rc.2` remains a **draft GitHub Release**, with no publication time. Its
+artifact was nevertheless deployed to the Azure VM; publication and deployment
+are separate states. See [GitHub Releases](https://github.com/chi-thanh-nguyen/codemastery/releases).
+
+- **Deployment — 24 November 2026, 07:45:19 ICT (UTC+7).** The operator record
+  reports `v0.1.0-rc.2` as `DEPLOYED`, exit code `0`, using operator tooling
+  `b568d18`. Its source is `84d10a3202ef96b0230eff6c22db060a08bcc02d`, distinct
+  from the README baseline `main` at `a40cae6a3c51f8283c80ae09c80c170710f92a18`.
+  There is no evidence here that the latest `main` was deployed.
+- **Release/VM verification.** All five release image IDs matched, Flyway
+  V001–V009 were applied, application readiness was `UP`, and a separate operation
+  returned `VERIFIED`. The deployment's archive digest matches the corresponding
+  release metadata. These are dated operator results, not a fresh VM health check;
+  [deployment verification](docs/decisions/017-ssh-continuous-deployment.md#d8--deploysh-invocation-and-verification)
+  keeps infrastructure/readiness evidence separate from feature acceptance.
+- **Acceptance limits.** The deployment used an empty database; scheduled capture
+  and TLS-renewal timers remained disabled. End-to-end application acceptance was
+  not independently verified. This evidence does not establish complete production
+  readiness, measured recovery or lecturer acceptance. The remaining gates are in
+  the [operational documentation](docs/deployment.md).
 
 The [23 November VM observation](docs/deployment.md#historical-vm-observation-on-23-november-2026-read-only)
 records an older preview running on Azure; the subsequent
 [setup record](docs/deployment.md#phase-5-one-time-setup-executed--23-november-2026)
-records bootstrap and recovery-key preparation, with timers disabled. These dated
-records do not establish deployment or independent acceptance of current `main`.
-Release admission, measured recovery, production deployment and lecturer-accessible
-acceptance retain the gates in the operational documentation.
+records bootstrap and recovery-key preparation, with timers disabled. These remain
+dated historical evidence; their pending-deployment statements predate the rc.2
+operation above.
 
 ## Stack and architecture
 
@@ -250,7 +275,7 @@ Anthropic Claude Code assistance, as recorded in
 [ADR015](docs/decisions/015-release-pipeline.md) and
 [ADR017](docs/decisions/017-ssh-continuous-deployment.md). Their tooling uses GitHub
 Actions, Trivy, Sigstore artifact attestations, OpenSSH, OpenSSL, optional Azure CLI
-integration and acme.sh. The 23 November VM records above supersede older statements
+integration and acme.sh. The 23–24 November VM records above supersede older statements
 about deployment absence; they are dated evidence, not a current runtime check.
 
 </details>
