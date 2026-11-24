@@ -162,7 +162,8 @@ naming patterns, with explicit exclusions for `**/integration/**` and `**/*$*`.
 Place unit tests in the approved module test locations outside `integration`.
 Current unit suites are under `modules/auth/`, `modules/course/` (including
 `application/service/`), `modules/assessment/` (`AssessmentRepresentationsTest`,
-`QuestionBankServiceTest`, `QuizGradingServiceTest` and the AS06 quiz authoring cases in
+`QuestionBankServiceTest`, `QuizGradingServiceTest`, `QuestionSelectionServiceTest`,
+`PracticeQuizProfilesTest` and the AS06 quiz authoring cases in
 `AttemptServiceTest`), `modules/adaptive/mastery/` and the shared
 `support/` package. The other module test files are empty scaffolds. The integration base
 class is compiled but is not initialized by this unit-test lifecycle, so
@@ -6541,3 +6542,61 @@ case is present. The informational CI XML-attribute summary can therefore show s
 No unrelated test/reporting harness change was made. Frontend/E2E and real VM qualification were
 not run; no changed frontend/public operation exists in this PR. All evidence above is author-side
 verification, not independent QA, CODEOWNER approval or release acceptance.
+
+## AS07 practice-difficulty port, selection rule and practice quiz profiles verification — 25 November 2026
+
+PR #287 ([#158](https://github.com/chi-thanh-nguyen/codemastery/issues/158)) implements the
+effective Final AS07 Assessment deliverables under
+[ADR001](decisions/001-modular-monolith-module-boundaries.md),
+[ADR007 §§5–7](decisions/007-batch-03-contract-approvals.md#5-ct23composition),
+[ADR011 §8 (`CT07-DIFFICULTY-2026-11-12-r1`)](decisions/011-batch-06-contract-approvals.md#8-ct07difficulty)
+and Leader Decision E02 in
+[ADR013 §§19.1–19.3, 19.8, 19.10 (`CT23-PRACTICE-PROFILES-2026-11-15-r1`)](decisions/013-batch-08-contract-approvals.md#193-ct23-practice-profiles-2026-11-15-r1--assessment-read):
+
+- **AS07.port:** `PracticeDifficultyProvider` (`DifficultyLevel targetDifficulty(UUID courseId, UUID skillId)`)
+  in `modules/assessment/application/port/PracticeDifficultyProvider.java`, owned by Assessment with
+  no production caller under E02.
+- **AS07.select:** pure, deterministic `CandidateQuestion`, `fallbackOrder` and
+  `selectPracticeQuestions` in `QuestionSelectionService.java`, preserving existing CT23 explicit
+  composition (`requireOrderedCourseQuestions`, `requireCourseMembers`) unchanged and uncalled in
+  production under E02.
+- **CT23-PRACTICE-PROFILES-2026-11-15-r1:** `QuizService.readPracticeQuizProfiles(UUID courseId, Set<UUID> skillIds)`
+  and immutable `PracticeQuizProfile`, enforcing `Propagation.MANDATORY` and read-only
+  `REPEATABLE_READ` caller-snapshot metadata before executing one minimal set-based query across
+  `quizzes`, `quiz_questions` and `questions`, ordered deterministically by Java
+  `String.compareTo(title)` then canonical lowercase `quizId`. No new database grant is required:
+  existing `CT17-P6 r6` (`questions` `SELECT`) and `r7` (`quizzes`, `quiz_questions` `SELECT`)
+  already cover the query.
+
+**Placement.** `modules/assessment/QuestionSelectionServiceTest.java` and
+`modules/assessment/PracticeQuizProfilesTest.java` are bounded unit-test placements authorized on
+PR #287 (recording them in `repository-structure.md` requires a separate governance update). Real
+PostgreSQL persistence, query-count, snapshot and privilege assertions extend the existing
+`integration/repository/AssessmentPersistenceIntegrationTest.java`.
+
+| Obligation | Actual regression evidence |
+| --- | --- |
+| `AS07.port` exact signature, Assessment ownership, zero production callers, no Adaptive decision imports | `QuestionSelectionServiceTest.practiceDifficultyProviderExposesExactCt07SignatureInAssessmentPortPackage`, `portAndQuestionLevelSelectionHaveNoProductionCallersAndPreserveBoundaries`, `sourceScannerDetectsInvocationsAndReferencesWithoutMatchingDeclarationsOrNonCode` |
+| `AS07.select` conforming port double, `UNKNOWN`/`WEAK` → `EASY`, `LEARNING` → `MEDIUM`, `MASTERED` → `HARD`, exact fallback orders (`EASY→MEDIUM→HARD`, `MEDIUM→EASY→HARD`, `HARD→MEDIUM→EASY`), per-skill independent fallback, membership-position order without count cap, duplicate/null/invalid input rejection, unchanged CT23 explicit composition | `QuestionSelectionServiceTest` (12 unit tests) |
+| `CT23-PRACTICE-PROFILES` `Propagation.MANDATORY` + read-only `REPEATABLE_READ` caller snapshot required before repository access; concurrent commits invisible inside the caller's snapshot and visible in the next | `PracticeQuizProfilesTest.declaresMandatoryReadOnlyRepeatableReadTransactionAndMinimalRecordShape`, `rejectsAbsentReadWriteOrNonRepeatableReadCallerTransactionBeforeRepositoryAccess`; `AssessmentPersistenceIntegrationTest.practiceQuizProfilesRequireAndJoinCallersReadOnlyRepeatableReadSnapshot` (PostgreSQL) |
+| Published `practice` only, Course scoping (even when foreign skills appear in `skillIds`), nonempty membership (no `NOT EXISTS` vacuous-truth match on empty quizzes), whole-membership skill containment, uniform and mixed-difficulty aggregation, UTF-16 `String.compareTo` title order + canonical lowercase UUID tie-break | `PracticeQuizProfilesTest.aggregatesMinimalDifficultyRowsOrdersDeterministicallyAndReturnsImmutableProfiles`; `AssessmentPersistenceIntegrationTest.practiceQuizProfilesFilterWholeMembershipKindPublicationAndCourseInOneMinimalQuery` (PostgreSQL) |
+| `B8-P09` one query per nonempty call (0 queries for empty `skillIds`), data minimality (no prompts, options, answer keys, question IDs, attempts or scores), execution under a `NOLOGIN` PostgreSQL role granted only column-level `SELECT` (`quizzes(id,course_id,title,kind,publication_status)`, `quiz_questions(quiz_id,question_id)`, `questions(id,skill_id,difficulty)`) while prompt/options/key/attempt reads fail with `42501`, and caller allowlist (`RecommendationService` only, no Assessment REST exposure) | `PracticeQuizProfilesTest.onlyAdaptiveRecommendationServiceMayCallReadPracticeQuizProfiles`; `AssessmentPersistenceIntegrationTest.practiceQuizProfilesFilterWholeMembershipKindPublicationAndCourseInOneMinimalQuery`, `practiceQuizProfilesExecuteUnderColumnMinimalPrivilegesWithoutAnswerOrAttemptAccess` (PostgreSQL) |
+| Invalid stored V004 row values, blank/NUL/unpaired-surrogate titles and inconsistent titles fail closed (`IllegalStateException`); immutable list and difficulty sets | `PracticeQuizProfilesTest.rejectsNullArgumentsAndInvalidStoredRows`, `aggregatesMinimalDifficultyRowsOrdersDeterministicallyAndReturnsImmutableProfiles` |
+
+**Downstream and external boundaries (not implemented here):** Adaptive's
+`PracticeDifficultySelector`, `RecommendationService` practice-recommendation composition and
+`GET /api/courses/{courseId}/lessons/{lessonId}/practice-recommendation` belong to AD11 (#168);
+per-difficulty seed quizzes belong to SD04; Learner UI consumption belongs to FE09 (#194); E2E case
+`A-4` belongs to FE26; evaluation and limitation disclosure belong to QA05/QA08 and DO03.
+
+Executed locally on 25 November 2026 (macOS arm64, Temurin OpenJDK 25.0.4.1, Docker Desktop 29.8.1,
+Testcontainers PostgreSQL 17.11) in the isolated PR #287 worktree based on `main` `40db8f5`:
+
+| Command | Observed result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='QuestionSelectionServiceTest,PracticeQuizProfilesTest,QuestionBankServiceTest*,AttemptServiceTest*,QuizGradingServiceTest,AssessmentRepresentationsTest'` | BUILD SUCCESS; 167 unit tests (including `QuestionSelectionServiceTest` 12 and `PracticeQuizProfilesTest` 8), 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=AssessmentPersistenceIntegrationTest` | BUILD SUCCESS; 12 PostgreSQL integration tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 1,048 unit tests, Failsafe 488 PostgreSQL integration tests, 0 failures, errors or skips |
+| `git diff --check` | Exit 0 |
+
+These are local author/remediation runs, not independent QA, CODEOWNER review or release acceptance.

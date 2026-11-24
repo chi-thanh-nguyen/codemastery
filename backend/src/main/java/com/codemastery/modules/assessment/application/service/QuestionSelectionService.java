@@ -5,7 +5,10 @@ import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService
 import com.codemastery.modules.assessment.domain.model.DifficultyLevel;
 import com.codemastery.modules.assessment.domain.model.Question;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -15,13 +18,15 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.EnumSet;
 
 /**
- * CT23 question selection for quiz composition (ADR007 §§5, 7): exact explicit IDs in the supplied
- * order only. No count cap, randomization, weighting or adaptive/difficulty selection.
+ * CT23 question selection for quiz composition (ADR007 §§5, 7) and the pure CT07.difficulty
+ * practice-selection rule (ADR011 §8).
+ *
+ * <p>CT23 quiz composition ({@link #requireOrderedCourseQuestions} and {@link #requireCourseMembers})
+ * uses exact explicit IDs in the supplied order only, with no count cap, randomization, weighting
+ * or adaptive filtering. Under Leader Decision E02 (ADR013 §§19.1–19.2, 19.10), the pure
+ * {@link #selectPracticeQuestions} rule remains published with no production caller in Final.
  *
  * <p>Course scope comes only from the approved CT40 projection
  * {@code SkillGraphService.readSkillIds(courseId)} (ADR005 §3.2), produced by AD07 (#165) and reached
@@ -57,12 +62,11 @@ public class QuestionSelectionService {
             Objects.requireNonNull(questionId, "questionId must not be null");
             Objects.requireNonNull(skillId, "skillId must not be null");
             Objects.requireNonNull(difficulty, "difficulty must not be null");
-            if (membershipPosition < 0) {
-                throw new IllegalArgumentException("membershipPosition must be non-negative");
+            if (membershipPosition < 1) {
+                throw new IllegalArgumentException("membershipPosition must be >= 1");
             }
         }
     }
-
 
     /**
      * Approved CT07.difficulty fallback order (ADR011 §8):
@@ -88,16 +92,26 @@ public class QuestionSelectionService {
     ) {
         Objects.requireNonNull(candidates, "candidates must not be null");
         Objects.requireNonNull(targetDifficultyBySkill, "targetDifficultyBySkill must not be null");
+        Map<UUID, DifficultyLevel> targets = copyTargetDifficulties(targetDifficultyBySkill);
 
         if (candidates.isEmpty()) {
             return List.of();
         }
 
         List<CandidateQuestion> orderedCandidates = new ArrayList<>(candidates.size());
+        Set<UUID> seenQuestionIds = new HashSet<>(candidates.size());
+        Set<Integer> seenPositions = new HashSet<>(candidates.size());
         Map<UUID, Set<DifficultyLevel>> availableBySkill = new HashMap<>();
 
         for (CandidateQuestion candidate : candidates) {
             Objects.requireNonNull(candidate, "candidates must not contain null");
+            if (!seenQuestionIds.add(candidate.questionId())) {
+                throw new IllegalArgumentException("Duplicate candidate questionId: " + candidate.questionId());
+            }
+            if (!seenPositions.add(candidate.membershipPosition())) {
+                throw new IllegalArgumentException(
+                        "Duplicate candidate membershipPosition: " + candidate.membershipPosition());
+            }
             orderedCandidates.add(candidate);
             availableBySkill
                     .computeIfAbsent(candidate.skillId(), ignored -> EnumSet.noneOf(DifficultyLevel.class))
@@ -109,21 +123,17 @@ public class QuestionSelectionService {
         Map<UUID, DifficultyLevel> resolvedDifficultyBySkill = new HashMap<>(availableBySkill.size());
         for (Map.Entry<UUID, Set<DifficultyLevel>> entry : availableBySkill.entrySet()) {
             UUID skillId = entry.getKey();
-            DifficultyLevel target = targetDifficultyBySkill.get(skillId);
+            DifficultyLevel target = targets.get(skillId);
             if (target == null) {
                 throw new IllegalArgumentException("Missing target difficulty for skill: " + skillId);
             }
 
             Set<DifficultyLevel> available = entry.getValue();
-            DifficultyLevel chosen = null;
             for (DifficultyLevel candidateLevel : fallbackOrder(target)) {
                 if (available.contains(candidateLevel)) {
-                    chosen = candidateLevel;
+                    resolvedDifficultyBySkill.put(skillId, candidateLevel);
                     break;
                 }
-            }
-            if (chosen != null) {
-                resolvedDifficultyBySkill.put(skillId, chosen);
             }
         }
 
@@ -134,6 +144,17 @@ public class QuestionSelectionService {
             }
         }
         return List.copyOf(selected);
+    }
+
+    private static Map<UUID, DifficultyLevel> copyTargetDifficulties(Map<UUID, DifficultyLevel> raw) {
+        Map<UUID, DifficultyLevel> copy = new HashMap<>(raw.size());
+        for (Map.Entry<UUID, DifficultyLevel> entry : raw.entrySet()) {
+            if (entry.getKey() == null || entry.getValue() == null) {
+                throw new IllegalArgumentException("targetDifficultyBySkill must not contain null keys or values");
+            }
+            copy.put(entry.getKey(), entry.getValue());
+        }
+        return Map.copyOf(copy);
     }
 
     /**
@@ -236,6 +257,4 @@ public class QuestionSelectionService {
     private static IllegalStateException invalidStoredQuestion() {
         return new IllegalStateException("Stored question definition violates V004");
     }
-   
-
 }

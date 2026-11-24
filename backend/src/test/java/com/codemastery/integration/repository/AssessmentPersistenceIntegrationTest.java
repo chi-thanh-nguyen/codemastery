@@ -1,6 +1,8 @@
 package com.codemastery.integration.repository;
 
 import com.codemastery.integration.AbstractIntegrationTest;
+import com.codemastery.modules.assessment.application.service.QuizService;
+import com.codemastery.modules.assessment.application.service.QuizService.PracticeQuizProfile;
 import com.codemastery.modules.assessment.domain.model.Attempt;
 import com.codemastery.modules.assessment.domain.model.DifficultyLevel;
 import com.codemastery.modules.assessment.domain.model.Question;
@@ -17,6 +19,8 @@ import com.codemastery.modules.assessment.infrastructure.persistence.entity.Quiz
 import com.codemastery.modules.assessment.infrastructure.persistence.entity.SubmissionEntity;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.hibernate.resource.jdbc.spi.StatementInspector;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -24,7 +28,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -33,9 +39,13 @@ import java.math.BigDecimal;
 import java.security.SecureRandom;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -46,6 +56,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Transactional
@@ -53,10 +64,29 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
 
     private static final String JWT_SECRET = ephemeralJwtSecret();
     private static final Instant START = Instant.parse("2026-11-11T03:00:00.123456Z");
+    private static final ThreadLocal<List<String>> STATEMENTS = new ThreadLocal<>();
 
     @DynamicPropertySource
     static void registerTestProperties(DynamicPropertyRegistry registry) {
         registry.add("JWT_SECRET", () -> JWT_SECRET);
+        registry.add("spring.jpa.properties.hibernate.session_factory.statement_inspector",
+                () -> RecordingStatementInspector.class.getName());
+    }
+
+    public static class RecordingStatementInspector implements StatementInspector {
+        @Override
+        public String inspect(String sql) {
+            List<String> recorded = STATEMENTS.get();
+            if (recorded != null) {
+                recorded.add(sql);
+            }
+            return sql;
+        }
+    }
+
+    @AfterEach
+    void clearRecordedStatements() {
+        STATEMENTS.remove();
     }
 
     private static String ephemeralJwtSecret() {
@@ -79,6 +109,9 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private AttemptRepository attemptRepository;
+
+    @Autowired
+    private QuizService quizService;
 
     @Autowired
     private PlatformTransactionManager transactionManager;
@@ -410,6 +443,351 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
         } catch (Exception unexpected) {
             throw new IllegalStateException(unexpected);
         }
+    }
+
+    // ---- AS07 CT23-PRACTICE-PROFILES-2026-11-15-r1 (ADR013 §19.3, B8-P03/B8-P08/B8-P09) ----
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void practiceQuizProfilesFilterWholeMembershipKindPublicationAndCourseInOneMinimalQuery() {
+        UUID instructor = user("instructor");
+        UUID courseId = insertCourse(instructor, "AS07 Course");
+        UUID foreignCourseId = insertCourse(instructor, "AS07 Foreign Course");
+
+        UUID skillA = skill(courseId);
+        UUID skillB = skill(courseId);
+        UUID extraUnusedSkill = skill(courseId);
+        UUID disallowedSkill = skill(courseId);
+        UUID foreignSkill = skill(foreignCourseId);
+
+        UUID qEasyA1 = insertQuestion(skillA, "easy");
+        UUID qEasyA2 = insertQuestion(skillA, "easy");
+        UUID qMediumA = insertQuestion(skillA, "medium");
+        UUID qHardA = insertQuestion(skillA, "hard");
+        UUID qMediumB = insertQuestion(skillB, "medium");
+        UUID qHardB = insertQuestion(skillB, "hard");
+        UUID qDisallowedHard = insertQuestion(disallowedSkill, "hard");
+        UUID qForeignEasy = insertQuestion(foreignSkill, "easy");
+
+        // Qualifying quizzes: uniform, mixed, subset of M(L), case-sensitive UTF-16 title order and UUID tie-breaks.
+        UUID tie00 = insertQuiz(prefixed("00"), courseId, "Loops Tie", "practice", "published");
+        UUID tie7f = insertQuiz(prefixed("7f"), courseId, "Loops Tie", "practice", "published");
+        UUID tie80 = insertQuiz(prefixed("80"), courseId, "Loops Tie", "practice", "published");
+        UUID tieff = insertQuiz(prefixed("ff"), courseId, "Loops Tie", "practice", "published");
+        UUID zebraQuiz = insertQuiz(UUID.randomUUID(), courseId, "Zebra Practice", "practice", "published");
+        UUID alphaQuiz = insertQuiz(UUID.randomUUID(), courseId, "alpha Practice", "practice", "published");
+
+        insertMembership(tie00, List.of(qEasyA1, qEasyA2));
+        insertMembership(tie7f, List.of(qMediumB));
+        insertMembership(tie80, List.of(qHardA));
+        insertMembership(tieff, List.of(qEasyA1, qHardB));
+        insertMembership(zebraQuiz, List.of(qEasyA1, qMediumA, qHardB));
+        insertMembership(alphaQuiz, List.of(qMediumA));
+
+        // Excluded quizzes: hidden, test, diagnostic, empty (vacuous-truth guard), mixed allowed+disallowed skill, wrong Course.
+        UUID hiddenPractice = insertQuiz(UUID.randomUUID(), courseId, "Hidden Practice", "practice", "hidden");
+        UUID publishedTest = insertQuiz(UUID.randomUUID(), courseId, "Published Test", "test", "published");
+        UUID publishedDiagnostic = insertQuiz(UUID.randomUUID(), courseId, "Published Diagnostic", "diagnostic", "published");
+        UUID emptyPublishedPractice = insertQuiz(UUID.randomUUID(), courseId, "Empty Practice", "practice", "published");
+        UUID partialSkillPractice = insertQuiz(UUID.randomUUID(), courseId, "Partial Skill Practice", "practice", "published");
+        UUID foreignCoursePractice = insertQuiz(UUID.randomUUID(), foreignCourseId, "Foreign Practice", "practice", "published");
+
+        insertMembership(hiddenPractice, List.of(qEasyA1));
+        insertMembership(publishedTest, List.of(qEasyA1));
+        insertMembership(publishedDiagnostic, List.of(qEasyA1));
+        insertMembership(partialSkillPractice, List.of(qEasyA1, qDisallowedHard));
+        insertMembership(foreignCoursePractice, List.of(qForeignEasy));
+
+        List<UUID> allQuizzes = List.of(
+                tie00, tie7f, tie80, tieff, zebraQuiz, alphaQuiz,
+                hiddenPractice, publishedTest, publishedDiagnostic,
+                emptyPublishedPractice, partialSkillPractice, foreignCoursePractice);
+        List<UUID> allQuestions = List.of(
+                qEasyA1, qEasyA2, qMediumA, qHardA, qMediumB, qHardB, qDisallowedHard, qForeignEasy);
+        List<UUID> allSkills = List.of(skillA, skillB, extraUnusedSkill, disallowedSkill, foreignSkill);
+
+        try {
+            TransactionTemplate readTx = repeatableReadOnlyTx();
+
+            // Even when foreignSkill is passed in skillIds, foreignCoursePractice is excluded by course_id.
+            Set<UUID> fullAllowedSet = Set.of(skillA, skillB, extraUnusedSkill, foreignSkill);
+            List<String> recordedSql = new ArrayList<>();
+            List<PracticeQuizProfile> profiles = readTx.execute(status -> {
+                assertEquals("repeatable read/on", jdbc.queryForObject(
+                        "SELECT current_setting('transaction_isolation') || '/' || current_setting('transaction_read_only')",
+                        String.class));
+                STATEMENTS.set(recordedSql);
+                try {
+                    List<PracticeQuizProfile> result = quizService.readPracticeQuizProfiles(courseId, fullAllowedSet);
+                    assertNull(jdbc.queryForObject("SELECT pg_current_xact_id_if_assigned()::text", String.class),
+                            "readPracticeQuizProfiles must not write or assign a transaction xid");
+                    return result;
+                } finally {
+                    STATEMENTS.remove();
+                }
+            });
+
+            assertEquals(1, recordedSql.size(), () -> "Expected exactly 1 SQL query, got: " + recordedSql);
+            String sql = recordedSql.getFirst().toLowerCase(Locale.ROOT);
+            assertAll(
+                    () -> assertFalse(sql.contains("prompt"), "SQL must not select question prompts"),
+                    () -> assertFalse(sql.contains("correct_options"), "SQL must not select answer keys"),
+                    () -> assertFalse(sql.contains("options"), "SQL must not select question options"),
+                    () -> assertFalse(sql.contains("attempts"), "SQL must not touch attempts"),
+                    () -> assertFalse(sql.contains("attempt_answers"), "SQL must not touch attempt_answers"));
+
+            assertEquals(List.of(
+                    new PracticeQuizProfile(tie00, "Loops Tie", Set.of(DifficultyLevel.EASY)),
+                    new PracticeQuizProfile(tie7f, "Loops Tie", Set.of(DifficultyLevel.MEDIUM)),
+                    new PracticeQuizProfile(tie80, "Loops Tie", Set.of(DifficultyLevel.HARD)),
+                    new PracticeQuizProfile(tieff, "Loops Tie", Set.of(DifficultyLevel.EASY, DifficultyLevel.HARD)),
+                    new PracticeQuizProfile(zebraQuiz, "Zebra Practice",
+                            Set.of(DifficultyLevel.EASY, DifficultyLevel.MEDIUM, DifficultyLevel.HARD)),
+                    new PracticeQuizProfile(alphaQuiz, "alpha Practice", Set.of(DifficultyLevel.MEDIUM))
+            ), profiles);
+
+            // Narrowing skillIds to only skillA excludes quizzes that also contain skillB questions.
+            List<PracticeQuizProfile> skillAOnly = readTx.execute(
+                    status -> quizService.readPracticeQuizProfiles(courseId, Set.of(skillA)));
+            assertEquals(List.of(
+                    new PracticeQuizProfile(tie00, "Loops Tie", Set.of(DifficultyLevel.EASY)),
+                    new PracticeQuizProfile(tie80, "Loops Tie", Set.of(DifficultyLevel.HARD)),
+                    new PracticeQuizProfile(alphaQuiz, "alpha Practice", Set.of(DifficultyLevel.MEDIUM))
+            ), skillAOnly);
+
+            // Empty skillIds executes zero SQL queries and returns an empty list.
+            List<String> emptyCallSql = new ArrayList<>();
+            List<PracticeQuizProfile> emptyProfiles = readTx.execute(status -> {
+                STATEMENTS.set(emptyCallSql);
+                try {
+                    return quizService.readPracticeQuizProfiles(courseId, Set.of());
+                } finally {
+                    STATEMENTS.remove();
+                }
+            });
+            assertTrue(emptyProfiles.isEmpty());
+            assertEquals(List.of(), emptyCallSql);
+        } finally {
+            cleanupPracticeFixtures(allQuizzes, allQuestions, allSkills, List.of(courseId, foreignCourseId), instructor);
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void practiceQuizProfilesExecuteUnderColumnMinimalPrivilegesWithoutAnswerOrAttemptAccess() {
+        UUID instructor = user("instructor");
+        UUID courseId = insertCourse(instructor, "AS07 Minimal Privilege Course");
+        UUID skillA = skill(courseId);
+        UUID qEasy = insertQuestion(skillA, "easy");
+        UUID qHard = insertQuestion(skillA, "hard");
+        UUID quizId = insertQuiz(UUID.randomUUID(), courseId, "Minimal Privilege Practice", "practice", "published");
+        insertMembership(quizId, List.of(qEasy, qHard));
+
+        String role = "as07_min_" + UUID.randomUUID().toString().replace("-", "");
+        jdbc.execute("CREATE ROLE " + role + " NOLOGIN");
+        jdbc.execute("GRANT USAGE ON SCHEMA public TO " + role);
+        jdbc.execute("GRANT SELECT (id, course_id, title, kind, publication_status) ON public.quizzes TO " + role);
+        jdbc.execute("GRANT SELECT (quiz_id, question_id) ON public.quiz_questions TO " + role);
+        jdbc.execute("GRANT SELECT (id, skill_id, difficulty) ON public.questions TO " + role);
+
+        try {
+            // Confirm the restricted role is genuinely denied prompt, options, answer-key and attempt reads (42501).
+            TransactionTemplate verifyDenialTx = new TransactionTemplate(transactionManager);
+            for (String deniedSql : List.of(
+                    "SELECT prompt FROM public.questions",
+                    "SELECT options FROM public.questions",
+                    "SELECT correct_options FROM public.questions",
+                    "SELECT id FROM public.attempts",
+                    "SELECT id FROM public.attempt_answers")) {
+                assertEquals("42501", sqlStateOf(verifyDenialTx, role, deniedSql), deniedSql);
+            }
+
+            // Under the exact same column-minimal role, readPracticeQuizProfiles succeeds cleanly.
+            List<PracticeQuizProfile> profiles = repeatableReadOnlyTx().execute(status -> {
+                jdbc.execute("SET LOCAL ROLE " + role);
+                assertEquals(role, jdbc.queryForObject("SELECT current_user", String.class));
+                assertEquals("on", jdbc.queryForObject("SHOW transaction_read_only", String.class));
+                return quizService.readPracticeQuizProfiles(courseId, Set.of(skillA));
+            });
+
+            assertEquals(List.of(new PracticeQuizProfile(
+                    quizId, "Minimal Privilege Practice", Set.of(DifficultyLevel.EASY, DifficultyLevel.HARD))),
+                    profiles);
+        } finally {
+            jdbc.execute("DROP OWNED BY " + role);
+            jdbc.execute("DROP ROLE " + role);
+            cleanupPracticeFixtures(
+                    List.of(quizId), List.of(qEasy, qHard), List.of(skillA), List.of(courseId), instructor);
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void practiceQuizProfilesRequireAndJoinCallersReadOnlyRepeatableReadSnapshot() throws Exception {
+        UUID instructor = user("instructor");
+        UUID courseId = insertCourse(instructor, "AS07 Snapshot Course");
+        UUID skillA = skill(courseId);
+        UUID disallowedSkill = skill(courseId);
+        UUID qEasy = insertQuestion(skillA, "easy");
+        UUID qMedium = insertQuestion(skillA, "medium");
+        UUID qDisallowed = insertQuestion(disallowedSkill, "hard");
+
+        UUID quizToHide = insertQuiz(UUID.randomUUID(), courseId, "A Will Hide", "practice", "published");
+        UUID quizToContaminate = insertQuiz(UUID.randomUUID(), courseId, "B Will Gain Foreign Skill", "practice", "published");
+        UUID quizToPublish = insertQuiz(UUID.randomUUID(), courseId, "C Will Publish", "practice", "hidden");
+        insertMembership(quizToHide, List.of(qEasy));
+        insertMembership(quizToContaminate, List.of(qMedium));
+        insertMembership(quizToPublish, List.of(qEasy));
+
+        ExecutorService writer = Executors.newSingleThreadExecutor();
+        try {
+            // Mandatory caller-owned read-only REPEATABLE READ transaction enforcement through Spring proxy.
+            assertThrows(IllegalTransactionStateException.class,
+                    () -> quizService.readPracticeQuizProfiles(courseId, Set.of(skillA)));
+            assertThrows(IllegalTransactionStateException.class,
+                    () -> quizService.readPracticeQuizProfiles(courseId, Set.of()));
+
+            TransactionTemplate readCommittedReadOnly = new TransactionTemplate(transactionManager);
+            readCommittedReadOnly.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+            readCommittedReadOnly.setReadOnly(true);
+            assertThrows(IllegalStateException.class,
+                    () -> readCommittedReadOnly.execute(
+                            s -> quizService.readPracticeQuizProfiles(courseId, Set.of(skillA))));
+
+            TransactionTemplate repeatableReadWrite = new TransactionTemplate(transactionManager);
+            repeatableReadWrite.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+            repeatableReadWrite.setReadOnly(false);
+            assertThrows(IllegalStateException.class,
+                    () -> repeatableReadWrite.execute(
+                            s -> quizService.readPracticeQuizProfiles(courseId, Set.of(skillA))));
+
+            // Repository adapter direct defensive checks (@Repository translates IllegalArgumentException).
+            assertThrows(NullPointerException.class,
+                    () -> quizRepository.findPublishedPracticeQuizDifficultyRows(null, Set.of(skillA)));
+            assertThrows(NullPointerException.class,
+                    () -> quizRepository.findPublishedPracticeQuizDifficultyRows(courseId, null));
+            var badArg = assertThrows(org.springframework.dao.InvalidDataAccessApiUsageException.class,
+                    () -> quizRepository.findPublishedPracticeQuizDifficultyRows(
+                            courseId, Collections.singletonList(null)));
+            assertEquals(IllegalArgumentException.class, badArg.getCause().getClass());
+            assertEquals(List.of(), quizRepository.findPublishedPracticeQuizDifficultyRows(courseId, Set.of()));
+
+            // Snapshot isolation: concurrent commits after the caller's snapshot started remain invisible.
+            TransactionTemplate callerSnapshot = repeatableReadOnlyTx();
+            callerSnapshot.executeWithoutResult(status -> {
+                List<PracticeQuizProfile> before = quizService.readPracticeQuizProfiles(courseId, Set.of(skillA));
+                assertEquals(List.of(
+                        new PracticeQuizProfile(quizToHide, "A Will Hide", Set.of(DifficultyLevel.EASY)),
+                        new PracticeQuizProfile(quizToContaminate, "B Will Gain Foreign Skill",
+                                Set.of(DifficultyLevel.MEDIUM))
+                ), before);
+
+                try {
+                    writer.submit(() -> {
+                        jdbc.update("UPDATE quizzes SET publication_status = 'hidden' WHERE id = ?", quizToHide);
+                        jdbc.update("UPDATE quizzes SET publication_status = 'published' WHERE id = ?", quizToPublish);
+                        jdbc.update("INSERT INTO quiz_questions (id, quiz_id, question_id, position) VALUES (?, ?, ?, 2)",
+                                UUID.randomUUID(), quizToContaminate, qDisallowed);
+                    }).get(10, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+
+                List<PracticeQuizProfile> sameSnapshot = quizService.readPracticeQuizProfiles(courseId, Set.of(skillA));
+                assertEquals(before, sameSnapshot,
+                        "readPracticeQuizProfiles must join the caller's REPEATABLE READ snapshot");
+            });
+
+            // A subsequent snapshot observes all three committed mutations.
+            List<PracticeQuizProfile> nextSnapshot = callerSnapshot.execute(
+                    status -> quizService.readPracticeQuizProfiles(courseId, Set.of(skillA)));
+            assertEquals(List.of(
+                    new PracticeQuizProfile(quizToPublish, "C Will Publish", Set.of(DifficultyLevel.EASY))
+            ), nextSnapshot);
+        } finally {
+            writer.shutdownNow();
+            cleanupPracticeFixtures(
+                    List.of(quizToHide, quizToContaminate, quizToPublish),
+                    List.of(qEasy, qMedium, qDisallowed),
+                    List.of(skillA, disallowedSkill),
+                    List.of(courseId),
+                    instructor);
+        }
+    }
+
+    private TransactionTemplate repeatableReadOnlyTx() {
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        tx.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        tx.setReadOnly(true);
+        return tx;
+    }
+
+    private String sqlStateOf(TransactionTemplate tx, String role, String sql) {
+        try {
+            tx.executeWithoutResult(status -> {
+                jdbc.execute("SET LOCAL ROLE " + role);
+                jdbc.queryForList(sql);
+            });
+            return null;
+        } catch (RuntimeException failure) {
+            for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+                if (cause instanceof SQLException sqlEx) {
+                    return sqlEx.getSQLState();
+                }
+            }
+            throw failure;
+        }
+    }
+
+    private UUID insertCourse(UUID instructorId, String title) {
+        UUID courseId = UUID.randomUUID();
+        jdbc.update("INSERT INTO courses (id, instructor_id, title, description, publication_status, adaptive_enabled) "
+                + "VALUES (?, ?, ?, 'AS07 fixture', 'published', false)", courseId, instructorId, title);
+        return courseId;
+    }
+
+    private UUID insertQuestion(UUID skillId, String difficulty) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO questions (id, skill_id, prompt, kind, difficulty, options, correct_options) "
+                + "VALUES (?, ?, 'Sensitive prompt', 'single_choice', ?, ARRAY['Secret A','Secret B'], ARRAY[true,false])",
+                id, skillId, difficulty);
+        return id;
+    }
+
+    private UUID insertQuiz(UUID quizId, UUID courseId, String title, String kind, String status) {
+        jdbc.update("INSERT INTO quizzes (id, course_id, title, kind, time_limit_seconds, publication_status) "
+                + "VALUES (?, ?, ?, ?, 120, ?)", quizId, courseId, title, kind, status);
+        return quizId;
+    }
+
+    private void insertMembership(UUID quizId, List<UUID> questionIds) {
+        for (int i = 0; i < questionIds.size(); i++) {
+            jdbc.update("INSERT INTO quiz_questions (id, quiz_id, question_id, position) VALUES (?, ?, ?, ?)",
+                    UUID.randomUUID(), quizId, questionIds.get(i), i + 1);
+        }
+    }
+
+    private void cleanupPracticeFixtures(
+            List<UUID> quizIds,
+            List<UUID> questionIds,
+            List<UUID> skillIds,
+            List<UUID> courseIds,
+            UUID instructorId
+    ) {
+        for (UUID quizId : quizIds) {
+            jdbc.update("DELETE FROM quiz_questions WHERE quiz_id = ?", quizId);
+            jdbc.update("DELETE FROM quizzes WHERE id = ?", quizId);
+        }
+        for (UUID questionId : questionIds) {
+            jdbc.update("DELETE FROM questions WHERE id = ?", questionId);
+        }
+        for (UUID skillId : skillIds) {
+            jdbc.update("DELETE FROM skills WHERE id = ?", skillId);
+        }
+        for (UUID courseId : courseIds) {
+            jdbc.update("DELETE FROM courses WHERE id = ?", courseId);
+        }
+        jdbc.update("DELETE FROM users WHERE id = ?", instructorId);
     }
 
     private UUID skill(UUID courseId) {
