@@ -12,6 +12,22 @@ import com.codemastery.modules.auth.domain.model.Role;
 import com.codemastery.modules.auth.infrastructure.security.AuthenticatedUser;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.web.context.WebApplicationContext;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Locale;
+import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,7 +41,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
-import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -49,9 +64,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * IN10 real-PostgreSQL suite for the append-only audit log (V006 audit_logs; ADR012 sections 7, 19.2):
- * insert, filtered/ordered/paged reads, the SELECT+INSERT privilege ceiling and the transaction rule of
- * {@link AuditLogService#record}. Every test runs in one transaction that is always rolled back.
+ * IN10 real-PostgreSQL suite for the append-only audit log (V006 audit_logs; ADR012 sections 7, 19.2;
+ * placement {@code CT14-IN10-PLACEMENT-2026-11-24-r1}): insert, filtered/ordered/paged reads, execution
+ * under a role holding exactly the CT17-P6 r10 {@code audit_logs} row (SELECT, INSERT), the row written by
+ * {@link AuditLogService#record}, and the read over HTTP. Repository and service tests run in one
+ * transaction that is always rolled back; the HTTP tests commit their fixtures and remove them.
+ * Transaction atomicity is in {@code InteractionAdminIntegrationTest}; the authorization, precedence and
+ * no-store matrix is in {@code AuthorizationIntegrationTest} (ADR012 section 19.3).
  */
 @DirtiesContext
 class AuditLogRepositoryIntegrationTest extends AbstractIntegrationTest {
@@ -85,6 +104,12 @@ class AuditLogRepositoryIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private AuditLogService auditService;
+
+    @Autowired
+    private WebApplicationContext context;
+
+    @Autowired
+    private JwtTokenProvider tokens;
 
     @AfterEach
     void clearSecurityContext() {
@@ -238,9 +263,13 @@ class AuditLogRepositoryIntegrationTest extends AbstractIntegrationTest {
             AuditLog row = row(admin, AuditAction.REPORT_DISMISSED, T0);
 
             audits.append(row);
-            entityManager.flush();
 
             assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.audit_logs WHERE id = ?", Integer.class, row.getId()));
+            entityManager.clear();
+            // The read path (filtered page plus count) needs only SELECT.
+            Page<AuditLog> page = audits.search(filter(admin, null, null, null, null, null), PageRequest.of(0, 1));
+            assertEquals(List.of(row.getId()), ids(page));
+            assertEquals(1, page.getTotalElements());
         });
     }
 
@@ -259,12 +288,6 @@ class AuditLogRepositoryIntegrationTest extends AbstractIntegrationTest {
     }
 
     // ---------------------------------------------------------------- AuditLogService.record
-
-    @Test
-    void recordFailsOutsideACallerTransactionInsteadOfCommittingOnItsOwn() {
-        assertThrows(IllegalTransactionStateException.class,
-                () -> auditService.record(AuditAction.USER_LOCKED, UUID.randomUUID()));
-    }
 
     @Test
     void recordWritesTheAdministratorsRowInsideTheCallerTransaction() {
@@ -328,6 +351,130 @@ class AuditLogRepositoryIntegrationTest extends AbstractIntegrationTest {
         });
     }
 
+    // ---------------------------------------------------------------- the read over HTTP
+
+    /** CT31.read end to end (functional behaviour); committed fixtures, removed after each test. */
+    @Nested
+    class HttpRead {
+
+        private static final String PATH = "/api/admin/audit-logs";
+        private final List<UUID> actors = new ArrayList<>();
+        private MockMvc mvc;
+        private UUID admin;
+        private UUID otherAdmin;
+        private UUID userTarget;
+        private UUID courseTarget;
+
+        @BeforeEach
+        void fixtures() {
+            mvc = webAppContextSetup(context).apply(springSecurity()).build();
+            admin = committedUser("admin", "IN10 Admin");
+            otherAdmin = committedUser("admin", "IN10 Second Admin");
+            userTarget = UUID.randomUUID();
+            courseTarget = UUID.randomUUID();
+            committedAudit(admin, "user_locked", "user", userTarget, T0);
+            committedAudit(admin, "course_hidden", "course", courseTarget, T0.plusSeconds(1));
+            committedAudit(otherAdmin, "report_dismissed", "content_report", UUID.randomUUID(), T0.plusSeconds(2));
+        }
+
+        @AfterEach
+        void removeFixtures() {
+            for (UUID actor : actors) {
+                jdbc.update("DELETE FROM public.audit_logs WHERE actor_id = ?", actor);
+                jdbc.update("DELETE FROM public.refresh_sessions WHERE user_id = ?", actor);
+                jdbc.update("DELETE FROM public.users WHERE id = ?", actor);
+            }
+            actors.clear();
+        }
+
+        @Test
+        void listsNewestFirstWithActorNamesAndDefaultPaging() throws Exception {
+            mvc.perform(asAdmin(get(PATH).param("actorId", admin.toString())))
+                    .andExpect(status().isOk())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.totalElements").value(2))
+                    .andExpect(jsonPath("$.totalPages").value(1))
+                    .andExpect(jsonPath("$.page").value(0))
+                    .andExpect(jsonPath("$.size").value(20))
+                    .andExpect(jsonPath("$.content", hasSize(2)))
+                    .andExpect(jsonPath("$.content[0].action").value("course_hidden"))
+                    .andExpect(jsonPath("$.content[0].targetType").value("course"))
+                    .andExpect(jsonPath("$.content[0].targetReference").value(courseTarget.toString()))
+                    .andExpect(jsonPath("$.content[0].actorId").value(admin.toString()))
+                    .andExpect(jsonPath("$.content[0].actorDisplayName").value("IN10 Admin"))
+                    .andExpect(jsonPath("$.content[0].occurredAt").value("2026-11-18T01:00:01.123456Z"))
+                    .andExpect(jsonPath("$.content[1].action").value("user_locked"));
+        }
+
+        @Test
+        void filtersAreAndCombinedWithAnInclusiveFromAndAnExclusiveTo() throws Exception {
+            mvc.perform(asAdmin(get(PATH).param("actorId", otherAdmin.toString())))
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.content[0].actorDisplayName").value("IN10 Second Admin"));
+            mvc.perform(asAdmin(get(PATH).param("actorId", admin.toString()).param("action", "user_locked")))
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.content[0].targetReference").value(userTarget.toString()));
+            mvc.perform(asAdmin(get(PATH).param("actorId", admin.toString()).param("targetType", "course")))
+                    .andExpect(jsonPath("$.totalElements").value(1));
+            // Upper-case UUID text matches the stored lowercase canonical reference.
+            mvc.perform(asAdmin(get(PATH).param("targetReference", userTarget.toString().toUpperCase(Locale.ROOT))))
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.content[0].action").value("user_locked"));
+            // 08:00:01.123456+07:00 is exactly T0 + 1 s: the inclusive lower bound keeps that row and drops T0's.
+            mvc.perform(asAdmin(get(PATH).param("actorId", admin.toString())
+                            .param("occurredFrom", "2026-11-18T08:00:01.123456+07:00")
+                            .param("occurredTo", "2026-11-18T01:00:02.123456Z")))
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.content[0].action").value("course_hidden"));
+            // The exclusive upper bound drops the row that occurred exactly at occurredTo.
+            mvc.perform(asAdmin(get(PATH).param("actorId", admin.toString())
+                            .param("occurredTo", "2026-11-18T01:00:01.123456Z")))
+                    .andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.content[0].action").value("user_locked"));
+            mvc.perform(asAdmin(get(PATH).param("actorId", admin.toString()).param("action", "report_dismissed")))
+                    .andExpect(jsonPath("$.totalElements").value(0))
+                    .andExpect(jsonPath("$.totalPages").value(0))
+                    .andExpect(jsonPath("$.content", hasSize(0)));
+        }
+
+        @Test
+        void pagingReportsTheTrueTotalAndAPageBeyondTheEndIsEmpty() throws Exception {
+            mvc.perform(asAdmin(get(PATH).param("actorId", admin.toString()).param("size", "1").param("page", "1")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content", hasSize(1)))
+                    .andExpect(jsonPath("$.content[0].action").value("user_locked"))
+                    .andExpect(jsonPath("$.totalElements").value(2))
+                    .andExpect(jsonPath("$.totalPages").value(2));
+            mvc.perform(asAdmin(get(PATH).param("actorId", admin.toString()).param("page", "2147483647").param("size", "100")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.content", hasSize(0)))
+                    .andExpect(jsonPath("$.page").value(2147483647))
+                    .andExpect(jsonPath("$.totalElements").value(2));
+        }
+
+        private MockHttpServletRequestBuilder asAdmin(MockHttpServletRequestBuilder request) {
+            UUID session = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.refresh_sessions (id,user_id,created_at,expires_at) "
+                    + "VALUES (?,?,now(),now() + interval '1 hour')", session, admin);
+            return request.header("Authorization", "Bearer " + tokens.createToken(admin, session));
+        }
+
+        private UUID committedUser(String role, String displayName) {
+            UUID id = UUID.randomUUID();
+            actors.add(id);
+            jdbc.update("INSERT INTO public.users (id, email, password_hash, display_name, role, account_status) "
+                    + "VALUES (?, ?, 'not-a-login-fixture', ?, ?, 'active')", id, "in10-" + id + "@example.test",
+                    displayName, role);
+            return id;
+        }
+
+        private void committedAudit(UUID actor, String action, String targetType, UUID target, Instant at) {
+            jdbc.update("INSERT INTO public.audit_logs (id, actor_id, action, target_type, target_reference, occurred_at) "
+                    + "VALUES (?, ?, ?, ?, ?, ?)", UUID.randomUUID(), actor, action, targetType, target.toString(),
+                    OffsetDateTime.ofInstant(at, ZoneOffset.UTC));
+        }
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private void inRolledBackTransaction(Runnable body) {
@@ -350,8 +497,9 @@ class AuditLogRepositoryIntegrationTest extends AbstractIntegrationTest {
     }
 
     /**
-     * Switches the current transaction to a new {@code NOLOGIN} role holding exactly the ADR012 section
-     * 19.2 ceiling for {@code audit_logs} (SELECT, INSERT). Role, grants and the switch end with the rollback.
+     * Switches the current transaction to a new {@code NOLOGIN} role holding exactly the CT17-P6 r10
+     * {@code audit_logs} row (SELECT, INSERT; equal to the ADR012 section 19.2 ceiling) and no other
+     * privilege. Role, grants and the switch end with the rollback.
      */
     private void switchToCeilingRole() {
         entityManager.flush();

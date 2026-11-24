@@ -4397,29 +4397,37 @@ Report results per layer and only after the checks actually run. Unit results do
 establish browser, assistive-technology, backend or deployment behavior, and a design
 preview is never integration evidence.
 
-## IN10 audit recording and read (#184) â€” 23 November 2026
+## IN10 audit recording and read (#184) — 24 November 2026
 
-IN10 (`Refs #184`) implements CT31 recording and the filterable audit read
-([ADR012 Â§7](decisions/012-batch-07-contract-approvals.md)): `AuditAction`, `AuditLogRepository`,
-`AuditLogService`, `AuditLogMapper`, `UserAccountService.userSummaries`, the `SecurityConfig` rule for
-`GET /api/admin/audit-logs` and `AdminReportingController`. This record lists the suites added and what
-they do and do not cover. It claims no execution result; the pull request records the executed
-`./mvnw verify`.
+IN10 (`Refs #184`, [PR #276](https://github.com/chi-thanh-nguyen/codemastery/pull/276)) implements
+CT31 recording and the filterable audit read ([ADR012 §7](decisions/012-batch-07-contract-approvals.md)):
+`AuditAction`, `AuditLogRepository` and its JPA adapter, `AuditLogService`, `AuditLogMapper`, the
+CT01.user-summaries method `UserAccountService.userSummaries` (ADR012 §3.4), the `SecurityConfig` rule
+for `GET /api/admin/audit-logs` and `AdminReportingController`, with the CT17-P6 r10 `audit_logs`
+row ([deployment record](deployment.md)). Placement follows ADR012 §19.3 and
+`CT14-IN10-PLACEMENT-2026-11-24-r1` ([repository structure](repository-structure.md)). This record lists
+what the suites cover and what they do not; it claims no execution result. The pull request records the
+executed commands and counts.
 
 | Suite | Kind | Covers |
 |---|---|---|
-| `modules/admin/application/service/AuditLogServiceTest` | Unit (Mockito, fixed `Clock`) | Row content, microsecond truncation, Administrator-only recording and reading, filter/paging hand-off, actor names including a missing account, rejection of invalid values before any query |
+| `modules/admin/application/service/AuditLogServiceTest` | Unit (Mockito, fixed `Clock`) | Row content, microsecond truncation, Administrator-only recording and reading, ADR012 §12 stage order (invalid values are 400 before the role 403, and both before any lookup), filter and paging hand-off, actor names including a missing account |
 | `modules/admin/AuditActionTest` | Unit | The closed nine-code catalogue with target types; exact-match `fromCode` |
 | `modules/admin/AuditLogMapperTest` | Unit | Field-for-field domain/entity mapping; null input |
-| `modules/admin/AdminRequestsTest` | Unit | Query syntax: known single-valued parameters, UUID text, RFC 3339 offsets normalised to UTC, digit-only paging, 400 for malformed input |
-| `integration/repository/AuditLogRepositoryIntegrationTest` | PostgreSQL Testcontainer | Insert and read-back, newest-first then id-descending order that ignores caller sorting, AND-combined filters with inclusive `occurredFrom` and exclusive `occurredTo`, true totals beyond the last page, no overwrite of an existing id, the ADR012 Â§19.2 `audit_logs` ceiling (SELECT and INSERT allowed; UPDATE and DELETE refused with SQLSTATE 42501), `record` refusing a call outside a caller transaction, actor attribution, non-Administrator rejection, actor display names from real accounts |
-| `integration/AuditLogReadIntegrationTest` | PostgreSQL Testcontainer, MockMvc | 401 for anonymous callers, 403 for Learner and Instructor before input validation, newest-first listing with `actorDisplayName` and `Cache-Control: no-store`, each filter and the time bounds, paging and an out-of-range page, 400 with `no-store` for malformed queries |
+| `modules/admin/AdminRequestsTest` | Unit | Query syntax: known single-valued parameters, UUID text, the RFC 3339 date-time grammar (forms ISO-8601 parsing would also accept are 400), offsets normalised to UTC, digit-only paging |
+| `modules/auth/AuthServiceTest` (`UserSummaries`) | Unit | Stored display name and current role literal, unknown IDs omitted, no email/status/credential component, at most 100 IDs, storage failures propagated, and the caller allowlist of ADR012 §3 checked over the production sources |
+| `integration/repository/AuditLogRepositoryIntegrationTest` | PostgreSQL Testcontainer | Insert and read-back, newest-first then id-descending order that ignores caller sorting, AND filters with inclusive `occurredFrom` and exclusive `occurredTo`, true totals beyond the last page, no overwrite of an existing id, the adapter's insert and read under a role holding exactly the r10 row (SELECT, INSERT) and UPDATE/DELETE refused with 42501, the row `record` writes, and the read over HTTP (filters including upper-case UUID text and offsets, both time bounds, paging, actor names) |
+| `integration/InteractionAdminIntegrationTest` (IN10 part) | PostgreSQL Testcontainer, independent committed reads | B7-O07 recording side: the audit row commits only with its caller's change and is invisible to other connections before that commit; an injected audit-insert failure (actor foreign key) surfaces from `record` and rolls the change back; a later failure removes the audit row; no recording outside a transaction or in a read-only one; one row per call |
+| `integration/AuthorizationIntegrationTest` (`AuditLogReadEndpoint`) | PostgreSQL Testcontainer, production security chain | B7-O12 for CT31.read: 401 before query validation, Learner/Instructor 403 but malformed query values 400 first, a demoted Administrator's token refused by the current role, a locked Administrator 401, exactly the approved page and row fields with no email or status, 400 matrix, no-store on every outcome, other methods denied |
 
-Not covered by these suites: the audited actions themselves. The CT12 user and course services and the CT32
-moderation resolution call `AuditLogService.record`; their same-transaction and no-op oracles stay with the
-existing placements named by ADR012 Â§19.3. `UserAccountService.userSummaries` has no dedicated unit test: it
-is exercised through the audit read, and its 100-ID limit is not asserted. The placement of these suites is
-for review.
+Not covered here: the audited actions themselves. B7-O07's per-action catalogue rows, its no-op cases
+and the audit side of B7-O08–O10 need the CT12 user and course services and CT32 moderation (IN11, IN20,
+IN21), which call `AuditLogService.record` and add their cases to `InteractionAdminIntegrationTest`.
+QA06 executes ADR012 §15. A missing actor account cannot occur in PostgreSQL (V006's foreign key), so
+the null `actorDisplayName` fallback is covered by the unit test only. The VM privilege tests
+(`test-deploy-privilege-matrix-contract.sh`, `test-postgres-privilege-matrix-containment.sh`,
+`test-runtime-real-backend-privileges.sh`) carry the r10 cases; CI runs them.
+
 ## AS05 question bank remediation (PR #259) — 20 November 2026
 
 AS05 ([#156](https://github.com/chi-thanh-nguyen/codemastery/issues/156),
