@@ -1,0 +1,12 @@
+# Unix entry points must remain usable even with core.autocrlf=true.
+*.sh text eol=lf
+/backend/mvnw text eol=lf
+
+# Preserve the checked-in Windows wrapper's CRLF bytes without renormalizing it.
+/backend/mvnw.cmd -text
+
+# Binary reference artifacts, slides, icons and fonts must not undergo text conversion.
+*.pdf binary
+*.docx binary
+*.ico binary
+*.woff2 binary
