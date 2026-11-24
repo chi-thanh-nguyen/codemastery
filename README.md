@@ -1,42 +1,35 @@
 # CodeMastery
 
-**Mastery-based programming learning for beginner university students.**
+Mastery-based programming learning for beginner university students.
 
 CodeMastery is a course-based, self-paced web application for introductory
-programming, developed for CO3103 at HCMUT. Its Mastery-Based Adaptive Learning
-design tracks individual skills and uses explainable rules to recommend the next
-lesson, test out of mastered content, or revisit prerequisites. The integrated
-adaptive journey is still being built.
+programming, developed for CO3103 at HCMUT. Its intended difference is skill-level
+mastery: learners receive explainable guidance to continue, test out, or revisit
+prerequisites, while instructors follow their progress. That adaptive journey is
+still being built; the implemented capabilities are listed below.
 
-[![Backend](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-backend.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-backend.yml)
-[![Frontend](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-frontend.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-frontend.yml)
-[![E2E](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-e2e.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-e2e.yml)
+[![Backend](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-backend.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-backend.yml) [![Frontend](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-frontend.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-frontend.yml) [![E2E](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-e2e.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-e2e.yml) [![VM](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-vm.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-vm.yml) [![CodeQL](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/github-code-scanning/codeql/badge.svg?branch=main)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/github-code-scanning/codeql) [![MIT License](https://img.shields.io/github/license/chi-thanh-nguyen/codemastery?style=flat)](LICENSE)
 
-## Why CodeMastery
+[Setup](docs/setup.md#prerequisites) · [Contributing](CONTRIBUTING.md) ·
+[Documentation](#documentation-index) · [Security](SECURITY.md)
 
-- **Skill-level mastery foundations.** Deterministic mastery calculation, skill
-  graph validation, categorical mastery persistence and append-only recommendation
-  history are implemented. Quiz-driven mastery updates, next-lesson recommendations
-  and the learner Mastery Map are not integrated.
-- **Course-based programming study.** Learners can register, sign in, restore a
-  session, browse published courses, join or leave a course, and view their enrolled
-  courses. Password recovery has backend and frontend support; delivery requires
-  the documented SMTP configuration.
-- **Progress and resume APIs.** The backend supports Learner lesson reads,
-  completion/progress and resume. Production lesson screens remain to be delivered.
-- **Instructor authoring APIs.** Course, Chapter and Lesson authoring/publication,
-  skill graphs, question banks and quiz composition/publication have backend support.
-  Most of these newer APIs have no production frontend screen yet; Instructor
-  workspaces remain preview-only.
-- **One backend, explicit module boundaries.** A Spring Boot Modular Monolith
-  separates six modules with approved public interfaces, ports and events. The
-  architecture defines ownership without introducing separate backend services.
+## What works today
+
+- Learners can register, sign in, restore a session, browse published courses,
+  join or leave a course, and view their enrolled courses. Password recovery has
+  backend and frontend support; delivery requires the documented SMTP configuration.
+- Backend APIs support Course, Chapter and Lesson authoring/publication, Learner
+  lesson reads, completion/progress and resume, Instructor skill graphs, question
+  banks, and quiz composition/publication. Most of these newer APIs have no
+  production frontend screen yet.
+- Adaptive foundations include deterministic mastery calculation, skill graph
+  validation, categorical mastery persistence and append-only recommendation
+  history. Quiz-driven mastery updates, next-lesson recommendations and the
+  learner Mastery Map are not integrated.
 
 Adaptive learning is rule-based inside the Java backend. It uses no ML model,
 external AI inference service or separate Python service. Python Fundamentals is
-sample course content, not the backend language. The status table below separates
-implemented capabilities from remaining work; neither code nor previews establish
-independent application acceptance.
+sample course content, not the backend language.
 
 ## Quick links
 
