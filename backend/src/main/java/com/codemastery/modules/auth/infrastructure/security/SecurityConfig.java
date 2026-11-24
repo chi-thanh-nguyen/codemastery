@@ -141,6 +141,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/quizzes/{quizId}",
                                 "/api/courses/{courseId}/quizzes/{quizId}/publication").hasRole("INSTRUCTOR")
                         .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/quizzes/{quizId}").hasRole("INSTRUCTOR")
+                        // CT07-PRACTICE-RECOMMENDATION (ADR013 §19.4): self Learner. The chain decides only
+                        // authentication: malformed UUIDs are 400 (order 2) before the role 403 (order 3),
+                        // which CT03 inside CT33 readLearnerState decides before any lookup.
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/courses/{courseId}/lessons/{lessonId}/practice-recommendation").authenticated()
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),

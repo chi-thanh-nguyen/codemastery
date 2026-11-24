@@ -58,6 +58,24 @@ public final class AdaptiveDecisionEngine {
         return new AdaptiveDecision(testOutLessonIds, recommendations);
     }
 
+    /**
+     * Returns the US-06 prerequisite warning of one published Lesson (ADR011 §7): the direct
+     * prerequisites p of any skill mapped to the Lesson with p not {@code Mastered} and p not
+     * itself mapped to the Lesson, in ADR011 §9 name order. The warning is guidance only; it
+     * never blocks or reorders access, and Unknown counts as unmastered.
+     *
+     * @param context  the validated course snapshot
+     * @param lessonId a Lesson of the snapshot
+     * @return the warning skill IDs, possibly empty, immutable
+     * @throws IllegalArgumentException if an argument is null or the Lesson is not in the snapshot
+     */
+    public List<UUID> prerequisiteWarnings(DecisionContext context, UUID lessonId) {
+        if (context == null || lessonId == null) {
+            throw new IllegalArgumentException("Decision context and lesson ID are required");
+        }
+        return nextLessonResolver.prerequisiteWarnings(context, lessonId);
+    }
+
     public record DecisionContext(
             UUID courseId,
             UUID learnerId,

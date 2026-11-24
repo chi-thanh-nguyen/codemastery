@@ -1,6 +1,9 @@
 package com.codemastery.modules.adaptive.decision;
 
+import com.codemastery.modules.adaptive.application.decision.AdaptiveDecisionEngine;
 import com.codemastery.modules.adaptive.application.decision.AdaptiveDecisionEngine.DecisionContext;
+import com.codemastery.modules.adaptive.application.decision.AdaptiveDecisionEngine.LessonInput;
+import com.codemastery.modules.adaptive.application.decision.AdaptiveDecisionEngine.PrerequisiteInput;
 import com.codemastery.modules.adaptive.application.decision.AdaptiveDecisionService;
 import com.codemastery.modules.adaptive.application.event.RecommendationCreatedEvent;
 import com.codemastery.modules.adaptive.application.event.RecommendationCreatedEvent.CreatedRecommendation;
@@ -8,9 +11,14 @@ import com.codemastery.modules.adaptive.application.recommendation.Recommendatio
 import com.codemastery.modules.adaptive.application.recommendation.RecommendationService;
 import com.codemastery.modules.adaptive.domain.model.AdaptiveDecision;
 import com.codemastery.modules.adaptive.domain.model.AdaptiveDecision.Recommendation;
+import com.codemastery.modules.adaptive.domain.model.MasteryState;
 import com.codemastery.modules.adaptive.domain.model.PathRecommendation;
 import com.codemastery.modules.adaptive.domain.model.RecommendationType;
+import com.codemastery.modules.adaptive.application.mastery.MasteryQueryService;
 import com.codemastery.modules.adaptive.domain.repository.PathRecommendationRepository;
+import com.codemastery.modules.adaptive.domain.repository.SkillRepository;
+import com.codemastery.modules.assessment.application.service.QuizService;
+import com.codemastery.modules.course.application.service.LessonProgressService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.BeanUtils;
 import org.springframework.context.ApplicationEventPublisher;
@@ -20,16 +28,292 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class AdaptiveDecisionEngineTest {
+
+    @Test
+    void skipsMasteredLessonThenContinuesToFirstIncompleteLesson() {
+        UUID masteredLesson = new UUID(0, 1);
+        UUID nextLesson = new UUID(0, 2);
+        UUID loops = new UUID(0, 3);
+        UUID arrays = new UUID(0, 4);
+
+        var context = new DecisionContext(
+                new UUID(0, 5), new UUID(0, 6),
+                List.of(new LessonInput(masteredLesson, false, Set.of(loops, arrays)),
+                        new LessonInput(nextLesson, false, Set.of())),
+                Map.of(loops, MasteryState.MASTERED, arrays, MasteryState.MASTERED),
+                List.of(),
+                Map.of(loops, "Loops", arrays, "Arrays"));
+
+        var result = new AdaptiveDecisionEngine().decide(context);
+
+        assertEquals(List.of(masteredLesson), result.testOutLessonIds());
+        assertEquals(List.of(
+                new Recommendation(RecommendationType.SKIP, masteredLesson,
+                        "Tested out: you have mastered every skill in this lesson (\"Arrays\", \"Loops\")."),
+                new Recommendation(RecommendationType.CONTINUE, nextLesson,
+                        "Continue with the next lesson in the course order.")),
+                result.recommendations());
+    }
+
+    @Test
+    void skipReasonPreservesCaseDuplicateNamesAndDistinctUnicodeForms() {
+        UUID lesson = new UUID(0, 100);
+        var names = Map.of(
+                new UUID(0, 1), "beta",
+                new UUID(0, 2), "Alpha",
+                new UUID(0, 3), "Zeta",
+                new UUID(0, 4), "\u00C4rger",
+                new UUID(0, 5), "alpha",
+                new UUID(0, 6), "alpha",
+                new UUID(0, 7), "\u00E9",
+                new UUID(0, 8), "e\u0301");
+
+        Map<UUID, MasteryState> mastery = new HashMap<>();
+        names.keySet().forEach(id -> mastery.put(id, MasteryState.MASTERED));
+
+        var context = new DecisionContext(
+                new UUID(0, 201), new UUID(0, 202),
+                List.of(new LessonInput(lesson, false, names.keySet())),
+                mastery, List.of(), names);
+
+        var result = new AdaptiveDecisionEngine().decide(context);
+
+        String expectedReason = "Tested out: you have mastered every skill in this lesson "
+                + "(\"Alpha\", \"Zeta\", \"alpha\", \"alpha\", \"beta\", "
+                + "\"e\u0301\", \"\u00C4rger\", \"\u00E9\").";
+
+        assertEquals(List.of(lesson), result.testOutLessonIds());
+        assertEquals(List.of(new Recommendation(
+                RecommendationType.SKIP, lesson, expectedReason)), result.recommendations());
+    }
+
+    // AD11: ADR011 §§6-7, 9-10 decision oracles (L1-L3 map S1-S3; S2 -> S1 and S3 -> S2).
+
+    private static final UUID S1 = new UUID(0, 0x51), S2 = new UUID(0, 0x52), S3 = new UUID(0, 0x53);
+    private static final UUID OL1 = new UUID(0, 0x201), OL2 = new UUID(0, 0x202), OL3 = new UUID(0, 0x203);
+    private static final Map<UUID, String> ORACLE_NAMES = Map.of(S1, "Variables", S2, "Loops", S3, "Arrays");
+    private static final List<PrerequisiteInput> ORACLE_EDGES =
+            List.of(new PrerequisiteInput(S2, S1), new PrerequisiteInput(S3, S2));
+
+    private static DecisionContext oracle(Map<UUID, MasteryState> mastery, boolean... completed) {
+        boolean[] done = completed.length == 0 ? new boolean[3] : completed;
+        return new DecisionContext(COURSE, LEARNER,
+                List.of(new LessonInput(OL1, done[0], Set.of(S1)), new LessonInput(OL2, done[1], Set.of(S2)),
+                        new LessonInput(OL3, done[2], Set.of(S3))),
+                mastery, ORACLE_EDGES, ORACLE_NAMES);
+    }
+
+    private static Map<UUID, MasteryState> states(MasteryState s1, MasteryState s2, MasteryState s3) {
+        return Map.of(S1, s1, S2, s2, S3, s3);
+    }
+
+    @Test
+    void b6R01TwoOrderedTestOutsAreFollowedByContinue() {
+        var decision = new AdaptiveDecisionEngine().decide(oracle(states(
+                MasteryState.MASTERED, MasteryState.MASTERED, MasteryState.UNKNOWN)));
+
+        assertEquals(List.of(OL1, OL2), decision.testOutLessonIds());
+        assertEquals(List.of(
+                new Recommendation(RecommendationType.SKIP, OL1,
+                        "Tested out: you have mastered every skill in this lesson (\"Variables\")."),
+                new Recommendation(RecommendationType.SKIP, OL2,
+                        "Tested out: you have mastered every skill in this lesson (\"Loops\")."),
+                new Recommendation(RecommendationType.CONTINUE, OL3, "Continue with the next lesson in the course order.")),
+                decision.recommendations());
+    }
+
+    @Test
+    void b6R02AWeakSkillWithAnUnknownPrerequisiteGetsRemedialFirst() {
+        var decision = new AdaptiveDecisionEngine().decide(oracle(states(
+                MasteryState.UNKNOWN, MasteryState.WEAK, MasteryState.UNKNOWN)));
+
+        assertTrue(decision.testOutLessonIds().isEmpty());
+        assertEquals(List.of(new Recommendation(RecommendationType.REMEDIAL, OL1,
+                        "Review this lesson first: your skill \"Loops\" is Weak and its prerequisite \"Variables\" is not yet Mastered.")),
+                decision.recommendations());
+    }
+
+    @Test
+    void b6R03AMasteredPrerequisiteLeavesNoCandidateSoTheDecisionFallsBackToContinue() {
+        var decision = new AdaptiveDecisionEngine().decide(oracle(states(
+                MasteryState.MASTERED, MasteryState.WEAK, MasteryState.UNKNOWN)));
+
+        assertEquals(List.of(OL1), decision.testOutLessonIds());
+        assertEquals(RecommendationType.SKIP, decision.recommendations().getFirst().type());
+        assertEquals(new Recommendation(RecommendationType.CONTINUE, OL2, "Continue with the next lesson in the course order."),
+                decision.recommendations().getLast());
+        assertEquals(2, decision.recommendations().size());
+    }
+
+    @Test
+    void b6R07AnUnmappedLessonIsNeverTestedOutButCanBeTheContinueTarget() {
+        UUID unmapped = new UUID(0, 0x2FF);
+        var context = new DecisionContext(COURSE, LEARNER,
+                List.of(new LessonInput(OL1, false, Set.of(S1)), new LessonInput(unmapped, false, Set.of()),
+                        new LessonInput(OL2, false, Set.of(S2))),
+                states(MasteryState.MASTERED, MasteryState.MASTERED, MasteryState.MASTERED), ORACLE_EDGES, ORACLE_NAMES);
+
+        var decision = new AdaptiveDecisionEngine().decide(context);
+
+        assertEquals(List.of(OL1, OL2), decision.testOutLessonIds());
+        assertEquals(new Recommendation(RecommendationType.CONTINUE, unmapped, "Continue with the next lesson in the course order."),
+                decision.recommendations().getLast());
+    }
+
+    @Test
+    void b6R08AllLessonsCompletedWithoutAWeakCandidateYieldNoGuidanceDraft() {
+        var engine = new AdaptiveDecisionEngine();
+
+        var noWeak = engine.decide(oracle(states(
+                MasteryState.LEARNING, MasteryState.UNKNOWN, MasteryState.LEARNING), true, true, true));
+        assertTrue(noWeak.testOutLessonIds().isEmpty());
+        assertTrue(noWeak.recommendations().isEmpty());
+
+        // Completion alone never suppresses remedial: a Weak S3 with unmastered S2 still selects review of L2.
+        assertEquals(List.of(new Recommendation(RecommendationType.REMEDIAL, OL2,
+                        "Review this lesson first: your skill \"Arrays\" is Weak and its prerequisite \"Loops\" is not yet Mastered.")),
+                engine.decide(oracle(states(MasteryState.LEARNING, MasteryState.UNKNOWN, MasteryState.WEAK),
+                        true, true, true)).recommendations());
+    }
+
+    @Test
+    void contrastingProfilesOnTheSameCourseReceiveDifferentNextRecommendations() {
+        var engine = new AdaptiveDecisionEngine();
+        // Strong foundation: Variables and Loops mastered. Loops gap: Variables learning, Loops weak.
+        var strong = engine.decide(oracle(states(MasteryState.MASTERED, MasteryState.MASTERED, MasteryState.UNKNOWN)));
+        var loopsGap = engine.decide(oracle(states(MasteryState.LEARNING, MasteryState.WEAK, MasteryState.UNKNOWN)));
+
+        assertEquals(new Recommendation(RecommendationType.CONTINUE, OL3, "Continue with the next lesson in the course order."),
+                strong.recommendations().getLast());
+        assertEquals(new Recommendation(RecommendationType.REMEDIAL, OL1,
+                        "Review this lesson first: your skill \"Loops\" is Weak and its prerequisite \"Variables\" is not yet Mastered."),
+                loopsGap.recommendations().getLast());
+        assertNotEquals(strong.recommendations().getLast(), loopsGap.recommendations().getLast());
+    }
+
+    @Test
+    void decisionsAreReproducibleImmutableAndIndependentOfTheCallersCollections() {
+        Map<UUID, MasteryState> mastery = new HashMap<>(states(MasteryState.MASTERED, MasteryState.WEAK, MasteryState.UNKNOWN));
+        Set<UUID> skills = new java.util.HashSet<>(Set.of(S1));
+        List<LessonInput> lessons = new ArrayList<>(List.of(new LessonInput(OL1, false, skills),
+                new LessonInput(OL2, false, Set.of(S2)), new LessonInput(OL3, false, Set.of(S3))));
+        var context = new DecisionContext(COURSE, LEARNER, lessons, mastery, ORACLE_EDGES, ORACLE_NAMES);
+        var engine = new AdaptiveDecisionEngine();
+        var first = engine.decide(context);
+
+        mastery.put(S1, MasteryState.WEAK);
+        skills.add(S2);
+        lessons.clear();
+
+        assertEquals(first, engine.decide(context));
+        assertEquals(first, new AdaptiveDecisionEngine().decide(oracle(states(
+                MasteryState.MASTERED, MasteryState.WEAK, MasteryState.UNKNOWN))));
+        assertThrows(UnsupportedOperationException.class, () -> first.testOutLessonIds().clear());
+        assertThrows(UnsupportedOperationException.class, () -> first.recommendations().clear());
+    }
+
+    @Test
+    void invalidSnapshotsAreRejected() {
+        var engine = new AdaptiveDecisionEngine();
+        var names = Map.of(S1, "Variables", S2, "Loops");
+        var mastery = Map.of(S1, MasteryState.UNKNOWN, S2, MasteryState.UNKNOWN);
+
+        assertThrows(IllegalArgumentException.class, () -> engine.decide(null));
+        assertThrows(IllegalArgumentException.class, () -> new DecisionContext(COURSE, LEARNER,
+                List.of(new LessonInput(OL1, false, Set.of(S1)), new LessonInput(OL1, false, Set.of(S2))),
+                mastery, List.of(), names));
+        assertThrows(IllegalArgumentException.class, () -> new DecisionContext(COURSE, LEARNER,
+                List.of(new LessonInput(OL1, false, Set.of(S3))), mastery, List.of(), names));
+        assertThrows(IllegalArgumentException.class, () -> new DecisionContext(COURSE, LEARNER,
+                List.of(), mastery, List.of(new PrerequisiteInput(S1, S3)), names));
+        assertThrows(IllegalArgumentException.class, () -> new DecisionContext(COURSE, LEARNER,
+                List.of(), mastery, List.of(new PrerequisiteInput(S1, S2), new PrerequisiteInput(S2, S1)), names));
+        assertThrows(IllegalArgumentException.class, () -> new DecisionContext(COURSE, LEARNER,
+                List.of(), mastery, List.of(new PrerequisiteInput(S1, S1)), names));
+        assertThrows(IllegalArgumentException.class, () -> new DecisionContext(COURSE, LEARNER,
+                List.of(), mastery, List.of(new PrerequisiteInput(S2, S1), new PrerequisiteInput(S2, S1)), names));
+        assertThrows(IllegalArgumentException.class, () -> new DecisionContext(COURSE, LEARNER,
+                java.util.Arrays.asList(new LessonInput(OL1, false, Set.of()), null), mastery, List.of(), names));
+        assertThrows(IllegalArgumentException.class, () -> new DecisionContext(null, LEARNER,
+                List.of(), mastery, List.of(), names));
+        assertThrows(IllegalArgumentException.class, () -> new LessonInput(OL1, false, null));
+    }
+
+    @Test
+    void prerequisiteWarningsNameUnmasteredDirectPrerequisitesOutsideTheLessonInNameOrderWithoutBlocking() {
+        UUID alphaLow = new UUID(0, 0x61), alphaHigh = new UUID(0, 0x62), zeta = new UUID(0, 0x63);
+        UUID upper = new UUID(0, 0x64), target = new UUID(0, 0x65), mappedPrerequisite = new UUID(0, 0x66);
+        UUID mastered = new UUID(0, 0x67), lesson = new UUID(0, 0x300), other = new UUID(0, 0x301);
+        var names = Map.of(alphaLow, "alpha", alphaHigh, "alpha", zeta, "Zeta", upper, "Alpha", target, "Target",
+                mappedPrerequisite, "Mapped", mastered, "Done");
+        var mastery = new HashMap<UUID, MasteryState>();
+        names.keySet().forEach(id -> mastery.put(id, MasteryState.UNKNOWN));
+        mastery.put(zeta, MasteryState.WEAK);
+        mastery.put(upper, MasteryState.LEARNING);
+        mastery.put(mastered, MasteryState.MASTERED);
+        var edges = List.of(new PrerequisiteInput(target, alphaHigh), new PrerequisiteInput(target, zeta),
+                new PrerequisiteInput(target, alphaLow), new PrerequisiteInput(target, upper),
+                new PrerequisiteInput(target, mappedPrerequisite), new PrerequisiteInput(target, mastered),
+                new PrerequisiteInput(mappedPrerequisite, alphaLow));
+        var context = new DecisionContext(COURSE, LEARNER,
+                List.of(new LessonInput(lesson, false, Set.of(target, mappedPrerequisite)), new LessonInput(other, false, Set.of(zeta))),
+                mastery, edges, names);
+        var engine = new AdaptiveDecisionEngine();
+
+        java.util.Locale original = java.util.Locale.getDefault();
+        try {
+            for (java.util.Locale locale : List.of(java.util.Locale.ROOT, java.util.Locale.forLanguageTag("tr-TR"),
+                    java.util.Locale.GERMANY)) {
+                java.util.Locale.setDefault(locale);
+                assertEquals(List.of(upper, zeta, alphaLow, alphaHigh), engine.prerequisiteWarnings(context, lesson), locale.toString());
+            }
+        } finally {
+            java.util.Locale.setDefault(original);
+        }
+        assertEquals(List.of(), engine.prerequisiteWarnings(context, other));
+        assertThrows(IllegalArgumentException.class, () -> engine.prerequisiteWarnings(context, new UUID(0, 0x3FF)));
+        assertThrows(UnsupportedOperationException.class, () -> engine.prerequisiteWarnings(context, lesson).clear());
+        // Guidance only: the warned Lesson stays the continue target although its prerequisites are unmastered.
+        assertEquals(List.of(new Recommendation(RecommendationType.CONTINUE, lesson,
+                        "Continue with the next lesson in the course order.")), engine.decide(context).recommendations());
+    }
+
+    @Test
+    void b6R12NameOrderIsIdenticalUnderAnyDefaultLocaleAndBreaksEqualNamesByUuid() {
+        UUID smallAlpha = new UUID(0, 5), largeAlpha = new UUID(0, 6);
+        var names = Map.of(new UUID(0, 1), "beta", new UUID(0, 2), "Alpha", new UUID(0, 3), "Zeta",
+                new UUID(0, 4), "\u00C4rger", largeAlpha, "alpha", smallAlpha, "alpha");
+        java.util.Locale original = java.util.Locale.getDefault();
+        try {
+            for (java.util.Locale locale : List.of(java.util.Locale.ROOT, java.util.Locale.forLanguageTag("tr-TR"),
+                    java.util.Locale.forLanguageTag("sv-SE"))) {
+                java.util.Locale.setDefault(locale);
+                assertEquals(List.of(new UUID(0, 2), new UUID(0, 3), smallAlpha, largeAlpha, new UUID(0, 1), new UUID(0, 4)),
+                        names.keySet().stream().sorted(RecommendationReasonBuilder.nameOrder(names)).toList(), locale.toString());
+            }
+        } finally {
+            java.util.Locale.setDefault(original);
+        }
+        String reason = RecommendationReasonBuilder.skip(names.keySet(), names);
+        assertEquals("Tested out: you have mastered every skill in this lesson "
+                + "(\"Alpha\", \"Zeta\", \"alpha\", \"alpha\", \"beta\", \"\u00C4rger\").", reason);
+        assertFalse(reason.contains(smallAlpha.toString()));
+    }
 
     // AD14 history and CT29 producer rules of AdaptiveDecisionService (ADR011 §§7, 9, B6-R09;
     // ADR012 §9.4). Real PostgreSQL commit, rollback and after-commit delivery are covered in
@@ -254,7 +538,8 @@ class AdaptiveDecisionEngineTest {
         try {
             return BeanUtils.instantiateClass(AdaptiveDecisionService.class.getDeclaredConstructor(
                             RecommendationService.class, ApplicationEventPublisher.class, Clock.class),
-                    new RecommendationService(history), publisher, clock);
+                    new RecommendationService(history, mock(LessonProgressService.class), mock(SkillRepository.class),
+                            mock(MasteryQueryService.class), mock(QuizService.class)), publisher, clock);
         } catch (NoSuchMethodException missing) {
             throw new AssertionError(missing);
         }

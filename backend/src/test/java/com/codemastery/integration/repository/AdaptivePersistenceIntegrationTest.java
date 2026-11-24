@@ -1,6 +1,7 @@
 package com.codemastery.integration.repository;
 
 import com.codemastery.integration.AbstractIntegrationTest;
+import com.codemastery.modules.adaptive.application.mastery.MasteryQueryService;
 import com.codemastery.modules.adaptive.domain.model.MasteryState;
 import com.codemastery.modules.adaptive.domain.model.PathRecommendation;
 import com.codemastery.modules.adaptive.domain.model.RecommendationType;
@@ -21,6 +22,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.security.SecureRandom;
@@ -28,10 +30,12 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -65,6 +69,10 @@ import static org.junit.jupiter.api.Assertions.fail;
  * runtime rows for {@code learner_skill_masteries} and {@code path_recommendations}; the rollback
  * removes the role and its grants. This proves the adapter SQL needs nothing more. It is not the
  * deployed runtime role: the VM matrix tests cover that.
+ *
+ * <p>AD16 state read (ADR011 §13, ADR013 §19.4): {@code findStates} and {@code MasteryQueryService.readStates}
+ * read one learner's rows for a skill set in one column projection, within the r8 column grant, and
+ * map absent rows to {@code Unknown} only in the query service.
  *
  * <p>The context is closed after this class so its connection pool does not stay open next to the
  * other cached integration contexts that share the one per-JVM PostgreSQL container.
@@ -123,6 +131,9 @@ class AdaptivePersistenceIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private PathRecommendationRepository recommendations;
+
+    @Autowired
+    private MasteryQueryService masteryQuery;
 
     private final ExecutorService workers = Executors.newFixedThreadPool(3);
     private final List<CommittedFixture> committed = new ArrayList<>();
@@ -315,6 +326,98 @@ class AdaptivePersistenceIntegrationTest extends AbstractIntegrationTest {
 
         assertEquals(0, committedMasteryCount(f.learnerId));
         assertEquals(0, committedRecommendationCount(f.enrollmentId));
+    }
+
+    // ------------------------------------------------------------------- AD16 state read
+
+    @Test
+    void stateReadReturnsOnlyTheLearnersRequestedRowsInOneColumnProjection() {
+        inRolledBackTransaction(() -> {
+            Fixture f = fixture();
+            UUID skillC = skill(f.courseId, "C");
+            masteries.storeState(f.learnerId, f.skillA, MasteryState.MASTERED);
+            masteries.storeState(f.learnerId, skillC, MasteryState.WEAK);
+            masteries.storeState(f.otherLearnerId, f.skillB, MasteryState.LEARNING);
+
+            List<String> statements = recording(() -> assertEquals(Map.of(f.skillA, MasteryState.MASTERED),
+                    masteries.findStates(f.learnerId, List.of(f.skillA, f.skillB, f.skillA))));
+
+            assertEquals(1, statements.size(), () -> "exactly one statement, got " + statements);
+            String sql = normalized(statements.getFirst());
+            assertTrue(sql.startsWith("select skill_id, state from public.learner_skill_masteries "
+                    + "where user_id = ? and skill_id in ("), sql);
+            assertEquals(Map.of(f.skillA, MasteryState.MASTERED, skillC, MasteryState.WEAK),
+                    masteries.findStates(f.learnerId, Set.of(f.skillA, f.skillB, skillC)));
+            assertEquals(Map.of(f.skillB, MasteryState.LEARNING),
+                    masteries.findStates(f.otherLearnerId, Set.of(f.skillA, f.skillB)), "another learner's rows only");
+            assertEquals(List.of(), recording(() -> assertEquals(Map.of(), masteries.findStates(f.learnerId, Set.of()))));
+            assertThrows(UnsupportedOperationException.class, () -> masteries.findStates(f.learnerId, Set.of(f.skillA)).clear());
+            assertThrows(NullPointerException.class, () -> masteries.findStates(null, Set.of(f.skillA)));
+            assertThrows(NullPointerException.class, () -> masteries.findStates(f.learnerId, null));
+            // @Repository exception translation reports the rejected argument as a data-access usage error.
+            assertThrows(InvalidDataAccessApiUsageException.class,
+                    () -> masteries.findStates(f.learnerId, Arrays.asList(f.skillA, null)));
+        });
+    }
+
+    @Test
+    void stateReadNeedsOnlyTheR8ColumnGrantAndACallerTransaction() {
+        inRolledBackTransaction(() -> {
+            Fixture f = fixture();
+            masteries.storeState(f.learnerId, f.skillA, MasteryState.LEARNING);
+            switchToR8Role();
+
+            assertEquals(Map.of(f.skillA, MasteryState.LEARNING), masteries.findStates(f.learnerId, Set.of(f.skillA, f.skillB)));
+            assertFalse(Boolean.TRUE.equals(jdbc.queryForObject(
+                    "SELECT rolsuper FROM pg_roles WHERE rolname = current_user", Boolean.class)),
+                    "the read above ran as the restricted role");
+        });
+        assertThrows(IllegalTransactionStateException.class,
+                () -> masteries.findStates(UUID.randomUUID(), Set.of(UUID.randomUUID())));
+    }
+
+    @Test
+    void queryServiceReturnsEveryRequestedSkillWithAbsentRowsAsUnknownInTheCallersReadOnlySnapshot() {
+        CommittedFixture f = committedFixture();
+        UUID[] skillB = new UUID[1];
+        inCommittedTransaction(() -> {
+            skillB[0] = skill(f.courseId, "B");
+            masteries.storeState(f.learnerId, f.skillA, MasteryState.WEAK);
+            masteries.storeState(f.otherLearnerId, skillB[0], MasteryState.MASTERED);
+        });
+
+        Map<UUID, MasteryState> states = snapshot(TransactionDefinition.ISOLATION_REPEATABLE_READ, true, () -> {
+            Map<UUID, MasteryState> first = masteryQuery.readStates(f.learnerId, List.of(f.skillA, skillB[0]));
+            // A concurrent commit is invisible inside the caller's snapshot.
+            onWorker(() -> {
+                inCommittedTransaction(() -> masteries.storeState(f.learnerId, skillB[0], MasteryState.LEARNING));
+                return null;
+            });
+            assertEquals(first, masteryQuery.readStates(f.learnerId, Set.of(f.skillA, skillB[0])));
+            return first;
+        });
+
+        assertEquals(Map.of(f.skillA, MasteryState.WEAK, skillB[0], MasteryState.UNKNOWN), states);
+        assertThrows(UnsupportedOperationException.class, states::clear);
+        assertEquals(Map.of(f.skillA, MasteryState.WEAK, skillB[0], MasteryState.LEARNING),
+                snapshot(TransactionDefinition.ISOLATION_REPEATABLE_READ, true,
+                        () -> masteryQuery.readStates(f.learnerId, Set.of(f.skillA, skillB[0]))), "the next snapshot sees it");
+        assertEquals(Map.of(), snapshot(TransactionDefinition.ISOLATION_REPEATABLE_READ, true,
+                () -> masteryQuery.readStates(f.learnerId, Set.of())));
+    }
+
+    @Test
+    void queryServiceRefusesAnyCallerContextOtherThanAReadOnlyRepeatableReadTransaction() {
+        UUID learner = UUID.randomUUID();
+        Set<UUID> skills = Set.of(UUID.randomUUID());
+
+        assertThrows(IllegalTransactionStateException.class, () -> masteryQuery.readStates(learner, skills));
+        assertThrows(IllegalStateException.class, () -> snapshot(TransactionDefinition.ISOLATION_REPEATABLE_READ, false,
+                () -> masteryQuery.readStates(learner, skills)));
+        assertThrows(IllegalStateException.class, () -> snapshot(TransactionDefinition.ISOLATION_READ_COMMITTED, true,
+                () -> masteryQuery.readStates(learner, skills)));
+        assertThrows(IllegalArgumentException.class, () -> snapshot(TransactionDefinition.ISOLATION_REPEATABLE_READ, true,
+                () -> masteryQuery.readStates(learner, Arrays.asList(UUID.randomUUID(), null))));
     }
 
     // ------------------------------------------------------------------- recommendation history
@@ -667,6 +770,13 @@ class AdaptivePersistenceIntegrationTest extends AbstractIntegrationTest {
 
     private void inCommittedTransaction(Runnable body) {
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> body.run());
+    }
+
+    private <T> T snapshot(int isolation, boolean readOnly, java.util.function.Supplier<T> body) {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setIsolationLevel(isolation);
+        template.setReadOnly(readOnly);
+        return template.execute(status -> body.get());
     }
 
     private List<String> recording(Runnable body) {
