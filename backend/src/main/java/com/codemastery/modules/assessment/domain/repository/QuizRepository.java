@@ -61,4 +61,8 @@ public interface QuizRepository {
 
     /** The questions among {@code questionIds} whose skill is in {@code skillIds}; empty input matches nothing. */
     List<Question> findQuestionsInSkills(Collection<UUID> questionIds, Collection<UUID> skillIds);
+
+    record PracticeQuizDifficultyRow(UUID quizId, String title, String difficulty) {}
+
+    List<PracticeQuizDifficultyRow> findPublishedPracticeQuizDifficultyRows(UUID courseId, Collection<UUID> skillIds);
 }
