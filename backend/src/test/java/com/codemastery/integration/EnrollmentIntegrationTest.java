@@ -207,6 +207,250 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         assertEquals(List.of(), progressFlags());
     }
 
+    // CO15 + bounded AD11 Course dependency: CT33/ADR011 §13, ADR013 §19.4, CT17-P6 r11.
+    private com.codemastery.modules.course.application.service.LessonProgressService.LearnerCourseState learnerState(UUID course) {
+        return asIdentity(LEARNER, Role.LEARNER, () -> unit(TransactionDefinition.ISOLATION_REPEATABLE_READ, true)
+                .execute(status -> progress.readLearnerState(course)));
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"active", "completed"})
+    void learnerStateReadsPublishedCanonicalPlacementsActualFlagsAndStoredSettingsWithoutWrites(String membership) {
+        structureFixture(); row(membership);
+        jdbc.update("INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) VALUES (?,?,?,true,false),(?,?,?,true,true),(?,?,?,true,true)",
+                PROGRESS, ENROLLMENT, LESSON, id("skipped"), ENROLLMENT, L2, id("hidden-progress"), ENROLLMENT, HIDDEN_LESSON);
+        String policy = "{\"masteryThreshold\":0.80,\"nested\":{\"array\":[true,null,{\"value\":1}]}}";
+        jdbc.update("UPDATE public.courses SET adaptive_enabled=true, adaptive_settings=CAST(? AS jsonb) WHERE id=?", policy, COURSE);
+        var before = jdbc.queryForList("SELECT * FROM public.enrollments WHERE id=?", ENROLLMENT);
+        asIdentity(LEARNER, Role.LEARNER, () -> unit(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(status -> {
+            assertEquals("repeatable read/on", jdbc.queryForObject("SELECT current_setting('transaction_isolation') || '/' || current_setting('transaction_read_only')", String.class));
+            var state = progress.readLearnerState(COURSE);
+            assertEquals(COURSE, state.courseId()); assertEquals(LEARNER, state.learnerId()); assertEquals(ENROLLMENT, state.enrollmentId());
+            assertEquals(membership, state.membershipStatus()); assertTrue(state.adaptiveEnabled());
+            assertEquals(com.codemastery.modules.course.infrastructure.persistence.mapper.CourseMapper.settingsFromJson(policy), state.adaptiveSettings());
+            assertEquals(List.of(LESSON, L2, L3, GAP_PUBLISHED), state.lessons().stream().map(l -> l.lessonId()).toList());
+            assertEquals(List.of(CHAPTER, CHAPTER, EMPTY_CHAPTER, GAP_CHAPTER), state.lessons().stream().map(l -> l.chapterId()).toList());
+            assertEquals(List.of(1, 1, 2, 6), state.lessons().stream().map(l -> l.chapterPosition()).toList());
+            assertEquals(List.of(1, 3, 1, 9), state.lessons().stream().map(l -> l.lessonPosition()).toList());
+            assertEquals(List.of(true, true, false, false), state.lessons().stream().map(l -> l.completed()).toList());
+            assertEquals(List.of(false, true, false, false), state.lessons().stream().map(l -> l.masterySkipped()).toList());
+            assertNull(jdbc.queryForObject("SELECT NULLIF(current_setting('codemastery.course_root',true),'')", String.class));
+            assertNull(jdbc.queryForObject("SELECT pg_current_xact_id_if_assigned()::text", String.class), "no write or tuple lock assigned an xid");
+            assertFalse(rootLockedElsewhere(COURSE), "the caller still owns the read transaction but no write root");
+            assertEquals(state, progress.readLearnerState(COURSE));
+            return null;
+        }));
+        assertEquals(before, jdbc.queryForList("SELECT * FROM public.enrollments WHERE id=?", ENROLLMENT));
+        assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM public.lesson_progress WHERE enrollment_id=?", Integer.class, ENROLLMENT));
+        assertNull(learnerState(COURSE).lessons().stream().filter(l -> l.lessonId().equals(HIDDEN_LESSON)).findFirst().orElse(null));
+    }
+
+    @Test void learnerStateUsesCt03AdmissionAndTheExistingHttpBoundaryKeepsItsStatusMapping() throws Exception {
+        // No REST endpoint is invented for this internal callable. /progress uses the same CT03 admission.
+        String path = "/api/courses/" + COURSE + "/progress";
+        SecurityContextHolder.clearContext();
+        assertThrows(org.springframework.security.core.AuthenticationException.class, () ->
+                unit(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(s -> progress.readLearnerState(COURSE)));
+        mvc.perform(get(path)).andExpect(status().isUnauthorized());
+        for (UUID user : List.of(OWNER, ADMIN)) {
+            Role role = user.equals(OWNER) ? Role.INSTRUCTOR : Role.ADMIN;
+            assertThrows(AccessDeniedException.class, () -> asIdentity(user, role, () ->
+                    unit(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(s -> progress.readLearnerState(id("missing")))));
+            mvc.perform(as(get(path), user)).andExpect(status().isForbidden());
+        }
+        assertThrows(AccessDeniedException.class, () -> learnerState(COURSE));
+        mvc.perform(as(get(path), LEARNER)).andExpect(status().isForbidden());
+        row("left");
+        assertThrows(AccessDeniedException.class, () -> learnerState(COURSE));
+        mvc.perform(as(get(path), LEARNER)).andExpect(status().isForbidden());
+        jdbc.update("UPDATE public.enrollments SET status='active' WHERE id=?", ENROLLMENT);
+        assertThrows(ResourceNotFoundException.class, () -> learnerState(HIDDEN));
+        assertThrows(ResourceNotFoundException.class, () -> learnerState(id("missing")));
+        assertThrows(AccessDeniedException.class, () -> learnerState(SECOND), "published foreign Course with no membership is 403");
+        jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status) VALUES (?,?,?,'active')", id("hidden-member"), LEARNER, HIDDEN);
+        assertThrows(ResourceNotFoundException.class, () -> learnerState(HIDDEN), "hidden even with active membership");
+        mvc.perform(as(get("/api/courses/" + HIDDEN + "/progress"), LEARNER)).andExpect(status().isNotFound());
+        mvc.perform(as(get("/api/courses/" + id("missing") + "/progress"), LEARNER)).andExpect(status().isNotFound());
+        mvc.perform(as(get("/api/courses/" + SECOND + "/progress"), LEARNER)).andExpect(status().isForbidden());
+        assertEquals("active", learnerState(COURSE).membershipStatus());
+        assertFalse(learnerState(COURSE).adaptiveEnabled()); assertNull(learnerState(COURSE).adaptiveSettings());
+        assertThrows(org.springframework.transaction.IllegalTransactionStateException.class, () -> progress.readLearnerState(COURSE));
+        assertThrows(IllegalStateException.class, () -> unit(READ_COMMITTED, true).execute(s -> progress.readLearnerState(COURSE)));
+        assertThrows(IllegalStateException.class, () -> unit(TransactionDefinition.ISOLATION_REPEATABLE_READ, false).execute(s -> progress.readLearnerState(COURSE)));
+    }
+
+    @Test void learnerStateKeepsAccessEnrollmentPlacementsAndConfigurationInTheCallersSingleSnapshot() throws Exception {
+        structureFixture(); row("active");
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            asIdentity(LEARNER, Role.LEARNER, () -> unit(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(status -> {
+                // Establish the caller's snapshot before even the CT03 access query.
+                assertEquals("published", courseStatus(COURSE));
+                var before = progress.readLearnerState(COURSE);
+                try {
+                    worker.submit(() -> unit(READ_COMMITTED, false).execute(s -> {
+                        assertTrue(courseRows.lockCourseRoot(COURSE));
+                        jdbc.update("UPDATE public.courses SET publication_status='hidden', adaptive_settings='{\"changed\":true}'::jsonb WHERE id=?", COURSE);
+                        jdbc.update("UPDATE public.enrollments SET status='left' WHERE id=?", ENROLLMENT);
+                        jdbc.update("UPDATE public.lessons SET publication_status='published' WHERE id=?", HIDDEN_LESSON);
+                        jdbc.update("UPDATE public.lessons SET position=8 WHERE id=?", LESSON);
+                        return null;
+                    })).get(20, TimeUnit.SECONDS);
+                } catch (Exception failure) { throw new IllegalStateException(failure); }
+                assertEquals(before, progress.readLearnerState(COURSE), "the read must join rather than replace the caller's snapshot");
+                return null;
+            }));
+        }
+        assertEquals("left", enrollmentStatus());
+        assertThrows(ResourceNotFoundException.class, () -> learnerState(COURSE), "a new snapshot sees the hidden Course");
+        jdbc.update("UPDATE public.courses SET publication_status='published' WHERE id=?", COURSE);
+        assertThrows(AccessDeniedException.class, () -> learnerState(COURSE), "a new snapshot also sees LEFT membership");
+    }
+
+    /** Exact r11 Course subset, including CT03's material admission columns; disposable test database only. */
+    private String createRuntimeCourseRole(boolean skipUpdate) {
+        String role = "co15_" + UUID.randomUUID().toString().replace("-", "");
+        jdbc.execute("CREATE ROLE " + role + " NOLOGIN");
+        jdbc.execute("GRANT USAGE ON SCHEMA public TO " + role);
+        jdbc.execute("GRANT SELECT ON public.users, public.courses, public.chapters, public.lessons TO " + role);
+        jdbc.execute("GRANT SELECT(id,lesson_id,publication_status) ON public.learning_materials TO " + role);
+        jdbc.execute("GRANT UPDATE(id) ON public.courses TO " + role);
+        jdbc.execute("GRANT SELECT, INSERT, UPDATE(status,resume_lesson_id,last_visited_at) ON public.enrollments TO " + role);
+        jdbc.execute("GRANT SELECT, INSERT, UPDATE(completed" + (skipUpdate ? ",mastery_skipped" : "") + ") ON public.lesson_progress TO " + role);
+        return role;
+    }
+    private void runtimeCourseRole(boolean skipUpdate) {
+        String role = createRuntimeCourseRole(skipUpdate);
+        jdbc.execute("SET LOCAL ROLE " + role);
+    }
+
+    @Test void learnerStateAlsoWorksReadOnlyUnderTheRestrictedRuntimeCoursePrivileges() {
+        row("active");
+        String role = createRuntimeCourseRole(true);
+        try {
+            asIdentity(LEARNER, Role.LEARNER, () -> unit(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(status -> {
+                jdbc.execute("SET LOCAL ROLE " + role);
+                assertEquals(role, jdbc.queryForObject("SELECT current_user", String.class));
+                assertEquals("on", jdbc.queryForObject("SHOW transaction_read_only", String.class));
+                assertEquals("active", progress.readLearnerState(COURSE).membershipStatus());
+                assertNull(jdbc.queryForObject("SELECT pg_current_xact_id_if_assigned()::text", String.class));
+                return null;
+            }));
+        } finally {
+            jdbc.execute("DROP OWNED BY " + role); jdbc.execute("DROP ROLE " + role);
+        }
+        assertEquals(List.of(), progressFlags()); assertEquals("active", enrollmentStatus());
+    }
+
+    @Test void actualParticipantSqlWorksUnderR11AndRollsBackMidBatchFailureWithEnrollmentAndCallerWrites() {
+        moreLessons(); row("active");
+        jdbc.update("INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) VALUES (?,?,?,false,false),(?,?,?,true,false)",
+                PROGRESS, ENROLLMENT, LESSON, id("manual"), ENROLLMENT, L2);
+        heldRootUnit().execute(status -> {
+            runtimeCourseRole(true);
+            assertTrue(courseRows.lockCourseRoot(COURSE)); courseRows.markCourseRootHeld(COURSE);
+            var after = progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON, L2, L3));
+            assertEquals("completed", after.membershipStatus());
+            assertEquals(List.of(true, false, true), after.lessons().stream().map(l -> l.masterySkipped()).toList());
+            assertEquals(after, progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON, L2, L3)));
+            assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM public.lesson_progress WHERE enrollment_id=?", Integer.class, ENROLLMENT));
+            status.setRollbackOnly(); return null;
+        });
+        assertEquals(List.of(false, false), progressFlags()); assertEquals("active", enrollmentStatus());
+        // Test-scoped trigger fails on the last canonical Lesson, after the participant has upgraded an earlier row.
+        jdbc.execute("CREATE FUNCTION public.co15_fail_progress() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.lesson_id='" + L3 + "'::uuid THEN RAISE EXCEPTION 'CO15 injected failure'; END IF; RETURN NEW; END $$");
+        jdbc.execute("CREATE TRIGGER co15_fail_progress BEFORE INSERT ON public.lesson_progress FOR EACH ROW EXECUTE FUNCTION public.co15_fail_progress()");
+        try {
+            var failure = assertThrows(org.springframework.dao.DataAccessException.class, () -> heldRootUnit().execute(status -> {
+                runtimeCourseRole(true);
+                assertTrue(courseRows.lockCourseRoot(COURSE)); courseRows.markCourseRootHeld(COURSE);
+                jdbc.update("UPDATE public.enrollments SET resume_lesson_id=? WHERE id=?", L2, ENROLLMENT); // caller-owned Course work
+                return progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON, L3));
+            }));
+            assertTrue(failure.getMostSpecificCause().getMessage().contains("CO15 injected failure"));
+        } finally {
+            jdbc.execute("DROP TRIGGER co15_fail_progress ON public.lesson_progress");
+            jdbc.execute("DROP FUNCTION public.co15_fail_progress()");
+        }
+        assertEquals(List.of(false, false), progressFlags()); assertEquals("active", enrollmentStatus());
+        assertEquals(LESSON, jdbc.queryForObject("SELECT resume_lesson_id FROM public.enrollments WHERE id=?", UUID.class, ENROLLMENT));
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM public.lesson_progress WHERE enrollment_id=?", Integer.class, ENROLLMENT));
+    }
+
+    @Test void actualIncompleteRowUpdateFailsWith42501UnderThePreR11RoleAndNothingCommits() {
+        row("active");
+        jdbc.update("INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) VALUES (?,?,?,false,false)", PROGRESS, ENROLLMENT, LESSON);
+        var failure = assertThrows(org.springframework.dao.DataAccessException.class, () -> heldRootUnit().execute(status -> {
+            runtimeCourseRole(false);
+            assertTrue(courseRows.lockCourseRoot(COURSE)); courseRows.markCourseRootHeld(COURSE);
+            return progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON));
+        }));
+        assertEquals("42501", ((SQLException) failure.getMostSpecificCause()).getSQLState());
+        assertEquals(List.of(false, false), progressFlags()); assertEquals("active", enrollmentStatus());
+    }
+
+    @ParameterizedTest @ValueSource(strings = {
+            "UPDATE public.lesson_progress SET id=id", "UPDATE public.lesson_progress SET lesson_id=lesson_id",
+            "UPDATE public.lesson_progress SET enrollment_id=enrollment_id", "DELETE FROM public.lesson_progress",
+            "TRUNCATE public.lesson_progress"})
+    void r11StillDeniesProgressIdentityRewritesEraseAndTruncate(String sql) {
+        var failure = assertThrows(org.springframework.dao.DataAccessException.class, () -> heldRootUnit().execute(status -> {
+            runtimeCourseRole(true); jdbc.execute(sql); return null;
+        }));
+        assertEquals("42501", ((SQLException) failure.getMostSpecificCause()).getSQLState());
+    }
+
+    @Test void masterySkipWaitsForManualCompletionOnTheRootAndDoesNotRelabelItsCommittedRow() throws Exception {
+        row("active");
+        var locked = new CountDownLatch(1); var release = new CountDownLatch(1);
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            try {
+                var manual = workers.submit(() -> asIdentity(LEARNER, Role.LEARNER, () -> heldRootUnit().execute(status -> {
+                    progress.complete(COURSE, LESSON);
+                    locked.countDown(); await(release); return null;
+                })));
+                await(locked);
+                var skipped = workers.submit(() -> underHeldRoot(() -> progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON))));
+                awaitLockWaiters(1); assertFalse(skipped.isDone());
+                release.countDown(); manual.get(20, TimeUnit.SECONDS);
+                var state = skipped.get(20, TimeUnit.SECONDS);
+                assertEquals("completed", state.membershipStatus());
+                assertTrue(state.lessons().getFirst().completed()); assertFalse(state.lessons().getFirst().masterySkipped());
+            } finally { release.countDown(); }
+        }
+        assertEquals(List.of(true, false), progressFlags());
+    }
+
+    @Test void executionParticipationRejectsReadSnapshotsAndDoesNotLeakTheRootToAnotherThreadOrTransaction() {
+        row("active");
+        for (var definition : List.of(new int[]{READ_COMMITTED, 1},
+                new int[]{TransactionDefinition.ISOLATION_REPEATABLE_READ, 0},
+                new int[]{TransactionDefinition.ISOLATION_REPEATABLE_READ, 1})) {
+            unit(definition[0], definition[1] == 1).execute(status -> {
+                courseRows.markCourseRootHeld(COURSE); // even a marker cannot authorize an incompatible unit
+                assertThrows(IllegalStateException.class, () -> progress.readExecutionState(COURSE, LEARNER));
+                assertThrows(IllegalStateException.class, () -> progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON)));
+                return null;
+            });
+        }
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            underHeldRoot(() -> {
+                try {
+                    worker.submit(() -> heldRootUnit().execute(status -> {
+                        assertThrows(IllegalStateException.class, () -> progress.readExecutionState(COURSE, LEARNER));
+                        assertThrows(IllegalStateException.class, () -> progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON)));
+                        return null;
+                    })).get(20, TimeUnit.SECONDS);
+                } catch (Exception failure) { throw new IllegalStateException(failure); }
+                return null;
+            });
+        }
+        heldRootUnit().execute(status -> {
+            assertThrows(IllegalStateException.class, () -> progress.readExecutionState(COURSE, LEARNER));
+            assertThrows(IllegalStateException.class, () -> progress.applyMasterySkips(COURSE, LEARNER, java.util.Set.of(LESSON)));
+            return null;
+        });
+        assertEquals(List.of(), progressFlags()); assertEquals("active", enrollmentStatus());
+    }
+
     // CO06 CT21.authoring (ADR006 §5) through real MVC, security, the ADR005 guard and PostgreSQL.
     @Test void instructorAuthorsOwnedContentAndLessonPublicationReconcilesLearnerCompletion() throws Exception {
         UUID rival = UUID.randomUUID();

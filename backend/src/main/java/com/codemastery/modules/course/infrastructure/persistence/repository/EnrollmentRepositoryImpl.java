@@ -17,7 +17,7 @@ public class EnrollmentRepositoryImpl implements EnrollmentRepository {
     private final JdbcTemplate jdbc;
     public EnrollmentRepositoryImpl(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
-    // "scope" selects the Courses; every figure is aggregated once per Course. R is the set of
+    // CT13.reads. "scope" selects the Courses; every figure is aggregated once per Course. R is the set of
     // currently published Lessons of the Course; a joined learner completes it when R is nonempty and every
     // R member has a completed=true progress row of that learner's Enrollment (mastery_skipped implies it).
     private static final String METRICS = "WITH scope AS (%s), "
@@ -97,7 +97,7 @@ public class EnrollmentRepositoryImpl implements EnrollmentRepository {
                 userId, status, status, status, page.getPageSize(), page.getOffset());
         return new PageImpl<>(rows, page, total == null ? 0 : total);
     }
-    // Canonical order: Chapter.position, then Lesson.position.
+    // CT22.progress / CT22.resume. Canonical order: Chapter.position, then Lesson.position.
     private static final String PUBLISHED_LESSONS = " FROM public.lessons l JOIN public.chapters ch ON ch.id=l.chapter_id "
             + "WHERE ch.course_id=c.id AND l.publication_status='published'";
 

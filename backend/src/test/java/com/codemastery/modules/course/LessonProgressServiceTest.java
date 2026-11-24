@@ -36,6 +36,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -44,6 +45,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -401,6 +404,116 @@ class LessonProgressServiceTest {
     @AfterEach void clearTransaction() {
         TransactionSynchronizationManager.setActualTransactionActive(false);
         TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+        TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(null);
+    }
+
+    private void readSnapshot() {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
+        TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(Isolation.REPEATABLE_READ.value());
+    }
+
+    @ParameterizedTest @EnumSource(value = EnrollmentStatus.class, names = {"ACTIVE", "COMPLETED"})
+    void learnerStateAdmitsBeforeReadingSelfStateAndReusesTheExecutionProjection(EnrollmentStatus status) throws Exception {
+        readSnapshot(); learner(); joined(status, a); adaptive();
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(
+                List.of(placed(a, 1, true, false), placed(b, 3, true, true), placed(c, 7, false, false)));
+        var state = service.readLearnerState(course);
+        assertEquals(course, state.courseId()); assertEquals(actor, state.learnerId()); assertEquals(row, state.enrollmentId());
+        assertEquals(status.getStatus(), state.membershipStatus());
+        assertTrue(state.adaptiveEnabled()); assertEquals(settings, state.adaptiveSettings());
+        assertEquals(List.of(new LessonProgressService.LessonState(a, chapter, 1, 1, true, false),
+                new LessonProgressService.LessonState(b, chapter, 1, 3, true, true),
+                new LessonProgressService.LessonState(c, chapter, 1, 7, false, false)), state.lessons());
+        InOrder order = inOrder(access, identities, repository, courses);
+        order.verify(access).requireLearnerCourseAccess(course);
+        order.verify(identities).requireCurrentIdentity();
+        order.verify(repository).find(actor, course);
+        order.verify(repository).publishedLessonPlacements(course, row);
+        order.verify(courses).findAdaptiveConfiguration(course);
+        verifyNoMoreInteractions(access, identities, repository, courses); // no root, locks or writes
+        assertTransaction("readLearnerState", true, Isolation.REPEATABLE_READ, UUID.class);
+        assertEquals(Propagation.MANDATORY, LessonProgressService.class.getMethod("readLearnerState", UUID.class)
+                .getAnnotation(Transactional.class).propagation());
+    }
+
+    @Test void learnerStateRejectsAnIncompatibleOrAbsentCallerTransactionBeforeAdmission() {
+        assertThrows(IllegalStateException.class, () -> service.readLearnerState(course));
+        readSnapshot(); TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+        assertThrows(IllegalStateException.class, () -> service.readLearnerState(course));
+        readSnapshot(); TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(Isolation.READ_COMMITTED.value());
+        assertThrows(IllegalStateException.class, () -> service.readLearnerState(course));
+        verifyNoInteractions(access, identities, repository, courses);
+    }
+
+    @Test void learnerStatePropagatesEveryAdmissionFailureWithoutReadingBusinessData() {
+        readSnapshot();
+        for (var failure : List.of(new BadCredentialsException("Authentication failed"), new AccessDeniedException("Denied"),
+                new ResourceNotFoundException("Unavailable"), new IllegalStateException("Provider failed"))) {
+            doThrow(failure).when(access).requireLearnerCourseAccess(course);
+            assertSame(failure, assertThrows(failure.getClass(), () -> service.readLearnerState(course)));
+        }
+        verifyNoInteractions(identities, repository, courses);
+    }
+
+    @Test void learnerStatePropagatesRepositoryFailureAndRejectsImpossibleAdmittedMembership() {
+        readSnapshot(); learner();
+        when(repository.find(actor, course)).thenReturn(Optional.empty(), Optional.of(enrollment(EnrollmentStatus.LEFT, null)));
+        assertThrows(IllegalStateException.class, () -> service.readLearnerState(course));
+        assertThrows(IllegalStateException.class, () -> service.readLearnerState(course));
+        var failure = new IllegalStateException("Database failed");
+        when(repository.find(actor, course)).thenThrow(failure);
+        assertSame(failure, assertThrows(IllegalStateException.class, () -> service.readLearnerState(course)));
+        verify(repository, never()).publishedLessonPlacements(any(), any()); verifyNoInteractions(courses);
+    }
+
+    @Test void learnerStateKeepsNullSettingsAndNeverReconcilesAStoredMembershipOnRead() {
+        readSnapshot(); learner(); joined(EnrollmentStatus.COMPLETED, a);
+        when(courses.findAdaptiveConfiguration(course)).thenReturn(Optional.of(new StoredAdaptiveConfiguration(course, false, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(List.of(placed(a, 1, false, false)));
+        var state = service.readLearnerState(course);
+        assertNull(state.adaptiveSettings()); assertFalse(state.adaptiveEnabled());
+        assertEquals("completed", state.membershipStatus()); assertFalse(state.lessons().getFirst().completed());
+        verify(repository, never()).updateStatus(any(), any());
+        verify(courses, never()).currentTransactionFacts();
+    }
+
+    @Test @SuppressWarnings("unchecked")
+    void learnerCourseStateDefensivelyCopiesNestedJsonAndLessonsAtEveryConstructionBoundary() {
+        var nested = new LinkedHashMap<String, Object>();
+        nested.put("threshold", new java.math.BigDecimal("0.80")); nested.put("nullable", null);
+        var array = new ArrayList<Object>(); array.add(nested); array.add(null);
+        var source = new LinkedHashMap<String, Object>(); source.put("array", array);
+        var lessons = new ArrayList<LessonProgressService.LessonState>();
+        lessons.add(new LessonProgressService.LessonState(a, chapter, 1, 1, false, false));
+        var state = new LessonProgressService.LearnerCourseState(course, actor, row, "active", false, source, lessons);
+        nested.put("threshold", 1); array.clear(); source.clear(); lessons.clear();
+        var returnedArray = (List<Object>) state.adaptiveSettings().get("array");
+        var returnedObject = (Map<String, Object>) returnedArray.getFirst();
+        assertEquals(new java.math.BigDecimal("0.80"), returnedObject.get("threshold"));
+        assertTrue(returnedObject.containsKey("nullable")); assertNull(returnedObject.get("nullable"));
+        assertNull(returnedArray.get(1)); assertEquals(1, state.lessons().size());
+        assertThrows(UnsupportedOperationException.class, () -> state.adaptiveSettings().clear());
+        assertThrows(UnsupportedOperationException.class, () -> returnedArray.add("changed"));
+        assertThrows(UnsupportedOperationException.class, () -> returnedObject.put("threshold", 2));
+        assertThrows(UnsupportedOperationException.class, () -> state.lessons().clear());
+    }
+
+    /** CT33 and ADR013 §19.4: only the approved Adaptive read compositions may consume the admitted state. */
+    @Test void learnerStateHasOnlyTheApprovedAdaptiveReadCallers() throws Exception {
+        Path root = Path.of("src", "main", "java", "com", "codemastery");
+        var allowed = Set.of(root.resolve("modules/course/application/service/LessonProgressService.java"),
+                root.resolve("modules/adaptive/application/mastery/MasteryQueryService.java"),
+                root.resolve("modules/adaptive/application/recommendation/RecommendationService.java"),
+                root.resolve("modules/adaptive/application/mastery/PlacementDiagnosticService.java"));
+        try (var files = Files.walk(root)) {
+            var callers = files.filter(file -> file.toString().endsWith(".java")).filter(file -> {
+                try { return Files.readString(file).contains("readLearnerState("); }
+                catch (java.io.IOException e) { throw new java.io.UncheckedIOException(e); }
+            }).toList();
+            assertFalse(callers.isEmpty());
+            assertTrue(allowed.containsAll(callers), () -> "Unapproved CT33 learner state callers: " + callers);
+        }
     }
     private void heldRoot(String isolation, boolean readOnly, UUID root) {
         TransactionSynchronizationManager.setActualTransactionActive(true);

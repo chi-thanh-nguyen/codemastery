@@ -5,6 +5,7 @@ import com.codemastery.modules.auth.application.service.UserAccountService;
 import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
 import com.codemastery.modules.auth.application.service.UserAccountService.IdentityRole;
 import com.codemastery.modules.course.domain.model.Enrollment;
+import com.codemastery.modules.course.domain.model.Course;
 import com.codemastery.modules.course.domain.model.EnrollmentStatus;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository.LessonFlags;
@@ -14,6 +15,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -25,7 +27,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
-
+/** Course-owned CT22 progress/resume and atomic participation, plus the admitted CT33 learner read. */
 @Service
 public class LessonProgressService {
     private final EnrollmentRepository enrollments;
@@ -105,6 +107,24 @@ public class LessonProgressService {
                 .map(row -> new LearnerResumePosition(row.courseId(), row.lessonId(), row.lastVisitedAt())).orElse(null));
     }
 
+    /** ADR011 §13: one admitted snapshot, owned by the CT33/AD11 caller; no execution root is needed. */
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public LearnerCourseState readLearnerState(UUID courseId) {
+        requireId(courseId);
+        // Joining an existing transaction does not apply an annotation's isolation/readOnly settings.
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isCurrentTransactionReadOnly()
+                || !Objects.equals(TransactionSynchronizationManager.getCurrentTransactionIsolationLevel(),
+                        Isolation.REPEATABLE_READ.value())) {
+            throw new IllegalStateException("Course learner reads require a read-only REPEATABLE READ transaction");
+        }
+        access.requireLearnerCourseAccess(courseId);
+        var actor = learner();
+        var enrollment = joined(enrollments.find(actor.userId(), courseId).orElse(null));
+        return executionState(courseId, actor.userId(), enrollment);
+    }
+
+    /** ADR011 §3: actorless execution read, only under this Course's held write root. */
     public LearnerCourseState readExecutionState(UUID courseId, UUID learnerId) {
         requireId(courseId);
         requireId(learnerId);
@@ -113,6 +133,7 @@ public class LessonProgressService {
     }
 
 
+    /** ADR011 §3: monotonic skips in the caller's transaction; failures must propagate to that caller. */
     public LearnerCourseState applyMasterySkips(UUID courseId, UUID learnerId, Set<UUID> lessonIds) {
         requireId(courseId);
         requireId(learnerId);
@@ -178,7 +199,7 @@ public class LessonProgressService {
         }
     }
 
-    /** .progress integer calculation over the published required set R, in canonical order. */
+    /** CT22.progress integer calculation over the published required set R, in canonical order. */
     static Calculation calculate(List<LessonFlags> lessons) {
         long completed = 0;
         for (var lesson : lessons) {
@@ -205,7 +226,7 @@ public class LessonProgressService {
         return lessons.stream().filter(lesson -> !lesson.completed()).map(LessonFlags::lessonId).findFirst().orElse(null);
     }
 
-    /** admission already proved ACTIVE/COMPLETED; anything else here is an invariant failure. */
+    /** CT03 admission already proved ACTIVE/COMPLETED; anything else here is an invariant failure. */
     private static Enrollment joined(Enrollment enrollment) {
         if (enrollment == null || enrollment.status() == EnrollmentStatus.LEFT) {
             throw new IllegalStateException("Admitted Learner has no joined Enrollment");
@@ -254,7 +275,10 @@ public class LessonProgressService {
     public record LearnerCourseState(UUID courseId, UUID learnerId, UUID enrollmentId,
             String membershipStatus, boolean adaptiveEnabled, Map<String, Object> adaptiveSettings,
             List<LessonState> lessons) {
-        public LearnerCourseState { lessons = List.copyOf(lessons); }
+        public LearnerCourseState {
+            adaptiveSettings = adaptiveSettings == null ? null : Course.immutableJsonObject(adaptiveSettings);
+            lessons = List.copyOf(lessons);
+        }
     }
     public record LessonState(UUID lessonId, UUID chapterId, int chapterPosition,
             int lessonPosition, boolean completed, boolean masterySkipped) {}
