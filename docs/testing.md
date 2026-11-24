@@ -6509,8 +6509,8 @@ and real endpoint tests. The pure decision engine/resolver and AD14 append servi
 base do not deliver that endpoint. `readOwnedLearnerState` serves different CT33 consumers and is
 excluded. These responsibilities remain with AS07 #158, AD16 #171 and AD11 #168, respectively.
 
-**Not covered and still gated:** Adaptive execution (AD13), Assessment event publication and
-Attempt lifecycle (AS12), the Course assessment guard entries (ADR007 §3.1) and full QA04
+**Not covered and still gated:** Adaptive execution (AD13 #169), Assessment event publication
+(AS12 #161), Attempt lifecycle (AS08 #159), the Course assessment guard entries (ADR007 §3.1) and full QA04
 `MasteryProgressTransactionIntegrationTest` are still missing on this base. Participant tests
 therefore acquire/mark the real Course root directly; they do not prove the missing guard callback
 or full quiz-result/mastery/progress/history transaction. LD-11 joint owner review, independent
