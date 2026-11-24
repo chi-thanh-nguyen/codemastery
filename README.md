@@ -1,223 +1,209 @@
-# CodeMastery – Mastery-Based Programming Learning Platform for Beginner University Students
+# CodeMastery
 
-CodeMastery is an academic online learning platform for **CO3103 – Programming
-Integration Project, Semester 261**, Software Engineering track. The approved
-product supports course-based, self-paced introductory university programming
-with Learner, Instructor, and Administrator roles.
+Mastery-based programming learning for beginner university students.
 
-The approved architecture combines a **Spring Boot Modular Monolith** backend,
-a **React + TypeScript** frontend, **PostgreSQL** for relational domain data, and
-**MinIO** through its S3-compatible API for files. Its advanced component is
-**rule-based Mastery-Based Adaptive Learning** inside the backend. The
-repository contains the platform foundation and a first end-to-end Learner slice
-(registration, sign-in, course catalogue and course membership). Most Instructor,
-Administrator, assessment and adaptive features are still to be implemented.
+CodeMastery is a course-based, self-paced web application for introductory
+programming, developed for CO3103 at HCMUT. Its intended difference is skill-level
+mastery: learners receive explainable guidance to continue, test out, or revisit
+prerequisites, while instructors follow their progress. That adaptive journey is
+still being built; the implemented capabilities are listed below.
 
-## Current Project Status
+[![Backend](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-backend.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-backend.yml)
+[![Frontend](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-frontend.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-frontend.yml)
+[![E2E](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-e2e.yml/badge.svg?branch=main&event=push)](https://github.com/chi-thanh-nguyen/codemastery/actions/workflows/ci-e2e.yml)
 
-Status values: **Implemented** (in place on `main`; code is covered by automated
-tests), **Partial** (some approved capabilities implemented), **Planned**
-(approved location or design only).
+[Setup](docs/setup.md#prerequisites) · [Contributing](CONTRIBUTING.md) ·
+[Documentation](#documentation-index) · [Security](SECURITY.md)
 
-| Area | Status | Current state |
+## What works today
+
+- Learners can register, sign in, restore a session, browse published courses,
+  join or leave a course, and view their enrolled courses. Password recovery has
+  backend and frontend support; delivery requires the documented SMTP configuration.
+- Backend APIs support Course, Chapter and Lesson authoring/publication, Learner
+  lesson reads, completion/progress and resume, Instructor skill graphs, question
+  banks, and quiz composition/publication. Most of these newer APIs have no
+  production frontend screen yet.
+- Adaptive foundations include deterministic mastery calculation, skill graph
+  validation, categorical mastery persistence and append-only recommendation
+  history. Quiz-driven mastery updates, next-lesson recommendations and the
+  learner Mastery Map are not integrated.
+
+Adaptive learning is rule-based inside the Java backend. It uses no ML model,
+external AI inference service or separate Python service. Python Fundamentals is
+sample course content, not the backend language.
+
+## Current project status
+
+Repository snapshot: 24 November 2026. “Implemented” describes code on `main`;
+[test records](docs/testing.md) identify what was tested and at which revision.
+Contract approval, implementation, passing tests, independent acceptance, release
+publication and deployment are separate states.
+
+| Area | Implemented | Remaining work or limitation |
 | --- | --- | --- |
-| Governance and decisions | Implemented | [AGENTS.md](AGENTS.md), [requirements](docs/requirements.md), [architecture](docs/architecture.md), [repository structure](docs/repository-structure.md), [ADR 001](docs/decisions/001-modular-monolith-module-boundaries.md) and the bounded Interim contracts in [ADR 002](docs/decisions/002-interim-delegated-contracts.md). |
-| Database | Implemented | The approved 23-table PostgreSQL schema is applied by Flyway migrations V001–V006; see [docs/data-model.md](docs/data-model.md). |
-| Shared backend | Implemented | Problem-detail error handling, validated pagination, correlation IDs and password validation in `common`. The object-storage adapter is still an empty scaffold. |
-| Authentication (`auth`) | Partial | Learner self-registration and sign-in (`POST /api/auth/register`, `POST /api/auth/login`), BCrypt `$2b$` cost 14, 15-minute HS256 JWTs and per-request account-status checks; password recovery. Hybrid sessions ([ADR 014](docs/decisions/014-hybrid-refresh-session-authentication.md)): the access token stays in memory, a rotating refresh token in an HttpOnly cookie restores and renews the session (`POST /api/auth/refresh`), and `POST /api/auth/logout` revokes it on the server. Account administration is planned. |
-| Courses (`course`) | Partial | Public catalogue with search, filtering and pagination; course detail with the published syllabus; Learner join/leave and My Courses (`/api/courses/{courseId}/membership`, `/api/me/courses`); Course and Lesson access checks. Lesson viewing, progress, authoring and file materials are planned. |
-| Adaptive learning (`adaptive`) | Partial | Local mastery calculation and state classification with deterministic tests. Skill graphs, quiz-driven mastery updates, recommendations and the Mastery Map are planned; see [docs/adaptive-learning.md](docs/adaptive-learning.md). |
-| Assessment, interaction, admin | Planned | Approved scaffolds only. |
-| REST API documentation | Partial | [docs/api/openapi.yaml](docs/api/openapi.yaml) specifies the eight implemented operations on six paths: registration and sign-in, catalogue and course detail, membership GET/PUT/DELETE, and My Courses. |
-| Frontend | Partial | React Router application with a public landing page, sign-in (with a session-ended notice), registration, profile, course catalogue and detail, a Learner home of active courses, and My courses (including leave and re-enroll), in the redesigned “Lit Path” interface, with Vitest regression tests. Lesson, assessment, Mastery Map, notification, Instructor and Administrator screens exist only in the sample-data design preview at `/preview` until their API contracts are approved. |
-| Sample data | Partial | Synthetic Users, Courses, Lessons and text materials (SD01/SD02) with database-target protection, and one sample slide deck; see [sample-data/README.md](sample-data/README.md). Skill-graph, question and learner-profile datasets are planned. |
-| Testing | Partial | Backend unit tests for Auth, Course, mastery calculation and shared REST; Testcontainers PostgreSQL integration tests for the catalogue, membership (including REST sign-in), shared REST and sample data; frontend Vitest suites; a local Playwright E2E suite (`e2e/`) for the implemented learner flows on a disposable Docker stack, not yet run in CI; see [docs/testing.md](docs/testing.md). |
-| CI | Implemented | GitHub Actions runs the Backend (`./mvnw verify`), Frontend (`npm ci`, `npm test`, `npm run build`), VM deployment-script and MinIO initializer qualification jobs; CodeQL code scanning also runs on pull requests. |
-| Local runtime and deployment | Partial | Docker Compose runs PostgreSQL, MinIO, the backend and the frontend locally ([setup](docs/setup.md#local-docker-compose-runtime)). An Interim VM deployment script and its decisions exist ([deployment](docs/deployment.md)); no public deployment has been performed or verified. |
+| Authentication | Learner registration, BCrypt passwords, locked-account rejection, memory-only access JWTs, rotating HttpOnly refresh cookies, server logout and password recovery | Account administration; operational recovery-delivery configuration. See [ADR014](docs/decisions/014-hybrid-refresh-session-authentication.md). |
+| Course | Catalogue, membership, content persistence, Course guard/settings storage, authoring, lesson reads, progress and resume APIs | File-material delivery and production lesson/authoring UI. |
+| Assessment | Question-bank and quiz authoring/publication APIs; internal quiz grading service | Learner attempt/submission flow, assignments and grading UI. |
+| Adaptive | Skill-graph APIs, mastery calculation and mastery/history write persistence | End-to-end quiz-to-mastery execution, routing, placement, insights and learner Mastery Map. |
+| Interaction and admin | Domain representations; service/API scaffolds | Q&A, notifications, reports and administration features. |
+| Frontend | Landing page, sign-in/registration/recovery, read-only Profile, catalogue/detail, Learner home and My courses; Light, Dark and System themes | Lesson, assessment, mastery, Instructor and Administrator screens remain sample-data presentations at `/preview`. |
+| Data and storage | Flyway V001–V009; synthetic Users, Courses, Lessons and text materials; local MinIO provisioning | Backend file adapter/delivery and final skill/question/learner-profile datasets. The [sample slides](sample-data/README.md#sample-materials) are repository-only. |
 
-Empty files reserve approved locations and responsibilities; they do not define
-functionality or implementation contracts.
+The [OpenAPI document](docs/api/openapi.yaml) contains both implemented and future
+operations. Its declarations are not an endpoint inventory: compare the relevant
+controllers, [security route rules](backend/src/main/java/com/codemastery/modules/auth/infrastructure/security/SecurityConfig.java)
+and test evidence before relying on an operation. Empty scaffolds do not supply
+missing contracts or functionality.
 
-## Approved Product Scope
+### Releases and deployment
 
-The approved roles and planned responsibilities are:
+The published `v0.1.0-preview.1` is a prerelease. At this snapshot,
+`v0.1.0-rc.2` is a draft, not a published production release. See
+[GitHub Releases](https://github.com/chi-thanh-nguyen/codemastery/releases).
 
-- **Learner:** enrol, study, take quizzes, submit assignments, track progress and
-  mastery, and participate in lesson Q&A.
-- **Instructor:** manage course content, skills, assessments, grading, and learner
-  insights.
-- **Administrator:** manage users/courses, handle content reports, and inspect
-  metrics and audit information.
+The [23 November VM observation](docs/deployment.md#historical-vm-observation-on-23-november-2026-read-only)
+records an older preview running on Azure; the subsequent
+[setup record](docs/deployment.md#phase-5-one-time-setup-executed--23-november-2026)
+records bootstrap and recovery-key preparation, with timers disabled. These dated
+records do not establish deployment or independent acceptance of current `main`.
+Release admission, measured recovery, production deployment and lecturer-accessible
+acceptance retain the gates in the operational documentation.
 
-The scope covers accounts/RBAC, courses and materials, enrolment/progress,
-assessment, in-app interaction/notifications, administration/reporting, and
-adaptive learning. Python is the language of the sample course content, not a
-separate backend language or service. User stories and acceptance criteria belong
-in the [approved architecture](docs/architecture.md); mandatory course
-obligations belong in the [requirements](docs/requirements.md).
+## Stack and architecture
 
-Adaptive Learning uses course-scoped skills and an acyclic prerequisite graph,
-the states `Unknown`, `Learning`, `Mastered`, and `Weak`, and explainable
-`continue`, `skip`/Test-out, or `remedial` recommendations. It preserves
-canonical course structure and must not hard-block advanced lessons solely
-because prerequisite mastery is missing. Detailed rules, deferred thresholds,
-and planned evaluation belong in [the adaptive design](docs/adaptive-learning.md).
-No evaluation results or populated learner profiles are claimed here.
+One Spring Boot modular monolith contains `auth`, `course`, `assessment`,
+`adaptive`, `interaction` and `admin`. Cross-module access follows approved public
+interfaces, ports and events; [ADR001](docs/decisions/001-modular-monolith-module-boundaries.md)
+defines ownership and transaction boundaries.
+Shared REST support provides problem details, validated pagination, correlation
+IDs and password validation.
 
-## Approved Architecture
-
-The backend is one deployable application with six logical modules:
-
-| Module | Approved responsibility |
+| Layer | Technology |
 | --- | --- |
-| `auth` | Accounts, roles, authentication, API protection, and account status. |
-| `course` | Courses, lessons, materials, enrolment, and learning progress. |
-| `assessment` | Quizzes, assignments, attempts, grading, and results. |
-| `adaptive` | Skills, mastery, adaptive decisions, and explainable recommendations. |
-| `interaction` | Lesson Q&A, in-app notifications, and content reports. |
-| `admin` | Administration, report handling, metrics, and audit logging. |
+| Backend | Java 25 LTS, Spring Boot 4.1.1, Spring Data JPA, Bean Validation, Spring Security/JWT, Actuator and structured logging |
+| Frontend | TypeScript, React, Vite, Material UI, React Router; React Flow for example/preview maps |
+| Data | PostgreSQL and Flyway; MinIO through its S3-compatible API for approved file storage |
+| Validation and delivery | JUnit Jupiter 6 (Boot-managed), Mockito, Testcontainers, Vitest, Playwright, Docker Compose and GitHub Actions |
 
-Layering, encapsulation, approved interactions, and atomic mastery/progress
-updates are defined in [ADR 001](docs/decisions/001-modular-monolith-module-boundaries.md).
-PostgreSQL owns relational data; MinIO is selected for slides, attachments, and
-submissions. Videos use external embed links. Concrete public interfaces, event
-payloads, and REST contracts require approval before dependent implementation.
-The approved initial physical schema is recorded in the data model; future
-schema evolution requires new Flyway migrations.
+Exact versions and commands live in [the backend build](backend/pom.xml),
+[Maven Wrapper configuration](backend/.mvn/wrapper/maven-wrapper.properties),
+[frontend manifest](frontend/package.json) and [E2E manifest](e2e/package.json).
+See the [architecture](docs/architecture.md) and [data model](docs/data-model.md)
+for the approved design. Video uses external embed links; hosting/transcoding is
+out of scope.
 
-## Technology Stack
+## Quick start
 
-The backend baseline follows [pom.xml](backend/pom.xml) and the
-[wrapper configuration](backend/.mvn/wrapper/maven-wrapper.properties).
-Configured libraries do not establish completed feature integrations.
+Follow [Development Setup](docs/setup.md#prerequisites) for prerequisites and
+configuration. The [local Compose guide](docs/setup.md#local-docker-compose-runtime)
+runs PostgreSQL, MinIO, its initializer, the backend and the frontend.
 
-| Area | Approved/current baseline |
+1. Copy `.env.example` to the ignored `.env` and replace the required placeholders
+   using the [environment contract](docs/setup.md#environment-file). Database
+   initialization/runtime credentials and MinIO root/application credentials have
+   distinct roles. Never put secrets in `VITE_*` variables.
+2. From the repository root, validate configuration, build and start:
+
+   ```bash
+   docker compose --env-file .env -f infrastructure/docker-compose.yml config --quiet
+   docker compose --env-file .env -f infrastructure/docker-compose.yml build
+   docker compose --env-file .env -f infrastructure/docker-compose.yml up -d
+   docker compose --env-file .env -f infrastructure/docker-compose.yml ps -a
+   ```
+
+3. Open [localhost:5173](http://localhost:5173). The fresh database has no accounts
+   or courses; follow the [sample-data guide](sample-data/README.md) for synthetic
+   demo data and its disposable-target safeguards.
+
+Use `docker compose --env-file .env -f infrastructure/docker-compose.yml down`
+to stop the stack while retaining volumes. `down -v` deletes local data.
+For host development, use the [contributor commands](CONTRIBUTING.md#testing-guidelines).
+
+## Testing and delivery
+
+[Backend](.github/workflows/ci-backend.yml),
+[Frontend](.github/workflows/ci-frontend.yml),
+[E2E](.github/workflows/ci-e2e.yml) and [VM](.github/workflows/ci-vm.yml)
+workflows validate pull requests and pushes to `main`. E2E runs the existing learner
+journey on a disposable Docker stack across five browser/device projects.
+CodeQL also scans the repository. Badges show workflow outcomes, not coverage,
+security certification or production health.
+
+[Release](.github/workflows/release.yml) builds and qualifies candidates and
+performs admission-gated promotion into draft releases. [Deploy](.github/workflows/deploy.yml)
+provides manually dispatched SSH operations with production-environment gates.
+Their path-filtered PR jobs test the tooling; merging a PR does not deploy it.
+Use [Testing](docs/testing.md) for commands, evidence and coverage limits, and
+[Deployment](docs/deployment.md#phase-4-release-pipeline--23-november-2026) for
+release verification, authority and operating procedures.
+
+## Documentation index
+
+| Start here | Reference |
 | --- | --- |
-| Backend | Java **25 LTS**, Spring Boot **4.1.1**; Spring Framework **7**, Spring Security **7**, Hibernate **7**, Jackson **3**; Spring Data JPA and Bean Validation. |
-| Build | Maven Wrapper **3.3.4**, configured Maven distribution **3.9.16**; no global Maven installation required. |
-| Persistence | PostgreSQL and Flyway; initial V001–V006 schema migrations are implemented. |
-| Security | Spring Security, JWT via JJWT **0.13.0**, and BCrypt; authentication is implemented for the current endpoints, and role-specific authorization for later features is pending. |
-| Object storage | MinIO/S3-compatible storage through AWS SDK **2.44.7**; the storage adapter and file delivery are pending. |
-| API documentation | REST/JSON, OpenAPI, springdoc **3.1.1**; the OpenAPI document covers the implemented endpoints. |
-| Backend testing | Approved JUnit Jupiter **6**, managed by Spring Boot **4.1.1** (currently **6.0.3**), + Mockito and Testcontainers PostgreSQL; Surefire/Failsafe and JaCoCo **0.8.15** (reporting only, no thresholds). |
-| Observability | Actuator and logging configuration, including ECS JSON console logging under `prod`; this profile is not complete production configuration. |
-| Frontend | React **19.3.0**, TypeScript **7.0.2**, Vite **8.3.3**, Material UI **9.4.0**, React Router **7.18.4**, React Flow **12.12.0** and Vitest **5.0.5** are pinned in [package.json](frontend/package.json) and its npm lockfile. React Flow is not yet used. |
-| Infrastructure/E2E | GitHub Actions uses Temurin 25 and Node 22 on `ubuntu-24.04`. Docker Compose (local) and an Interim VM deployment script exist. Playwright Test **1.63.0** is pinned in [e2e/package.json](e2e/package.json); no CI job runs it yet. |
+| Requirements and authority | [Course brief (PDF)](docs/references/originals/project-requirements.pdf), [requirements](docs/requirements.md), [AGENTS.md](AGENTS.md) |
+| System design | [Approved architecture (DOCX)](docs/references/originals/approved-architecture.docx), [architecture](docs/architecture.md), [repository structure](docs/repository-structure.md), [decision index](docs/decisions/README.md) |
+| Features and contracts | [OpenAPI](docs/api/openapi.yaml), [data model](docs/data-model.md), [adaptive learning](docs/adaptive-learning.md), [UI/UX design](DESIGN.md) |
+| Development and operations | [Setup](docs/setup.md), [environment template](.env.example), [testing](docs/testing.md), [deployment](docs/deployment.md), [sample data](sample-data/README.md) |
 
-Use the actual build/configuration files for dependency versions and executable
-commands. Current defaults do not establish final security, deployment, or
-business policy.
+README is an entry point. Source precedence and the Blocker Protocol are defined
+in AGENTS.md; immutable originals and effective scoped decisions retain their authority.
 
-## Repository Structure
+## Contributing, security and license
 
-Follow the fixed [approved repository structure](docs/repository-structure.md).
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before selecting work or opening a pull
+request. Report vulnerabilities through the private channel in
+[SECURITY.md](SECURITY.md), rather than public Issues.
 
-| Location | Responsibility |
-| --- | --- |
-| `backend/` | Modular Monolith, configuration, migrations, and backend tests. |
-| `frontend/` | React application with feature-oriented modules; implemented and scaffolded features are listed above. |
-| `e2e/` | Playwright Test suite: configuration, disposable-stack global setup, catalogue fixture and the learner-flow specification (`adaptive-flow.spec.ts` is still empty). |
-| `infrastructure/` | Local Compose runtime and the Interim VM deployment script. |
-| `.github/` | Collaboration templates, CODEOWNERS and the CI workflow. |
-| `sample-data/` | Synthetic seed SQL and sample learning material, with a [loading guide](sample-data/README.md). |
-| `docs/` | Approved design, decision records, setup, testing, deployment and API documentation. |
+Original CodeMastery code and documentation are available under the
+[MIT License](LICENSE), copyright 2026 CodeMastery contributors. On 24 November
+2026, the Project Leader confirmed the contributors' consent and authority to
+license that work, including the absence of conflicting university obligations.
+The grant excludes the original reference artifacts in `docs/references/originals/`,
+the [sample slide deck](sample-data/README.md#permitted-use-and-provenance), and
+third-party content. Those retain their existing rights and permissions.
 
-## Development and Setup
+Bundled fonts retain their notices: [Google Sans Flex](frontend/public/google-sans-flex-OFL.txt),
+[JetBrains Mono](frontend/public/jetbrains-mono-OFL.txt) and [Poppins](frontend/public/poppins-OFL.txt).
+Libraries and container components keep their own licenses, including the
+[modified MinIO Client's AGPL and Corresponding Source obligations](docs/deployment.md#minio-client-licence-and-corresponding-source).
+The MIT grant does not relicense these components or assets.
 
-Start with [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
-Use [docs/setup.md](docs/setup.md) for prerequisites, environment-file loading,
-variable scopes, and the limits of current setup support.
+## Academic context and credits
 
-Backend validation uses the Maven Wrapper:
-
-```bash
-cd backend
-./mvnw test     # unit tests, no Docker required
-./mvnw verify   # unit and integration tests; integration tests need Docker
-```
-
-`./mvnw verify -DskipITs` skips Failsafe execution while still compiling the
-integration tests. See [testing](docs/testing.md) for suite placement and
-isolation rules, and [setup](docs/setup.md) for prerequisites.
-
-For the frontend, use Node.js satisfying `^22.12.0 || ^24.0.0` and npm:
-
-```bash
-cd frontend
-npm ci
-npm test
-npm run build   # includes type checking
-```
-
-`npm run dev` starts the Vite development server and `npm run preview` serves an
-existing production build. `VITE_API_BASE_URL` is a public build-time setting;
-never place secrets in `VITE_*` variables.
-
-The [local Compose workflow](docs/setup.md#local-docker-compose-runtime) runs the
-full local stack. To populate a disposable local database with the synthetic
-demonstration accounts and courses, follow
-[sample-data/README.md](sample-data/README.md). CI results come from actual
-GitHub Actions runs, not from local execution.
-
-## Documentation Index
-
-[AGENTS.md](AGENTS.md) defines source precedence and the Blocker Protocol. Use
-these documents for their specific responsibilities:
-
-| Document | Purpose/status |
-| --- | --- |
-| [Course requirements PDF](docs/references/originals/project-requirements.pdf) / [requirements Markdown](docs/requirements.md) | Canonical mandatory requirements and readable derivative. |
-| [Approved architecture DOCX](docs/references/originals/approved-architecture.docx) / [architecture Markdown](docs/architecture.md) | Approved design and stack. |
-| [Repository structure](docs/repository-structure.md) | Approved file/module locations. |
-| [ADR 001](docs/decisions/001-modular-monolith-module-boundaries.md) | Approved module boundaries and interactions. |
-| [ADR 002](docs/decisions/002-interim-delegated-contracts.md) | Bounded Interim technical contracts and their approval records. |
-| [ADR 003](docs/decisions/003-postgresql-alpine-su-exec-image.md) | PostgreSQL image hardening (Alpine with su-exec). |
-| [ADR 004](docs/decisions/004-leader-approval-of-delegated-records.md) | Leader approval of earlier delegated records; the `LEADER_APPROVED` label. |
-| [Decision index](docs/decisions/README.md) | Where every decision record lives, and what each approval status label means. |
-| [Data model](docs/data-model.md) | Conceptual model and approved initial PostgreSQL physical baseline. |
-| [Adaptive Learning](docs/adaptive-learning.md) | Approved design, planned evaluation, and deferred decisions. |
-| [Setup](docs/setup.md) / [environment template](.env.example) | Current development configuration contract. |
-| [Testing](docs/testing.md) | Test strategy, suite placement and executed verification evidence. |
-| [Deployment](docs/deployment.md) | Interim deployment decisions, privileges and operating procedure. |
-| [OpenAPI](docs/api/openapi.yaml) | Specification of the implemented REST endpoints. |
-| [UI/UX design](DESIGN.md) | Visual system, screens, flows and frontend handoff; subordinate to the requirements, architecture, ADRs and API contracts. |
-| [Sample data](sample-data/README.md) | Synthetic dataset, safe loading procedure and material provenance. |
-| [Contributing](CONTRIBUTING.md) | Branch, commit, PR, testing, and documentation workflow. |
-
-Original files under `docs/references/originals/` are immutable references.
-Governance changes require explicit authorization. README is an entry point and
-does not override these sources.
-
-## Scope, Security, and Delivery Obligations
-
-The approved scope excludes code-execution sandboxes, ML/AI chatbots, certificates,
-payments, video hosting/transcoding, email/SMS/push, real-time chat, native mobile
-apps, cross-course adaptation, and plagiarism detection. Notifications are
-in-app only.
-
-JWT authentication, BCrypt password hashing and locked-account rejection are
-implemented for the current endpoints. Role-specific authorization for later
-features, protected-file authorization and privacy controls remain obligations
-for those features. Never commit real secrets or demo/lecturer credentials, and
-never expose secrets through `VITE_*`.
-
-The course requires automated business-logic tests, at least one main E2E flow,
-sample data, reproducible setup, and a deployed application accessible to the
-lecturer. Automated tests, the Interim sample data, the local setup and a local E2E
-flow for the implemented learner journey exist; the adaptive E2E flow, an E2E CI run
-and the lecturer-accessible deployment remain to be completed and evidenced. Reports,
-grading documentation, the presentation, live demo, and Q&A must be in English;
+CodeMastery is developed for CO3103 – Programming Integration Project, Semester
+261, Software Engineering track, at Ho Chi Minh City University of Technology
+(HCMUT). The approved roles are Learner, Instructor and Administrator. The course
+requires business-logic tests, at least one main E2E flow, sample data, reproducible
+setup, a lecturer-accessible deployment and disclosure of AI/third-party use.
+An isolated adaptive calculation or preview is not completion of the advanced
+component; its integrated journey and evaluation remain to be delivered.
+Reports, grading documentation, presentation, demo and Q&A must be in English;
 all user-facing interface text must also be in English.
 
-## AI and Third-Party Service Disclosure
+The approved scope excludes code-execution sandboxes, AI chatbots, certificates,
+payments, video hosting, email/SMS/push notifications, real-time chat, native mobile
+apps, cross-course adaptation and plagiarism detection. Notifications are in-app
+only; configured password-recovery email is a separate authentication capability.
+
+Contributors are credited in the [contribution history](https://github.com/chi-thanh-nguyen/codemastery/graphs/contributors).
+The frontend visual reference and its non-reuse boundaries are credited in
+[Setup](docs/setup.md#frontend-setup-and-validation); sample material provenance is
+recorded in the [sample-data guide](sample-data/README.md#content-provenance).
+
+## AI and third-party service disclosure
+
+<details>
+<summary>Development assistance and third-party tools</summary>
 
 The course requires disclosure of AI use, AI-assisted development, and
-third-party services with their actual purposes. **OpenAI Codex has assisted with
+third-party services with their actual purposes. OpenAI Codex has assisted with
 repository documentation, environment-contract synchronization, the frontend
 build/bootstrap foundation, the backend integration-test/CI foundations,
 the standalone container-build/Nginx foundation, the initial PostgreSQL
 schema/Flyway foundation, and the local Compose/provisioning foundation during
-development.** AI-assisted development was also used for the Interim
+development. AI-assisted development was also used for the Interim
 deployment-privilege work and for the sample datasets, their verification and
 documentation, and the revised sample slides; Anthropic Claude Code assisted with
 the DP01 HTTPS ingress integration, its tests and its deployment documentation,
@@ -250,10 +236,21 @@ Backend third-party libraries and their configured purposes are recorded in
 `pom.xml`; frontend dependencies are recorded in `frontend/package.json` and its
 lockfile. Local PostgreSQL/MinIO infrastructure uses the images identified in
 [setup](docs/setup.md#services-and-local-urls), including the approved third-party
-Golithus builds for local MinIO server/client use; the release initializer image
-in `infrastructure/minio/` is built on the same pinned client image. No production
-hosting provider,
-public deployment, or external video host is identified as already in use.
+Golithus builds for local MinIO server/client use. The release initializer in
+`infrastructure/minio/` builds a modified MinIO Client with its Corresponding Source
+archive and third-party notices. Azure VM observations and setup are recorded in
+the deployment documentation linked above; no external video host is identified
+as already in use.
 Contributors must record further actual tools,
 services, uses, and content sources in the final project documentation without
 inventing or concealing details.
+
+The release pipeline and SSH deployment/recovery tooling were developed with
+Anthropic Claude Code assistance, as recorded in
+[ADR015](docs/decisions/015-release-pipeline.md) and
+[ADR017](docs/decisions/017-ssh-continuous-deployment.md). Their tooling uses GitHub
+Actions, Trivy, Sigstore artifact attestations, OpenSSH, OpenSSL, optional Azure CLI
+integration and acme.sh. The 23 November VM records above supersede older statements
+about deployment absence; they are dated evidence, not a current runtime check.
+
+</details>
