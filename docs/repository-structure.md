@@ -2330,7 +2330,8 @@ Bounded Upstream Gaps, and Perform Comprehensive Code Review". ADR008 §5 record
 and integration test inventories as a gap, and ADR012 §19.3 approves only the shared
 `InteractionAdminIntegrationTest.java` (audit atomicity among B7-O01–O03 and O06–O11) and
 `AuthorizationIntegrationTest.java` (authorization matrices). Exactly these five test files are
-added inside existing directories:
+added; four go into existing directories, and `AuditLogServiceTest.java` adds `application/service/`
+under the existing Admin test package (`modules/admin/`):
 
 | File | Responsibility |
 | --- | --- |

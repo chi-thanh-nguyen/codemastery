@@ -61,7 +61,8 @@ public class AuditLogService {
     /**
      * Records one actual change by the authenticated Administrator (CT31.actions, CT31.consistency).
      * Callers must not call this for no-ops, reads, denied or failed attempts, and call it after their
-     * own change and locks. {@code MANDATORY} makes a call outside the caller's transaction fail instead
+     * own change and locks; their pending persistence-context changes are flushed before the audit INSERT
+     * executes. {@code MANDATORY} makes a call outside the caller's transaction fail instead
      * of committing an audit row on its own; the insert is executed before this method returns, so an
      * insert failure (including a read-only caller transaction) surfaces here and rolls back the
      * caller's whole unit.

@@ -35,12 +35,15 @@ public class AuditLogRepositoryImpl implements AuditLogRepository {
     }
 
     /**
-     * Inserts one row and executes the INSERT now (CT31.consistency): it runs after the caller's earlier
-     * writes in issue order, and a failure surfaces to the caller instead of at commit. Never updates.
+     * Inserts one row and executes the INSERT now (CT31.consistency). The caller's pending persistence-
+     * context changes are flushed first, because one Hibernate flush executes queued inserts before
+     * queued updates and deletes; the audit INSERT therefore always follows the caller's own writes, and
+     * a failure of either surfaces to the caller instead of at commit. Never updates.
      */
     @Override
     public AuditLog append(AuditLog auditLog) {
         Objects.requireNonNull(auditLog, "auditLog");
+        entityManager.flush();
         entityManager.persist(mapper.toEntity(auditLog));
         entityManager.flush();
         return auditLog;

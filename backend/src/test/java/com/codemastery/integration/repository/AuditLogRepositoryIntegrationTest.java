@@ -15,6 +15,9 @@ import jakarta.persistence.PersistenceContext;
 import com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.web.context.WebApplicationContext;
@@ -99,7 +102,8 @@ class AuditLogRepositoryIntegrationTest extends AbstractIntegrationTest {
     @Autowired
     private PlatformTransactionManager transactionManager;
 
-    @Autowired
+    /** A spy that calls the real adapter; one test observes the transaction it runs in. */
+    @MockitoSpyBean
     private AuditLogRepository audits;
 
     @Autowired
@@ -349,6 +353,22 @@ class AuditLogRepositoryIntegrationTest extends AbstractIntegrationTest {
                     () -> assertEquals(1, theirs.totalElements()),
                     () -> assertEquals("Second Admin", theirs.content().get(0).actorDisplayName()));
         });
+    }
+
+    /** CT31.read: the page and its count are read in one read-only REPEATABLE READ transaction. */
+    @Test
+    void searchRunsInOneReadOnlyRepeatableReadTransaction() {
+        signIn(UUID.randomUUID(), Role.ADMIN);
+        List<String> observed = new ArrayList<>();
+        doAnswer(invocation -> {
+            observed.add(jdbc.queryForObject("SELECT current_setting('transaction_isolation') || '/' "
+                    + "|| current_setting('transaction_read_only')", String.class));
+            return invocation.callRealMethod();
+        }).when(audits).search(any(), any());
+
+        auditService.search(null, "report_dismissed", null, null, null, null, 0, 1);
+
+        assertEquals(List.of("repeatable read/on"), observed);
     }
 
     // ---------------------------------------------------------------- the read over HTTP

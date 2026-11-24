@@ -4418,13 +4418,17 @@ executed commands and counts.
 | `modules/auth/AuthServiceTest` (`UserSummaries`) | Unit | Stored display name and current role literal, unknown IDs omitted, no email/status/credential component, at most 100 IDs, storage failures propagated, and the caller allowlist of ADR012 §3 checked over the production sources |
 | `integration/repository/AuditLogRepositoryIntegrationTest` | PostgreSQL Testcontainer | Insert and read-back, newest-first then id-descending order that ignores caller sorting, AND filters with inclusive `occurredFrom` and exclusive `occurredTo`, true totals beyond the last page, no overwrite of an existing id, the adapter's insert and read under a role holding exactly the r10 row (SELECT, INSERT) and UPDATE/DELETE refused with 42501, the row `record` writes, and the read over HTTP (filters including upper-case UUID text and offsets, both time bounds, paging, actor names) |
 | `integration/InteractionAdminIntegrationTest` (IN10 part) | PostgreSQL Testcontainer, independent committed reads | B7-O07 recording side: the audit row commits only with its caller's change and is invisible to other connections before that commit; an injected audit-insert failure (actor foreign key) surfaces from `record` and rolls the change back; a later failure removes the audit row; no recording outside a transaction or in a read-only one; one row per call |
-| `integration/AuthorizationIntegrationTest` (`AuditLogReadEndpoint`) | PostgreSQL Testcontainer, production security chain | B7-O12 for CT31.read: 401 before query validation, Learner/Instructor 403 but malformed query values 400 first, a demoted Administrator's token refused by the current role, a locked Administrator 401, exactly the approved page and row fields with no email or status, 400 matrix, no-store on every outcome, other methods denied |
+| `integration/AuthorizationIntegrationTest` (`AuditLogReadEndpoint`) | PostgreSQL Testcontainer, production security chain | B7-O12 for CT31.read: 401 before query validation, Learner/Instructor 403 but malformed query values 400 first, a demoted Administrator's token refused by the current role, a locked Administrator 401, exactly the approved page and row fields with no email or status, 400 matrix, no-store on 200, 400, 401 and 403, other methods denied |
 
 Not covered here: the audited actions themselves. B7-O07's per-action catalogue rows, its no-op cases
 and the audit side of B7-O08–O10 need the CT12 user and course services and CT32 moderation (IN11, IN20,
 IN21), which call `AuditLogService.record` and add their cases to `InteractionAdminIntegrationTest`.
 QA06 executes ADR012 §15. A missing actor account cannot occur in PostgreSQL (V006's foreign key), so
-the null `actorDisplayName` fallback is covered by the unit test only. The VM privilege tests
+the null `actorDisplayName` fallback is covered by the unit test only. No test forces a 500, whose
+no-store header comes from the same response advice as the 400. Two syntactically valid RFC 3339 forms
+are answered 400 because `java.time` cannot represent them: offsets beyond ±18:00 and the leap second
+`:60`. The read's REPEATABLE READ, read-only transaction is asserted in the repository suite against
+PostgreSQL's own transaction settings. The VM privilege tests
 (`test-deploy-privilege-matrix-contract.sh`, `test-postgres-privilege-matrix-containment.sh`,
 `test-runtime-real-backend-privileges.sh`) carry the r10 cases; CI runs them.
 
