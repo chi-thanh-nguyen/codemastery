@@ -510,6 +510,20 @@ class AdaptiveDecisionEngineTest {
                 () -> new RecommendationCreatedEvent(COURSE, LEARNER, null, LATEST, List.copyOf(event.recommendations())));
     }
 
+    @Test
+    void aDecisionCannotCarryTwoGuidanceDraftsOrSkipsThatDisagreeWithItsTestOuts() {
+        var cont = new Recommendation(RecommendationType.CONTINUE, L2, CONTINUE_REASON);
+        var remedial = new Recommendation(RecommendationType.REMEDIAL, L1, REMEDIAL_REASON);
+
+        assertThrows(IllegalArgumentException.class, () -> new AdaptiveDecision(List.of(), List.of(cont, remedial)));
+        assertThrows(IllegalArgumentException.class, () -> new AdaptiveDecision(List.of(L1), List.of(cont, skip(L1))));
+        assertThrows(IllegalArgumentException.class, () -> new AdaptiveDecision(List.of(L2), List.of(skip(L1), cont)));
+        assertThrows(IllegalArgumentException.class, () -> new AdaptiveDecision(List.of(L1, L2), List.of(skip(L2), skip(L1))));
+        assertThrows(IllegalArgumentException.class, () -> new AdaptiveDecision(List.of(L1), List.of(cont)));
+        assertEquals(2, new AdaptiveDecision(List.of(L1), List.of(skip(L1), remedial)).recommendations().size());
+        assertTrue(new AdaptiveDecision(List.of(), List.of()).recommendations().isEmpty());
+    }
+
     private AdaptiveDecisionService service(Clock clock) {
         return service(repository, clock);
     }
