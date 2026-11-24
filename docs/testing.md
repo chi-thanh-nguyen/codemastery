@@ -6374,3 +6374,16 @@ workflow remains excluded. No SHA exception is implemented.
 The existing snapshot limitations in ADR015 A2.8 remain. PR #275 CI was not queried,
 waited for or rerun. No candidate, admission, promotion or deployment was performed.
 Independent re-review of this follow-up remains outstanding.
+
+## TLS renewal timing and VM reconciliation verification — 24 November 2026
+
+- `test_real_pair_replacement_and_partial_rename_rollback` now renews without the
+  operator's `--force`. It asserts that the acme.sh call ends with
+  `--renew -d codemastery.app --ecc --server letsencrypt --force`. It fails on `main`
+  `a40cae6`, whose argv omits `--force`, and passes with the change.
+- `python3 -m unittest infrastructure/vm/tests/test_phase5_units.py`: macOS, 47 tests
+  OK (11 skipped, OpenSSL 3 absent); `python:3.12-bookworm`, 47 tests OK.
+- The VM reconciliation, the acme.sh remediation, the deployment reverification and the
+  public smoke tests are recorded in
+  [deployment.md](deployment.md#v010-rc2-deployment-and-vm-reconciliation--24-november-2026).
+  They are operational evidence for that date, not independent QA acceptance.

@@ -5009,3 +5009,111 @@ with the documented former-hostname acme.sh finding; both timers `disabled`.
   and timer enablement; the GitHub `production` environment, `VM_SSH_PRIVATE_KEY` and its
   two reference variables; runner SSH reachability (NSG); an Azure storage account; an
   offline copy of the recipient key and passphrase.
+
+## v0.1.0-rc.2 deployment and VM reconciliation — 24 November 2026
+
+**Authority.** The Project Leader @chi-thanh-nguyen authorized, on 24 November 2026:
+- admission and promotion of the existing candidate under the earlier delegation;
+- deployment through the D9 operator path;
+- discarding the VM's sample PostgreSQL/MinIO data without backup, publication or a
+  restore test, because all of it was disposable test data.
+
+After PR #281, the Leader also authorized reconciling the VM with `main`. This record
+supersedes the "Still open" list above only for the items below.
+
+### Release
+
+| Step | Evidence |
+| --- | --- |
+| Candidate | Run [45293686961](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45293686961). Source `84d10a3202ef96b0230eff6c22db060a08bcc02d`, tooling `282cbbfea0f4ddb3229f2dc82824688f78d31198`. Manifest SHA-256 `2fdf6417…2e26`. Q00–Q05 PASS. 37 findings: 0 CRITICAL, 0 HIGH, 31 MEDIUM, 5 LOW, 1 UNKNOWN (counted again from the raw Trivy reports). |
+| Admission and promotion | Run [45296627074](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45296627074), dispatched and approved in `release-admission` by `chi-thanh-nguyen`. Record `CM-REL-ADMISSION-45296627074-1`. The promotion rescan found the same 37 findings. Run 45296539370 was cancelled before approval because its note miscounted the findings; it admitted nothing. |
+| Draft | `v0.1.0-rc.2`, release ID 456159763. Archive SHA-256 `4bebefcd2c42bc4abc0d11abf0646f94dcb7b85c7744ac3dd09d9bc5d81f4086`. `verify-release.sh` at the tooling commit: VERIFIED. The draft is not published. |
+
+### Deployment (operator path, fresh state)
+
+`plan` reported the schema as `UPGRADE` (V006 → V009) over existing state. That route
+needs the P9 recovery evidence, which was waived rather than fabricated, so the fresh
+route was used. The following were removed by exact ID and name, after checking each
+name and Compose project label:
+- the five preview containers (`061102e3`);
+- the volumes `codemastery_postgres-data` (48 MB) and `codemastery_minio-data` (328 KB);
+- the data-free network `codemastery_default`.
+
+TLS material, `/etc/codemastery/runtime/.env`, keys, sshd/sudoers, images and the
+`/opt` and `/home` trees were kept. Results:
+- `prepare`: `READY_FRESH`.
+- `deploy`: `DEPLOYED` (`deploy.sh` exit 0, no P9 flags).
+- `verify`: `VERIFIED`.
+- `tls-renew --staging`: `STAGING_CHALLENGE_PASS`. The frontend was stopped for about
+  20 s and Let's Encrypt staging reached TCP 443.
+
+Two Phase 5 tooling defects blocked the first attempt. They were fixed and later
+merged as PR #281 (`a40cae6a3c51f8283c80ae09c80c170710f92a18`):
+- `release.json` never maps `SHA256SUMS`, so every real release was refused before
+  staging.
+- `__pycache__` written into the installed tooling tree broke `install-tooling` on its
+  next run.
+
+### Reconciliation after PR #281
+
+- `bootstrap.sh --check` showed every item present. The prerequisites then matched the
+  installed state: the deploy key fingerprint `SHA256:aoS/YF4P…PDQ`, the recipient
+  certificate (same SHA-256), the systemd units, the gate, `authorize.py` and the
+  sudoers rule. `ops.conf` was kept (`wait_timeout` 300).
+- `bootstrap.sh --apply` from a clean `a40cae6` checkout installed tooling `a40cae6`
+  (`current`) and the `-B` wrapper. The producer key `e0aa1ec5…e016` was kept, and the
+  timers are still disabled. No container was restarted and no image was redeployed.
+- Two rounds of `status`, `inventory`, `tls-check` and a repeated
+  `install-tooling a40cae6` each passed the git-tree check. The installed tree has no
+  `__pycache__`.
+- The earlier tooling folders `84d10a3`, `9bace22` and `b568d18` remain inert under
+  `/opt/codemastery/tooling`.
+- Former-hostname acme.sh configuration:
+  `/root/.acme.sh/codemastery.eastasia.cloudapp.azure.com_ecc` was moved, under the
+  operations lock, to
+  `/opt/codemastery/backups/acme-retired-codemastery.eastasia.cloudapp.azure.com_ecc-20261124T031721Z`
+  (root 0700, reversible).
+  - `acme.sh --list` now shows only `codemastery.app` (ALPN, production CA, installs
+    into `/etc/codemastery/renewal-staging/`).
+  - The live pair and that configuration are byte-identical to before.
+  - `tls-check` reports `OK` with no findings. `tls-renew` reports `NOT_DUE` (69 days
+    left).
+- Renewal timing: acme.sh's own next renewal for `codemastery.app` is
+  2027-01-02T09:38:45Z. The first due 03:30 UTC run is 2027-01-02, with 30 whole days
+  left. Without `--force`, acme.sh would skip that run (exit 2) after the frontend had
+  already stopped. The change that adds this record makes `tls-renew` always pass
+  `--force` once this tool has decided renewal is due. The VM's tooling `a40cae6` does
+  not have it yet; install it after merge with `bootstrap.sh --apply`, or the next
+  operator `install-tooling`. The renewal timer stays **disabled** pending the Leader's
+  enablement decision.
+
+### Verification on 24 November 2026 (after reconciliation)
+
+| Check | Result |
+| --- | --- |
+| Deployment record | `v0.1.0-rc.2`, source `84d10a32…`, archive `4bebefcd…4086`, no hold |
+| Images | postgres `d69863c9…`, minio `5c10958e…`, minio-init `25a711e1…` (exited 0), backend `91256c2e…`, frontend `d6cadc5f…`; each equals `expected-images.containerd.txt` |
+| PostgreSQL/Flyway | V001–V009 successful; roles `cm_bootstrap` (superuser), `cm_migrator`, `cm_runtime` |
+| MinIO | `/minio/health/ready` 200 on the private network; bucket `codemastery` provisioned |
+| Backend | Private readiness `UP` |
+| HTTPS/TLS | `GET /` 200 with a trusted chain; leaf `CN=codemastery.app`, Let's Encrypt YE2, valid to 2027-02-01, SHA-256 `05:BB:3C:6E:…:D6:69`; served equals installed; TLS 1.1 refused |
+| Packet filter (from the operator workstation) | 22 and 443 reachable; 80, 5432, 8080, 9000 and 9001 filtered |
+| Smoke (public origin) | SPA routes and assets 200. `GET /api/courses` 200 with an empty page; an unknown course 404; unauthenticated `GET /api/me/courses` 401; unknown-user login 401; invalid registration 400. Register (201), login (200, Learner), `GET /api/me/courses` (200). Refresh with a foreign `Origin` 403; with the trusted `Origin` 200 and a new token. Logout 204; refresh afterwards 401. Two synthetic Learner accounts `smoke-…@example.com` remain, with discarded passwords. |
+
+The database holds no seed data. Feature behavior beyond this smoke test remains QA01,
+QA07 and DP03 evidence.
+
+### Still open (Leader-only)
+
+- **GitHub `production` environment.** It does not exist, so the Deploy workflow fails
+  closed. To set it up:
+  - create the environment with required reviewer `chi-thanh-nguyen`, administrator
+    bypass off and deployments from `main` only;
+  - add the secret `VM_SSH_PRIVATE_KEY` (the content of `~/.ssh/codemastery-deploy`);
+  - add the variables `PUBLIC_EXPOSURE_AUTHORIZATION` and `PACKET_FILTER_VERIFICATION`.
+- **Runner SSH reachability.** The NSG admits only the operator's address. Either the
+  optional NSG gate (federated credential and variables) or the D9 path is needed.
+- Timer enablement: renewal after the decision above, capture after recovery
+  qualification. An Azure storage account for off-VM copies. An offline copy of the
+  recipient key and passphrase. Seed data, if a demonstration needs it. Publication of
+  the draft.

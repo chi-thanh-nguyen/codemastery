@@ -1053,13 +1053,15 @@ def op_tls_renew(args):
         if not fe or not recovery.Docker().state(fe).get("Running"):
             refuse("the frontend is not running; renewal never starts an absent ingress")
         work_home = None
-        argv = [acme, "--home", cfg["acme_home"], "--renew", "-d", host, "--ecc", "--server", "letsencrypt"]
+        # This tool alone decides when renewal is due (<= 30 days, or --force). acme.sh keeps its
+        # own next-renewal time, which can fall hours after the first due 03:30 UTC run; without
+        # --force it would skip (exit 2) after the frontend was already stopped.
+        argv = [acme, "--home", cfg["acme_home"], "--renew", "-d", host, "--ecc", "--server", "letsencrypt",
+                "--force"]
         if args.staging:
             work_home = tempfile.mkdtemp(prefix="cm-acme-staging-")
             argv = [acme, "--home", work_home, "--config-home", work_home, "--issue", "--alpn", "-d", host,
                     "--keylength", "ec-256", "--server", "letsencrypt_test", "--force"]
-        elif args.force:
-            argv.append("--force")
         staged = (os.path.join(work_home, host + "_ecc", "fullchain.cer"), os.path.join(work_home, host + "_ecc",
                                                                                          host + ".key")) \
             if work_home else ("/etc/codemastery/renewal-staging/fullchain.pem",
