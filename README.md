@@ -237,6 +237,11 @@ Anthropic Claude Code also audited and completed the AD06 Adaptive mastery and
 recommendation-history write persistence: the write mechanism, its unit and PostgreSQL
 integration tests, the CT17-P6 r8 runtime privileges and ADR016
 ([PR #263](https://github.com/chi-thanh-nguyen/codemastery/pull/263), 23 November 2026).
+Anthropic Claude Code also audited and completed the IN10 administrative audit recording
+and read on a team member's pull request: the error-precedence, recording-flush and
+date-time parsing corrections, the CT01.user-summaries and atomicity tests, the CT17-P6 r10
+runtime privileges and the IN10 test-placement record
+([PR #276](https://github.com/chi-thanh-nguyen/codemastery/pull/276), 24 November 2026).
 The team reviews this work through the normal pull-request process. This
 disclosure describes development assistance; CodeMastery's approved adaptive
 engine is rule-based and uses no AI/ML service.
