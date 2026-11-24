@@ -65,8 +65,10 @@ The published `v0.1.0-preview.1` is a prerelease. At this snapshot,
 The [23 November VM observation](docs/deployment.md#historical-vm-observation-on-23-november-2026-read-only)
 records an older preview running on Azure; the subsequent
 [setup record](docs/deployment.md#phase-5-one-time-setup-executed--23-november-2026)
-records bootstrap and recovery-key preparation, with timers disabled. These dated
-records do not establish deployment or independent acceptance of current `main`.
+records bootstrap and recovery-key preparation, with timers disabled. The
+[24 November record](docs/deployment.md#v010-rc2-deployment-and-vm-reconciliation--24-november-2026)
+records the operator deployment of the draft `v0.1.0-rc.2` (fresh state) and its
+verification. These dated records do not establish independent acceptance of current `main`.
 Release admission, measured recovery, production deployment and lecturer-accessible
 acceptance retain the gates in the operational documentation.
 

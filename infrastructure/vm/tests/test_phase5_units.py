@@ -316,7 +316,12 @@ class TLSRenewalRegression(unittest.TestCase):
                         with self.assertRaises(recovery.RecoveryError):
                             ops.op_tls_renew(SimpleNamespace(staging=False, force=True))
                     else:
-                        self.assertEqual(ops.op_tls_renew(SimpleNamespace(staging=False, force=True))["result"], "RENEWED")
+                        # A due renewal (no --force from the operator) must not defer to acme.sh's
+                        # own next-renewal time, which would skip after the frontend stopped.
+                        self.assertEqual(ops.op_tls_renew(SimpleNamespace(staging=False, force=False))["result"], "RENEWED")
+                        argv = acme.call_args[0][0]
+                        self.assertEqual(argv[argv.index("--renew"):], ["--renew", "-d", "codemastery.app", "--ecc",
+                                                                       "--server", "letsencrypt", "--force"])
                 for name, suffix in (("fullchain.pem", "chain"), ("privkey.pem", "key")):
                     with open(os.path.join(d, name)) as f:
                         self.assertEqual(f.read(), ("old-" if fail_chain_rename else "new-") + suffix)
