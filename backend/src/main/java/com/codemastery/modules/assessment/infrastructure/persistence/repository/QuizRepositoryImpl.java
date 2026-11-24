@@ -163,4 +163,21 @@ public class QuizRepositoryImpl implements QuizRepository {
                 entity.getOptions() == null ? null : entity.getOptions().clone(),
                 entity.getCorrectOptions() == null ? null : entity.getCorrectOptions().clone());
     }
+
+    @Override
+    public List<PracticeQuizDifficultyRow> findPublishedPracticeQuizDifficultyRows(
+            UUID courseId, Collection<UUID> skillIds) {
+        Objects.requireNonNull(courseId, "courseId");
+        Objects.requireNonNull(skillIds, "skillIds");
+        if (skillIds.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("skillIds must not contain null");
+        }
+        Set<UUID> uniqueSkills = Set.copyOf(skillIds);
+        if (uniqueSkills.isEmpty()) {
+            return List.of();
+        }
+        return jpaRepository.findPublishedPracticeQuizDifficultyRows(courseId, uniqueSkills).stream()
+                .map(row -> new PracticeQuizDifficultyRow((UUID) row[0], (String) row[1], (String) row[2]))
+                .toList();
+    }
 }
