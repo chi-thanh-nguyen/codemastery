@@ -124,7 +124,7 @@ const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]:not([a
 const dialogs = () => [...document.querySelectorAll<HTMLElement>('[role="dialog"]')];
 const confirmDialog = (title: string) => dialogs().find((item) => item.textContent?.includes(title))!;
 function field(label: string, scope: ParentNode = document) {
-    const labelNode = [...scope.querySelectorAll('label')].find((item) => item.textContent?.replace('*', '').trim() === label);
+    const labelNode = [...scope.querySelectorAll('label')].find((item) => item.textContent?.replaceAll('*', '').trim() === label);
     const input = labelNode ? document.getElementById(labelNode.getAttribute('for') ?? '') as HTMLInputElement | HTMLTextAreaElement | null : scope.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`);
     if (!input) throw new Error(`No field "${label}"`);
     return input;
@@ -136,7 +136,7 @@ async function type(label: string, value: string, scope: ParentNode = document) 
 }
 async function choose(label: string, option: string, scope: ParentNode = document) {
     // MUI renders a select's label as a div with the InputLabel class.
-    const labelNode = [...scope.querySelectorAll('.MuiInputLabel-root')].find((item) => item.textContent?.replace('*', '').trim() === label)!;
+    const labelNode = [...scope.querySelectorAll('.MuiInputLabel-root')].find((item) => item.textContent?.replaceAll('*', '').trim() === label)!;
     const combo = scope.querySelector<HTMLElement>(`[role="combobox"][aria-labelledby~="${labelNode.id}"]`)!;
     await act(async () => { combo.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 })); });
     const item = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((node) => node.textContent?.startsWith(option))!;
