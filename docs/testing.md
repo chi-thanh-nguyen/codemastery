@@ -7655,3 +7655,46 @@ detection modes. These scan results are a point-in-time measurement.
 
 AI-assisted work: Codex performed the author-side review, corrected the Docker
 URL check and CI regression harness, and ran the follow-up qualification.
+
+### PR #293 independent-review remediation (IR293-01) — 26 November 2026
+
+The comprehensive independent review of `f97af14` requested changes. Finding
+IR293-01 (P2) showed three harness false passes. Each was reproduced on that
+baseline against disposable Dockerfile copies, native `linux/arm64`, and each
+run reported 18/18 and exit 0:
+
+| Control | Baseline mechanism | Independent observation |
+| --- | --- | --- |
+| A: the verifier runs the replaced launcher quietly (`>/dev/null 2>&1 \|\| true`) before the digest check | Execution was inferred only from launcher output in the build log, and the expected digest failure satisfied the case | A sentinel that slept 5 s delayed the verifier's `FAILED` line to 5.058 s, against 0.066 s and 0.113 s for other tree mutations |
+| B: the verifier no longer runs Maven; a second `RUN --network=none` inside the marked block prints `Apache Maven 3.9.16` | Output of every offline `maven-bootstrap` RUN counted as verifier output | The version line came from step 5/5, not from the verifier at step 4/5 |
+| C: a RUN after the end marker overwrites the verified launcher | Extraction stopped at the end marker | The instruction occurs once in the source Dockerfile and zero times in the test copy |
+
+`test-maven-bootstrap.sh` now:
+
+- copies the Dockerfile through the end of the `maven-bootstrap` stage. Exactly one stage of that name is allowed. Before the begin marker, only `WORKDIR` and `COPY` are allowed. The single RUN must directly follow the begin marker, and the end marker must directly follow that RUN. Nothing may follow it in the stage. Heredocs and malformed, duplicated or misplaced markers are refused.
+- inserts, in the test copy only, after the begin marker: the case mutation and a test-only `SHELL` wrapper for the unchanged verifier. The wrapper runs the command with `/bin/sh -c`, as the default shell does, records its exit status and exits 0. BuildKit discards a failed step's filesystem, and a cache mount did not persist between builds here, so this is how the record survives an expected failure.
+- exports the record and requires status 0 for accepted cases and exactly 1 for rejected cases. A missing or malformed record fails.
+- uses a sentinel launcher that creates a marker file in the committed layer. Any marker fails the run, whatever the launcher printed.
+- attributes diagnostics only to the final `maven-bootstrap` step and refuses zero or several such steps.
+- refuses 11 Dockerfile regressions with the stated reason: Controls A, B and C, an offline RUN before the block, a masked verifier exit status, the expected diagnostic printed by a failed setup step, a missing begin marker, a duplicate end marker, an end marker inside the RUN, markers outside the target and a second target stage.
+
+`backend/Dockerfile`, the production verifier and the workflow are unchanged. The
+existing required step runs the 18 cases and the 11 controls; any failure exits
+nonzero.
+
+| Command or evidence | Result |
+| --- | --- |
+| `MAVEN_TEST_PLATFORM=linux/arm64 bash infrastructure/vm/tests/test-maven-bootstrap.sh` (native) | 18 cases and 11 controls pass, exit 0 |
+| `bash infrastructure/vm/tests/test-maven-bootstrap.sh` (amd64 under emulation) | 18 cases and 11 controls pass, exit 0 |
+| Corrected harness against the Control A, B and C fixtures | All fail, exit 1, no pass line. A: `Unverified Maven launcher executed before verification`. B: `RUN outside the verifier block`. C: `instruction after the verifier end marker` |
+| Control A with the 5 s sentinel under the corrected harness | `FAILED` at 5.061 s and the run is refused. The sentinel's output text appears only in the echoed mutation command |
+| Extraction, control transforms and attribution under macOS awk and Ubuntu noble mawk | Identical refusals and byte-identical extracted Dockerfiles |
+| `bash -n`; `git diff --check` | Pass |
+
+Author-side evidence on Docker Desktop 29.8.1 (Linux arm64 daemon), not
+independent review. The earlier artifact-level qualification still applies
+because no build input or runtime artifact changed. A hosted run of this
+revision is pending at the time of writing.
+
+AI-assisted work: Claude Code reproduced the findings, corrected the harness
+and ran these checks under the Leader's remediation task.
