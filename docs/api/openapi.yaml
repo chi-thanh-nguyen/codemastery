@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the fourteen CO06 CT21.authoring Course/Chapter/Lesson and Learner Lesson operations (#172, materials excluded), the eight AD07 CT05 skill-graph operations (#165), the five AS05 CT23.questions operations (#156) and the seven AS06 CT23.composition/publication operations (#157), and the CT31.read audit-log operation (IN10 #184), and the AD11 CT07-PRACTICE-RECOMMENDATION practice-recommendation read (#168); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
+    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the fourteen CO06 CT21.authoring Course/Chapter/Lesson and Learner Lesson operations (#172, materials excluded), the eight AD07 CT05 skill-graph operations (#165), the five AS05 CT23.questions operations (#156) and the seven AS06 CT23.composition/publication operations (#157), the five AS09 CT10.rest owner Assignment authoring/read operations (#160, learner assignment/submission and grading operations excluded), and the CT31.read audit-log operation (IN10 #184), and the AD11 CT07-PRACTICE-RECOMMENDATION practice-recommendation read (#168); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
   },
   "x-implementation-status": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_101",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -5407,7 +5407,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor (Lesson ownership when lessonId is set); creates a hidden Assignment. Deadline is an RFC 3339 instant with at most microsecond precision. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor (Lesson ownership when lessonId is set); creates a hidden Assignment. Deadline is an RFC 3339 instant with at most microsecond precision whose UTC instant lies in years 0000-9999 (the response renders it in UTC); anything else is 400. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 415/path 400 precede Stage 3 CT03 ownership 403/404, which precedes strict JSON body 400, and the insert runs in a READ COMMITTED transaction without the Course-root guard (ADR010 §10: assignments do not affect adaptive invariants). Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -5426,7 +5426,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under the AS09 (#160) owner slice.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -5459,7 +5459,6 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -5804,7 +5803,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; hidden and published, ordered by title COLLATE C then UUID, with submission and graded counts. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; hidden and published, ordered by title COLLATE C then UUID, with submission and graded counts. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 path/query 400 precedes Stage 3 CT03 ownership 403/404, and the snapshot runs in a read-only REPEATABLE READ transaction. Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -5842,7 +5841,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under the AS09 (#160) owner slice.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -5872,7 +5871,6 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -5882,7 +5880,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; hidden or published Assignment. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; hidden or published Assignment. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 path 400 precedes Stage 3 CT03 ownership 403/404 and same-Course Assignment lookup in a read-only REPEATABLE READ snapshot. Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -5910,7 +5908,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under the AS09 (#160) owner slice.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -5940,7 +5938,6 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       },
       "put": {
@@ -5948,7 +5945,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; full replacement of title, instructions, deadlineAt and lessonId. Locks the Assignment row; affects only later admissions. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; full replacement of title, instructions, deadlineAt and lessonId. deadlineAt follows the create rule (at most microsecond precision; UTC instant in years 0000-9999, else 400). Locks the Assignment row; affects only later admissions. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 415/path 400 precede Stage 3 CT03 ownership 403/404 and the same-Course Assignment row lock (FOR UPDATE) in a READ COMMITTED transaction without the Course-root guard (ADR010 §10) before strict JSON body 400 and targeted column updates within ADR012 §19.2. Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -5976,7 +5973,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under the AS09 (#160) owner slice.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -6009,7 +6006,6 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -6029,7 +6025,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; explicit hidden or published. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; explicit hidden or published. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 415/path 400 precede Stage 3 CT03 ownership 403/404 and the same-Course Assignment row lock (FOR UPDATE) in a READ COMMITTED transaction without the Course-root guard (ADR010 §10) before strict JSON body 400 and targeted publicationStatus update within ADR012 §19.2. Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -6057,7 +6053,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under the AS09 (#160) owner slice.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -6090,7 +6086,6 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,

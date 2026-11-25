@@ -419,6 +419,27 @@ artifact upload is introduced: the workflow reuses `actions/checkout@v7` and
 `actions/setup-node@v7`. The immutable canonical tree remains unchanged; this is an
 explicit addition, not a reinterpretation of its original inventory.
 
+## Bounded FE15 Instructor authoring test inventory addition — 25 November 2026
+
+Under the Project Leader and repository Owner @chi-thanh-nguyen's explicit authorization
+in “CodeMastery — Consolidate FE15 PRs & Complete All Required Upstream Integration”
+(25 November 2026, Asia/Ho_Chi_Minh), four frontend Vitest files added on consolidated
+[PR #273](https://github.com/chi-thanh-nguyen/codemastery/pull/273) within existing
+`frontend/src/features/instructor/` subtrees are recorded in the approved tree:
+
+| File | Responsibility |
+| --- | --- |
+| `frontend/src/features/instructor/course-management/api/assessmentAuthoringApi.test.ts` | Strict decoder, URL encoding, query clamping and write-payload tests for `CT23` question/quiz and `CT10` owner assignment API clients |
+| `frontend/src/features/instructor/course-management/hooks/assessmentHooks.test.tsx` | Lifecycle, session-generation reset, single-flight guard and cancellation tests for Instructor assessment hooks |
+| `frontend/src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx` | Component and workflow tests for `AssessmentsPage` (`Questions`, `Quizzes`, `Assignments`), `QuestionEditorSheet`, `QuizEditor`, `AssignmentEditor`, `CourseEditorShell` and `CourseSkillsSection` |
+| `frontend/src/features/instructor/skill-graph-editor/api/skillGraphApi.test.ts` | Strict decoder and mutation client tests for `CT05` `getOwnedSkillGraph` and skill/prerequisite/mapping operations |
+
+The existing `/frontend/src/features/instructor/` CODEOWNERS rule (@heizseung and
+@chi-thanh-nguyen) covers all four files and is unchanged. No new directory, production
+file path, backend test file or dependency is added; the immutable canonical
+`final-repository-tree.docx` remains unchanged. See
+[the FE15 verification record](testing.md#fe15-consolidation-and-instructor-upstream-integration-verification--25-november-2026).
+
 ```text
 codemastery/
 
@@ -1614,6 +1635,8 @@ codemastery/
 
 │       │   │   │   │   ├── assessmentAuthoringApi.ts
 
+│       │   │   │   │   ├── assessmentAuthoringApi.test.ts
+
 │       │   │   │   │   └── instructorCourseApi.ts
 
 │       │   │   │   ├── components/
@@ -1630,6 +1653,8 @@ codemastery/
 
 │       │   │   │   ├── hooks/
 
+│       │   │   │   │   ├── assessmentHooks.test.tsx
+
 │       │   │   │   │   ├── useAssessmentEditor.ts
 
 │       │   │   │   │   ├── useCourseEditor.ts
@@ -1637,6 +1662,8 @@ codemastery/
 │       │   │   │   │   └── useQuestionBank.ts
 
 │       │   │   │   ├── pages/
+
+│       │   │   │   │   ├── assessmentAuthoring.test.tsx
 
 │       │   │   │   │   ├── AssignmentEditorPage.tsx
 
@@ -1660,7 +1687,9 @@ codemastery/
 
 │       │   │   │   ├── api/
 
-│       │   │   │   │   └── skillGraphApi.ts
+│       │   │   │   │   ├── skillGraphApi.ts
+
+│       │   │   │   │   └── skillGraphApi.test.ts
 
 │       │   │   │   ├── components/
 

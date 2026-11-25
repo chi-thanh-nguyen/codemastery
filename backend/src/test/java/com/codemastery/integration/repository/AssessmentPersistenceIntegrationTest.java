@@ -3,10 +3,13 @@ package com.codemastery.integration.repository;
 import com.codemastery.integration.AbstractIntegrationTest;
 import com.codemastery.modules.assessment.application.service.QuizService;
 import com.codemastery.modules.assessment.application.service.QuizService.PracticeQuizProfile;
+import com.codemastery.modules.assessment.domain.model.Assignment;
 import com.codemastery.modules.assessment.domain.model.Attempt;
 import com.codemastery.modules.assessment.domain.model.DifficultyLevel;
 import com.codemastery.modules.assessment.domain.model.Question;
 import com.codemastery.modules.assessment.domain.model.Quiz;
+import com.codemastery.modules.assessment.domain.repository.AssignmentRepository;
+import com.codemastery.modules.assessment.domain.repository.AssignmentRepository.SubmissionCounts;
 import com.codemastery.modules.assessment.domain.repository.AttemptRepository;
 import com.codemastery.modules.assessment.domain.repository.QuestionRepository;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository;
@@ -109,6 +112,9 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private AttemptRepository attemptRepository;
+
+    @Autowired
+    private AssignmentRepository assignmentRepository;
 
     @Autowired
     private QuizService quizService;
@@ -712,6 +718,188 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                     List.of(skillA, disallowedSkill),
                     List.of(courseId),
                     instructor);
+        }
+    }
+
+    /** D2: compare SQL instants independently, not just symmetric application conversions. */
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "0000-01-01T00:00:00Z", "0000-02-29T12:34:56.123456Z", "0001-01-01T00:00:00Z",
+            "1500-02-28T23:59:59.999999Z", "1500-03-01T00:00:00Z", "1500-03-10T00:00:00Z",
+            "1500-03-11T00:00:00.000001Z", "1582-10-04T23:59:59.999999Z",
+            "1582-10-05T00:00:00Z", "1582-10-14T23:59:59.999999Z", "1582-10-15T00:00:00.000001Z",
+            "1600-02-29T12:00:00Z", "1700-03-01T00:00:00Z", "2026-12-01T10:00:00.123456Z",
+            "9999-12-31T23:59:59.999999Z"
+    })
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void assignmentDeadlineBoundariesRoundTripThroughPostgresqlAtMicrosecondPrecision(String input) {
+        UUID instructor = user("instructor");
+        UUID courseId = UUID.randomUUID();
+        UUID id = UUID.randomUUID();
+        Instant deadline = Instant.parse(input);
+        jdbc.update("INSERT INTO courses (id, instructor_id, title, description, publication_status, adaptive_enabled) "
+                + "VALUES (?, ?, 'D2 course', 'D2 fixture', 'hidden', false)", courseId, instructor);
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        try {
+            tx.executeWithoutResult(status -> assignmentRepository.insert(
+                    new Assignment(id, courseId, null, "Inserted", "I", deadline, "hidden")));
+            assertAssignmentSqlEpoch(id, deadline);
+            tx.executeWithoutResult(status -> assertEquals(deadline,
+                    assignmentRepository.findInCourse(id, courseId).orElseThrow().deadline_at()));
+
+            // A targeted JPQL UPDATE must use the field's JDBC type too, including the historical leap-day probe.
+            tx.executeWithoutResult(status -> assignmentRepository.updateDefinition(
+                    id, courseId, null, "Replaced", "I2", deadline));
+            assertAssignmentSqlEpoch(id, deadline);
+            tx.executeWithoutResult(status -> {
+                Assignment read = assignmentRepository.findInCourse(id, courseId).orElseThrow();
+                assertEquals("Replaced", read.title());
+                assertEquals(deadline, read.deadline_at());
+            });
+
+            // Store via a PostgreSQL text cast, independent of Hibernate and java.sql.Timestamp.
+            // PostgreSQL has no year zero: ISO 0000 is year 0001 BC.
+            String literal = input.replace('T', ' ').replace("Z", "+00");
+            if (literal.startsWith("0000-")) literal = "0001-" + literal.substring(5) + " BC";
+            jdbc.update("UPDATE assignments SET deadline_at = CAST(? AS timestamptz) WHERE id = ?", literal, id);
+            assertAssignmentSqlEpoch(id, deadline);
+            for (String zone : List.of("UTC", "America/New_York", "Asia/Ho_Chi_Minh")) {
+                tx.executeWithoutResult(status -> {
+                    jdbc.execute("SET LOCAL TIME ZONE '" + zone + "'");
+                    assertEquals(deadline, assignmentRepository.findInCourse(id, courseId).orElseThrow().deadline_at(), zone);
+                    assertEquals(deadline, assignmentRepository.findPageInCourse(courseId, 0, 20).getFirst().deadline_at(), zone);
+                    assertEquals(deadline, assignmentRepository.findInCourseForUpdate(id, courseId).orElseThrow().deadline_at(), zone);
+                });
+            }
+        } finally {
+            jdbc.update("DELETE FROM assignments WHERE course_id = ?", courseId);
+            jdbc.update("DELETE FROM courses WHERE id = ?", courseId);
+            jdbc.update("DELETE FROM users WHERE id = ?", instructor);
+        }
+    }
+
+    private void assertAssignmentSqlEpoch(UUID id, Instant expected) {
+        BigDecimal epoch = BigDecimal.valueOf(expected.getEpochSecond()).add(BigDecimal.valueOf(expected.getNano(), 9));
+        BigDecimal stored = jdbc.queryForObject("SELECT extract(epoch FROM deadline_at) FROM assignments WHERE id = ?",
+                BigDecimal.class, id);
+        assertEquals(0, epoch.compareTo(stored), () -> expected + ": expected SQL epoch " + epoch + ", actual " + stored);
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void assignmentDeadlineSqlOrderingAndComparisonsUseUtcInstants() {
+        UUID instructor = user("instructor"), course = UUID.randomUUID();
+        List<Instant> deadlines = List.of(Instant.parse("0000-01-01T00:00:00Z"),
+                Instant.parse("1500-03-09T23:59:59.999999Z"), Instant.parse("1500-03-10T00:00:00Z"),
+                Instant.parse("1582-10-14T23:59:59.999999Z"), Instant.parse("1582-10-15T00:00:00Z"),
+                Instant.parse("2026-12-01T00:00:00Z"), Instant.parse("9999-12-31T23:59:59.999999Z"));
+        List<UUID> ids = deadlines.stream().map(value -> UUID.randomUUID()).toList();
+        jdbc.update("INSERT INTO courses (id,instructor_id,title,description,publication_status,adaptive_enabled) "
+                + "VALUES (?,?,'D2 ordering','D2 fixture','hidden',false)", course, instructor);
+        try {
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                for (int index = deadlines.size() - 1; index >= 0; index--) {
+                    assignmentRepository.insert(new Assignment(ids.get(index), course, null, "D2", "I", deadlines.get(index), "hidden"));
+                }
+            });
+            assertEquals(ids, jdbc.queryForList("SELECT id FROM assignments WHERE course_id = ? ORDER BY deadline_at", UUID.class, course));
+            assertEquals(ids.subList(0, 2), jdbc.queryForList("SELECT id FROM assignments WHERE course_id = ? "
+                    + "AND deadline_at < '1500-03-10T00:00:00Z'::timestamptz ORDER BY deadline_at", UUID.class, course));
+        } finally {
+            jdbc.update("DELETE FROM assignments WHERE course_id = ?", course);
+            jdbc.update("DELETE FROM courses WHERE id = ?", course);
+            jdbc.update("DELETE FROM users WHERE id = ?", instructor);
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void assignmentAdapterOrdersByCollateCCountsSubmissionsLocksForUpdateAndRespectsColumnPrivileges() throws Exception {
+        UUID instructor = user("instructor");
+        UUID learnerA = user("learner");
+        UUID learnerB = user("learner");
+        UUID courseId = UUID.randomUUID();
+        UUID chapterId = UUID.randomUUID();
+        UUID lessonId = UUID.randomUUID();
+        UUID low = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        UUID high = UUID.fromString("ffffffff-ffff-ffff-ffff-fffffffffffe");
+        UUID third = UUID.randomUUID();
+        String restrictedRole = "as09_runtime_" + UUID.randomUUID().toString().replace("-", "");
+        jdbc.update("INSERT INTO courses (id, instructor_id, title, description, publication_status, adaptive_enabled) "
+                + "VALUES (?, ?, 'AS09 course', 'AS09 fixture', 'published', false)", courseId, instructor);
+        jdbc.update("INSERT INTO chapters (id, course_id, title, position) VALUES (?, ?, 'Ch 1', 1)", chapterId, courseId);
+        jdbc.update("INSERT INTO lessons (id, chapter_id, title, content_markdown, position, publication_status) "
+                + "VALUES (?, ?, 'Lesson 1', 'Body', 1, 'published')", lessonId, chapterId);
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        ExecutorService other = Executors.newSingleThreadExecutor();
+        try {
+            jdbc.execute("CREATE ROLE " + restrictedRole + " NOLOGIN");
+            jdbc.execute("GRANT USAGE ON SCHEMA public TO " + restrictedRole);
+            // ADR012 §19.2 ceiling: SELECT, INSERT, UPDATE (lesson_id, title, instructions, deadline_at,
+            // publication_status) on assignments (never course_id or DELETE), plus FK/SELECT references.
+            // CT17-P6 r12 rows: no REFERENCES (PostgreSQL checks foreign keys with the owner's rights)
+            // and only the submission columns the owner counts read.
+            jdbc.execute("GRANT SELECT ON public.courses, public.lessons TO " + restrictedRole);
+            jdbc.execute("GRANT SELECT, INSERT, UPDATE (lesson_id, title, instructions, deadline_at, publication_status) "
+                    + "ON public.assignments TO " + restrictedRole);
+            jdbc.execute("GRANT SELECT (id, assignment_id, graded_at) ON public.submissions TO " + restrictedRole);
+
+            tx.executeWithoutResult(status -> {
+                jdbc.execute("SET LOCAL ROLE " + restrictedRole);
+                assignmentRepository.insert(new Assignment(high, courseId, null, "Same", "Inst H", START.plusSeconds(60), "hidden"));
+                assignmentRepository.insert(new Assignment(low, courseId, lessonId, "Same", "Inst L", START.plusSeconds(120), "hidden"));
+                assignmentRepository.insert(new Assignment(third, courseId, null, "apple", "Inst A", START.plusSeconds(180), "hidden"));
+                assignmentRepository.updateDefinition(low, courseId, null, "Same", "Updated Inst L", START.plusSeconds(240));
+                assignmentRepository.updatePublicationStatus(low, courseId, "published");
+            });
+
+            java.time.OffsetDateTime submittedAt = START.atOffset(java.time.ZoneOffset.UTC);
+            jdbc.update("INSERT INTO submissions (id, assignment_id, user_id, object_key, original_filename, submitted_at) "
+                    + "VALUES (?, ?, ?, 'submissions/00000000-0000-4000-8000-000000000001', 'one.pdf', ?)",
+                    UUID.randomUUID(), low, learnerA, submittedAt);
+            jdbc.update("INSERT INTO submissions (id, assignment_id, user_id, object_key, original_filename, submitted_at, "
+                            + "grade_percentage, feedback, graded_at) "
+                            + "VALUES (?, ?, ?, 'submissions/00000000-0000-4000-8000-000000000002', 'two.zip', ?, 95.50, 'Good', ?)",
+                    UUID.randomUUID(), low, learnerB, submittedAt, submittedAt.plusSeconds(10));
+
+            tx.executeWithoutResult(status -> {
+                jdbc.execute("SET LOCAL ROLE " + restrictedRole);
+                assertEquals(3, assignmentRepository.countInCourse(courseId));
+                List<Assignment> page = assignmentRepository.findPageInCourse(courseId, 0, 10);
+                assertEquals(List.of(low, high, third), page.stream().map(Assignment::id).toList());
+                assertEquals("Updated Inst L", page.get(0).instructions());
+                assertEquals("published", page.get(0).publication_status());
+                List<String> countSql = new java.util.ArrayList<>();
+                STATEMENTS.set(countSql);
+                try {
+                    assertEquals(
+                            new SubmissionCounts(2, 1),
+                            assignmentRepository.countSubmissions(List.of(low, high)).get(low));
+                } finally {
+                    STATEMENTS.remove();
+                }
+                assertEquals(1, countSql.size(), countSql::toString);
+                assertTrue(countSql.get(0).contains("from submissions"), countSql::toString);
+                assertFalse(countSql.get(0).matches("(?s).*\\b(object_key|original_filename|user_id|feedback|grade_percentage|submitted_at)\\b.*"),
+                        countSql::toString);
+
+                assertTrue(assignmentRepository.findInCourseForUpdate(high, courseId).isPresent());
+                assertEquals("55P03", referenceFailure(other, tx,
+                        "INSERT INTO submissions (id, assignment_id, user_id, object_key, original_filename, submitted_at) "
+                                + "VALUES (?, '" + high + "', '" + learnerA
+                                + "', 'submissions/00000000-0000-4000-8000-000000000003', 'blocked.pdf', now())"));
+            });
+        } finally {
+            other.shutdownNow();
+            jdbc.update("DELETE FROM submissions WHERE assignment_id IN (?, ?, ?)", low, high, third);
+            jdbc.update("DELETE FROM assignments WHERE course_id = ?", courseId);
+            jdbc.update("DELETE FROM lessons WHERE id = ?", lessonId);
+            jdbc.update("DELETE FROM chapters WHERE id = ?", chapterId);
+            jdbc.update("DELETE FROM courses WHERE id = ?", courseId);
+            jdbc.update("DELETE FROM users WHERE id IN (?, ?, ?)", instructor, learnerA, learnerB);
+            jdbc.execute("REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM " + restrictedRole);
+            jdbc.execute("REVOKE USAGE ON SCHEMA public FROM " + restrictedRole);
+            jdbc.execute("DROP ROLE IF EXISTS " + restrictedRole);
         }
     }
 

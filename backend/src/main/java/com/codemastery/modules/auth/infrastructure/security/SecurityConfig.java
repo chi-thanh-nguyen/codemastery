@@ -146,6 +146,14 @@ public class SecurityConfig {
                         // which CT03 inside CT33 readLearnerState decides before any lookup.
                         .requestMatchers(HttpMethod.GET,
                                 "/api/courses/{courseId}/lessons/{lessonId}/practice-recommendation").authenticated()
+                        // CT10.rest (ADR010 §§12, 14): owning Instructor assignment authoring and owner reads.
+                        // The chain decides only authentication here so stage 2 (415 media type and 400 path/query)
+                        // precedes stage 3 (CT03 role/ownership/scope 403/404); unimplemented B5 paths stay denied.
+                        .requestMatchers(HttpMethod.POST, "/api/courses/{courseId}/assignments").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/owned-assignments",
+                                "/api/courses/{courseId}/owned-assignments/{assignmentId}").authenticated()
+                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/owned-assignments/{assignmentId}",
+                                "/api/courses/{courseId}/owned-assignments/{assignmentId}/publication").authenticated()
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),

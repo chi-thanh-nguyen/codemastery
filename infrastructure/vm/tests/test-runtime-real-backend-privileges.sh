@@ -343,6 +343,82 @@ DELETE FROM public.enrollments WHERE course_id='20000000-0000-0000-0000-00000000
 UPDATE public.courses SET publication_status='hidden' WHERE id='20000000-0000-0000-0000-0000000000c3';
 SQL
 
+echo "== CO06 Instructor authoring (r12: courses INSERT, UPDATE(title, description, prerequisite_description, publication_status); chapters/lessons SELECT, INSERT, UPDATE(structure))"
+owned=/api/instructor/courses
+call POST "$owned" "$token_i" '{"title":"Authored","description":"CO06 course","prerequisiteDescription":null}'
+check "create a Course (INSERT, hidden by default)" "$STATUS/$(field publicationStatus)" "201/hidden"
+authored="$(field id)"
+call PUT "$owned/$authored" "$token_i" '{"title":"Authored 2","description":"Replaced","prerequisiteDescription":"Loops"}'
+check "replace Course metadata (UPDATE three columns)" "$STATUS/$(field title)/$(field prerequisiteDescription)" "200/Authored 2/Loops"
+call POST "$owned/$authored/chapters" "$token_i" '{"title":"First"}'; check "append a Chapter (INSERT ... RETURNING)" "$STATUS/$(field position)" "201/1"
+chapter_a="$(field id)"
+call POST "$owned/$authored/chapters" "$token_i" '{"title":"Second"}'; check "append a second Chapter" "$STATUS/$(field position)" "201/2"
+chapter_b="$(field id)"
+call PUT "$owned/$authored/chapters/$chapter_a" "$token_i" '{"title":"First renamed"}'; check "rename a Chapter (UPDATE title)" "$STATUS/$(field title)" "200/First renamed"
+call PUT "$owned/$authored/chapters/order" "$token_i" "{\"orderedIds\":[\"$chapter_b\",\"$chapter_a\"]}"
+check "reorder Chapters (deferred uniqueness, UPDATE position)" "$STATUS/$(field orderedIds.0)" "200/$chapter_b"
+call POST "$owned/$authored/chapters/$chapter_a/lessons" "$token_i" '{"title":"L1","contentMarkdown":"Body"}'; check "append a Lesson" "$STATUS/$(field publicationStatus)" "201/hidden"
+lesson_a="$(field id)"
+call POST "$owned/$authored/chapters/$chapter_a/lessons" "$token_i" '{"title":"L2","contentMarkdown":null}'; lesson_b="$(field id)"
+call PUT "$owned/$authored/lessons/$lesson_a" "$token_i" '{"title":"L1 edited","contentMarkdown":"Body 2"}'
+check "replace a Lesson (UPDATE title, content_markdown)" "$STATUS/$(field title)" "200/L1 edited"
+call PUT "$owned/$authored/chapters/$chapter_a/lessons/order" "$token_i" "{\"orderedIds\":[\"$lesson_b\",\"$lesson_a\"]}"
+check "reorder Lessons" "$STATUS/$(field orderedIds.1)" "200/$lesson_a"
+call PUT "$owned/$authored/lessons/$lesson_a/publication" "$token_i" '{"publicationStatus":"published"}'
+check "publish a Lesson (UPDATE publication_status)" "$STATUS/$(field publicationStatus)" "200/published"
+call PUT "$owned/$authored/publication" "$token_i" '{"publicationStatus":"published"}'
+check "publish the Course (Course root lock, UPDATE publication_status)" "$STATUS/$(field publicationStatus)" "200/published"
+call GET "$owned/$authored" "$token_i"
+check "owner read shows the committed structure" "$STATUS/$(field chapters.0.title)/$(field chapters.1.lessons.0.title)" "200/Second/L2"
+call GET "$owned" "$token_i"; check "owner list includes the authored Course" "$STATUS/$(field totalElements)" "200/2"
+call GET "$owned/$authored/lessons/$lesson_a" "$token_i"; check "owner Lesson read (learning_materials SELECT)" "$STATUS/$(field title)" "200/L1 edited"
+call GET "/api/courses/$course/lessons/40000000-0000-0000-0000-0000000000e1" "$token_a"
+check "Learner Lesson read with its material (learning_materials SELECT)" "$STATUS/$(field materials.0.title)" "200/Slides"
+check "the Learner Lesson body never carries the object key" "$(python3 -c 'import sys; print("object-key" in sys.argv[1] or "slides.pdf" in sys.argv[1])' "$BODY")" "False"
+call PUT "$owned/$authored" "$token_a" '{"title":"Hijack","description":"x","prerequisiteDescription":null}'; check "a Learner cannot author" "$STATUS" 403
+check "the stored instructor is the authenticated Instructor" "$(psql_admin <<<"SELECT u.email FROM public.courses c JOIN public.users u ON u.id=c.instructor_id WHERE c.id='$authored';")" "instructor.ad07@example.test"
+
+echo "== AS09 owner assignments (r12: assignments SELECT, INSERT, UPDATE(definition, publication); submissions SELECT(id, assignment_id, graded_at))"
+assigned=/api/courses/$authored
+call POST "$assigned/assignments" "$token_i" "{\"title\":\"Project\",\"instructions\":\"Submit a ZIP\",\"deadlineAt\":\"9999-12-31T23:59:59.999999Z\",\"lessonId\":\"$lesson_a\"}"
+check "create an Assignment at the latest representable deadline (INSERT)" "$STATUS/$(field publicationStatus)/$(field deadlineAt)" "201/hidden/9999-12-31T23:59:59.999999Z"
+assignment="$(field id)"
+call POST "$assigned/assignments" "$token_i" '{"title":"Late","instructions":"x","deadlineAt":"9999-12-31T23:59:59-05:00","lessonId":null}'
+check "a deadline past year 9999 in UTC is a 400 (U6)" "$STATUS" 400
+# D2: exercise JDBC INSERT, targeted UPDATE and fresh extraction under the real r12 runtime role.
+# The SQL epoch oracle is independent of the application's date conversion.
+call POST "$assigned/assignments" "$token_i" '{"title":"Historical","instructions":"I","deadlineAt":"1500-03-10T00:00:00Z","lessonId":null}'
+check "historical leap-day INSERT no longer fails with 22008" "$STATUS/$(field deadlineAt)" "201/1500-03-10T00:00:00Z"
+historical="$(field id)"
+check "historical INSERT stores the exact SQL epoch" "$(psql_admin <<<"SELECT extract(epoch FROM deadline_at) FROM public.assignments WHERE id='$historical';")" "-14825894400.000000"
+call GET "$assigned/owned-assignments/$historical" "$token_i"
+check "historical owner re-read preserves the UTC instant" "$STATUS/$(field deadlineAt)" "200/1500-03-10T00:00:00Z"
+call PUT "$assigned/owned-assignments/$historical" "$token_i" '{"title":"Historical","instructions":"I","deadlineAt":"0000-01-01T00:00:00Z","lessonId":null}'
+check "year-zero targeted replacement" "$STATUS/$(field deadlineAt)" "200/0000-01-01T00:00:00Z"
+check "year-zero UPDATE stores the exact SQL epoch" "$(psql_admin <<<"SELECT extract(epoch FROM deadline_at) FROM public.assignments WHERE id='$historical';")" "-62167219200.000000"
+call GET "$assigned/owned-assignments/$historical" "$token_i"
+check "year-zero owner re-read preserves the UTC instant" "$STATUS/$(field deadlineAt)" "200/0000-01-01T00:00:00Z"
+psql_admin >/dev/null <<<"DELETE FROM public.assignments WHERE id='$historical';"
+call PUT "$assigned/owned-assignments/$assignment" "$token_i" '{"title":"Project 2","instructions":"Submit a PDF","deadlineAt":"2026-12-01T10:00:00.000001+07:00","lessonId":null}'
+check "replace under the FOR UPDATE row lock (targeted UPDATE)" "$STATUS/$(field deadlineAt)/$(field lessonId)" "200/2026-12-01T03:00:00.000001Z/None"
+call PUT "$assigned/owned-assignments/$assignment/publication" "$token_i" '{"publicationStatus":"published"}'
+check "publish (UPDATE publication_status)" "$STATUS/$(field publicationStatus)" "200/published"
+psql_admin >/dev/null <<SQL
+INSERT INTO public.submissions SELECT gen_random_uuid(), '$assignment', id, 'submissions/' || gen_random_uuid(), 'a.pdf', now(), NULL, NULL, NULL FROM public.users WHERE email='learner.a@example.test';
+INSERT INTO public.submissions SELECT gen_random_uuid(), '$assignment', id, 'submissions/' || gen_random_uuid(), 'b.zip', now(), 80, 'Good', now() FROM public.users WHERE email='learner.b@example.test';
+SQL
+call GET "$assigned/owned-assignments" "$token_i"
+check "owner list with submission and graded counts (column SELECT)" "$STATUS/$(field totalElements)/$(field content.0.submissionCount)/$(field content.0.gradedCount)" "200/1/2/1"
+call GET "$assigned/owned-assignments/$assignment" "$token_i"; check "owner read" "$STATUS/$(field title)" "200/Project 2"
+call GET "$assigned/owned-assignments" "$token_a"; check "a Learner cannot read owner assignments" "$STATUS" 403
+psql_admin >/dev/null <<SQL
+DELETE FROM public.submissions WHERE assignment_id='$assignment';
+DELETE FROM public.assignments WHERE id='$assignment';
+DELETE FROM public.lessons WHERE chapter_id IN ('$chapter_a','$chapter_b');
+DELETE FROM public.chapters WHERE course_id='$authored';
+DELETE FROM public.courses WHERE id='$authored';
+SQL
+
 echo "== IN10 audit read (r10: audit_logs SELECT, INSERT; users SELECT for actor names)"
 # The account is registered, then promoted by the bootstrap administrator, which also stands in for the
 # audited Administrator actions (IN11/IN20/IN21 add their HTTP mutations and real-backend cases later).
@@ -430,7 +506,7 @@ check "backend log never contains a recipient address" "$(docker logs "$backend"
 echo "== no permission failure anywhere, and the matrix is unchanged"
 check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank, AS06 quiz composition and the IN10 audit read under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank, AS06 quiz composition, CO06 Instructor authoring, AS09 owner assignments and the IN10 audit read under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE=codemastery-backend:privilege-test \

@@ -4,9 +4,23 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcType;
+import org.hibernate.type.descriptor.ValueExtractor;
+import org.hibernate.type.descriptor.WrapperOptions;
+import org.hibernate.type.descriptor.java.JavaType;
+import org.hibernate.type.descriptor.jdbc.BasicExtractor;
+import org.hibernate.type.descriptor.jdbc.TimestampWithTimeZoneJdbcType;
 
+import java.sql.CallableStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.Locale;
 import java.util.UUID;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.OffsetTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
 
 @Entity
 @Table(name = "assignments")
@@ -29,6 +43,7 @@ public class AssignmentEntity{
     private String instructions;
 
     @Column(name = "deadline_at", nullable = false)
+    @JdbcType(DeadlineJdbcType.class)
     private Instant deadline_at;
 
     @Column(name = "publication_status", nullable = false, columnDefinition = "text")
@@ -109,5 +124,48 @@ public class AssignmentEntity{
 
     public void setPublicationStatus(String publication_status){
         this.publication_status = publication_status;
+    }
+
+    /**
+     * Assignment-local timestamptz mapping (D2). The inherited JDBC 4.2 OffsetDateTime binder
+     * preserves ISO instants on INSERT and targeted JPQL UPDATE. Extract the driver's ISO text
+     * without java.sql.Timestamp's hybrid calendar or its OffsetDateTime reader's BC leap-day bug.
+     * PostgreSQL 0001 BC is ISO year zero; apply that conversion before constructing the date.
+     */
+    public static class DeadlineJdbcType extends TimestampWithTimeZoneJdbcType {
+        private static final DateTimeFormatter SQL_TIME = new DateTimeFormatterBuilder()
+                .append(DateTimeFormatter.ISO_LOCAL_TIME).appendOffset("+HH:mm:ss", "Z").toFormatter(Locale.ROOT);
+
+        private static Instant instant(String text) {
+            if (text == null) return null;
+            boolean bc = text.endsWith(" BC");
+            String value = bc ? text.substring(0, text.length() - 3) : text;
+            int separator = value.indexOf(' ');
+            String[] date = value.substring(0, separator).split("-");
+            int year = Integer.parseInt(date[0]);
+            LocalDate day = LocalDate.of(bc ? 1 - year : year, Integer.parseInt(date[1]), Integer.parseInt(date[2]));
+            // PostgreSQL offsets can include historical seconds and omit zero minutes (e.g. +07:06:30, +00).
+            return day.atTime(OffsetTime.parse(value.substring(separator + 1), SQL_TIME)).toInstant();
+        }
+
+        @Override
+        public <X> ValueExtractor<X> getExtractor(JavaType<X> javaType) {
+            return new BasicExtractor<>(javaType, this) {
+                @Override
+                protected X doExtract(ResultSet result, int index, WrapperOptions options) throws SQLException {
+                    return javaType.wrap(instant(result.getString(index)), options);
+                }
+
+                @Override
+                protected X doExtract(CallableStatement statement, int index, WrapperOptions options) throws SQLException {
+                    return javaType.wrap(instant(statement.getString(index)), options);
+                }
+
+                @Override
+                protected X doExtract(CallableStatement statement, String name, WrapperOptions options) throws SQLException {
+                    return javaType.wrap(instant(statement.getString(name)), options);
+                }
+            };
+        }
     }
 }

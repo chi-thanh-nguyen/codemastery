@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Box, useMediaQuery, useTheme } from '@mui/material';
 import { AppHeader, ThemeControl } from '../shared/components/AppHeader';
@@ -25,6 +25,50 @@ export interface DashboardLayoutProps {
     brandHref?: string;
     onBrandSelect?: () => void;
     children: ReactNode;
+}
+
+/**
+ * Shell navigation guard (DESIGN.md S19 "Editor navigation and recovery"): the shell's own destinations (primary
+ * navigation, the CodeMastery home link and account-menu links) ask the mounted guards before navigating. A guard
+ * returns true when it takes over, that is, it shows its own "Leave without saving?" confirmation and calls
+ * `proceed` only if the user chooses Leave. Only the most recently registered guard that takes over is asked, so
+ * one confirmation appears. This works with the declarative router, which has no blocker API; browser Back and
+ * reload are not intercepted here (A15; reload uses `beforeunload`). Sign-out and session end never ask.
+ */
+export type NavigationGuard = (proceed: () => void) => boolean;
+export interface ShellNavigation {
+    /** Runs `proceed` unless a guard takes over. */
+    attempt(proceed: () => void): void;
+    register(guard: NavigationGuard): () => void;
+}
+export const ShellNavigationContext = createContext<ShellNavigation | null>(null);
+
+/** A stable guard registry for the component that owns the shell's navigation handlers. */
+export function useShellNavigationRegistry(): ShellNavigation {
+    const guards = useRef<NavigationGuard[]>([]);
+    return useMemo(() => ({
+        attempt(proceed) {
+            for (const guard of [...guards.current].reverse()) if (guard(proceed)) return;
+            proceed();
+        },
+        register(guard) {
+            guards.current = [...guards.current, guard];
+            return () => { guards.current = guards.current.filter((item) => item !== guard); };
+        },
+    }), []);
+}
+
+/** The surrounding shell's navigation, or null outside a shell. */
+export function useShellNavigation() {
+    return useContext(ShellNavigationContext);
+}
+
+/** Registers `guard` (its latest version) while the calling component is mounted. */
+export function useNavigationGuard(guard: NavigationGuard) {
+    const shell = useContext(ShellNavigationContext);
+    const latest = useRef(guard);
+    latest.current = guard;
+    useEffect(() => shell?.register((proceed) => latest.current(proceed)), [shell]);
 }
 
 const RISE = presentationTokens.reachHeight;
