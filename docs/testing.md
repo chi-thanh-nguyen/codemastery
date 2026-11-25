@@ -84,7 +84,11 @@ Those need CO09/AS09 and QA10. Authorization, filename/signature checks and uplo
 limits remain consumer responsibilities. Independent review, required remote CI,
 runtime provisioning, exposure-risk acceptance and release/deployment are separate.
 
-### SH05-R01 diagnostic lifecycle remediation — 25 November 2026
+### SH05-R01 first lifecycle remediation — 25 November 2026 (historical)
+
+**Superseded by round 2 below.** The following records the first author-side
+remediation and its executed evidence; the subsequent independent concurrency
+review found its continuous-confidentiality claim incomplete.
 
 An independent full-PR review of `bba812e` confirmed P2 SH05-R01: Boot logging
 initialization removed the constructor-installed filter, and a retained adapter
@@ -143,6 +147,92 @@ and SH05-A01 pool code are byte-identical outside the diagnostic guard. Unaffect
 storage matrices and unrelated backend/frontend/E2E/VM suites were not repeated.
 Fresh independent delta review and required new-head CI remain integration gates;
 remote CI is not awaited or manually rerun.
+
+
+### SH05-R01 round 2: output-boundary confidentiality — 25 November 2026
+
+The independent delta review of `1ba256d3504b8879ce4d26b805585be3a022460e`
+classified SH05-R01 as **PARTIALLY_FIXED**, P2. Source restoration after reset was
+correct but did not prevent a logging call admitted while turbo filters were
+absent from reaching a newly attached appender. Its network-free synthetic
+check recorded 999 provider events during 10,000 resets, with initial denial,
+application controls and one final filter/listener. This established provider
+event escape, not disclosure of actual credentials or protected data.
+
+The Leader authorized the bounded round-2 correction and explicitly added
+`backend/src/main/resources/logback-spring.xml` plus its single repository-tree
+entry to the allowed file scope. The supplied console configuration installs
+`S3FileStorage.ProviderDiagnosticsFilter` before starting/attaching output, using
+the existing Boot defaults and `logging.structured.format.console` setting.
+Pattern output and ECS remain available. The filter denies exactly the previously
+suppressed SDK/Apache namespaces and returns NEUTRAL for application logging.
+No dependency, environment variable, destination or storage-interface change is
+introduced. Constructor-time TurboFilter/listener registration is removed.
+
+Correctness depends on delivery, not eventual filter registration: Logback 1.5.38
+`AppenderBase`/`UnsynchronizedAppenderBase.doAppend` checks each appender's filter
+chain before output. Every live old/new sink has its own stateless deny filter;
+stopping/detaching an old sink does not remove its chain, and Joran constructs
+and configures a replacement before starting/attaching it. A provider event
+admitted before/during reset is therefore denied even when delivered afterwards.
+There is no adapter-owned hook, shared listener list, callback lock or repair
+thread. Alternative Joran/programmatic outputs must retain this boundary first in every filter chain;
+arbitrary unfiltered output or deliberate hook removal remains outside scope.
+
+`diagnosticConfidentialityDuringConcurrentLoggingInIsolatedJvm` launches the
+network-free `LoggingConcurrencyProbe`. Its principal check pauses an ordinary
+synthetic provider log using Logback's public sequence-number hook, which runs
+inside event construction after source admission and before appender lookup.
+It completes actual Boot reconfiguration, then releases delivery to the new
+output. Both default and ECS output deny the pending diagnostic and emit the
+application positive control; the encoder type is also checked. This uses
+barriers rather than relying on repetition to hit the scheduling gap.
+
+The same child checks an already-admitted event against unfiltered (must capture)
+and guarded (must deny) sinks, exact provider namespace boundaries, and application
+output. Four ordinary provider-logging workers then overlap 1,000 lock-protected
+resets with fresh guarded sinks: zero provider output, application controls present
+and one confidentiality filter per active appender. The parent enforces its
+60-second bound, forced termination and temporary-output deletion. The child
+releases barriers before closing its executor and stops its logging context.
+No parent-JVM logging state or outer container fixture is initialized by the child.
+
+The existing lifecycle child retains real SDK requests against a synthetic loopback
+server, default/ECS Boot initialization, Joran, twenty resets, retained adapters,
+two Spring contexts, context closure, invalid consumed settings, an active returned
+stream and a barrier-admitted DELETE. As in supported application startup, initial
+output is configured before consuming the adapter; the same adapters then survive
+all four reinitializations. Its test sinks carry the same output filter as production.
+The original sensitive-string assertions and application positive controls remain.
+The shared PostgreSQL foundation and SH05-A01 pool configuration are unchanged.
+
+Executed from `backend/` during round 2:
+
+```bash
+./mvnw -o -DskipTests test-compile
+./mvnw -o '-Dit.test=FileStorageIntegrationTest#diagnosticConfidentialityDuringConcurrentLoggingInIsolatedJvm+diagnosticConfidentialitySurvivesLoggingLifecycleInIsolatedJvm+syntheticHttpFailuresAreNotRetriedOrLoggedEvenAtTrace+contextShutdownClosesClientAndTransportEvenWhenClientCloseFails+simulatedTransportAndUnclassified404FailuresAreSafeAndNeverMissingObjects+simulatedReadAndCloseFailuresKeepCheckedSemanticsWithoutProviderDiagnostics+unusedAdapterDoesNotResolveOptionalConfigurationAndConsumptionFailsClosed+consumptionRejectsMissingPlaceholderAndUnresolvableConfiguration' test-compile failsafe:integration-test failsafe:verify
+```
+
+Compilation and 19 selected cases passed, zero failures/errors/skips. The final
+two lifecycle/concurrency cases were rerun through Failsafe after tightening the
+observable-output assertion ordering; both passed. Both children also passed directly. A scratch-only mutation removed the output filters from a
+classpath copy of the XML: the final concurrency child failed on observable
+**Deferred provider event reached new output**, before registration-count checks.
+This supplements the historical first-remediation failure; it is an output-boundary
+omission control, not a claim to rerun the entire earlier revision. No tracked file
+or PR history was changed for the negative control.
+
+Non-logging adapter text (normalizing only logging imports/guard/call) and the exact
+interface remain byte-identical to `1ba256d`; the POM, configuration bindings,
+timeouts/retry, IO/stream ownership and test pool are unchanged. Unaffected full
+backend, streaming/MinIO, frontend/E2E and VM matrices were not repeated. No complete
+local verify or new JaCoCo percentage is claimed. The 16 successful checks at
+`1ba256d` are historical baseline evidence, not checks of this correction.
+
+Author-side obligation assessment after the focused audit: interface 6/6, adapter
+20/20, overall 26/26. This is remediation-author verification, not fresh independent
+acceptance. Independent delta review, eligible protected approval, final-head CI,
+current-main requirements and downstream/operational qualification remain separate.
 
 ## Purpose
 

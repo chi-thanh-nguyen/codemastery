@@ -2107,16 +2107,31 @@ complete API call 60 seconds each, with no retry and no new environment variable
 Pool acquisition is bounded by the same connection timeout. These are adapter
 settings, not an upload limit or a production capacity qualification. The existing
 AWS SDK Apache transport is configured through its public SPI; no dependency changes.
-SDK and Apache HTTP diagnostics are suppressed at their Logback source, including
+SDK and Apache HTTP diagnostics are denied at the output boundary, including
 DEBUG/TRACE wire and signing output; application logging remains available.
-The guard is shared by the Logback context, not owned by an individual Spring
-context or adapter. Its reset-resistant listener restores the filter during
-reconfiguration. The filter's stop callback re-registers that listener when Boot's
-stop/reset sequence removes context listeners. This uses the existing Boot 4.1.1 /
-Logback 1.5.38 lifecycle; it adds no logger namespace, environment input, thread or
-adapter operation. Closing one adapter does not remove another adapter's protection,
-including an already returned download stream. Arbitrary replacement of the logging
-backend or deliberate removal of its confidentiality hooks is outside this guarantee.
+`backend/src/main/resources/logback-spring.xml` configures the existing console
+output with `S3FileStorage.ProviderDiagnosticsFilter` before the appender starts
+or is attached. It reuses Boot's patterns, charset and threshold and the existing
+`logging.structured.format.console` setting (including the deployed ECS format).
+The Project Leader authorized this additional configuration file and its structure
+entry for SH05-R01 round 2 on 25 November 2026. No dependency, environment input,
+output destination or storage contract is added.
+
+A source TurboFilter can admit an event while its list is being reset; that event
+can reach a newly attached appender after source denial is restored. The output
+filter instead checks each event immediately before output, including an event
+admitted before or during reconfiguration. Old appenders retain their filter
+until stopped; replacement appenders start with their own filter. The stateless
+filter owns no adapter, listener, thread or transport resource. Closing a Spring
+context does not remove another adapter or active download's protection. There is
+no constructor-time logging registration or lifecycle repair callback.
+
+Application logging is configured before Spring consumes the adapter. Alternative
+Joran configurations and programmatic test sinks must install the same filter
+first in the chain before starting/attaching every output; a custom unfiltered appender or deliberate
+replacement/removal of the confidentiality boundary is outside this guarantee.
+Ordinary reset/stop/start and reinitialization with the supplied configuration
+remain supported on the existing Boot 4.1.1 / Logback 1.5.38 versions.
 
 Upload input streams belong to the caller. `open` returns a caller-owned
 `StoredObject`; use try-with-resources across header preparation and body copying.

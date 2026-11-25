@@ -11,6 +11,7 @@ import com.codemastery.infrastructure.storage.FileStorage.FileStorageException;
 import com.codemastery.infrastructure.storage.FileStorage.ObjectNotFoundException;
 import com.codemastery.infrastructure.storage.FileStorage.StoredObject;
 import com.codemastery.infrastructure.storage.s3.S3FileStorage;
+import com.codemastery.infrastructure.storage.s3.S3FileStorage.ProviderDiagnosticsFilter;
 import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -434,6 +435,7 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
         server.start();
         Logger root = (Logger) LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
         ListAppender<ILoggingEvent> logs = new ListAppender<>();
+        LoggingConcurrencyProbe.protectOutput(logs);
         logs.start();
         root.addAppender(logs);
         List<Logger> providerLoggers = List.of((Logger) LoggerFactory.getLogger("software.amazon.awssdk"),
@@ -471,15 +473,24 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void diagnosticConfidentialitySurvivesLoggingLifecycleInIsolatedJvm() throws Exception {
+        runLoggingProbe(LoggingLifecycleProbe.class, "SH05 logging lifecycle PASS");
+    }
+
+    @Test
+    void diagnosticConfidentialityDuringConcurrentLoggingInIsolatedJvm() throws Exception {
+        runLoggingProbe(LoggingConcurrencyProbe.class, "SH05 concurrent logging PASS");
+    }
+
+    private static void runLoggingProbe(Class<?> probe, String completion) throws Exception {
         Path output = Files.createTempFile("sh05-logging-lifecycle-", ".log");
         Process child = null;
         try {
             child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                     "-cp", System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")),
-                    LoggingLifecycleProbe.class.getName()).redirectErrorStream(true).redirectOutput(output.toFile()).start();
+                    probe.getName()).redirectErrorStream(true).redirectOutput(output.toFile()).start();
             assertTrue(child.waitFor(60, TimeUnit.SECONDS), "Isolated logging lifecycle must terminate");
             assertEquals(0, child.exitValue(), "Isolated logging lifecycle assertions failed");
-            assertTrue(Files.readString(output).contains("SH05 logging lifecycle PASS"));
+            assertTrue(Files.readString(output).contains(completion), "Child must report completed assertions");
         } finally {
             try {
                 if (child != null && child.isAlive()) {
@@ -547,6 +558,9 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                         .withProperty("codemastery.storage.path-style-access", "true");
                 LoggerContext loggingContext = (LoggerContext) LoggerFactory.getILoggerFactory();
                 List<ILoggingEvent> events = Collections.synchronizedList(new ArrayList<>());
+                LoggingSystem logging = LoggingSystem.get(LoggingLifecycleProbe.class.getClassLoader());
+                // As in application startup, configure output before consuming the adapter.
+                LoggingConcurrencyProbe.initialize(logging, false);
                 try (var first = context(environment); var second = context(environment)) {
                     FileStorage firstAdapter = first.getBean(FileStorage.class);
                     FileStorage retained = second.getBean(FileStorage.class);
@@ -554,7 +568,6 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                     operations(firstAdapter, objectKey);
                     assertConfidential(events, console, access, secret, objectKey);
 
-                    LoggingSystem logging = LoggingSystem.get(LoggingLifecycleProbe.class.getClassLoader());
                     for (int iteration = 0; iteration < 3; iteration++) {
                         logging.cleanUp();
                         logging.beforeInitialize();
@@ -577,6 +590,7 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                         configurator.doConfigure(new ByteArrayInputStream("""
                                 <configuration>
                                   <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+                                    <filter class="com.codemastery.infrastructure.storage.s3.S3FileStorage$ProviderDiagnosticsFilter"/>
                                     <encoder><pattern>%logger %msg%n</pattern></encoder>
                                   </appender>
                                   <root level="TRACE"><appender-ref ref="CONSOLE"/></root>
@@ -630,10 +644,9 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                         assertFalse(failure.toString().contains(secret));
                     }
                     operations(retained, objectKey);
-                    assertEquals(1, loggingContext.getTurboFilterList().stream()
-                            .filter(filter -> "SH05-provider-confidentiality".equals(filter.getName())).count());
-                    assertEquals(1, loggingContext.getCopyOfListenerList().stream()
-                            .filter(listener -> listener.getClass().getName().endsWith("$ProviderDiagnostics")).count());
+                    LoggingConcurrencyProbe.assertProtectedOutputs(loggingContext);
+                    assertTrue(loggingContext.getCopyOfListenerList().stream()
+                            .noneMatch(listener -> listener.getClass().getName().endsWith("$ProviderDiagnostics")));
                     assertConfidential(events, console, access, secret, objectKey);
                     assertTrue(requests.get() >= 42, "Actual SDK requests must have reached the provider");
                 }
@@ -642,7 +655,7 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                 previousOut.println("SH05 logging lifecycle PASS: provider events=0; no key/access/secret disclosure; "
                         + "application positive controls present; Boot resets=4 (including ECS/in-flight IO); Joran=1; "
                         + "Logback resets=20; contexts=2; "
-                        + "active stream and concurrent requests passed; one filter/listener");
+                        + "active stream and concurrent requests passed; one output filter per appender; no guard listener");
             } finally {
                 bodyRelease.countDown();
                 deleteRelease.countDown();
@@ -684,6 +697,7 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                 }
             };
             appender.setContext(context);
+            LoggingConcurrencyProbe.protectOutput(appender);
             appender.start();
             root.addAppender(appender);
         }
@@ -702,6 +716,190 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
             for (String sensitive : List.of(access, secret, key, "AWS4-HMAC-SHA256 Credential=")) {
                 assertFalse(captured.contains(sensitive), "Sensitive diagnostics escaped");
             }
+        }
+    }
+
+    /** Network-free child: deterministic deferred delivery plus concurrent ordinary logging. */
+    public static final class LoggingConcurrencyProbe {
+        public static void main(String[] args) throws Exception {
+            PrintStream previousOut = System.out;
+            PrintStream previousErr = System.err;
+            ByteArrayOutputStream console = new ByteArrayOutputStream();
+            LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+            try (PrintStream capture = new PrintStream(console, true, StandardCharsets.UTF_8)) {
+                System.setOut(capture);
+                System.setErr(capture);
+                verifyOutputBoundary();
+                LoggingSystem logging = LoggingSystem.get(LoggingConcurrencyProbe.class.getClassLoader());
+                initialize(logging, false);
+                for (boolean structured : new boolean[]{false, true}) {
+                    setTrace(context);
+                    String pending = "SH05 synthetic deferred provider diagnostic";
+                    CountDownLatch admitted = new CountDownLatch(1);
+                    CountDownLatch release = new CountDownLatch(1);
+                    var loggingThread = new java.util.concurrent.atomic.AtomicReference<Thread>();
+                    var previousSequence = context.getSequenceNumberGenerator();
+                    // Logback constructs LoggingEvent after the source-filter decision and
+                    // calls this public hook before looking up the current appenders.
+                    context.setSequenceNumberGenerator(new ch.qos.logback.core.spi.BasicSequenceNumberGenerator() {
+                        @Override public long nextSequenceNumber() {
+                            if (Thread.currentThread() == loggingThread.get()) {
+                                admitted.countDown();
+                                try {
+                                    assertTrue(release.await(15, TimeUnit.SECONDS), "Deferred event must be released");
+                                } catch (InterruptedException failure) {
+                                    Thread.currentThread().interrupt();
+                                    throw new AssertionError(failure);
+                                }
+                            }
+                            return super.nextSequenceNumber();
+                        }
+                    });
+                    try (var worker = Executors.newSingleThreadExecutor()) {
+                        try {
+                            var event = worker.submit(() -> {
+                                loggingThread.set(Thread.currentThread());
+                                LoggerFactory.getLogger("software.amazon.awssdk.synthetic").debug(pending);
+                            });
+                            assertTrue(admitted.await(5, TimeUnit.SECONDS), "Provider event passed source admission");
+                            initialize(logging, structured);
+                            setTrace(context);
+                            release.countDown();
+                            event.get(5, TimeUnit.SECONDS);
+                            String control = "SH05 post-reconfiguration application control " + structured;
+                            LoggerFactory.getLogger("com.codemastery.sh05-concurrent-control").warn(control);
+                            String output = console.toString(StandardCharsets.UTF_8);
+                            assertFalse(output.contains(pending), "Deferred provider event reached new output");
+                            assertTrue(output.contains(control), "New output must emit application logging");
+                            var appender = (ch.qos.logback.core.OutputStreamAppender<?>)
+                                    context.getLogger(Logger.ROOT_LOGGER_NAME).getAppender("CONSOLE");
+                            assertEquals(structured, appender.getEncoder() instanceof
+                                    org.springframework.boot.logging.logback.StructuredLogEncoder,
+                                    "Boot default/ECS format must be preserved");
+                            assertProtectedOutputs(context);
+                        } finally {
+                            release.countDown();
+                            context.setSequenceNumberGenerator(previousSequence);
+                        }
+                    }
+                }
+                verifyConcurrentResets(context);
+                assertFalse(console.toString(StandardCharsets.UTF_8).contains("SH05 synthetic provider"));
+                previousOut.println("SH05 concurrent logging PASS: deterministic deferred Boot default/ECS events denied; "
+                        + "1000 resets with four logging workers; zero provider output; application controls present; "
+                        + "output negative control detected; no guard listener");
+            } finally {
+                context.stop();
+                System.setOut(previousOut);
+                System.setErr(previousErr);
+            }
+        }
+
+        private static void initialize(LoggingSystem logging, boolean structured) {
+            logging.cleanUp();
+            logging.beforeInitialize();
+            MockEnvironment environment = new MockEnvironment()
+                    .withProperty("logging.structured.format.console", structured ? "ecs" : "");
+            logging.initialize(new LoggingInitializationContext(environment), null, null);
+        }
+
+        private static void setTrace(LoggerContext context) {
+            context.getLogger(Logger.ROOT_LOGGER_NAME).setLevel(Level.TRACE);
+            context.getLogger("software.amazon.awssdk.synthetic").setLevel(Level.TRACE);
+            context.getLogger("org.apache.http.wire").setLevel(Level.TRACE);
+        }
+
+        private static void verifyOutputBoundary() {
+            // An event already admitted at the source must be denied at delivery.
+            // An otherwise identical unfiltered sink is a mandatory negative control.
+            LoggerContext context = new LoggerContext();
+            try {
+                var provider = context.getLogger("software.amazon.awssdk.synthetic");
+                var pending = new ch.qos.logback.classic.spi.LoggingEvent(
+                        LoggingConcurrencyProbe.class.getName(), provider, Level.DEBUG,
+                        "SH05 harmless pending diagnostic", null, null);
+                ListAppender<ILoggingEvent> unfiltered = new ListAppender<>();
+                unfiltered.start();
+                unfiltered.doAppend(pending);
+                assertEquals(1, unfiltered.list.size(), "Unfiltered negative control must detect the pending event");
+                unfiltered.stop();
+                ListAppender<ILoggingEvent> guarded = new ListAppender<>();
+                protectOutput(guarded);
+                guarded.start();
+                for (String name : List.of("software.amazon.awssdk", "software.amazon.awssdk.synthetic",
+                        "org.apache.http", "org.apache.http.wire")) {
+                    guarded.doAppend(new ch.qos.logback.classic.spi.LoggingEvent(
+                            LoggingConcurrencyProbe.class.getName(), context.getLogger(name), Level.DEBUG,
+                            "SH05 harmless pending diagnostic", null, null));
+                }
+                assertTrue(guarded.list.isEmpty(), "Every approved provider namespace must be denied");
+                guarded.doAppend(new ch.qos.logback.classic.spi.LoggingEvent(LoggingConcurrencyProbe.class.getName(),
+                        context.getLogger("com.codemastery.synthetic"), Level.WARN, "application control", null, null));
+                assertEquals(1, guarded.list.size(), "Guard must preserve application output");
+                guarded.stop();
+            } finally { context.stop(); }
+        }
+
+        private static void verifyConcurrentResets(LoggerContext context) throws Exception {
+            List<ILoggingEvent> events = Collections.synchronizedList(new ArrayList<>());
+            var running = new java.util.concurrent.atomic.AtomicBoolean(true);
+            CountDownLatch active = new CountDownLatch(4);
+            var tasks = new ArrayList<java.util.concurrent.Future<?>>();
+            try (var workers = Executors.newFixedThreadPool(4)) {
+                try {
+                    for (int i = 0; i < 4; i++) {
+                        int worker = i;
+                        tasks.add(workers.submit(() -> {
+                            var provider = LoggerFactory.getLogger(worker % 2 == 0
+                                    ? "software.amazon.awssdk.synthetic" : "org.apache.http.wire");
+                            provider.debug("SH05 synthetic provider diagnostic");
+                            active.countDown();
+                            while (running.get()) { provider.debug("SH05 synthetic provider diagnostic"); }
+                        }));
+                    }
+                    assertTrue(active.await(5, TimeUnit.SECONDS), "All logging workers must be active");
+                    for (int i = 0; i < 1000; i++) {
+                        var lock = context.getConfigurationLock();
+                        lock.lock();
+                        try {
+                            context.reset();
+                            LoggingLifecycleProbe.captureEvents(context, events);
+                        } finally { lock.unlock(); }
+                        if (i % 100 == 0) {
+                            LoggerFactory.getLogger("com.codemastery.sh05-concurrent-control").warn("reset control");
+                        }
+                    }
+                } finally {
+                    running.set(false);
+                    for (var task : tasks) { task.get(5, TimeUnit.SECONDS); }
+                }
+            }
+            LoggerFactory.getLogger("com.codemastery.sh05-concurrent-control").warn("final application control");
+            synchronized (events) {
+                assertTrue(events.stream().anyMatch(event -> "final application control".equals(event.getFormattedMessage())));
+                assertTrue(events.stream().noneMatch(event -> event.getLoggerName().startsWith("software.amazon.awssdk")
+                        || event.getLoggerName().startsWith("org.apache.http")), "Concurrent provider event escaped");
+            }
+            assertProtectedOutputs(context);
+        }
+
+        private static void protectOutput(ch.qos.logback.core.Appender<ILoggingEvent> appender) {
+            ProviderDiagnosticsFilter filter = new ProviderDiagnosticsFilter();
+            filter.start();
+            appender.addFilter(filter);
+        }
+
+        private static void assertProtectedOutputs(LoggerContext context) {
+            var appenders = context.getLogger(Logger.ROOT_LOGGER_NAME).iteratorForAppenders();
+            int count = 0;
+            while (appenders.hasNext()) {
+                var appender = appenders.next();
+                assertTrue(appender.isStarted(), "Configured output must be active");
+                assertEquals(1, appender.getCopyOfAttachedFiltersList().stream()
+                        .filter(ProviderDiagnosticsFilter.class::isInstance).count(), "One deny boundary per output");
+                count++;
+            }
+            assertTrue(count > 0, "Logging must have an output");
         }
     }
 

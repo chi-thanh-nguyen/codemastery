@@ -1195,6 +1195,8 @@ codemastery/
 
 │       │       ├── application.yml
 
+│       │       ├── logback-spring.xml
+
 │       │       └── db/
 
 │       │           └── migration/
