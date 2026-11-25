@@ -95,6 +95,10 @@ public class SecurityConfig {
                                 "/api/me/course-progress", "/api/me/resume").hasRole("LEARNER")
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/lessons/{lessonId}/completion",
                                 "/api/courses/{courseId}/resume").hasRole("LEARNER")
+                        // CT31.read (ADR012 sections 7.3, 12): Administrator only. The chain decides only
+                        // authentication here: malformed query values are 400 (stage 2) before the role 403
+                        // (stage 3), which AuditLogService decides before any lookup. Other methods stay denied.
+                        .requestMatchers(HttpMethod.GET, "/api/admin/audit-logs").authenticated()
                         // CT21.authoring (ADR006 §5): self Instructor; the Learner Lesson read is self Learner.
                         // Material, file and learner-monitoring routes under the same prefix stay denied.
                         .requestMatchers(HttpMethod.GET, "/api/instructor/courses", "/api/instructor/courses/{courseId}",
@@ -137,6 +141,19 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/quizzes/{quizId}",
                                 "/api/courses/{courseId}/quizzes/{quizId}/publication").hasRole("INSTRUCTOR")
                         .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/quizzes/{quizId}").hasRole("INSTRUCTOR")
+                        // CT07-PRACTICE-RECOMMENDATION (ADR013 §19.4): self Learner. The chain decides only
+                        // authentication: malformed UUIDs are 400 (order 2) before the role 403 (order 3),
+                        // which CT03 inside CT33 readLearnerState decides before any lookup.
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/courses/{courseId}/lessons/{lessonId}/practice-recommendation").authenticated()
+                        // CT10.rest (ADR010 §§12, 14): owning Instructor assignment authoring and owner reads.
+                        // The chain decides only authentication here so stage 2 (415 media type and 400 path/query)
+                        // precedes stage 3 (CT03 role/ownership/scope 403/404); unimplemented B5 paths stay denied.
+                        .requestMatchers(HttpMethod.POST, "/api/courses/{courseId}/assignments").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/owned-assignments",
+                                "/api/courses/{courseId}/owned-assignments/{assignmentId}").authenticated()
+                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/owned-assignments/{assignmentId}",
+                                "/api/courses/{courseId}/owned-assignments/{assignmentId}/publication").authenticated()
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),

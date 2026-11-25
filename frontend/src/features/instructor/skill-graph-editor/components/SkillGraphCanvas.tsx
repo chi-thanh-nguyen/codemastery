@@ -3,21 +3,21 @@ import { ReactFlow, ReactFlowProvider, Handle, Position, MarkerType } from '@xyf
 import type { Edge, Node, NodeProps } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Box, ButtonBase, Typography } from '@mui/material';
-import type { EditableSkill } from '../types/skillGraphTypes';
+import type { GraphSkill } from '../types/skillGraphTypes';
 import { pathLine, radius, shadow, roles } from '../../../../app/theme/theme';
 
 const W = 184, H = 64, GAP_X = 56, GAP_Y = 28;
-type Data = { skill: EditableSkill; selected: boolean; onSelect: (id: string) => void };
+type Data = { skill: GraphSkill; selected: boolean; onSelect: (id: string) => void };
 
 /** Layered positions by longest prerequisite chain (presentation only; tolerates malformed input). */
-function layout(skills: EditableSkill[]) {
+function layout(skills: GraphSkill[]) {
     const byId = new Map(skills.map((skill) => [skill.id, skill])), depth = new Map<string, number>(), seen = new Set<string>();
     const layer = (id: string): number => {
         if (depth.has(id)) return depth.get(id)!; if (seen.has(id)) return 0; seen.add(id);
         const parents = (byId.get(id)?.prerequisiteIds ?? []).filter((p) => byId.has(p));
         const value = parents.length ? Math.max(...parents.map(layer)) + 1 : 0; seen.delete(id); depth.set(id, value); return value;
     };
-    const columns = new Map<number, EditableSkill[]>();
+    const columns = new Map<number, GraphSkill[]>();
     skills.forEach((skill) => { const l = layer(skill.id); columns.set(l, [...(columns.get(l) ?? []), skill]); });
     const out = new Map<string, { x: number; y: number }>();
     columns.forEach((list, l) => [...list].sort((a, b) => a.name.localeCompare(b.name)).forEach((skill, i) => out.set(skill.id, { x: l * (W + GAP_X), y: i * (H + GAP_Y) })));
@@ -26,15 +26,18 @@ function layout(skills: EditableSkill[]) {
 
 function SkillBox({ data }: NodeProps<Node<Data>>) {
     const { skill, selected, onSelect } = data;
+    const prerequisites = `${skill.prerequisiteIds.length} ${skill.prerequisiteIds.length === 1 ? 'prerequisite' : 'prerequisites'}`;
+    // A count is shown, and named, only when the data source returned one; it is never assumed to be zero.
+    const questions = skill.questionCount === undefined ? null : `${skill.questionCount} ${skill.questionCount === 1 ? 'question' : 'questions'}`;
     return <>
         <Handle type="target" position={Position.Left} isConnectable={false} style={{ opacity: 0 }} />
         <ButtonBase onClick={() => onSelect(skill.id)} aria-pressed={selected} className="nodrag"
-            aria-label={`${skill.name}, ${skill.prerequisiteIds.length} prerequisites, ${skill.questionCount} questions`}
+            aria-label={[skill.name, prerequisites, questions].filter(Boolean).join(', ')}
             sx={{ width: W, height: H, borderRadius: `${radius.lg}px`, bgcolor: roles.bg.raised, px: 2, justifyContent: 'flex-start', textAlign: 'left',
                 boxShadow: selected ? `0 0 0 2px ${roles.accent.progress}, ${shadow.raised}` : `inset 0 0 0 1px ${roles.line.hairline}`, '&.Mui-focusVisible': { outline: `2px solid ${roles.focus.ring}`, outlineOffset: 3 } }}>
             <Box sx={{ minWidth: 0 }}>
                 <Typography component="span" sx={{ display: 'block', fontWeight: 600, fontSize: '0.9375rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{skill.name}</Typography>
-                <Typography component="span" sx={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: roles.text.secondary }}>{skill.questionCount} questions</Typography>
+                {questions && <Typography component="span" sx={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: roles.text.secondary }}>{questions}</Typography>}
             </Box>
         </ButtonBase>
         <Handle type="source" position={Position.Right} isConnectable={false} style={{ opacity: 0 }} />
@@ -43,7 +46,7 @@ function SkillBox({ data }: NodeProps<Node<Data>>) {
 const nodeTypes = { skill: SkillBox };
 
 /** Instructor graph view; edges are created through the accessible prerequisite form, not by dragging. */
-export function SkillGraphCanvas({ skills, selectedId, onSelect, label }: { skills: EditableSkill[]; selectedId: string | null; onSelect: (id: string | null) => void; label: string }) {
+export function SkillGraphCanvas({ skills, selectedId, onSelect, label }: { skills: GraphSkill[]; selectedId: string | null; onSelect: (id: string | null) => void; label: string }) {
     const { nodes, edges } = useMemo(() => {
         const positions = layout(skills);
         const nodes: Node<Data>[] = [...skills].sort((a, b) => (positions.get(a.id)!.x - positions.get(b.id)!.x) || (positions.get(a.id)!.y - positions.get(b.id)!.y))

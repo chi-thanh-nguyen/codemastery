@@ -24,10 +24,10 @@ export interface AuthContextValue {
     rememberProfile(leavingSession?: boolean): void;
     /**
      * Post-sign-in destination: the one-use `/profile` return when one was captured (CT16-PROFILE P1),
-     * otherwise the role's start page — `/home` for a Learner (Leader instruction, 7 November 2026),
-     * `/courses` for every other role.
+     * otherwise the role's start page — `/home` for a Learner, `/teach` for an Instructor (CT16.routes),
+     * `/courses` for an Administrator until `/admin` is routed.
      */
-    consumeReturn(): '/profile' | '/home' | '/courses';
+    consumeReturn(): '/profile' | '/home' | '/teach' | '/courses';
 }
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
@@ -325,7 +325,12 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
         restoring,
         login, register, logout, isCurrent,
         rememberProfile: (leavingSession = false) => { if (!leavingSession || !explicitLogout.current) returnPath.current = '/profile'; },
-        consumeReturn: () => { const path = returnPath.current; returnPath.current = null; return path ?? (eligible()?.user.role === 'Learner' ? '/home' : '/courses'); },
+        consumeReturn: () => {
+            const path = returnPath.current;
+            returnPath.current = null;
+            const role = eligible()?.user.role;
+            return path ?? (role === 'Learner' ? '/home' : role === 'Instructor' ? '/teach' : '/courses');
+        },
     }), [snapshot, restoring, eligible, login, register, logout, isCurrent]);
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

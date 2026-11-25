@@ -1931,6 +1931,251 @@ a gap and a failed migration. Read-only evaluation on the VM on 23 November 2026
 v0.1.0-rc.1's `deploy.sh` (r4) the update of the deployed V006 database is refused by the
 Phase 5 plan gate before any change; with r9 it is an upgrade with V007–V009 pending.
 
+### CT17-P6-PRIVILEGES-2026-11-24-r10 — IN10 audit recording and read (within the ADR012 §19.2 ceiling, 24 November 2026)
+
+Prepared for IN10 ([#184](https://github.com/chi-thanh-nguyen/codemastery/issues/184),
+[PR #276](https://github.com/chi-thanh-nguyen/codemastery/pull/276)) under the Project Leader's
+explicit instruction of 24 November 2026 to complete IN10 on PR #276, including the runtime privileges
+its implemented SQL needs, inside the approved ceiling. It follows the extension procedure above and
+stays inside the DELEGATED_APPROVED `CT17-P6-PLAN-2026-11-15-r2` ceiling
+([ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)):
+the implemented consumer (`AuditLogRepositoryImpl` and `AuditLogJpaRepository`, used by
+`AuditLogService` for CT31.actions/CT31.consistency recording and the CT31.read operation
+`GET /api/admin/audit-logs`), `RUNTIME_PRIVILEGE_MATRIX` and the CI tests change together, and every
+privilege below is exercised by that consumer's SQL. r9 changed no row; this is the next dated
+revision. No migration is involved. No approval beyond that ceiling is claimed; this is not personal
+Leader review.
+
+The r1–r9 records above are unchanged history. The effective matrix is r1 plus r2–r8, with the row
+below replacing the r1 `audit_logs` row (none); no other privilege, role elevation or change is
+introduced. The row equals its ceiling row.
+
+| Relation (owner) | Runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `audit_logs` (admin) | SELECT, INSERT | `append`: one row per audited change, inside the caller's transaction; `search`: the filtered, ordered page and its count | r10 within ceiling (CT31, ADR012 §7) |
+
+Least privilege exercised by the consumer:
+
+| Operation | SQL | Privilege |
+| --- | --- | --- |
+| Record one audited change | `insert into audit_logs (action, actor_id, occurred_at, target_reference, target_type, id) values (?, ?, ?, ?, ?, ?)` (Hibernate `persist` with an assigned identifier, executed by `flush` before `record` returns) | INSERT; a reused identifier fails with 23505 |
+| Read a page | `select … from audit_logs where <optional AND filters> order by occurred_at desc, id desc offset ? rows fetch first ? rows only`, and `select count(…) from audit_logs where …` when the page does not reveal the total | SELECT |
+| Actor display names | CT01.user-summaries reads `users` by identifier | existing `users` SELECT (r1) |
+| Foreign key to `users` (`actor_id`) | checked by PostgreSQL with the table owner's rights | none |
+
+The runtime role still cannot do any of the following (CT31: rows are append-only):
+
+- update any audit column (no UPDATE privilege on `audit_logs`);
+- delete or truncate audit rows.
+
+A compromised runtime role could read the whole audit log and append rows naming any existing user
+as actor, which the approved recording inherently requires; that only Administrators record and read,
+and that `actor_id` is the authenticated Administrator, stay application invariants (ADR012 §§7.1,
+7.3), and V006's primary key, foreign key and text check stay authoritative.
+
+The following stay synchronized with this record:
+
+- `RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh` (27 relations, V001–V009), with
+  `verify_role_separation` probing the audit rewrite and erase denials;
+- `test-deploy-privilege-matrix-contract.sh`, which pins r1 history and the r2–r8 and r10 rows;
+- `test-postgres-privilege-matrix-containment.sh`: the recording and read SQL under the provisioned
+  runtime role on the real schema, the reused-identifier (23505) and unknown-actor (23503) refusals and
+  the rewrite, erase and truncate denials (42501);
+- `test-runtime-real-backend-privileges.sh`: the real backend's audit read under the runtime role
+  (Administrator page with actor names and both time bounds, Learner 403, malformed query 400, no row
+  written by the read);
+- `AuditLogRepositoryIntegrationTest` runs the adapter's insert and read under a transaction-scoped role
+  holding exactly this row and shows that the role cannot update or delete audit rows.
+
+No HTTP operation records an audit row yet: the audited Administrator mutations are IN11, IN20 and
+IN21, which add their own real-backend cases (and their own `users`, `courses`, `lessons`,
+`discussion_posts` and `content_reports` revisions) when they are implemented.
+
+Remaining gates: owning-module (Admin @tihh647-ui), `@tihh647-ui` infrastructure and independent
+Leader CODEOWNER review; protected integration of PR #276; these grants on any shared or production
+database (Leader-reserved). This revision executes no provisioning on any real database.
+
+### CT17-P6-PRIVILEGES-2026-11-24-r11 — CO15 atomic progress (within the ADR012 §19.2 ceiling, 24 November 2026)
+
+The Project Leader explicitly authorized this minimal extension in **“CodeMastery — PR #285:
+Complete CO15, Add AD11 Course Read, Remediate Findings”**, 24 November 2026, with Course owner
+@TamiaoNguyen's consent. Scope: CO15 [#178](https://github.com/chi-thanh-nguyen/codemastery/issues/178)
+on [PR #285](https://github.com/chi-thanh-nguyen/codemastery/pull/285), the bounded CT33 Course read
+for AD11 [#168](https://github.com/chi-thanh-nguyen/codemastery/issues/168), supporting tests and
+this runtime revision. This is explicit implementation and matrix-extension authorization within
+the effective `CT17-P6-PLAN-2026-11-15-r2` ceiling
+([ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)),
+not an independent CODEOWNER review, deployment authorization or runtime acceptance.
+
+r10 was the latest recorded revision when this work began. Records r1–r10 remain authentic history;
+the row below replaces only r4's `lesson_progress` row. All other effective rows, migration-column
+deferrals and containment restrictions remain unchanged. No Flyway migration changes.
+
+| Relation (owner) | Runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `lesson_progress` (course) | SELECT, INSERT; UPDATE (completed, mastery_skipped) | `EnrollmentRepositoryImpl.markMasterySkipped`: insert absent progress or upgrade an existing incomplete row; Course participant locks/reads and CT33 learner snapshot | r11, explicitly Leader-authorized within ceiling, CT22-ATOMIC-2026-11-12-r1 (ADR011 §3) |
+
+The sole added privilege is **UPDATE (mastery_skipped)**. Existing SELECT/INSERT and UPDATE
+(completed) remain unchanged. The actual consumer uses:
+
+```sql
+INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped)
+VALUES (?,?,?,true,true) ON CONFLICT (enrollment_id,lesson_id) DO NOTHING;
+-- Only when the INSERT affected zero rows:
+UPDATE public.lesson_progress SET completed=true, mastery_skipped=true
+WHERE enrollment_id=? AND lesson_id=? AND completed=false;
+```
+
+Before those statements, the Course root is already held; the participant locks Enrollment then
+existing progress in Lesson UUID order. It iterates the published set in Chapter/Lesson canonical
+order. An absent row becomes true/true, an incomplete row becomes true/true, a completed row stays
+unchanged, including a manual true/false row. It never clears either flag, and repeats add no row.
+Enrollment reconciliation uses the existing UPDATE (status). No mastery table is read by Course.
+`readLearnerState(UUID courseId)` joins the caller's read-only REPEATABLE READ snapshot, applies
+CT03 before Course business reads, then reads only self Enrollment, published placements/progress
+and stored adaptive fields; it requires no root marker and no additional privileges.
+
+**Least-privilege limits.** No table-wide UPDATE, DELETE, TRUNCATE, DDL, grant option or UPDATE of
+progress identifiers/ancestry is granted. `verify_role_separation` now probes identifier/ancestry
+rewrite and erase denials; the exact ACL comparison still checks every column. Column grants can
+permit a compromised role to alter both flags of arbitrary progress rows: same-Course binding,
+manual-label preservation and monotonicity are application invariants, with V002's
+`mastery_skipped implies completed` check as a database invariant. Narrowing INSERT or UPDATE
+further would prevent the approved SQL; triggers, schema changes and new database role policies
+are excluded. These grants apply to existing V002 columns even on an admitted V006/V008 predecessor;
+only V009's `enrollments.last_visited_at` remains deferred under r9.
+
+**Synchronized evidence surfaces.** `RUNTIME_PRIVILEGE_MATRIX`, the matrix-contract test (r11's
+single row and unchanged r1–r10), the PostgreSQL containment test (absent/incomplete/manual rows,
+repeat, constraint failure and identifier/erase/TRUNCATE denials), and
+`EnrollmentIntegrationTest` (actual Spring participant SQL with exactly the Course subset of
+r11, pre-r11 42501, rollback and read-only snapshot tests) ship together. Execution results and
+commands are recorded in [testing.md](testing.md#co15-atomic-lessonprogress-participant-verification--24-november-2026).
+The containment test provisions only disposable local/CI PostgreSQL containers. No HTTP path
+currently invokes CO15 or this new internal Course read, so the existing real-backend HTTP suite
+establishes regression compatibility only, not full Assessment → Adaptive → Course integration.
+
+**Retained gates.** Independent Course/infrastructure/Leader CODEOWNER review, required CI and
+protected integration; AD13/AS12/QA04 real event/orchestration acceptance. Provisioning this
+revision on any shared database or VM remains a separately authorized Leader operation. This
+change does not provision, deploy, alter credentials or mutate a real VM/database.
+
+### CT17-P6-PRIVILEGES-2026-11-25-r12 — CO06 authoring and AS09 owner assignments (within the ADR012 §19.2 ceiling, 25 November 2026)
+
+The Project Leader explicitly authorized this extension in **"CodeMastery — PR #273: Independent
+Finding Verification & Autonomous Remediation"**, 25 November 2026 (finding U1). The instruction
+authorizes a dated revision inside the effective `CT17-P6-PLAN-2026-11-15-r2` ceiling
+([ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)),
+granting only privileges that the implemented SQL exercises and that real PostgreSQL proves. It is not
+an independent CODEOWNER, owning-module or infrastructure review, deployment authorization or runtime
+acceptance.
+
+Scope:
+
+- **AS09 owner slice** ([#160](https://github.com/chi-thanh-nguyen/codemastery/issues/160)), whose
+  consumer ships in [PR #273](https://github.com/chi-thanh-nguyen/codemastery/pull/273):
+  `AssignmentService`, `AssignmentRepositoryImpl`, `AssignmentJpaRepository` and
+  `SubmissionJpaRepository`.
+- **CO06 Instructor authoring** ([PR #265](https://github.com/chi-thanh-nguyen/codemastery/pull/265),
+  on `main` since `75cdb8b`): `CourseManagementService`, `CourseStructureService`,
+  `CourseRepositoryImpl` and `CourseContentRepositoryImpl`. CO06 merged without its own revision. The
+  r7 record already noted that deployed Course authoring needs one. PR #273's FE15/FE14 screens are the
+  first UI over these operations, so the revision ships with them.
+
+r11 was the latest recorded revision when this work began. Records r1–r11 remain authentic history.
+The rows below replace r1's `courses`, `chapters`, `lessons`, `learning_materials` (column SELECT
+for access snapshots), `assignments` (none) and `submissions` (none) rows. All other effective rows, the migration-column deferral (r4/r9) and the containment
+restrictions are unchanged. No Flyway migration changes.
+
+| Relation (owner) | Runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `courses` (course) | SELECT, INSERT; UPDATE (id, title, description, prerequisite_description, publication_status) | CO06 create, metadata replacement and publication; existing reads; root locks | r12 within ceiling (CT21.authoring); UPDATE (id) is r1's unchanged lock enabler |
+| `chapters` (course) | SELECT, INSERT; UPDATE (title, position) | CO06 append, rename and sibling reorder | r12 equals ceiling row (CT21.authoring, reorder) |
+| `lessons` (course) | SELECT, INSERT; UPDATE (title, content_markdown, position, publication_status) | CO06 append, content replacement, reorder and publication | r12 equals ceiling row (CT21.authoring) |
+| `learning_materials` (course) | SELECT | CO06 owner Course and Lesson reads (every material of the tree, hidden ones included); the same column list serves the CO03.content Learner Lesson read | r12 within ceiling (CT21.authoring; SELECT is the ceiling's read) |
+| `assignments` (assessment) | SELECT, INSERT; UPDATE (lesson_id, title, instructions, deadline_at, publication_status) | AS09 create, owner list and read, definition replacement, publication, the `FOR UPDATE` row lock | r12 equals ceiling row (CT10.rest, ADR010 §10) |
+| `submissions` (assessment) | SELECT (id, assignment_id, graded_at) | AS09 owner submission and graded counts | r12 within ceiling (CT10.rest owner counts) |
+
+Least privilege exercised by the consumers:
+
+| Operation | SQL (as issued) | Privilege |
+| --- | --- | --- |
+| Course root lock (every CO06 write; settings use `NOWAIT`) | `SELECT id FROM public.courses WHERE id = ? FOR UPDATE [NOWAIT]` | SELECT plus any column UPDATE (r1) |
+| Create a Course | `INSERT INTO public.courses (id, instructor_id, title, description, prerequisite_description, publication_status, adaptive_enabled, adaptive_settings) VALUES (…)` | INSERT |
+| Replace Course metadata | `UPDATE public.courses SET title = ?, description = ?, prerequisite_description = ? WHERE id = ?` | UPDATE on those three columns |
+| Course or Lesson publication (no cascade) | `UPDATE public.courses SET publication_status = ? WHERE id = ?`; `UPDATE public.lessons SET publication_status = ? WHERE id = ? AND chapter_id = ?`; a real change then reconciles joined completion with the existing r4 Enrollment UPDATE (status) | UPDATE (publication_status) on each |
+| Append a Chapter or Lesson | `INSERT INTO public.chapters (id, course_id, title, position) SELECT …, next_position FROM (SELECT COALESCE(max(position), 0)::bigint + 1 …) … RETURNING position`; the same shape for `lessons` | SELECT, INSERT |
+| Rename a Chapter; replace a Lesson | `UPDATE public.chapters SET title = ? WHERE id = ? AND course_id = ?`; `UPDATE public.lessons SET title = ?, content_markdown = ? WHERE id = ? AND chapter_id = ?` | UPDATE on those columns |
+| Reorder siblings (ADR006 §5) | `SET CONSTRAINTS public.uq_chapters_course_position DEFERRED`; `UPDATE public.chapters SET position = ? WHERE id = ? AND course_id = ?` for 1..N; `SET CONSTRAINTS … IMMEDIATE` (the same for Lessons) | UPDATE (position); `SET CONSTRAINTS` needs no grant |
+| Create an Assignment | Hibernate `persist` with an assigned identifier: `insert into assignments (course_id, deadline_at, instructions, lesson_id, publication_status, title, id) values (…)` | INSERT |
+| Assignment row lock (replace, publication) | `SELECT * FROM public.assignments WHERE id = ? AND course_id = ? FOR UPDATE`, then an entity refresh | SELECT plus any column UPDATE |
+| Replace or publish an Assignment | `update assignments set lesson_id = ?, title = ?, instructions = ?, deadline_at = ? where id = ? and course_id = ?`; `update assignments set publication_status = ? where id = ? and course_id = ?` | UPDATE on those columns |
+| Owner list and read | `select count(a1_0.id) …`; `SELECT * FROM public.assignments WHERE course_id = ? ORDER BY title COLLATE "C", id LIMIT ? OFFSET ?` | SELECT |
+| Submission counts | `select s1_0.assignment_id, count(s1_0.id), count(s1_0.graded_at) from submissions s1_0 where s1_0.assignment_id in (…) group by s1_0.assignment_id` | SELECT (id, assignment_id, graded_at); removing `id` fails with 42501 |
+| Owner Course read (every CO06 response) and owner or Learner Lesson read | `SELECT m.id, m.lesson_id, m.title, m.material_type, m.publication_status, m.text_content, m.object_key, m.original_filename, m.external_video_url FROM public.learning_materials m JOIN public.lessons l … JOIN public.chapters ch … WHERE ch.course_id = ? ORDER BY …` (`CourseContentRepositoryImpl.MATERIAL_COLUMNS`) | SELECT on all nine columns; with only r1's three columns `GET /api/instructor/courses/{id}` and every authoring response failed with 42501 (500) under the runtime role |
+| Foreign keys (`chapters.course_id`, `lessons.chapter_id`, `assignments.course_id`/`lesson_id`) | checked by PostgreSQL with the table owner's rights | none (no REFERENCES) |
+
+Deliberately not granted, because no HTTP operation reaches the SQL: `courses` UPDATE (adaptive_enabled,
+adaptive_settings) (`CourseManagementService.writeAdaptiveConfiguration` has no caller), every
+`learning_materials` write (CT09), and every `submissions` write or wider read (Learner submission
+and grading, AS10/AS11). Those consumers add their own revisions within the ceiling when they are
+implemented.
+
+The runtime role still cannot do any of the following:
+
+- re-own a Course (no UPDATE on `courses.instructor_id`), rewrite its adaptive configuration, or delete
+  or truncate Courses, Chapters or Lessons;
+- move a Chapter to another Course or a Lesson to another Chapter (no UPDATE on `chapters.course_id`
+  or `lessons.chapter_id`), or re-key either;
+- move an Assignment to another Course (no UPDATE on `assignments.course_id`), re-key, delete or
+  truncate it;
+- create, update, delete or truncate learning materials;
+- read a submission's learner, object key, file name, grade or feedback, or create, update, delete or
+  truncate submissions.
+
+A compromised runtime role could create Courses naming any existing user as Instructor, and could
+rewrite the metadata, structure and publication of any Course and any Assignment. It can now also read
+material payload columns, including `object_key` and `original_filename`, which r1 kept unreadable.
+The CO06 SQL selects them, although its responses never expose them. An object key does not grant
+storage access without the MinIO credentials. Narrowing the Course module's material reads so that this
+column-level containment returns is a Course-module change, outside this revision. The approved owner
+operations inherently require that. Ownership (`instructor_id` equals the authenticated Instructor),
+Course scoping, same-Course Lesson binding and the publication rules stay application invariants.
+V002 and V004 keys, checks and the deferrable sibling-position uniqueness stay authoritative.
+
+**Synchronized evidence surfaces.** These change together with this record:
+
+- `RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh` (27 relations, V001–V009).
+  `verify_role_separation` now probes Course re-ownership, adaptive-setting, structure delete and move,
+  material write and delete, Assignment move and delete, and submission file and grade denials. It no
+  longer expects Course publication or material payload reads to be denied.
+- `test-deploy-privilege-matrix-contract.sh` pins r12's six rows, checks them against the ceiling's
+  "Never granted" column, and keeps r1–r11 unchanged.
+- `test-postgres-privilege-matrix-containment.sh` runs the CO06 and AS09 SQL above under the
+  provisioned runtime role on the real schema: deferred reorder, the 23505 sibling refusal, the 23503
+  Lesson foreign key, and owner counts over admin-inserted submissions. It also checks the denials above
+  (42501).
+- `test-runtime-real-backend-privileges.sh` runs the CO06 authoring and AS09 owner operations over HTTP
+  under the runtime role, plus the owner and Learner Lesson reads. Before the `learning_materials` row
+  was added, this test found the 500 on the first metadata replacement.
+- `AssessmentPersistenceIntegrationTest` runs the AS09 adapter under a transaction-scoped role holding
+  exactly the r12 `assignments` and `submissions` rows. That includes the `FOR UPDATE` lock that blocks
+  a concurrent submission insert (55P03).
+
+Execution results are recorded in
+[testing.md](testing.md#pr-273-u1u6-remediation-verification--25-november-2026). The containment and
+real-backend tests provision only disposable local or CI PostgreSQL containers.
+
+**Retained gates.** These remain open:
+
+- Owning-module review: Course (@TamiaoNguyen) for the CO06 rows, Assessment (@minhtan29042006) for
+  the AS09 rows.
+- `@tihh647-ui` infrastructure review and independent Leader CODEOWNER review.
+- Required CI and protected integration of PR #273.
+
+Provisioning this revision on any shared database or VM remains a separately authorized Leader
+operation. This change does not provision, deploy, alter credentials or mutate a real VM or database.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -4482,7 +4727,8 @@ the CO08 r4 rows for `enrollments` and `lesson_progress` inside it; since 22 Nov
 AD07 r5 rows for `skills`, `skill_prerequisites` and `lesson_skills` inside it; since 22 November 2026,
 the AS05 r6 rows for `questions`, `quiz_questions` and `attempt_answers` inside it, and the AS06 r7 rows
 for `quizzes`, `quiz_questions` and `attempts` inside it; since 23 November 2026, the AD06 r8 rows for
-`learner_skill_masteries` and `path_recommendations` inside it), and the extension procedure above
+`learner_skill_masteries` and `path_recommendations` inside it; since 24 November 2026, the IN10 r10 row
+for `audit_logs` inside it, followed by CO15 r11's `lesson_progress` replacement), and the extension procedure above
 still applies unchanged: each implemented consumer adds its own dated revision,
 `RUNTIME_PRIVILEGE_MATRIX` and CI tests together, never beyond the ceiling. Nothing is
 granted, and provisioning on any real database remains Leader-reserved.

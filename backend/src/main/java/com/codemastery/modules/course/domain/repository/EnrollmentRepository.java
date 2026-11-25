@@ -72,7 +72,18 @@ public interface EnrollmentRepository {
     /** Latest valid recorded visit: ACTIVE, published Course, published same-Course Lesson, non-null time. */
     Optional<VisitPosition> latestVisit(UUID userId);
 
+    /** Like {@link #publishedLessonFlags} with Chapter/Lesson placement; a null enrollmentId gives false/false flags. */
+    List<LessonPlacement> publishedLessonPlacements(UUID courseId, UUID enrollmentId);
+
+    /** Locks the Enrollment's existing progress rows (after its Enrollment row), in lesson-id order. */
+    void lockProgress(UUID enrollmentId);
+
+    /** Absent row → completed and skipped; incomplete row → both true; a completed row is left unchanged. */
+    void markMasterySkipped(UUID enrollmentId, UUID lessonId);
+
     record LessonFlags(UUID lessonId, boolean completed, boolean masterySkipped) {}
+    record LessonPlacement(UUID lessonId, UUID chapterId, int chapterPosition, int lessonPosition,
+            boolean completed, boolean masterySkipped) {}
     record ProgressSummary(UUID courseId, String title, long totalLessons, long completedLessons, UUID nextLessonId) {}
     record VisitPosition(UUID courseId, UUID lessonId, Instant lastVisitedAt) {}
 }

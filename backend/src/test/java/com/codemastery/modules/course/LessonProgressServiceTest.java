@@ -12,10 +12,21 @@ import com.codemastery.modules.course.application.service.EnrollmentService;
 import com.codemastery.modules.course.application.service.LessonProgressService;
 import com.codemastery.modules.course.domain.model.Enrollment;
 import com.codemastery.modules.course.domain.model.EnrollmentStatus;
+import com.codemastery.modules.course.domain.repository.CourseRepository;
+import com.codemastery.modules.course.domain.repository.CourseRepository.StoredAdaptiveConfiguration;
+import com.codemastery.modules.course.domain.repository.CourseRepository.TransactionFacts;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository;
+import com.codemastery.modules.course.domain.repository.EnrollmentRepository.LessonPlacement;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository.LessonFlags;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository.ProgressSummary;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository.VisitPosition;
+import com.sun.source.tree.IdentifierTree;
+import com.sun.source.tree.MemberReferenceTree;
+import com.sun.source.tree.MemberSelectTree;
+import com.sun.source.tree.MethodInvocationTree;
+import com.sun.source.util.JavacTask;
+import com.sun.source.util.TreeScanner;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,13 +42,28 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.lang.reflect.Method;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.HashSet;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import javax.tools.Diagnostic;
+import javax.tools.DiagnosticCollector;
+import javax.tools.JavaFileObject;
+import javax.tools.SimpleJavaFileObject;
+import javax.tools.ToolProvider;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -52,12 +78,13 @@ class LessonProgressServiceTest {
     @Mock EnrollmentRepository repository;
     @Mock UserAccountService identities;
     @Mock CourseAccessService access;
+    @Mock CourseRepository courses;
     LessonProgressService service;
 
     private final UUID actor = UUID.randomUUID(), course = UUID.randomUUID(), row = UUID.randomUUID();
     private final UUID a = UUID.randomUUID(), b = UUID.randomUUID(), c = UUID.randomUUID();
 
-    @BeforeEach void setup() { service = new LessonProgressService(repository, identities, access); }
+    @BeforeEach void setup() { service = new LessonProgressService(repository, identities, access, courses); }
 
     private void learner() { when(identities.requireCurrentIdentity()).thenReturn(new CurrentIdentity(actor, IdentityRole.LEARNER)); }
     private Enrollment enrollment(EnrollmentStatus status, UUID resume) { return new Enrollment(row, actor, course, status, resume); }
@@ -380,6 +407,372 @@ class LessonProgressServiceTest {
         for (String trailing : List.of(" garbage", "{}", "{\"lessonId\":\"" + a + "\"}", "]", " 0"))
             assertEquals(Optional.empty(), CourseProgressResponse.visitLessonId("{\"lessonId\":\"" + a + "\"}" + trailing), trailing);
         assertTrue(CourseProgressResponse.isCompletionWrite(" {\"completed\":true} \n"));
+    }
+
+    // ---- CT22.atomic (ADR011 §3): actorless participant under the caller's held Course root
+
+    private final UUID chapter = UUID.randomUUID();
+    private final Map<String, Object> settings = Map.of("masteryThreshold", 0.8);
+
+    @AfterEach void clearTransaction() {
+        TransactionSynchronizationManager.setActualTransactionActive(false);
+        TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+        TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(null);
+    }
+
+    private void readSnapshot() {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
+        TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(Isolation.REPEATABLE_READ.value());
+    }
+
+    @ParameterizedTest @EnumSource(value = EnrollmentStatus.class, names = {"ACTIVE", "COMPLETED"})
+    void learnerStateAdmitsBeforeReadingSelfStateAndReusesTheExecutionProjection(EnrollmentStatus status) throws Exception {
+        readSnapshot(); learner(); joined(status, a); adaptive();
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(
+                List.of(placed(a, 1, true, false), placed(b, 3, true, true), placed(c, 7, false, false)));
+        var state = service.readLearnerState(course);
+        assertEquals(course, state.courseId()); assertEquals(actor, state.learnerId()); assertEquals(row, state.enrollmentId());
+        assertEquals(status.getStatus(), state.membershipStatus());
+        assertTrue(state.adaptiveEnabled()); assertEquals(settings, state.adaptiveSettings());
+        assertEquals(List.of(new LessonProgressService.LessonState(a, chapter, 1, 1, true, false),
+                new LessonProgressService.LessonState(b, chapter, 1, 3, true, true),
+                new LessonProgressService.LessonState(c, chapter, 1, 7, false, false)), state.lessons());
+        InOrder order = inOrder(access, identities, repository, courses);
+        order.verify(access).requireLearnerCourseAccess(course);
+        order.verify(identities).requireCurrentIdentity();
+        order.verify(repository).find(actor, course);
+        order.verify(repository).publishedLessonPlacements(course, row);
+        order.verify(courses).findAdaptiveConfiguration(course);
+        verifyNoMoreInteractions(access, identities, repository, courses); // no root, locks or writes
+        assertTransaction("readLearnerState", true, Isolation.REPEATABLE_READ, UUID.class);
+        assertEquals(Propagation.MANDATORY, LessonProgressService.class.getMethod("readLearnerState", UUID.class)
+                .getAnnotation(Transactional.class).propagation());
+    }
+
+    @Test void learnerStateRejectsAnIncompatibleOrAbsentCallerTransactionBeforeAdmission() {
+        assertThrows(IllegalStateException.class, () -> service.readLearnerState(course));
+        readSnapshot(); TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+        assertThrows(IllegalStateException.class, () -> service.readLearnerState(course));
+        readSnapshot(); TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(Isolation.READ_COMMITTED.value());
+        assertThrows(IllegalStateException.class, () -> service.readLearnerState(course));
+        verifyNoInteractions(access, identities, repository, courses);
+    }
+
+    @Test void learnerStatePropagatesEveryAdmissionFailureWithoutReadingBusinessData() {
+        readSnapshot();
+        for (var failure : List.of(new BadCredentialsException("Authentication failed"), new AccessDeniedException("Denied"),
+                new ResourceNotFoundException("Unavailable"), new IllegalStateException("Provider failed"))) {
+            doThrow(failure).when(access).requireLearnerCourseAccess(course);
+            assertSame(failure, assertThrows(failure.getClass(), () -> service.readLearnerState(course)));
+        }
+        verifyNoInteractions(identities, repository, courses);
+    }
+
+    @Test void learnerStatePropagatesRepositoryFailureAndRejectsImpossibleAdmittedMembership() {
+        readSnapshot(); learner();
+        when(repository.find(actor, course)).thenReturn(Optional.empty(), Optional.of(enrollment(EnrollmentStatus.LEFT, null)));
+        assertThrows(IllegalStateException.class, () -> service.readLearnerState(course));
+        assertThrows(IllegalStateException.class, () -> service.readLearnerState(course));
+        var failure = new IllegalStateException("Database failed");
+        when(repository.find(actor, course)).thenThrow(failure);
+        assertSame(failure, assertThrows(IllegalStateException.class, () -> service.readLearnerState(course)));
+        verify(repository, never()).publishedLessonPlacements(any(), any()); verifyNoInteractions(courses);
+    }
+
+    @Test void learnerStateKeepsNullSettingsAndNeverReconcilesAStoredMembershipOnRead() {
+        readSnapshot(); learner(); joined(EnrollmentStatus.COMPLETED, a);
+        when(courses.findAdaptiveConfiguration(course)).thenReturn(Optional.of(new StoredAdaptiveConfiguration(course, false, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(List.of(placed(a, 1, false, false)));
+        var state = service.readLearnerState(course);
+        assertNull(state.adaptiveSettings()); assertFalse(state.adaptiveEnabled());
+        assertEquals("completed", state.membershipStatus()); assertFalse(state.lessons().getFirst().completed());
+        verify(repository, never()).updateStatus(any(), any());
+        verify(courses, never()).currentTransactionFacts();
+    }
+
+    @Test @SuppressWarnings("unchecked")
+    void learnerCourseStateDefensivelyCopiesNestedJsonAndLessonsAtEveryConstructionBoundary() {
+        var nested = new LinkedHashMap<String, Object>();
+        nested.put("threshold", new java.math.BigDecimal("0.80")); nested.put("nullable", null);
+        var array = new ArrayList<Object>(); array.add(nested); array.add(null);
+        var source = new LinkedHashMap<String, Object>(); source.put("array", array);
+        var lessons = new ArrayList<LessonProgressService.LessonState>();
+        lessons.add(new LessonProgressService.LessonState(a, chapter, 1, 1, false, false));
+        var state = new LessonProgressService.LearnerCourseState(course, actor, row, "active", false, source, lessons);
+        nested.put("threshold", 1); array.clear(); source.clear(); lessons.clear();
+        var returnedArray = (List<Object>) state.adaptiveSettings().get("array");
+        var returnedObject = (Map<String, Object>) returnedArray.getFirst();
+        assertEquals(new java.math.BigDecimal("0.80"), returnedObject.get("threshold"));
+        assertTrue(returnedObject.containsKey("nullable")); assertNull(returnedObject.get("nullable"));
+        assertNull(returnedArray.get(1)); assertEquals(1, state.lessons().size());
+        assertThrows(UnsupportedOperationException.class, () -> state.adaptiveSettings().clear());
+        assertThrows(UnsupportedOperationException.class, () -> returnedArray.add("changed"));
+        assertThrows(UnsupportedOperationException.class, () -> returnedObject.put("threshold", 2));
+        assertThrows(UnsupportedOperationException.class, () -> state.lessons().clear());
+    }
+
+    /** CT33 and ADR013 §19.4: only the approved Adaptive read compositions may consume the admitted state. */
+    @Test void learnerStateHasOnlyTheApprovedAdaptiveReadCallers() throws Exception {
+        Path root = Path.of("src", "main", "java", "com", "codemastery");
+        var allowed = Set.of(root.resolve("modules/course/application/service/LessonProgressService.java"),
+                root.resolve("modules/adaptive/application/mastery/MasteryQueryService.java"),
+                root.resolve("modules/adaptive/application/recommendation/RecommendationService.java"),
+                root.resolve("modules/adaptive/application/mastery/PlacementDiagnosticService.java"));
+        try (var files = Files.walk(root)) {
+            var callers = files.filter(file -> file.toString().endsWith(".java")).filter(file -> {
+                try { return calledMethods(Files.readString(file)).contains("readLearnerState"); }
+                catch (java.io.IOException e) { throw new java.io.UncheckedIOException(e); }
+            }).toList();
+            // No production caller is required before upstream integration; declarations are not callers.
+            assertTrue(allowed.containsAll(callers), () -> "Unapproved CT33 learner state callers: " + callers);
+        }
+    }
+    private void heldRoot(String isolation, boolean readOnly, UUID root) {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        when(courses.currentTransactionFacts()).thenReturn(new TransactionFacts(isolation, readOnly, true, root));
+    }
+    private void heldRoot() { heldRoot("read committed", false, course); }
+    private void adaptive() {
+        when(courses.findAdaptiveConfiguration(course)).thenReturn(Optional.of(new StoredAdaptiveConfiguration(course, true, settings)));
+    }
+    private LessonPlacement placed(UUID id, int position, boolean completed, boolean skipped) {
+        return new LessonPlacement(id, chapter, 1, position, completed, skipped);
+    }
+
+    @Test void participantRefusesWithoutAnActiveTransactionBeforeAnyRead() {
+        assertThrows(IllegalStateException.class, () -> service.readExecutionState(course, actor));
+        assertThrows(IllegalStateException.class, () -> service.applyMasterySkips(course, actor, Set.of(a)));
+        verifyNoInteractions(repository, courses, identities, access);
+    }
+
+    @Test void participantRefusesAReadOnlyOuterTransaction() {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
+        assertThrows(IllegalStateException.class, () -> service.readExecutionState(course, actor));
+        verifyNoInteractions(repository, courses);
+    }
+
+    @Test void participantRefusesWrongIsolationReadOnlyOrAnotherCoursesRoot() {
+        for (var facts : List.of(new Object[]{"repeatable read", false, course}, new Object[]{"read committed", true, course},
+                new Object[]{"read committed", false, UUID.randomUUID()}, new Object[]{"read committed", false, null})) {
+            heldRoot((String) facts[0], (Boolean) facts[1], (UUID) facts[2]);
+            assertThrows(IllegalStateException.class, () -> service.applyMasterySkips(course, actor, Set.of(a)));
+        }
+        verifyNoInteractions(repository, identities, access);
+        verify(courses, never()).findAdaptiveConfiguration(any());
+    }
+
+    @Test void executionStateReportsNoneMembershipWithFalseFlagsSettingsAndCanonicalPlacement() {
+        heldRoot(); adaptive();
+        when(repository.find(actor, course)).thenReturn(Optional.empty());
+        when(repository.publishedLessonPlacements(course, null)).thenReturn(List.of(placed(a, 1, false, false), placed(b, 3, false, false)));
+        var state = service.readExecutionState(course, actor);
+        assertEquals("none", state.membershipStatus()); assertNull(state.enrollmentId());
+        assertTrue(state.adaptiveEnabled()); assertEquals(settings, state.adaptiveSettings());
+        assertEquals(List.of(new LessonProgressService.LessonState(a, chapter, 1, 1, false, false),
+                new LessonProgressService.LessonState(b, chapter, 1, 3, false, false)), state.lessons());
+        verify(repository, never()).lockEnrollment(any(), any());
+        verifyNoInteractions(identities, access);
+    }
+
+    @Test void executionStateReportsLeftMembershipAndNullSettingsOfAnUnconfiguredCourse() {
+        heldRoot();
+        when(courses.findAdaptiveConfiguration(course)).thenReturn(Optional.of(new StoredAdaptiveConfiguration(course, false, null)));
+        when(repository.find(actor, course)).thenReturn(Optional.of(enrollment(EnrollmentStatus.LEFT, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(List.of());
+        var state = service.readExecutionState(course, actor);
+        assertEquals("left", state.membershipStatus()); assertEquals(row, state.enrollmentId());
+        assertFalse(state.adaptiveEnabled()); assertNull(state.adaptiveSettings());
+    }
+
+    @Test void enabledCourseWithoutStoredSettingsIsAnIntegrityFailure() {
+        heldRoot();
+        when(courses.findAdaptiveConfiguration(course)).thenReturn(Optional.of(new StoredAdaptiveConfiguration(course, true, null)));
+        when(repository.find(actor, course)).thenReturn(Optional.empty());
+        assertThrows(IllegalStateException.class, () -> service.readExecutionState(course, actor));
+    }
+
+    @Test void masterySkipsLockEnrollmentThenProgressSkipOnlyIncompleteLessonsAndRecalculateMembership() {
+        heldRoot(); adaptive();
+        when(repository.lockEnrollment(actor, course)).thenReturn(Optional.of(enrollment(EnrollmentStatus.ACTIVE, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(
+                List.of(placed(a, 1, true, false), placed(b, 2, false, false), placed(c, 3, false, false)),
+                List.of(placed(a, 1, true, false), placed(b, 2, true, true), placed(c, 3, true, true)));
+        var state = service.applyMasterySkips(course, actor, Set.of(a, b, c));
+        InOrder order = inOrder(courses, repository);
+        order.verify(courses).currentTransactionFacts();
+        order.verify(repository).lockEnrollment(actor, course);
+        order.verify(repository).lockProgress(row);
+        order.verify(repository).markMasterySkipped(row, b);
+        order.verify(repository).markMasterySkipped(row, c);
+        order.verify(repository).updateStatus(row, EnrollmentStatus.COMPLETED);
+        // A manual completion is never relabelled.
+        verify(repository, never()).markMasterySkipped(row, a);
+        verify(repository, never()).markCompleted(any(), any());
+        assertEquals("completed", state.membershipStatus());
+        assertEquals(List.of(false, true, true), state.lessons().stream().map(LessonProgressService.LessonState::masterySkipped).toList());
+        verifyNoInteractions(identities, access);
+    }
+
+    @Test void completedMembershipStaysCompletedWithoutARedundantStatusWrite() {
+        heldRoot(); adaptive();
+        when(repository.lockEnrollment(actor, course)).thenReturn(Optional.of(enrollment(EnrollmentStatus.COMPLETED, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(List.of(placed(a, 1, true, false)));
+        assertEquals("completed", service.applyMasterySkips(course, actor, Set.of(a)).membershipStatus());
+        verify(repository, never()).markMasterySkipped(any(), any());
+        verify(repository, never()).updateStatus(any(), any());
+    }
+
+    @Test void partialMasterySkipsKeepActiveMembershipWithoutRedundantWritesOnRepeat() {
+        heldRoot(); adaptive();
+        when(repository.lockEnrollment(actor, course)).thenReturn(Optional.of(enrollment(EnrollmentStatus.ACTIVE, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(
+                List.of(placed(a, 1, true, false), placed(b, 2, false, false), placed(c, 3, false, false)),
+                List.of(placed(a, 1, true, false), placed(b, 2, true, true), placed(c, 3, false, false)));
+        var expected = new LessonProgressService.LearnerCourseState(course, actor, row, "active", true, settings, List.of(
+                new LessonProgressService.LessonState(a, chapter, 1, 1, true, false),
+                new LessonProgressService.LessonState(b, chapter, 1, 2, true, true),
+                new LessonProgressService.LessonState(c, chapter, 1, 3, false, false)));
+        assertEquals(expected, service.applyMasterySkips(course, actor, Set.of(a, b)));
+        assertEquals(expected, service.applyMasterySkips(course, actor, Set.of(a, b)));
+        verify(repository, times(1)).markMasterySkipped(row, b);
+        verify(repository, times(1)).markMasterySkipped(any(), any());
+        verify(repository, never()).markCompleted(any(), any());
+        verify(repository, never()).updateStatus(any(), any());
+        verifyNoInteractions(identities, access);
+    }
+
+    @Test void partialMasterySkipsReconcileStaleCompletedMembershipToActiveExactlyOnce() {
+        heldRoot(); adaptive();
+        when(repository.lockEnrollment(actor, course)).thenReturn(
+                Optional.of(enrollment(EnrollmentStatus.COMPLETED, null)),
+                Optional.of(enrollment(EnrollmentStatus.ACTIVE, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(
+                List.of(placed(a, 1, false, false), placed(b, 2, false, false), placed(c, 3, true, false)),
+                List.of(placed(a, 1, true, true), placed(b, 2, false, false), placed(c, 3, true, false)));
+        var expected = new LessonProgressService.LearnerCourseState(course, actor, row, "active", true, settings, List.of(
+                new LessonProgressService.LessonState(a, chapter, 1, 1, true, true),
+                new LessonProgressService.LessonState(b, chapter, 1, 2, false, false),
+                new LessonProgressService.LessonState(c, chapter, 1, 3, true, false)));
+        assertEquals(expected, service.applyMasterySkips(course, actor, Set.of(a, c)));
+        assertEquals(expected, service.applyMasterySkips(course, actor, Set.of(a, c)));
+        verify(repository, times(1)).markMasterySkipped(row, a);
+        verify(repository, times(1)).markMasterySkipped(any(), any());
+        verify(repository, never()).markCompleted(any(), any());
+        verify(repository, times(1)).updateStatus(row, EnrollmentStatus.ACTIVE);
+        verify(repository, times(1)).updateStatus(any(), any());
+        verifyNoInteractions(identities, access);
+    }
+
+    @Test void emptySetIsANoOp() {
+        heldRoot(); adaptive();
+        when(repository.lockEnrollment(actor, course)).thenReturn(Optional.of(enrollment(EnrollmentStatus.ACTIVE, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(List.of(placed(a, 1, false, false)));
+        assertEquals("active", service.applyMasterySkips(course, actor, Set.of()).membershipStatus());
+        verify(repository, never()).lockProgress(any());
+        verify(repository, never()).markMasterySkipped(any(), any());
+        verify(repository, never()).updateStatus(any(), any());
+    }
+
+    @Test void absentOrLeftMembershipIsAnInternalErrorWithoutWrites() {
+        heldRoot();
+        when(repository.lockEnrollment(actor, course)).thenReturn(Optional.empty(), Optional.of(enrollment(EnrollmentStatus.LEFT, null)));
+        assertThrows(IllegalStateException.class, () -> service.applyMasterySkips(course, actor, Set.of(a)));
+        assertThrows(IllegalStateException.class, () -> service.applyMasterySkips(course, actor, Set.of(a)));
+        verify(repository, never()).markMasterySkipped(any(), any());
+        verify(repository, never()).updateStatus(any(), any());
+    }
+
+    @Test void hiddenOrForeignLessonIsRejectedBeforeAnyWrite() {
+        heldRoot();
+        when(repository.lockEnrollment(actor, course)).thenReturn(Optional.of(enrollment(EnrollmentStatus.ACTIVE, null)));
+        when(repository.publishedLessonPlacements(course, row)).thenReturn(List.of(placed(a, 1, false, false)));
+        assertThrows(IllegalArgumentException.class, () -> service.applyMasterySkips(course, actor, Set.of(a, b)));
+        verify(repository, never()).lockProgress(any());
+        verify(repository, never()).markMasterySkipped(any(), any());
+    }
+
+    @Test void nullArgumentsAreInternalErrors() {
+        var withNull = new java.util.HashSet<UUID>(); withNull.add(null);
+        assertThrows(IllegalArgumentException.class, () -> service.readExecutionState(null, actor));
+        assertThrows(IllegalArgumentException.class, () -> service.readExecutionState(course, null));
+        assertThrows(IllegalArgumentException.class, () -> service.applyMasterySkips(course, actor, null));
+        assertThrows(IllegalArgumentException.class, () -> service.applyMasterySkips(course, actor, withNull));
+        verifyNoInteractions(repository, courses);
+    }
+
+    /** ADR011 §3 allowlist: only Adaptive's execution orchestration may call the participant; no REST or scheduler. */
+    @Test void participantMethodsHaveOnlyTheApprovedCallers() throws Exception {
+        Path root = Path.of("src", "main", "java", "com", "codemastery");
+        var allowed = Set.of(root.resolve("modules/course/application/service/LessonProgressService.java"),
+                root.resolve("modules/adaptive/application/mastery/MasteryUpdateService.java"),
+                root.resolve("modules/adaptive/application/decision/AdaptiveDecisionService.java"));
+        try (var files = Files.walk(root)) {
+            var callers = files.filter(file -> file.toString().endsWith(".java")).filter(file -> {
+                try {
+                    var calls = calledMethods(Files.readString(file));
+                    return calls.contains("readExecutionState") || calls.contains("applyMasterySkips");
+                } catch (java.io.IOException e) { throw new java.io.UncheckedIOException(e); }
+            }).toList();
+            // No production caller is required before upstream integration; declarations are not callers.
+            assertTrue(allowed.containsAll(callers), () -> "Unapproved CT22.atomic callers: " + callers);
+        }
+    }
+
+    /** Parse only: no dependency resolution or compilation; declarations and non-code text are not calls. */
+    private static Set<String> calledMethods(String source) throws java.io.IOException {
+        var compiler = ToolProvider.getSystemJavaCompiler();
+        assertNotNull(compiler, "Caller allowlist tests require the project's JDK");
+        var diagnostics = new DiagnosticCollector<JavaFileObject>();
+        var input = new SimpleJavaFileObject(URI.create("string:///Caller.java"), JavaFileObject.Kind.SOURCE) {
+            @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) { return source; }
+        };
+        try (var fileManager = compiler.getStandardFileManager(diagnostics, null, null)) {
+            var task = (JavacTask) compiler.getTask(null, fileManager, diagnostics, List.of("-proc:none"), null, List.of(input));
+            Set<String> calls = new HashSet<>();
+            var scanner = new TreeScanner<Void, Void>() {
+                @Override public Void visitMethodInvocation(MethodInvocationTree node, Void unused) {
+                    if (node.getMethodSelect() instanceof MemberSelectTree member) calls.add(member.getIdentifier().toString());
+                    else if (node.getMethodSelect() instanceof IdentifierTree identifier) calls.add(identifier.getName().toString());
+                    return super.visitMethodInvocation(node, unused);
+                }
+                @Override public Void visitMemberReference(MemberReferenceTree node, Void unused) {
+                    calls.add(node.getName().toString());
+                    return super.visitMemberReference(node, unused);
+                }
+            };
+            for (var unit : task.parse()) scanner.scan(unit, null);
+            assertFalse(diagnostics.getDiagnostics().stream().anyMatch(d -> d.getKind() == Diagnostic.Kind.ERROR),
+                    () -> "Cannot parse Java source for caller allowlist: " + diagnostics.getDiagnostics());
+            return calls;
+        }
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"readLearnerState", "readExecutionState", "applyMasterySkips"})
+    void callerScanDetectsInvocationsAndReferencesWithoutMatchingDeclarationsOrNonCode(String method) throws Exception {
+        for (String expression : List.of("service." + method + "(id)", method + "(id)",
+                "service :: " + method, "service :: <UUID> " + method)) {
+            assertTrue(calledMethods("class Caller { void run() { var result = " + expression + "; } }").contains(method), expression);
+        }
+        var nonCalls = """
+                class Caller {
+                    Object %1$s(Object id) { return null; }
+                    // service.%1$s(id); service::%1$s
+                    /* service.%1$s(id); service::%1$s */
+                    String literal = "service.%1$s(id); service::%1$s";
+                    String block = \"\"\"
+                            service.%1$s(id); service::%1$s
+                            \"\"\";
+                    void other() { service.%1$sSuffix(id); }
+                }
+                """.formatted(method);
+        assertFalse(calledMethods(nonCalls).contains(method));
+    }
+
+    @Test void participantMethodsDeclareNoOwnTransaction() throws Exception {
+        assertNull(LessonProgressService.class.getMethod("readExecutionState", UUID.class, UUID.class).getAnnotation(Transactional.class));
+        assertNull(LessonProgressService.class.getMethod("applyMasterySkips", UUID.class, UUID.class, Set.class).getAnnotation(Transactional.class));
     }
 
     private static void assertTransaction(String method, boolean readOnly, Isolation isolation, Class<?>... parameters) throws Exception {

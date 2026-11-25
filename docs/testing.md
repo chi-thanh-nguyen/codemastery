@@ -54,7 +54,7 @@ verification is separate work.
 | Frontend unit/component | Vitest 5 with jsdom and real React DOM; `frontend/src/**/*.test.ts(x)` | Yes (`Frontend`) | Client, provider, router, page, design-preview and presentation behavior against controlled responses | A real backend, browser layout or assistive-technology output |
 | Optional browser harness | `npm run test:browser` (`presentation.browser.cjs`), using the Playwright installed in `e2e/` | No | Chromium/WebKit/Firefox layout at ten widths and 200% zoom, contrast, focus, dialogs, drawer, reduced motion, font loading and preview isolation, with controlled API responses ([interface](#browser-harness-and-e2e-suite)) | Live API integration, screen-reader output |
 | E2E stack lifecycle | `node --test fixtures/*.test.mjs` from `e2e/` (`lifecycle.test.mjs`, `run-inventory.test.mjs`, `stack-recovery.test.mjs`, `preview-control.test.mjs`, `local-stack.test.mjs`, `stack-down.test.mjs`); Python 3 (standard library only) and Node 22.18+ or 24; the coordinator tests use disposable fake checkouts and the real per-account registry, the recovery tests an injected fake Docker CLI, the other tests a stub `docker` on `PATH`, a stub Vite build entry point and a stub Vite preview module | Yes — the `E2E` check of `CI E2E` | CT34 r2: exclusive ownership taken and persisted before Playwright starts; same-checkout and path-alias conflicts refused without touching outputs; isolated checkouts concurrent; nonterminal, corrupt, widened-mode or earlier-device-identity records block reuse; a stale or exported hand-down is refused; unsafe output roots refused; birth-identity process classification (PID reuse never signalled); cooperative preview shutdown over the private channel with no PID fallback; no build or Docker removal while a writer lives; endpoint-bound Docker calls and daemon-confirmed absence (a lost daemon socket is never absence; recorded states are re-verified); interrupted-intent reconciliation; volume associations and unaccounted volumes; verified temporary-path removal; bounded idempotent retry; readiness marker and backend diagnostics | Real Docker, Vite, browsers or the E2E flows themselves ([real-Docker record](#fe24-ct34-r2-lifecycle-implementation--13-november-2026)) |
-| Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` and by the `E2E` job of `CI E2E`, a required check ([interface](#browser-harness-and-e2e-suite)) | Yes — the `E2E` check of `CI E2E` | Browser → production frontend build → REST → PostgreSQL for the landing page, registration, sign-in, session-ended notice, catalogue, detail, membership, Learner home, My courses, Profile, sign-out, role denial and not-found, on a disposable local stack | Deployed Nginx/TLS behavior, production data; `tests/adaptive-flow.spec.ts` is empty |
+| Playwright E2E | `e2e/` (`@playwright/test` 1.63.0, `playwright.config.ts`, `fixtures/`, `tests/learner-flow.spec.ts`), run locally with `npm test` from `e2e/` and by the `E2E` job of `CI E2E`, a required check ([interface](#browser-harness-and-e2e-suite)) | Yes — the `E2E` check of `CI E2E` | Browser → production frontend build → REST → PostgreSQL for the landing page, registration, sign-in, session-ended notice, catalogue, detail, membership, Learner home, My courses, Profile, sign-out, role denial, not-found, and Instructor course, skill-graph and assessment authoring (Teaching, Course Editor, Skills, Question bank, Quizzes and Assignments), on a disposable local stack | Deployed Nginx/TLS behavior, production data; `tests/adaptive-flow.spec.ts` is empty |
 | VM deployment tests | Six `VM …` CI jobs exercising `deploy.sh`, the VM override, the frontend `release` image and the MinIO initializer image against real containers on the runner | Yes | Script guards, runtime privilege matrix, image identity, HTTPS ingress behavior and MinIO initializer provisioning against disposable MinIO servers on the runner | Any deployment, the real VM or outside-network access |
 | Independent verification | QA01/QA02/QA07/QA13/QA14, DP02 and DP03 procedures by their owners | No | Acceptance on the named environment, when recorded | — |
 
@@ -66,12 +66,13 @@ verification is separate work.
 | `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119; CO03/CO14, PR #262; CO06 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations; CO03.content owner rows, scoped reads, appends, reorders and materials, and CO14 adaptive-field storage ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `AdaptiveLearningFlowIntegrationTest` | CO14, PR #262 | The Course part of B1-O14/B1-O15: the configuration guard's real transactions, root lock lifetime, outer joining, incompatible contexts, stale managed state, contention with enrollment and NOWAIT, plus the Course storage handoff. Adaptive (AD08) cases are not implemented ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `CourseCatalogueIntegrationTest` | CO04/CO05, PRs #96 and #113 | Course access assertions bound to real Auth account checks, catalogue ordering and pagination, hidden-content concealment and snapshot consistency under concurrent publication changes |
-| `EnrollmentIntegrationTest` | FE07, PR #101; CO08, PR #248; CO06 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods. CO08 additions: V009 column shape; CT22 progress calculation, idempotent completion, completion reconciliation and zero-Lesson Courses; admission precedence and concealment without writes; the ACTIVE-only progress summary; per-Course and account-level resume; rollback of progress, status, pointer and visit time together; concurrent completion; Course-root serialization against leave and publication ([record](#co08-progress-completion-and-resume-verification--17-november-2026)). CO06 additions: Instructor authoring over HTTP, Course and Lesson publication reconciliation, the CT12.course Administrator handoff as a Course-root participant, and authoring, Administrator and Learner races on the Course root ([record](#co06-instructor-authoring-and-administrator-course-handoff-verification--22-november-2026)); after the independent re-review, text the database rejects or cannot store, the JSON-only 415 for empty requests, owner success paths, settings NOWAIT versus authoring, and the CT40 structure projection ([record](#pr-265-independent-re-review-remediation-and-ct40-structure-projection--22-november-2026)) |
+| `EnrollmentIntegrationTest` | FE07, PR #101; CO08, PR #248; CO06; CO15 and bounded AD11 Course read, PR #285 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods. CO08 additions: V009 column shape; CT22 progress calculation, idempotent completion, completion reconciliation and zero-Lesson Courses; admission precedence and concealment without writes; the ACTIVE-only progress summary; per-Course and account-level resume; rollback of progress, status, pointer and visit time together; concurrent completion; Course-root serialization against leave and publication ([record](#co08-progress-completion-and-resume-verification--17-november-2026)). CO06 additions: Instructor authoring over HTTP, Course and Lesson publication reconciliation, the CT12.course Administrator handoff as a Course-root participant, and authoring, Administrator and Learner races on the Course root ([record](#co06-instructor-authoring-and-administrator-course-handoff-verification--22-november-2026)); after the independent re-review, text the database rejects or cannot store, the JSON-only 415 for empty requests, owner success paths, settings NOWAIT versus authoring, and the CT40 structure projection ([record](#pr-265-independent-re-review-remediation-and-ct40-structure-projection--22-november-2026)). CO15/AD11: held-root skips, rollback, restricted runtime privileges, admitted read-only snapshots and concurrent manual completion ([record](#co15-atomic-lessonprogress-participant-verification--24-november-2026)) |
 | `SampleDataSeedIntegrationTest` | SD01/SD02, PR #116 | Seed loading, reruns, conflicts, target attestation and its consumers ([record](#sd01sd02-seed-verification--30-october-2026)) |
+| `repository/AssessmentPersistenceIntegrationTest` | AS05/AS06; AS07, PR #287; AS09 owner slice, PR #273 | PostgreSQL persistence, constraints, locks and runtime column-privilege ceilings for `questions`, `quizzes`, `quiz_questions`, `assignments` and `submissions` (`COLLATE "C"` + UUID paging, native `SELECT ... FOR UPDATE` blocking concurrent `INSERT INTO submissions` with `55P03`, `AS07` practice quiz profile snapshots, and `ADR012 §19.2` column-privilege checks) |
 | `SharedRestInfrastructureIntegrationTest` | SH01, PR #78 | Spring MVC ProblemDetail, validation and paging with test-only routes; it does not start PostgreSQL or the security chain |
 
-`AdaptiveLearningFlowIntegrationTest.java` and
-`MasteryProgressTransactionIntegrationTest.java` are empty scaffolds.
+`AdaptiveLearningFlowIntegrationTest.java` currently covers Course configuration guards only;
+`MasteryProgressTransactionIntegrationTest.java` remains an empty scaffold.
 
 Merged test code does not complete QA01 or QA02: each Issue's own acceptance
 criteria, independent review and any environment-specific evidence remain open.
@@ -162,8 +163,9 @@ naming patterns, with explicit exclusions for `**/integration/**` and `**/*$*`.
 Place unit tests in the approved module test locations outside `integration`.
 Current unit suites are under `modules/auth/`, `modules/course/` (including
 `application/service/`), `modules/assessment/` (`AssessmentRepresentationsTest`,
-`QuestionBankServiceTest`, `QuizGradingServiceTest` and the AS06 quiz authoring cases in
-`AttemptServiceTest`), `modules/adaptive/mastery/` and the shared
+`QuestionBankServiceTest`, `QuizGradingServiceTest`, `QuestionSelectionServiceTest`,
+`PracticeQuizProfilesTest`, the AS06 quiz authoring cases in
+`AttemptServiceTest` and the AS09 owner assignment cases in `SubmissionServiceTest`), `modules/adaptive/mastery/` and the shared
 `support/` package. The other module test files are empty scaffolds. The integration base
 class is compiled but is not initialized by this unit-test lifecycle, so
 `./mvnw test` needs no Docker.
@@ -756,17 +758,21 @@ and the earlier steps remain the gate.
 The following are not covered by any executable test in the repository. No
 test-count or coverage-percentage claim is made for them.
 
-- **Empty scaffolds.** Assessment `SubmissionServiceTest` (`AttemptServiceTest` holds
-  only the AS06 quiz authoring cases; its attempt cases wait for AS08);
+- **Empty scaffolds.** Assessment: `AttemptServiceTest` holds only the AS06 quiz
+  authoring cases (its attempt cases wait for AS08) and `SubmissionServiceTest` holds
+  only the AS09 owner assignment authoring/read cases (its submission and grading
+  cases wait for the remaining AS09 slice);
   Interaction and Admin unit tests; Adaptive
-  decision, evaluation, listener, settings, mastery-update, placement and skill-graph
-  tests; `LessonProgressServiceTest`; `AdaptiveLearningFlowIntegrationTest`;
+  evaluation, listener, settings, mastery-update and placement
+  tests (the decision suites hold the AD11 oracles,
+  [record](#ad11-adaptive-decision-rules-verification--25-november-2026));
   `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`,
   `SkillGraphFixtures` and the three adaptive scenario JSON files. They wait for
   their features and approved contracts.
 - **E2E.** The Playwright suite runs locally with Docker and in the required `E2E`
   check of the `CI E2E` workflow ([CI](#ci)), on all five projects against a disposable
-  stack. It covers only the existing learner cases; `e2e/tests/adaptive-flow.spec.ts`
+  stack. It covers the implemented learner flows and the Instructor course, skill-graph
+  and assessment authoring journey; `e2e/tests/adaptive-flow.spec.ts`
   is empty, and new cases wait for their features and the CT19/CT35 selections.
   `firefox-desktop` first completed a recorded run in CI
   ([SH07 first executions](#sh07-e2e-ci-first-executions--13-november-2026)); it
@@ -4397,6 +4403,41 @@ Report results per layer and only after the checks actually run. Unit results do
 establish browser, assistive-technology, backend or deployment behavior, and a design
 preview is never integration evidence.
 
+## IN10 audit recording and read (#184) — 24 November 2026
+
+IN10 (`Refs #184`, [PR #276](https://github.com/chi-thanh-nguyen/codemastery/pull/276)) implements
+CT31 recording and the filterable audit read ([ADR012 §7](decisions/012-batch-07-contract-approvals.md)):
+`AuditAction`, `AuditLogRepository` and its JPA adapter, `AuditLogService`, `AuditLogMapper`, the
+CT01.user-summaries method `UserAccountService.userSummaries` (ADR012 §3.4), the `SecurityConfig` rule
+for `GET /api/admin/audit-logs` and `AdminReportingController`, with the CT17-P6 r10 `audit_logs`
+row ([deployment record](deployment.md)). Placement follows ADR012 §19.3 and
+`CT14-IN10-PLACEMENT-2026-11-24-r1` ([repository structure](repository-structure.md)). This record lists
+what the suites cover and what they do not; it claims no execution result. The pull request records the
+executed commands and counts.
+
+| Suite | Kind | Covers |
+|---|---|---|
+| `modules/admin/application/service/AuditLogServiceTest` | Unit (Mockito, fixed `Clock`) | Row content, microsecond truncation, Administrator-only recording and reading, ADR012 §12 stage order (invalid values are 400 before the role 403, and both before any lookup), filter and paging hand-off, actor names including a missing account |
+| `modules/admin/AuditActionTest` | Unit | The closed nine-code catalogue with target types; exact-match `fromCode` |
+| `modules/admin/AuditLogMapperTest` | Unit | Field-for-field domain/entity mapping; null input |
+| `modules/admin/AdminRequestsTest` | Unit | Query syntax: known single-valued parameters, UUID text, the RFC 3339 date-time grammar (forms ISO-8601 parsing would also accept are 400), offsets normalised to UTC, digit-only paging |
+| `modules/auth/AuthServiceTest` (`UserSummaries`) | Unit | Stored display name and current role literal, unknown IDs omitted, no email/status/credential component, at most 100 IDs, storage failures propagated, and the caller allowlist of ADR012 §3 checked over the production sources |
+| `integration/repository/AuditLogRepositoryIntegrationTest` | PostgreSQL Testcontainer | Insert and read-back, newest-first then id-descending order that ignores caller sorting, AND filters with inclusive `occurredFrom` and exclusive `occurredTo`, true totals beyond the last page, no overwrite of an existing id, no update or delete operation on either audit repository (the Spring Data interface exposes only the two Specification reads, not `JpaSpecificationExecutor`, whose bulk `update` and `delete` would otherwise be callable), the adapter's insert and read under a role holding exactly the r10 row (SELECT, INSERT) and UPDATE/DELETE refused with 42501, the row `record` writes, and the read over HTTP (filters including upper-case UUID text and offsets, both time bounds, paging, actor names) |
+| `integration/InteractionAdminIntegrationTest` (IN10 part) | PostgreSQL Testcontainer, independent committed reads | B7-O07 recording side: the audit row commits only with its caller's change and is invisible to other connections before that commit; an injected audit-insert failure (actor foreign key) surfaces from `record` and rolls the change back; a later failure removes the audit row; a pending JPA-managed caller change is written before the audit INSERT (PostgreSQL `cmin` order), and its failure surfaces from `record` before the INSERT runs; no recording outside a transaction or in a read-only one; one row per call |
+| `integration/AuthorizationIntegrationTest` (`AuditLogReadEndpoint`) | PostgreSQL Testcontainer, production security chain | B7-O12 for CT31.read: 401 before query validation, Learner/Instructor 403 but malformed query values 400 first, a demoted Administrator's token refused by the current role, a locked Administrator 401, exactly the approved page and row fields with no email or status, 400 matrix, no-store on 200, 400, 401 and 403, other methods denied |
+
+Not covered here: the audited actions themselves. B7-O07's per-action catalogue rows, its no-op cases
+and the audit side of B7-O08–O10 need the CT12 user and course services and CT32 moderation (IN11, IN20,
+IN21), which call `AuditLogService.record` and add their cases to `InteractionAdminIntegrationTest`.
+QA06 executes ADR012 §15. A missing actor account cannot occur in PostgreSQL (V006's foreign key), so
+the null `actorDisplayName` fallback is covered by the unit test only. No test forces a 500, whose
+no-store header comes from the same response advice as the 400. Two syntactically valid RFC 3339 forms
+are answered 400 because `java.time` cannot represent them: offsets beyond ±18:00 and the leap second
+`:60`. The read's REPEATABLE READ, read-only transaction is asserted in the repository suite against
+PostgreSQL's own transaction settings. The VM privilege tests
+(`test-deploy-privilege-matrix-contract.sh`, `test-postgres-privilege-matrix-containment.sh`,
+`test-runtime-real-backend-privileges.sh`) carry the r10 cases; CI runs them.
+
 ## AS05 question bank remediation (PR #259) — 20 November 2026
 
 AS05 ([#156](https://github.com/chi-thanh-nguyen/codemastery/issues/156),
@@ -6374,3 +6415,667 @@ workflow remains excluded. No SHA exception is implemented.
 The existing snapshot limitations in ADR015 A2.8 remain. PR #275 CI was not queried,
 waited for or rerun. No candidate, admission, promotion or deployment was performed.
 Independent re-review of this follow-up remains outstanding.
+
+## CO15 atomic LessonProgress participant verification — 24 November 2026
+
+Implementation of CO15 ([#178](https://github.com/chi-thanh-nguyen/codemastery/issues/178))
+against `CT22-ATOMIC-2026-11-12-r1` ([ADR011 §3](decisions/011-batch-06-contract-approvals.md#3-ct22atomic--course-participation-and-execution-reads)).
+`LessonProgressService` gains the two actorless participant methods
+`readExecutionState` and `applyMasterySkips` with the nested `LearnerCourseState` and
+`LessonState` records. Both join the caller's transaction (no own `@Transactional`), check
+before any other read or write that it is an active, read-write READ COMMITTED transaction
+holding this Course's root marker (`CourseRepository.currentTransactionFacts`), never commit
+and let every failure propagate. `EnrollmentRepository` gains the Course-internal
+`publishedLessonPlacements`, `lockProgress` and `markMasterySkipped`.
+
+| ADR011 §3 obligation | Covered by |
+| --- | --- |
+| Marker check before any read or write: no transaction, read-only, wrong isolation, missing or another Course's root → `IllegalStateException` | `LessonProgressServiceTest.participantRefuses*`; `EnrollmentIntegrationTest.participantRefusesAUnitWithoutTheSameCoursesHeldRoot` (row lock without marker, another Course's marker, no transaction) |
+| State: `active`/`completed`/`left`/`none` (null `enrollmentId`), stored adaptive fields, published Lessons only in canonical order with placement, absent rows false/false | `LessonProgressServiceTest.executionState*`; `EnrollmentIntegrationTest.masterySkipInsertsSkippedProgressAndCompletesMembershipUnderTheHeldRoot`, `hiddenLessonAndLeftMembershipAreRejectedWithoutWrites` |
+| Skips: joined membership required, unpublished/foreign IDs rejected, empty set no-op, Enrollment then progress locks, absent → insert both true, incomplete → both true, completed unchanged, ACTIVE/COMPLETED recalculated as CT22.progress, idempotent | `LessonProgressServiceTest.masterySkips*`, `emptySetIsANoOp`, `absentOrLeftMembership*`, `hiddenOrForeignLesson*`; `EnrollmentIntegrationTest.masterySkipNeverRelabelsAManualCompletionAndUpgradesAnIncompleteRow` |
+| Never commits: a later caller failure rolls the skip and status back with the unit | `EnrollmentIntegrationTest.callerFailureRollsBackTheMasterySkipWithTheWholeUnit` |
+| Caller allowlist (no REST, scheduler or other module) | `LessonProgressServiceTest.participantMethodsHaveOnlyTheApprovedCallers` (source scan: only `LessonProgressService` and Adaptive's `MasteryUpdateService`/`AdaptiveDecisionService` may reference the methods) |
+
+**Original implementation report (historical):** the PR author recorded the following local
+runs on branch `feature/course-atomic-progress`, based on `main` `53e9b1e`:
+
+| Command | Result |
+| --- | --- |
+| `cd backend && ./mvnw -Dtest=LessonProgressServiceTest test` | 66 tests, 0 failures or errors |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 980, Failsafe 413 (`EnrollmentIntegrationTest` 100), 0 failures, errors or skips |
+
+These are local developer runs, not independent review, QA or CI evidence.
+
+### CO15 remediation and bounded AD11 Course read — 24 November 2026
+
+The follow-up starts at PR #285 head `ea864b210dbb2caad50a5a46a25399875c0ab3a0`, containing
+`main` `670383b92f428e2219f36f615e4dcc79f2febe48`. The Project Leader's explicit instruction
+**“CodeMastery — PR #285: Complete CO15, Add AD11 Course Read, Remediate Findings”** authorizes
+the implementation, supporting tests, bounded technical choices and minimal runtime extension,
+with Course owner @TamiaoNguyen's consent. No higher contract, migration, dependency or REST
+operation changes; OpenAPI and frontend types therefore need no change.
+
+**AD11 handoff:** `public LearnerCourseState readLearnerState(UUID courseId)` in the existing
+Course `LessonProgressService`. CT03 `requireLearnerCourseAccess` runs before Course business
+reads and uses its existing `permitsLearning` (ACTIVE or COMPLETED). CT01 supplies the current
+Learner; no caller-supplied learner identifier. Missing/hidden Course is concealed as 404;
+LEFT/absent membership on a published Course is 403; Instructor/Administrator is 403. Tests
+observe authentication 401 and those mappings through the existing `/progress` admission/REST
+boundary, without adding a route for this internal method. A published different Course with
+no membership is 403, not 404.
+
+**Transaction choice within the bounded authorization:** MANDATORY plus read-only
+REPEATABLE READ metadata checks. A joined transaction ignores the annotation's isolation and
+read-only declarations, so the method explicitly rejects incompatible contexts before admission.
+MANDATORY requires the caller to own the snapshot; REQUIRED could start an unintended standalone
+snapshot, while REQUIRES_NEW would split the composition's snapshot. No root check/marker,
+root write lock, write transaction, mutation, event, reconciliation or automatic replay is added.
+The method reuses `executionState` and `publishedLessonPlacements`, returning self identifiers,
+stored membership/configuration and only published Lessons with actual flags, false/false for
+absent progress, canonical Chapter/Lesson order and unchanged positions/gaps.
+
+**Deep immutability:** persistence mapping already deep-copies JSON, but it cannot enforce a
+public record's invariant on direct construction or a different provider path. The record now
+uses existing `Course.immutableJsonObject`; nested maps/lists and the Lesson list are copied and
+unmodifiable, null settings and JSON nulls are preserved, and decimal values retain their approved
+representation. A mutable-source regression checks original and returned objects at every level.
+
+**Runtime correction:** [CT17-P6-PRIVILEGES-2026-11-24-r11](deployment.md#ct17-p6-privileges-2026-11-24-r11--co15-atomic-progress-within-the-adr012-192-ceiling-24-november-2026)
+adds only UPDATE (mastery_skipped), within ADR012 §19.2. The prior matrix could insert a new skip
+but failed with 42501 when the actual adapter upgraded an existing incomplete row. This is
+reproduced with the pre-r11 Course privileges and fixed with the exact r11 Course subset.
+No claim about privileges currently provisioned on the real VM is made.
+
+| Additional obligation | Actual regression evidence |
+| --- | --- |
+| Admission first; identity/provider failures propagate without Enrollment/configuration reads; no write or lock call on a learner read | `LessonProgressServiceTest.learnerState*`, with ordered calls and no further interactions |
+| ACTIVE/COMPLETED, same-Course published-only placements, ordering gaps, manual/skipped/absent flags and stored adaptive settings | `EnrollmentIntegrationTest.learnerStateReadsPublishedCanonicalPlacementsActualFlagsAndStoredSettingsWithoutWrites` |
+| Genuine read-only REPEATABLE READ; no root marker/lock, assigned write xid or state transition; method joins an existing snapshot across a concurrent commit of publication, Enrollment, placement and settings | `learnerStateReadsPublishedCanonicalPlacementsActualFlagsAndStoredSettingsWithoutWrites`, `learnerStateKeepsAccessEnrollmentPlacementsAndConfigurationInTheCallersSingleSnapshot` |
+| Restricted-role read-only admission and state read, including CT03's column-limited material lookup | `learnerStateAlsoWorksReadOnlyUnderTheRestrictedRuntimeCoursePrivileges` |
+| Actual participant insert, incomplete-row update, manual-label preservation, repeated skips and post-write Enrollment status under the restricted role | `actualParticipantSqlWorksUnderR11AndRollsBackMidBatchFailureWithEnrollmentAndCallerWrites` |
+| Injected PostgreSQL failure after an earlier progress update rolls that update and the caller's resume write back; later caller failure rolls inserted progress and status back | the same test, plus `callerFailureRollsBackTheMasterySkipWithTheWholeUnit` |
+| No thread/transaction marker leak; wrong isolation/read-only rejected even with a marker; root wait against concurrent manual completion preserves its manual label | `executionParticipationRejectsReadSnapshotsAndDoesNotLeakTheRootToAnotherThreadOrTransaction`, `masterySkipWaitsForManualCompletionOnTheRootAndDoesNotRelabelItsCommittedRow` |
+| Pre-r11 UPDATE fails with 42501 and rolls back; r11 still denies identifier/ancestry rewrites, DELETE and TRUNCATE | `actualIncompleteRowUpdateFailsWith42501UnderThePreR11RoleAndNothingCommits`, `r11StillDeniesProgressIdentityRewritesEraseAndTruncate` |
+| Only approved Adaptive composition callers; Course never reads mastery or accesses another module's persistence | `participantMethodsHaveOnlyTheApprovedCallers`, `learnerStateHasOnlyTheApprovedAdaptiveReadCallers`; focused source review |
+
+The NOLOGIN roles in the Java tests hold exactly the relevant Course rows, not the bootstrap
+superuser's privileges. Write-test roles/ACLs are created inside rolled-back transactions;
+the read-only test creates its role outside the read unit and removes its grants/role in `finally`.
+The containment suite separately exercises the complete provisioned runtime matrix.
+
+**Remaining upstream work (not absorbed):** no additional missing upstream implementation was
+necessary for these two Course deliverables, so no less-than-20% exception was used. The remaining
+AS07 profile read is a substantive independent capability (set-based candidate/whole-membership
+filter, immutable profile, transaction/caller allowlist and B8-P09 tests); implementing it here
+would absorb much of AS07's Final-specific dependency, not just a shared-file helper. AD16's
+learner mastery reads and any query-specific runtime SELECT extension must ship with that consumer
+and its tests; r8 already permits SELECT (user_id, skill_id, state), but not SELECT (id) or SELECT *.
+AD11 still needs its practice selector, `RecommendationService` read composition, controller/DTO
+and real endpoint tests. The pure decision engine/resolver and AD14 append service present on this
+base do not deliver that endpoint. `readOwnedLearnerState` serves different CT33 consumers and is
+excluded. These responsibilities remain with AS07 #158, AD16 #171 and AD11 #168, respectively.
+
+**Not covered and still gated:** Adaptive execution (AD13 #169), Assessment event publication
+(AS12 #161), Attempt lifecycle (AS08 #159), the Course assessment guard entries (ADR007 §3.1) and full QA04
+`MasteryProgressTransactionIntegrationTest` are still missing on this base. Participant tests
+therefore acquire/mark the real Course root directly; they do not prove the missing guard callback
+or full quiz-result/mastery/progress/history transaction. LD-11 joint owner review, independent
+CODEOWNER review, required CI, protected integration and the ADR011 §5 operational/QA gates
+remain separate. Author-side code completeness does not satisfy the whole CO15 Issue DoD or
+establish full AD11 integration, release or deployment readiness.
+
+**Follow-up execution evidence:** macOS arm64, Temurin OpenJDK 25.0.4.1, Docker Desktop
+29.8.1, repository Testcontainers PostgreSQL image and disposable VM-test PostgreSQL 17.11.
+All commands ran in the isolated PR #285 worktree; no shared or production database was used.
+
+| Command | Observed result |
+| --- | --- |
+| `cd backend && ./mvnw -B -Dtest=LessonProgressServiceTest test` | Host retry: 74 tests, 0 failures/errors/skips. The initial sandbox attempt had 74 MockMaker initialization errors because local agent attachment was restricted; this was an environment failure, not a passing run |
+| `cd backend && ./mvnw -B -Dtest=LessonProgressServiceTest -Dit.test=EnrollmentIntegrationTest verify` | BUILD SUCCESS; 74 unit + 111 integration tests, 0 failures/errors/skips, before the final three integration cases were added |
+| `cd backend && ./mvnw -B verify` (final sources, completed 24 November 2026, 22:24 ICT) | BUILD SUCCESS; Maven reports 1,023 unit + 485 integration tests, including all 114 `EnrollmentIntegrationTest` cases; 0 failures/errors/skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | PASS: 27 relations, r1 history and all effective extensions through r11; r11 replaces just one row |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | PASS: 94 successful SQL probes (including expected SQLSTATE denials), exact grants, CO15 absent/incomplete/manual/repeat checks, idempotency/drift/escalation/ownership, V008→V009, V006→V009 and both failure-containment cases |
+| `bash infrastructure/vm/tests/test-deploy-syntax-and-authorization-gates.sh` | Exit 0 |
+| `bash -n infrastructure/vm/deploy.sh`; `bash -n infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh`; `git diff --check` | Exit 0 |
+| `docker build -t codemastery-backend:pr285-ea864b2-review backend`, then `bash /private/tmp/pr285-runtime-tests.sh` | PASS: 143 HTTP/runtime checks, `RUNTIME_CONSUMER_TESTS_PASS` and `RUNTIME_UPGRADE_TESTS_PASS`; 0 backend permission-denied/42501 log entries. The scratch script equals `test-runtime-real-backend-privileges.sh` except its two image-tag assignments, avoiding replacement of a shared local tag |
+
+The final XML contains 1,023 unit and 485 integration `testcase` elements, matching Maven's
+summaries. Summing only root `tests` attributes gives 1,021 and 481: the existing AuthServiceTest
+and AuthorizationIntegrationTest reports have 215/217 and 105/109 attribute/case counts,
+respectively. This observed reporting discrepancy is retained explicitly; no failing/error/skipped
+case is present. The informational CI XML-attribute summary can therefore show smaller totals.
+No unrelated test/reporting harness change was made. Frontend/E2E and real VM qualification were
+not run; no changed frontend/public operation exists in this PR. All evidence above is author-side
+verification, not independent QA, CODEOWNER approval or release acceptance.
+
+## AS07 practice-difficulty port, selection rule and practice quiz profiles verification — 25 November 2026
+
+PR #287 ([#158](https://github.com/chi-thanh-nguyen/codemastery/issues/158)) implements the
+effective Final AS07 Assessment deliverables under
+[ADR001](decisions/001-modular-monolith-module-boundaries.md),
+[ADR007 §§5–7](decisions/007-batch-03-contract-approvals.md#5-ct23composition),
+[ADR011 §8 (`CT07-DIFFICULTY-2026-11-12-r1`)](decisions/011-batch-06-contract-approvals.md#8-ct07difficulty)
+and Leader Decision E02 in
+[ADR013 §§19.1–19.3, 19.8, 19.10 (`CT23-PRACTICE-PROFILES-2026-11-15-r1`)](decisions/013-batch-08-contract-approvals.md#193-ct23-practice-profiles-2026-11-15-r1--assessment-read):
+
+- **AS07.port:** `PracticeDifficultyProvider` (`DifficultyLevel targetDifficulty(UUID courseId, UUID skillId)`)
+  in `modules/assessment/application/port/PracticeDifficultyProvider.java`, owned by Assessment with
+  no production caller under E02.
+- **AS07.select:** pure, deterministic `CandidateQuestion`, `fallbackOrder` and
+  `selectPracticeQuestions` in `QuestionSelectionService.java`, preserving existing CT23 explicit
+  composition (`requireOrderedCourseQuestions`, `requireCourseMembers`) unchanged and uncalled in
+  production under E02.
+- **CT23-PRACTICE-PROFILES-2026-11-15-r1:** `QuizService.readPracticeQuizProfiles(UUID courseId, Set<UUID> skillIds)`
+  and immutable `PracticeQuizProfile`, enforcing `Propagation.MANDATORY` and read-only
+  `REPEATABLE_READ` caller-snapshot metadata before executing one minimal set-based query across
+  `quizzes`, `quiz_questions` and `questions`, ordered deterministically by Java
+  `String.compareTo(title)` then canonical lowercase `quizId`. No new database grant is required:
+  existing `CT17-P6 r6` (`questions` `SELECT`) and `r7` (`quizzes`, `quiz_questions` `SELECT`)
+  already cover the query.
+
+**Placement.** `modules/assessment/QuestionSelectionServiceTest.java` and
+`modules/assessment/PracticeQuizProfilesTest.java` are bounded unit-test placements authorized on
+PR #287 (recording them in `repository-structure.md` requires a separate governance update). Real
+PostgreSQL persistence, query-count, snapshot and privilege assertions extend the existing
+`integration/repository/AssessmentPersistenceIntegrationTest.java`.
+
+| Obligation | Actual regression evidence |
+| --- | --- |
+| `AS07.port` exact signature, Assessment ownership, zero production callers, no Adaptive decision imports | `QuestionSelectionServiceTest.practiceDifficultyProviderExposesExactCt07SignatureInAssessmentPortPackage`, `portAndQuestionLevelSelectionHaveNoProductionCallersAndPreserveBoundaries`, `sourceScannerDetectsInvocationsAndReferencesWithoutMatchingDeclarationsOrNonCode` |
+| `AS07.select` conforming port double, `UNKNOWN`/`WEAK` → `EASY`, `LEARNING` → `MEDIUM`, `MASTERED` → `HARD`, exact fallback orders (`EASY→MEDIUM→HARD`, `MEDIUM→EASY→HARD`, `HARD→MEDIUM→EASY`), per-skill independent fallback, membership-position order without count cap, duplicate/null/invalid input rejection, unchanged CT23 explicit composition | `QuestionSelectionServiceTest` (12 unit tests) |
+| `CT23-PRACTICE-PROFILES` `Propagation.MANDATORY` + read-only `REPEATABLE_READ` caller snapshot required before repository access; concurrent commits invisible inside the caller's snapshot and visible in the next | `PracticeQuizProfilesTest.declaresMandatoryReadOnlyRepeatableReadTransactionAndMinimalRecordShape`, `rejectsAbsentReadWriteOrNonRepeatableReadCallerTransactionBeforeRepositoryAccess`; `AssessmentPersistenceIntegrationTest.practiceQuizProfilesRequireAndJoinCallersReadOnlyRepeatableReadSnapshot` (PostgreSQL) |
+| Published `practice` only, Course scoping (even when foreign skills appear in `skillIds`), nonempty membership (no `NOT EXISTS` vacuous-truth match on empty quizzes), whole-membership skill containment, uniform and mixed-difficulty aggregation, UTF-16 `String.compareTo` title order + canonical lowercase UUID tie-break | `PracticeQuizProfilesTest.aggregatesMinimalDifficultyRowsOrdersDeterministicallyAndReturnsImmutableProfiles`; `AssessmentPersistenceIntegrationTest.practiceQuizProfilesFilterWholeMembershipKindPublicationAndCourseInOneMinimalQuery` (PostgreSQL) |
+| `B8-P09` one query per nonempty call (0 queries for empty `skillIds`), data minimality (no prompts, options, answer keys, question IDs, attempts or scores), execution under a `NOLOGIN` PostgreSQL role granted only column-level `SELECT` (`quizzes(id,course_id,title,kind,publication_status)`, `quiz_questions(quiz_id,question_id)`, `questions(id,skill_id,difficulty)`) while prompt/options/key/attempt reads fail with `42501`, and caller allowlist (`RecommendationService` only, no Assessment REST exposure) | `PracticeQuizProfilesTest.onlyAdaptiveRecommendationServiceMayCallReadPracticeQuizProfiles`; `AssessmentPersistenceIntegrationTest.practiceQuizProfilesFilterWholeMembershipKindPublicationAndCourseInOneMinimalQuery`, `practiceQuizProfilesExecuteUnderColumnMinimalPrivilegesWithoutAnswerOrAttemptAccess` (PostgreSQL) |
+| Invalid stored V004 row values, blank/NUL/unpaired-surrogate titles and inconsistent titles fail closed (`IllegalStateException`); immutable list and difficulty sets | `PracticeQuizProfilesTest.rejectsNullArgumentsAndInvalidStoredRows`, `aggregatesMinimalDifficultyRowsOrdersDeterministicallyAndReturnsImmutableProfiles` |
+
+**Downstream and external boundaries (not implemented here):** Adaptive's
+`PracticeDifficultySelector`, `RecommendationService` practice-recommendation composition and
+`GET /api/courses/{courseId}/lessons/{lessonId}/practice-recommendation` belong to AD11 (#168);
+per-difficulty seed quizzes belong to SD04; Learner UI consumption belongs to FE09 (#194); E2E case
+`A-4` belongs to FE26; evaluation and limitation disclosure belong to QA05/QA08 and DO03.
+
+Executed locally on 25 November 2026 (macOS arm64, Temurin OpenJDK 25.0.4.1, Docker Desktop 29.8.1,
+Testcontainers PostgreSQL 17.11) in the isolated PR #287 worktree based on `main` `40db8f5`:
+
+| Command | Observed result |
+| --- | --- |
+| `cd backend && ./mvnw -B test -Dtest='QuestionSelectionServiceTest,PracticeQuizProfilesTest,QuestionBankServiceTest*,AttemptServiceTest*,QuizGradingServiceTest,AssessmentRepresentationsTest'` | BUILD SUCCESS; 167 unit tests (including `QuestionSelectionServiceTest` 12 and `PracticeQuizProfilesTest` 8), 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=AssessmentPersistenceIntegrationTest` | BUILD SUCCESS; 12 PostgreSQL integration tests, 0 failures, errors or skips |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS; Surefire 1,048 unit tests, Failsafe 488 PostgreSQL integration tests, 0 failures, errors or skips |
+| `git diff --check` | Exit 0 |
+
+These are local author/remediation runs, not independent QA, CODEOWNER review or release acceptance.
+
+## AD11 adaptive decision rules verification — 25 November 2026
+
+**Scope and authority.** AD11 (#168), PR #278, on `main` `b954077` (after AD14 PR #277, CO15
+PR #285 and AS07 PR #287). The Project Leader's instructions **“CodeMastery — Complete AD11 on
+Existing PR #278 After PR #277 and PR #285 Merges”** and **“CodeMastery — Complete 100% AD11 on
+Existing PR #278 After AS07 Merge”** authorize the AD11-owned code, every AD16-owned read the
+endpoint needs, and other upstream slices below about 30% of their owning Issue. Consumed contracts:
+`CT24-DECISION-2026-11-12-r1` (ADR011 §6), `CT07-ROUTING/DIFFICULTY/REASONS/BINDING-ORACLES-2026-11-12-r1`
+(ADR011 §§7–10), `CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1` (ADR013 §19.4, Leader decision E02
+option a), CT33 `readLearnerState` (ADR011 §13, CO15), `CT23-PRACTICE-PROFILES-2026-11-15-r1`
+(ADR013 §19.3, AS07) and `CT17-P6-PRIVILEGES-2026-11-23-r8`. No contract, migration, dependency,
+privilege-matrix or frontend change.
+
+**Pure rules.** `AdaptiveDecisionEngine.decide` and `NextLessonResolver` (test-out, remedial-first,
+continue), `AdaptiveDecisionEngine.prerequisiteWarnings` (US-06 warning, guidance only) and
+`PracticeDifficultySelector` (mapping, fallback order and the §19.4 `recommendPractice` rule with both
+fixed English reasons). `PracticeDifficultyProvider` keeps no production caller.
+
+**REST binding (`b8ReadPracticeRecommendation`).**
+`GET /api/courses/{courseId}/lessons/{lessonId}/practice-recommendation` in `RecommendationController`
+(DTOs in `RecommendationResponse`), composed by `RecommendationService.readPracticeRecommendation` in
+one read-only REPEATABLE READ transaction: CT33 `readLearnerState` (CT03 admission, ACTIVE/COMPLETED)
+first; then the Lesson must be one of that state's published Lessons (else 404); with the stored
+`adaptiveEnabled` false or no Course skill mapped to the Lesson the result is null and nothing else is
+read; otherwise Adaptive's `SkillRepository` skills and mappings, the AD16 state read and Assessment's
+`readPracticeQuizProfiles` for exactly the Lesson's skills feed `recommendPractice`. The route rule in
+`SecurityConfig` requires authentication only, so malformed UUIDs and query parameters are 400 before
+the Learner-role 403 that CT03 decides. Success and MVC errors carry `Cache-Control: no-store`.
+OpenAPI marks only this operation implemented.
+
+**AD16 read slice.** `LearnerSkillMasteryRepository.findStates` (one native
+`SELECT skill_id, state … WHERE user_id = ? AND skill_id IN (…)`, within the r8 column grant, no entity
+load) and `MasteryQueryService.readStates` (joins only a read-only REPEATABLE READ caller transaction;
+every requested skill returned, an absent row as Unknown). The Mastery Map, guidance, insights and
+their REST operations remain AD16's.
+
+| Oracle | Evidence |
+| --- | --- |
+| B6-R01–R03, R07, R08, R12 | `AdaptiveDecisionEngineTest.b6R0*`, `b6R12*`, plus the skip-reason name-order case |
+| B6-R04–R06, R14 (decision side) | `NextLessonResolverTest.b6R0*`, `b6R14*` |
+| ADR011 §7.2 tie-breaks (lesson-less Weak skill last, lowercase-UUID-text ties, canonical test-out order) | `NextLessonResolverTest.aWeakSkillWithoutAPublishedLesson…`, `weakSkillsTiedOnLessonIndex…`, `candidatesWithTheSameTargetLesson…`, `testOutsFollowCanonicalOrder…` |
+| B6-R11 | `PracticeDifficultySelectorTest.mapsAllFourMasteryStates`, `usesTheContractFallbackOrderForEachTarget`, `selectsTheFirstAvailableLevel…` |
+| B8-P01–P06 (rule) | `PracticeDifficultySelectorTest.b8P0*` |
+| B8-P01–P04, P06 (PostgreSQL, HTTP) | `AdaptiveLearningFlowIntegrationTest.b8TheRecommendationFollowsStoredMasteryAndTheUniformPublishedPracticeBankOverHttp`: absent row as Unknown, easiest target governs, hidden/`test`/`diagnostic`/mixed/empty/other-skill/other-Course Quizzes excluded, a subset-covering Quiz included, fallback template, recomputation from stored rows, unmapped Lesson and disabled Course null; exact field set and lowercase codes |
+| B8-P06–P09 composition order and fail-closed integrity | `PracticeDifficultySelectorTest.ReadPracticeRecommendation` (admission first; 404, disabled and unmapped paths read neither mastery nor Assessment; profiles requested for exactly M(L); invalid provider results are 500s; transaction attributes; no port or publisher) |
+| B8-P07 | `AdaptiveLearningFlowIntegrationTest.b8P07AdmissionAndUnavailableLessonsFollowTheContractOrderWithoutReadingMasteryOrAssessment`: 401 (missing/invalid token), 400 (malformed IDs, also for an Instructor; query), 403 (Instructor, Administrator, absent and LEFT memberships), 404 (hidden/missing Course, hidden/missing/foreign Lesson), COMPLETED admitted; every error `no-store` problem JSON with no mastery or Quiz SQL issued |
+| B8-P08 | `…b8P08TheRecommendationWritesNothingPublishesNothingAndRunsInTheCallersReadOnlySnapshot` (no row changed, no event, no transaction ID assigned, read-only REPEATABLE READ; a read-write READ COMMITTED caller refused) and `…b8TheRecommendationIsOneSnapshotEvenWhenAWriterCommitsBetweenItsReads` (a mastery row and a Quiz publication committed between admission and the mastery read are invisible, then visible) |
+| B8-P09 | AS07's `PracticeQuizProfilesTest.onlyAdaptiveRecommendationServiceMayCallReadPracticeQuizProfiles` now passes with this real caller; `…b8TheWholeCompositionNeedsOnlyTheRuntimeMatrixSelectGrants` runs the whole read under a role holding only matrix SELECT rows (column-limited `learner_skill_masteries` and `learning_materials`) |
+| Safe 500 | `…b8AProviderFailureIsASafeNoStoreServerError` |
+| AD16 state read | `AdaptivePersistenceIntegrationTest.stateRead*`, `queryService*` (one column-projection statement, learner and skill scoping, r8 role, caller snapshot, absent → Unknown, refused contexts) |
+
+**Not in AD11 (other Issues' evidence, not claimed).** B8-P08's attempt-start/submission half
+(CT04-START/CT08-EVIDENCE capture of a recommended Quiz) needs AS08's attempt runtime; B8-P10 (SD04
+dataset), B8-P11 and the Lesson page entry (FE09), E2E A-4 (FE26), the SD03 two-profile evaluation
+(QA05), orchestration (AD13) and `/adaptive-guidance`, the Mastery Map and insights (AD16).
+**Placement.** All tests extend existing files; no test file is added, so no
+`repository-structure.md` inventory change is needed. ADR013 §19.8 lists `AuthorizationIntegrationTest`
+for the B8-P07 admission oracle; it is implemented in `AdaptiveLearningFlowIntegrationTest`, which
+drives the same production security chain and holds the other B8 PostgreSQL cases.
+
+**Port implementation (recorded, not implemented).** ADR011 §8 names `PracticeDifficultySelector`
+as the only implementation of Assessment's `PracticeDifficultyProvider`, for a caller that only the
+Leader-reserved CT04-START/CT08-EVIDENCE amendment (ADR011 §17 option b) would have created. Leader
+decision E02 adopted option a and not option b (ADR013 §19.1); ADR013 §19.2 routes the practice
+difficulty through the selector's pure mapping, “never the port”, and the Leader's AD11 instruction
+keeps the port without a production caller. No class implements the port: an uncalled adapter
+that reads the current learner's mastery would add an unused, security-relevant path. If the
+Leader wants that adapter anyway, it is a small AD11 follow-up under ADR011 §8's admission order.
+
+**Execution evidence.** macOS arm64, Temurin OpenJDK 25.0.4.1, Docker Desktop 29.8.1,
+Testcontainers PostgreSQL, in an isolated PR #278 worktree; no shared database.
+
+| Command | Observed result |
+| --- | --- |
+| `cd backend && ./mvnw -B -Dtest='AdaptiveDecisionEngineTest,NextLessonResolverTest,PracticeDifficultySelectorTest' test` (pure rules, earlier head `dff6dbb`) | 47 tests (24, 13, 10), 0 failures/errors/skips |
+| `cd backend && ./mvnw -B verify` (earlier head `dff6dbb`, before the REST binding) | BUILD SUCCESS; 1,063 unit + 485 integration tests, 0 failures/errors/skips |
+| `cd backend && ./mvnw -B -Djacoco.skip=true -Dtest='PracticeDifficultySelectorTest,AdaptiveDecisionEngineTest,NextLessonResolverTest,PracticeQuizProfilesTest,QuestionSelectionServiceTest,LessonProgressServiceTest' test` (final sources) | 167 unit tests (20 including 10 in `ReadPracticeRecommendation`, 24, 13, 8, 23, 79), 0 failures/errors/skips; the AS07 profile-caller, CT33 learner-state-caller, port-caller and new AD16 state-caller allowlists all pass |
+| `cd backend && ./mvnw -B -Djacoco.skip=true -Dtest=NoSuch -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='AdaptiveLearningFlowIntegrationTest,AuthorizationIntegrationTest,AdaptivePersistenceIntegrationTest' verify` (before the audit fixes) | BUILD SUCCESS; 110 + 109 (XML root attribute 105, the known discrepancy above) + 24 PostgreSQL integration tests, 0 failures/errors/skips |
+| `cd backend && ./mvnw -B -Djacoco.skip=true -Dtest=NoSuch -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=AdaptiveLearningFlowIntegrationTest#b8*,AdaptivePersistenceIntegrationTest' verify` (final sources) | BUILD SUCCESS; 6 + 24 PostgreSQL integration tests, 0 failures/errors/skips |
+| `git diff --check origin/main` | Exit 0 |
+
+AI-assisted review (one comprehensive audit in a separate Claude Code review context) found no P0/P1
+issue. Its P2 (no port implementation) is recorded above as an E02 consequence; its P3 findings
+(exception documentation, an AD16 caller allowlist, this record's scaffold list and placement note, a
+positive control for the no-mastery/Assessment-SQL check, a missing final newline) are fixed in this
+change. It is not CODEOWNER or human review.
+
+These are local author runs on the final sources unless stated; they are not independent QA,
+CODEOWNER review or release acceptance. The full backend suite, frontend, E2E and VM checks were not
+rerun for this change.
+
+## FE15 consolidation and Instructor upstream integration verification — 25 November 2026
+
+Author-side verification of the consolidated FE15 (#200) pull request ([#273](https://github.com/chi-thanh-nguyen/codemastery/pull/273), superseding [#272](https://github.com/chi-thanh-nguyen/codemastery/pull/272)) under the Project Leader's explicit upstream-integration authorization. In addition to FE15 (`Questions` bank, `QuestionEditorSheet`, `Quizzes` list and `QuizEditor`), PR #273 delivers the bounded upstream slices required for the real Instructor assessment workflow:
+
+- **FE32 (#224):** role-aware Instructor navigation (`Teaching` → `/teach` and `Catalogue` → `/courses`), `/teach` post-sign-in start page and logo target, and parent-aware active section highlighting across `/teach/courses/...`.
+- **FE14 (#199):** `instructorCourseApi` (`CT21.authoring` Course, Chapter and Lesson operations), `TeachingHomePage`, `CreateCoursePage` (`/teach/courses/new`), and `CourseEditorShell` / `CourseEditorFrame` (`S18` header, publication toggle, `Content · Skills · Assessments · Settings` tabs, and `D12-3` single shared `getOwnedCourse` and `getOwnedSkillGraph` state per `courseId` and session generation).
+- **FE18 (#203):** `CourseSkillsSection` (`S20` `Skill graph` and `Lesson mapping` tabs against `AD07` `CT05` endpoints, with stale-skill refresh coordination into `Assessments`).
+- **AS09 (#160, owner slice):** `CT10.rest` owner Assignment operations (`POST /api/courses/{courseId}/assignments`, `GET /api/courses/{courseId}/owned-assignments`, `GET /api/courses/{courseId}/owned-assignments/{assignmentId}`, `PUT /api/courses/{courseId}/owned-assignments/{assignmentId}`, `PUT /api/courses/{courseId}/owned-assignments/{assignmentId}/publication`) in `AssignmentController`, `AssignmentService`, `AssignmentRepositoryImpl` and `SecurityConfig`, enforcing `ADR010 §14` Stage 1–4 error precedence, `REPEATABLE READ` snapshots, and `READ COMMITTED` writes that lock the Assignment row with native `SELECT ... FOR UPDATE` on `public.assignments` without the Course-root guard (ADR010 §10), and targeted JPQL column updates within `ADR012 §19.2`.
+- **FE16 (#201, owner slice):** three-view `AssessmentsPage` (`Questions | Quizzes | Assignments` at `/teach/courses/:courseId/assessments?view=questions|quizzes|assignments`), `AssignmentsView` (`Title`, `Deadline`, `Related lesson` with `(hidden)` and one-time course re-read, `Publication`, `Submitted`, `Graded`) and `AssignmentEditor` (`S19` create/edit/publish/hide, lossless microsecond `deadlineAt` preservation when untouched, and `F14` error/unknown-outcome recovery).
+
+Executed locally on macOS arm64 (Temurin OpenJDK 25.0.4.1, Node 24.21.0, Docker Engine 29.8.1) from the isolated PR #273 worktree:
+
+| Command or check | Observed result |
+| --- | --- |
+| `cd backend && ./mvnw -B verify` (rebased onto `main` `bb31410`) | `BUILD SUCCESS`; Surefire and Failsafe suites pass with 0 failures, errors or skips (`SubmissionServiceTest`: 26 AS09 unit/MockMvc cases; `AssessmentPersistenceIntegrationTest`: `COLLATE "C"`, `FOR UPDATE` `55P03` lock contention and `ADR012 §19.2` column-privilege checks alongside AS05/AS06/AS07; `AuthorizationIntegrationTest$AssignmentAuthoringEndpoints`: HTTP Stage 1–4 precedence and CRUD/publication round trips) |
+| `cd frontend && npm run typecheck && npm test && npm run build` | `typecheck` exit 0; Vitest 776 tests in 20 files passed (`routes/index.test.tsx` 91, `assessmentAuthoringApi.test.ts` 40, `skillGraphApi.test.ts` 17, `assessmentAuthoring.test.tsx` 26); `vite build` exit 0 |
+| `cd frontend && npm run test:browser` | Chromium 153.0.8010.12: 69 passed, 0 failed, 0 scenarios not exercised |
+| `cd e2e && node --test fixtures/*.test.mjs` | 155 tests in 37 suites passed, 0 failed |
+| `cd e2e && npm test -- --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --project=webkit-mobile` | 91 passed, 0 failed, 5 skipped by design across Chromium and WebKit desktop/mobile on the disposable Docker stack, including the new `instructor course, skill graph and assessment authoring` end-to-end journey; Firefox did not launch inside the local macOS agent sandbox and runs in `CI E2E` on `ubuntu-24.04` |
+| `bash infrastructure/vm/tests/test-deploy-syntax-and-authorization-gates.sh` and `test-deploy-privilege-matrix-contract.sh` | Exit 0 (`MATRIX_CONTRACT_SYNC_PASS`) |
+
+**Interactive real-backend Playwright CLI check.** A disposable PostgreSQL + Spring Boot + production `vite preview` stack was driven with `playwright-cli` in Chromium against real REST and database state:
+
+- Instructor sign-in landed on `/teach` with `Teaching` active in the navigation bar and `CodeMastery home` pointing to `/teach`. On a course with zero skills, both the empty `Questions` bank and `QuestionEditorSheet` rendered `Go to Skills` and navigated to `/teach/courses/:courseId/skills`.
+- Switching across `Content`, `Skills`, `Assessments` and `Settings` inside `CourseEditorShell` issued 0 duplicate `getOwnedCourse` or `getOwnedSkillGraph` `GET` requests (`D12-3`).
+- Authoring verified end to end: Chapter and Lesson creation, publication and reordering; Skill creation, prerequisite linking, `409` cycle rejection, Lesson-to-Skill mapping (and `1 skill mapped` reflected in `Content`); `single_choice`, `multiple_choice` (3 options, 2 correct) and `true_false` question creation, unused edit (`200`) and unused delete (`200`); `409` refusal when deleting a quiz-referenced question; `409` refusal when replacing a question with a committed `attempt_answers` row followed by `Save as a new question` (`201`) preserving the original question; empty-quiz `409` publish refusal, `ADR013` mixed versus uniform `Practice` difficulty summaries, question reordering, quiz publish/hide and unused-quiz delete handover notice; Assignment creation at `…/assignments/new` linked to a hidden lesson (`(hidden)`), URL replacement, edit/save, publish/hide, list columns and Course publish/hide confirmations.
+- Recovery, themes, viewports and authorization: stopping the backend container before `Save changes` sent exactly 1 `PUT` (no automatic retry), preserved the draft and showed `"We couldn't confirm whether your changes were saved."`; restarting the container and clicking `Try again` re-read `Current version:` alongside the draft, and a deliberate `Save changes` returned `200`. Full page reload on `/teach/courses/:courseId/assessments?view=assignments` restored the session via the `HttpOnly` refresh cookie with empty `sessionStorage` and `document.cookie`. `Light`, `Dark` and `System` modes updated `data-color-scheme`; no horizontal overflow occurred at `360`, `768`, `1024`, `1280` or `1440 px` across 8 Instructor screens plus the open `QuestionEditorSheet`; foreign published courses returned `403`, foreign hidden courses concealed as `404`, and a Learner visiting `/teach` saw the `403` role denial state.
+
+**Remaining independent scope and governance gates.** Learner assignment reads/file submissions and Instructor submission grading (`AS09` remaining 7 `b5*` operations, `FE09`, `FE16` learner slice, `FE17`), lesson-detail/material/file authoring (`CO07`, `FE14`), adaptive-settings toggle (`AD08`, `FE18`), learner insights (`FE19`) and Q&A (`FE13`) remain with their respective Issues. Runtime database grants for `CO06` Course writes and `AS09` `assignments`/`submissions` are not yet in the `CT17-P6` matrix (`docs/deployment.md`). Shared `AssessmentsPage` boundary gate `G7` (`#200`/`#201`), independent `CODEOWNERS` reviews and protected merge remain open; these developer checks are not independent QA or CODEOWNER approval.
+
+## PR #273 audit remediation verification — 25 November 2026
+
+A read-only audit of PR #273 at `be522b4` found these defects. They are fixed on the same pull request under the Project Leader's implementation authorization:
+
+- **N1:** a failed `getOwnedSkillGraph` read on the `Questions` view was retried continuously, about 500 requests per second. The course editor context changed identity on every render, and the stale-refresh path also reloaded after an error. `useOwnedSkillGraph` and `useOwnerRead` now return memoized values. `refreshSkillsIfStale` reloads only after an S20 skill change, and not while a read is in flight. A failed read is retried only by `Try again` or a later deliberate opening.
+- **N2:** at 320 to 390 px the Assessments section grew to its segmented switch's min-content width. The canvas clips horizontal overflow, so the assignment cards were cut off. The section and view containers now use `minmax(0, 1fr)` with `minWidth: 0`.
+- **N3:** the S20 skill form ran several CT05 writes. A refusal after an earlier commit was reported as a plain failure. Edge additions now run first, because a CT05 409 on `addCoursePrerequisite` means a new cycle. Removals and the name and description follow. The first failure stops the sequence with no compensating write. The message names what was saved, what was refused and how many changes were not attempted. The graph is re-read, and the draft stays on screen. A created skill whose prerequisite is refused stays bound to the form, so saving again edits it instead of creating a duplicate.
+- **N4:** the graph canvas showed `0 questions` for every skill, although CT05 returns no question references. Production now passes no count, and the canvas shows and names a count only when its source supplies one. The preview fixtures keep theirs.
+- **N5:** primary navigation, the CodeMastery home link and the account menu's `Profile` item left a dirty quiz or assignment editor without asking. A scoped shell navigation guard (`ShellNavigationContext` in `layouts/DashboardLayout.tsx`, provided by `Workspace`) lets the editors and the course editor frame show their existing `Leave without saving?` dialog. The router is unchanged. Browser Back (A15), sign-out and session end are not intercepted.
+- **N6:** focus fell to `<body>` after a keyboard map or unmap in `Lesson mapping`. After the re-read, focus returns to the row's `Add skill` control. If that control is disabled, it goes to a chip's remove control, and otherwise to the lesson title.
+- **N10:** `sameAssignment` compared deadlines with `Date.parse`, which keeps only milliseconds. `sameInstant` now compares RFC 3339 instants exactly to the microsecond.
+- **N9:** the AS09 descriptions in `docs/api/openapi.yaml` and the FE15 record above now state that owner assignment writes lock the Assignment row `FOR UPDATE` in a `READ COMMITTED` transaction without the Course-root guard, as ADR010 §10 requires. Earlier text claimed CO14's Course-root lock. The backend is unchanged.
+
+N7 is unchanged. DESIGN.md S19/S20 ask for the server's detail and field errors. The backend returns only CT18.minimum generic details, with no `errors[]`, and the shared client keeps no server text. This stays a contract mismatch pending a Leader decision. The QuestionEditorSheet test now asserts the production 400 at form level, and labels its field-error case as hypothetical.
+
+Executed locally on macOS arm64 (Node 24.21.0, Docker Engine 29.8.1) from an isolated worktree:
+
+| Command or check | Observed result |
+| --- | --- |
+| `cd frontend && npm run typecheck` | Exit 0 |
+| `cd frontend && npm test` | 20 files, 787 tests passed. That is the 776 existing tests plus 11 regression tests in `assessmentAuthoring.test.tsx` for N1, N3, N4, N5, N6 and N10. With the four N1 source files reverted to `be522b4`, both N1 tests fail, the first by timing out in the request loop |
+| `cd frontend && npm run build` | Exit 0 |
+| `cd frontend && npm run test:browser` | Chromium 153.0.8010.12: 69 passed, 0 failed |
+| Interactive `playwright-cli` (Chrome) against a disposable PostgreSQL + Spring Boot + production `vite preview` stack | See below |
+
+- **N1:** under a persistent mocked 500, 1 skill-graph `GET` in 10 s, compared with 5,541 before the fix. One `Try again` adds exactly one `GET`. With the backend container stopped, opening `Questions` after a failed S20 change re-read once in 5 s, compared with 2,185 in 3 s before.
+- **N2:** no element under `main` extended past the viewport outside a horizontally scrollable container. This was checked with `getBoundingClientRect()`, not document `scrollWidth`, at 320, 360 and 390 px, for `Questions`, `Quizzes` and `Assignments` (including a 300-character title), in Light and Dark.
+- **N3:**
+  - Renaming a skill while adding a cycle-closing prerequisite sent only `PUT …/prerequisites/…` (409). PostgreSQL kept the old name and the draft stayed on screen.
+  - Creating a skill whose chosen prerequisite was deleted elsewhere gave `POST` 201 and then `PUT` 404. The form became `Edit Arrays`, and only one row exists.
+  - When the edge was added (204) and the rename's response was lost, both outcomes were stated.
+- **N4:** canvas names were `Variables, 0 prerequisites` and `Loops, 1 prerequisite`, with no question count, while PostgreSQL holds a question for `Variables`.
+- **N5:** for dirty assignment and quiz editors, `Teaching`, `Catalogue`, the home link and `Profile` each showed exactly one dialog with `Stay` focused. `Stay` kept the route and draft, and `Leave` reached the destination. Back links are still guarded. A dirty Settings tab showed one dialog for shell navigation and one for a tab switch. Sign-out was not blocked. Learner navigation showed no dialog.
+- **N6:** with the keyboard only, focus stayed in the lesson row after mapping and unmapping, including when every skill was mapped.
+
+The stack was removed afterwards: containers, volumes, network, images and the preview process. The backend, the full Maven suites, the E2E suite and the VM checks were not rerun locally because no backend or E2E source changed. Their evidence is CI on `be522b4` and CI on the pushed head. These are author-side checks, not independent QA or CODEOWNER review.
+
+## PR #273 U1–U6 remediation verification — 25 November 2026
+
+An ultrareview of PR #273 at `49eaff6` reported findings U1–U8. The Project Leader's instruction "CodeMastery — PR #273: Independent Finding Verification & Autonomous Remediation" (25 November 2026) authorized independent verification and remediation on the same pull request. Each finding was re-verified against source, contracts and runtime evidence:
+
+- **U1 (confirmed, fixed):** the runtime privilege matrix lacked grants that the AS09 owner slice (added here) and CO06 authoring (on `main` since `75cdb8b`, first reachable from the UI here) execute. The real-backend test under the restricted role then found two failures. First, `PUT /api/instructor/courses/{id}` returned 500, because every CO06 owner response reads all nine `learning_materials` columns while the role held three. Second, the AS09 owner count needs `submissions.id`, because Hibernate renders `count(s.id)`. Dated revision `CT17-P6-PRIVILEGES-2026-11-25-r12` ([deployment record](deployment.md#ct17-p6-privileges-2026-11-25-r12--co06-authoring-and-as09-owner-assignments-within-the-adr012-192-ceiling-25-november-2026)) adds exactly the exercised privileges inside the ADR012 §19.2 ceiling, and `deploy.sh` and the three VM tests change with it.
+- **U2 (confirmed, fixed):** `useOwnerRead` and `useOwnedSkillGraph` set the body to `null` on any failed re-read, so a background re-read failure replaced the whole course editor with an error view and discarded open drafts. Now only an unknown outcome (network, invalid response, 5xx) of the same key and session keeps the last body, together with the error. 401, 403, 404 and every other refusal, a key change and a session change still discard it. The course editor shell and the assignment editor show "We couldn't load this course. The last loaded version is shown." with `Try again`. The Skills section shows the D12-3 alert "Skills couldn't be loaded." with `Try again`. Nothing is retried automatically. The shared context's skills-stale flag now clears only on a successful read.
+- **U3 (confirmed, fixed):** `CreateCoursePage` registers with the shell navigation guard. Back, Cancel, primary navigation, the home link and account-menu links share one `Leave without saving?` dialog. A successful creation clears the draft before it replaces the URL. Sign-out and session end are not intercepted.
+- **U4 (confirmed, fixed):** after a deletion empties the current page, the Questions view moves once to the last page the server reports. It acts only on a current, successful read of that page, and each step lowers the page. An empty answer at page 0 shows the empty state.
+- **U5 (initially reported fixed; D1 follow-up below):** the initial change keyed the Settings form by course identity and preserved `Saved` on the ordinary post-save re-read. The subsequent independent review at `3f7c184` found that a delayed PUT response could suppress metadata already observed by a shared GET (D1); the original completion claim did not cover that interleaving. An unknown save outcome was not reported as `Saved`.
+- **U6 (confirmed, fixed):** a deadline such as `9999-12-31T23:59:59-05:00` normalizes to year 10000 in UTC. `Instant.toString()` then renders `+10000-01-01T04:59:59Z`, which the frontend decoder (four-digit year) and RFC 3339 reject. Create and replace now answer 400 unless the UTC instant lies in years 0000–9999. The check runs in the request parser and again in `AssignmentService`. Microsecond precision and the API format are unchanged. OpenAPI states the rule.
+- **U7, U8 (deferred):** the duplicated read and mutation hooks and the duplicated API decoders are maintainability debt, not defects. U2 needed the same small change in both read hooks. Merging them would add a dependency from `skill-graph-editor` to `course-management`, whose hooks already import `skill-graph-editor`, for no correctness gain. No refactor was made.
+
+**Historical persistence claim corrected by D2:** the original boundary test checked symmetric application round-trips for three selected values and their SQL order. It did not prove correct stored UTC instants or universal ordering/round-trip behavior. The subsequent independent review at `3f7c184` found that `0000-01-01T00:00:00Z` stored SQL epoch `-62167046400` instead of `-62167219200`, and `1500-03-10T00:00:00Z` failed with SQLSTATE `22008`. D2 corrects the Assignment-local mapping and replaces that insufficient oracle as recorded below. No conclusion about every other timestamp mapping is established by these Assignment tests.
+
+Executed locally on macOS arm64 (Docker Engine 29.8.1) from an isolated worktree:
+
+| Command or check | Observed result |
+| --- | --- |
+| `cd backend && ./mvnw -B -Djacoco.skip=true test -Dtest=SubmissionServiceTest` | 42 tests, 0 failures. Includes the U6 cases: offsets on both sides of both boundaries, sub-microsecond zeros, response rendering against the frontend decoder's pattern, and the service and MockMvc 400s on create and replace |
+| `AssessmentPersistenceIntegrationTest` (Failsafe, Testcontainers PostgreSQL) | 14 tests, 0 failures. The AS09 adapter runs under a role holding exactly the r12 `assignments` and `submissions` rows, with no REFERENCES. Removing `submissions.id` from that role failed with `permission denied for table submissions` |
+| `cd backend && ./mvnw -B verify` | BUILD SUCCESS: Surefire 1146 and Failsafe 502 tests, 0 failures, errors or skips |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | `MATRIX_CONTRACT_SYNC_PASS`: 27 relations, r1 to r11 unchanged, r12 (6 rows) checked against the ceiling's "Never granted" column |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | Exit 0. The CO06 and AS09 SQL ran as issued under the provisioned runtime role, including deferred sibling reorder, 23505 on a duplicate sibling position, 23503 on an unknown Lesson, and owner counts over admin-inserted submissions. The new 42501 denials covered Course re-ownership, adaptive settings, structure moves, deletes and TRUNCATE, material writes, Assignment moves and deletes, and submission files, learners, grades and writes. Idempotency, drift, escalation, V008→V009 and V006→V009 upgrade sections all passed |
+| `test-runtime-real-backend-privileges.sh` (backend image under a run-unique tag) | Exit 0. CO06 create, metadata replacement, Chapter and Lesson append, rename and replace, both reorders, Lesson and Course publication, and owner Course and Lesson reads succeeded over HTTP under the runtime role. The Learner Lesson read returned its material without the object key. AS09 create at `9999-12-31T23:59:59.999999Z`, the U6 400, replace under the row lock, publication, and owner list and read with counts 2/1 also succeeded. The backend log had 0 `permission denied` or 42501 lines, and the matrix was unchanged afterwards |
+| `cd frontend && npm run typecheck` / `npm run build` | Exit 0 / exit 0 |
+| `cd frontend && npm test` | 20 files, 805 tests passed: the 787 earlier tests plus 18 new tests in `assessmentAuthoring.test.tsx` (U2–U5) and `assessmentHooks.test.tsx` (the U2 rule, including the 401/403/404/409 discards and key or session isolation). With the eight frontend source files reverted to `49eaff6`, 9 of the 11 new page tests fail. The other 2 are deliberate baseline cases |
+| `git diff --check` | No whitespace errors |
+
+Interactive `playwright-cli` checks in Chrome ran against a disposable PostgreSQL, the PR backend image and a production `vite preview` build on loopback ports. Failures were injected with request interception on `GET` only:
+
+- **U3:** with a dirty Create course draft, `Teaching`, the home link, `Catalogue` and the account menu's `Profile` each opened exactly one dialog. `Stay` kept the route and the draft, `Leave` navigated once to the destination, and `Create course` navigated to the new editor with no dialog.
+- **U4:** with 21 questions on page 2, deleting the only question there sent `DELETE`, then `GET page=1` (empty), then exactly one `GET page=0`, and no further reads. The view showed "Question deleted." and "Showing 1–20 of 20 questions", not "No questions yet".
+- **U5:** saving `  … (renamed)  ` sent `PUT` and then one `GET`. The status still read `Saved`, the input was the same DOM node, its value was the trimmed committed title and the header was updated.
+- **U2:**
+  - Course re-read with a 503: with a dirty Settings draft, the publication `PUT` succeeded and one `GET` returned 503. The shell stayed with the alert, and the draft stayed in the same DOM node with `Unsaved changes`. No `GET` followed until `Try again`, whose single `GET` (200) removed the alert and kept the draft.
+  - Network failure: the copy and the draft were kept.
+  - Re-read with a 404: the F14 "Course not available" state, with no title, tree or form left on screen.
+  - Skill graph re-read with a 503 after an unknown skill save: the alert was shown, and both the graph and the skill draft were kept.
+- **Regressions:**
+  - N1: a persistent graph 500 gave 1 `GET` on load, none on view switches and exactly 1 per `Try again`.
+  - N5: a dirty assignment editor and a dirty Settings tab each showed one dialog. `Stay` and `Leave` behaved as before.
+  - N2: at 360 px, the only elements past the viewport on Assessments and Settings were segmented-control buttons inside their `overflow-x: auto` scroller.
+
+The stack was removed afterwards: containers, the network, images, the preview process and the browser session. The E2E suite was not rerun locally. Its evidence is CI on the pushed head. These are author-side checks, not independent QA, infrastructure or CODEOWNER review. No real database or VM was provisioned or changed.
+
+
+## PR #273 D1 Settings synchronization follow-up — 25 November 2026
+
+Under the Project Leader's explicit "PR #273 — Focused D1/D2 Remediation in the Current Review Session"
+authorization, D1 was reproduced on `3f7c184` and corrected in the existing Settings component.
+The form now tracks the snapshot actually displayed (a decoded GET or an acknowledged PUT), rather
+than marking the currently observed context metadata as adopted after every save. While the existing
+post-save GET is pending or failed, only the exact context snapshot still carrying the pre-save
+metadata is ignored. A changed context already observed during the write is reconciled when clean;
+a fresh read also reconciles when another writer restored the earlier metadata values. Dirty drafts
+remain protected. The course-identity key, session/cancellation boundaries, `Saved` indication and
+single post-save re-read are preserved; no context, provider, endpoint or automatic mutation replay
+was added.
+
+Executed from an isolated clone based on `3f7c184`, macOS arm64 / Node 24.21.0 / npm 11.19.0:
+
+| Command (cwd `frontend/`) | Observed result |
+| --- | --- |
+| `npm test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx -t 'D1:'` before the production fix | The four initial probes yielded 2 failures and 2 passes, reproducing the delayed PUT/newer GET race and missed synchronization when fresh metadata restored earlier values |
+| `npm test -- src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/routes/index.test.tsx` after the fix | 3 files, 162 tests passed, exit 0; includes 7 new D1 tests for the original race, ordinary save with pending/failed read, restored metadata, a new dirty draft, newly read pre-save metadata, and course/session replacement |
+| `npm run build` | Typecheck and production build passed, exit 0 |
+
+These are remediation-author executions and self-review, not a new independent acceptance or
+CODEOWNER approval. No new interactive browser or full E2E run is claimed. Earlier exact-tree CI and
+the preceding independent review's infrastructure/containment evidence remain historical; the D1
+change does not modify those implementations. Required CI and owner/governance gates remain open.
+
+
+## PR #273 D2 Assignment UTC persistence follow-up — 25 November 2026
+
+The same explicit D1/D2 implementation authorization covers this Assignment-only correction.
+`AssignmentEntity.deadline_at` now selects a nested `DeadlineJdbcType`: the existing Hibernate
+JDBC 4.2 OffsetDateTime binder supplies INSERT and targeted JPQL definition UPDATE values, while
+an ISO-text extractor constructs the proleptic Gregorian date with PostgreSQL BC converted to
+ISO year zero before date validation. This avoids both the previous hybrid-calendar conversion
+and the driver's OffsetDateTime-reader failure on the valid `0000-02-29` leap day. The text reader
+accepts the driver's ISO timestamps with fractional seconds and offsets including historical
+seconds; tests cover UTC, America/New_York and Asia/Ho_Chi_Minh, including local calendar years
+outside the UTC representation bounds.
+
+The domain/entity API remains `Instant`, the physical column remains `timestamptz`, and the
+normalized UTC years 0000–9999 and microsecond validation are unchanged. AssignmentMapper,
+AssignmentService, parser/REST shape, SQL column lists, READ COMMITTED writes, native FOR UPDATE
+and REPEATABLE READ owner snapshots are unchanged. There is no global Hibernate setting,
+dependency, migration, new repository file, grant or contract amendment.
+
+Verification uses real disposable PostgreSQL. The durable repository tests independently check
+SQL `extract(epoch)` using exact BigDecimal arithmetic after INSERT and targeted UPDATE, then
+store PostgreSQL text literals and verify extraction through JPQL, native paging and native lock
+plus refresh. Fifteen values cover both boundaries, ISO year-zero leap day, historical century
+rules, the exact 1500-03-10 failure, dates on both sides of the 1582 cutover and its intervening
+ISO dates, microseconds and a modern date. A separate SQL ordering/range-comparison case covers
+historical and modern instants. The HTTP test checks create, replace and a fresh GET for six
+representative values, along with independent SQL epoch assertions.
+
+**Existing-data compatibility:** no stored data is rewritten. A row previously written by the
+incorrect mapping may contain a shifted SQL instant even when the old symmetric reader returned
+the intended input. The new reader returns the actual persisted instant, so such a row can now
+produce a different historical deadline. Correctly stored PostgreSQL values now read correctly.
+An operator must separately audit provenance and intended deadlines before any repair: neither
+a blanket date offset nor an automatic migration is authorized. No existing host or production
+data was inspected, and this task establishes no count of affected rows.
+
+
+Executed from the same isolated clone, macOS arm64 / Temurin 25.0.4.1 / Docker Engine 29.8.1;
+the final backend container uses the repository-pinned Temurin 25.0.5+8 Dockerfile:
+
+| Command or check | Observed result |
+| --- | --- |
+| `cd backend && ./mvnw -o -B -Dtest=SubmissionServiceTest '-Dit.test=AssessmentPersistenceIntegrationTest#assignmentDeadlineBoundariesRoundTripThroughPostgresqlAtMicrosecondPrecision+assignmentDeadlineSqlOrderingAndComparisonsUseUtcInstants' verify` before the mapping fix | 42 unit tests passed; 16 selected integration cases produced 9 assertion failures and 2 persistence errors, including the original epoch mismatch and `22008`; exit 1 |
+| `cd backend && ./mvnw -o -B -Dtest=SubmissionServiceTest '-Dit.test=AssessmentPersistenceIntegrationTest,AuthorizationIntegrationTest$AssignmentAuthoringEndpoints' verify` with the final mapping | 42 unit tests and 32 integration cases passed, no failures/errors/skips, exit 0: 29 Assessment persistence cases and 3 Assignment HTTP cases, including existing authorization/precedence and restricted-role lock/column tests |
+| `docker build -t codemastery-review/pr273-d1d2:01a211a3-final backend` | Repository Dockerfile build passed, exit 0; isolated review tag, not a release artifact |
+| `test-runtime-real-backend-privileges.sh` using that image (only its two image references changed in the external runner) | Consumer HTTP and V008-to-V009 upgrade suites passed, exit 0; historical POST returned 201, replacement to year zero and fresh GET returned 200; exact SQL epochs were `-14825894400.000000` and `-62167219200.000000`; existing final matrix checks passed with zero permission-denied/42501 log entries |
+| `bash -n infrastructure/vm/tests/test-runtime-real-backend-privileges.sh`; `git diff --check` | Both passed, exit 0 |
+
+During implementation, selecting the standard JDBC 4.2 mapping alone exposed the driver's
+`0000-02-29` extraction failure; an explicit-calendar Timestamp reader also failed the historical
+instant oracles. Those candidates were rejected, not accepted as passing evidence. The final local
+extractor passed the unchanged date/epoch assertions, including the expanded timezone checks.
+
+Selective verification: the full backend suite, full browser E2E, interactive browser checks,
+standalone PostgreSQL containment, HTTPS/MinIO/containerd, release qualification and security scans
+were not rerun. The preceding review's results at `3f7c184` are retained only for unaffected behavior:
+D1 changes no shell/transport/route contract, and D2 changes no schema, ACL, deployment implementation,
+image baseline or unrelated timestamp field. The affected runtime-consumer suite was rerun because
+JDBC binding/extraction changed even though grants did not. These tests do not establish full-app,
+release, real-host or independent acceptance, and no omitted suite is claimed to pass on the new HEAD.
+Required CI is left to the protected-integration gate; the Leader explicitly waived waiting for it
+in this remediation session. U7/U8, G7, N7 and CODEOWNER/technical approval gates remain unresolved.
+
+
+## PR #273 D1-R1 acknowledgment and reconciliation correction — 25 November 2026
+
+The Project Leader explicitly authorized this focused correction in the same review session:
+"PR #273 — Focused D1-R1 Remediation in the Current Independent Review Session". The preceding
+independent review at `00f8084` found that the D1 follow-up above was only partially correct.
+Its object-identity and metadata-equality branches cannot establish database commit order:
+
+- **GET before the PUT commit:** PUT A is delayed before its guarded write; B commits and a
+  publication-triggered shared GET observes B; A then commits and returns successfully. If the
+  post-save GET fails, the old form adopts B, becomes clean and says `Saved` although A is stored.
+- **Restored original metadata:** A commits, another writer restores the original X, and a shared
+  GET observes a new X snapshot before A's delayed reply arrives. If the post-save GET fails,
+  equality with the pre-save metadata suppresses X and the old form displays A with `Saved`.
+
+The first sequence is a regression introduced by the earlier D1 fix; the second is a residual.
+The original D1 sequence (A commits, B commits, GET B arrives before A's reply) can have exactly
+that same frontend response ordering. An immediate choice of A in one case and B in another is
+therefore not a valid oracle without additional server ordering metadata. This correction adds
+no such metadata or public contract. The earlier implementation and test results above remain
+historical records, not proof that D1-R1 was already resolved.
+
+**Reconciliation model.** The existing `useSharedCourseState` counts actual `getOwnedCourse`
+initiations. The one existing `useOwnerRead` carries the successful body and that initiation
+sequence together; loading, retained-body errors and cancelled/superseded results cannot advance
+successful-read evidence. The generic owner-read hook itself is unchanged. Course reload returns
+the minimum next initiation sequence and schedules the existing shared reload. Reloads coalesced
+by React need no extra GET; a later accepted publication-triggered read can also satisfy the bound.
+
+A successful Settings PUT immediately displays its acknowledged canonical metadata and clears
+only the actual draft's dirty state. It starts the existing post-save shared reload and waits for
+a current successful read with an initiation sequence at least that bound. Pre-acknowledgment GETs
+cannot reconcile this save, irrespective of their values, object identity or arrival time. While
+pending the status is `Settings saved. Refreshing course…`; after an unknown read failure it is
+`Settings saved, but the current values couldn't be loaded.` The existing stale-course alert and
+`Try again` perform one deliberate shared re-read, never a mutation replay. A successful eligible
+read reconciles a clean form with the header and restores `Saved`, including when the read returns
+the original values or an identical object in a test double. It establishes only the state observed
+by that read, not permanent global freshness.
+
+A new unsaved draft retains its fields and the existing dirty-navigation guard. A confirmed save
+awaiting reconciliation alone is not an unsaved draft and does not trigger that guard. Consecutive
+saves obtain their own causal bounds. Course/session replacement, unmount, cancellation, refusals
+and unknown mutation outcomes retain their existing behavior. The form remains keyed by Course
+identity. The two qualified status strings are the minimal presentation adjustment authorized for
+D1-R1; they do not resolve N7 or amend DESIGN r13, S18/D12-3 or CT21.authoring.
+
+**Executed verification** (isolated implementation clone, starting `00f8084`; cwd `frontend/`):
+
+| Command | Observed result |
+| --- | --- |
+| `npm test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx -t D1-R1` before production changes | 18 new component cases: 16 failed, 2 passed, 55 old cases excluded by selector; exit 1. The two existing-behavior passes are confirmed read refusals. |
+| `npm test -- src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/routes/index.test.tsx` after correction | 3 files, 184 tests passed; exit 0. Includes 18 new component cases and 4 course-context hook cases. |
+| `npm run build` | TypeScript and production build passed; exit 0; existing chunk-size advisory. |
+| `git diff --check` | Passed; exit 0. |
+
+The deterministic component matrix covers both D1-R1 sequences and original D1 with network,
+protocol and 503 reconciliation failures, asserts acknowledgment and qualified status before a
+later GET can conceal errors, then verifies explicit retry, successful adoption and no PUT replay.
+Further cases cover pre-acknowledgment and post-acknowledgment publication reads, superseded reads,
+consecutive saves, reads resolving on either side of a later acknowledgment, same-value snapshots,
+clean navigation while unresolved, Course/session replacement and confirmed read refusals.
+Existing draft, mutation cancellation, unknown-outcome and navigation tests remain. The original
+D1 test now checks the pending acknowledgment before allowing the eligible read to succeed; its
+former immediate-ordering claim is intentionally replaced, not accepted as an achievable guarantee.
+Hook tests establish success-only evidence, retained errors, same-object success, coalesced reloads,
+supersession, Course/session isolation, Strict Mode and unmount cancellation.
+
+**Retained independent evidence and selective omissions.** At `00f8084`, the preceding independent
+review passed 42 Assignment unit tests, 29 persistence cases and 3 HTTP cases, plus an independent
+14-date SQL-epoch matrix with text/binary prepared-result transfer and a non-UTC JVM. The real
+restricted-role backend consumer and V008-to-V009 upgrade harness passed with no 42501. That is
+prior independently established evidence, not new-head execution: D2 production/tests, backend,
+schema, grants, provisioning and dependencies are unchanged, so none was rerun for D1-R1. The
+historical-row compatibility limitation above remains a separate provenance/repair decision.
+
+Standalone containment is retained from the independent `3f7c184` run for unchanged ACL/provisioning,
+schema and containment scripts. Full frontend/backend suites, full browser/E2E and interactive
+browser checks are omitted: only course-context read evidence and Settings reconciliation changed,
+with actual hooks/routes and deterministic interleavings tested above; existing unrelated author
+or CI results are not relabeled as new-head independent acceptance. HTTPS, MinIO, containerd,
+security scans and release qualification are omitted because their implementations, dependencies
+and image baselines are unchanged. No release, deployment or actual-host result is inferred.
+
+These are remediation-author tests and focused self-review. New independent acceptance, Leader
+technical approval, CODEOWNER/Infrastructure review, G7/N7 disposition and protected integration
+remain separate. The Leader expressly authorized committing and pushing without waiting for CI;
+required CI remains an integration gate. No merge, Issue/Project/PR metadata write, release,
+deployment or real infrastructure provisioning is part of this correction.
+
+
+## PR #273 D1-R2 Settings tab lifecycle correction — 25 November 2026
+
+The Project Leader explicitly authorized focused D1-R2 implementation, verification, commit and
+push in the existing third independent delta-review session, starting from `77b3128`:
+"PR #273 — Focused D1-R2 Remediation in the Current Review Session". This record preserves the
+preceding review and remediation records as history. The third independent review verified the
+original D1 and D1-R1 causal reconciliation cases and retained independent D2 evidence, but found
+D1-R2 (P2, high confidence). D1-R2 also reproduces at `00f8084`: it is a pre-existing lifecycle
+issue, not a regression caused by the read sequence counter.
+
+**Reproduction and cause.** The Course provider survives tab changes; the Settings form does not.
+With shared metadata X, a successful metadata PUT acknowledges A. While its post-acknowledgment
+GET remains pending or fails (503, network or protocol), the old form holds A and its reconciliation
+bound only locally. Settings → Content → Settings loses that local state, initializes from retained
+X and loses the qualified save status. Editing only description then sends a full replacement with
+title X, silently undoing A. The failed branch still has the generic stale-course alert; the pending
+branch has no warning after remount. Preserving just a `Saved` label would not correct the payload.
+
+**Correction and ownership.** `useSharedCourseState`, owned by the existing Course provider, retains
+only the three acknowledged metadata fields (`title`, `description`, `prerequisiteDescription`) and
+the existing minimum read-initiation bound. This state is separate from `course.data` and
+`successfulRead`: a PUT never becomes successful GET evidence or a replacement shared Course tree.
+The existing GET sequence and reload mechanism are unchanged. The provider resolves the
+acknowledgment when an accepted successful read reaches the bound, even while Settings is absent.
+An eligible read that returns another writer's values, including the original X, takes precedence;
+no object equality or response-order heuristic establishes commit order or permanent freshness.
+
+A remounted Settings form uses unresolved acknowledged metadata as its editing baseline and keeps
+`Settings saved. Refreshing course…` or `Settings saved, but the current values couldn't be loaded.`
+The existing `Try again` performs one shared read. Tab changes start no additional Course/skill
+reads. Later successful saves establish their own bounds. Unsaved drafts, dirty flags, validation,
+field errors and unknown-mutation-outcome warnings remain local to the form: an explicitly discarded
+draft never reappears as an acknowledgment. A rejected/unknown second mutation does not replace a
+previous confirmed acknowledgment with its draft. Acknowledgment alone does not trigger the leave
+confirmation. Unknown mutations retain the existing deliberate re-read and are never replayed.
+
+The retained state is scoped to authenticated session generation and Course identity. Identity
+replacement or logout discards it. A confirmed read refusal discards the shared body and clears
+acknowledgment before same-provider recovery; a later successful recovery cannot resurrect it.
+Provider unmount discards the state and existing request cancellation rejects late work. The
+existing `useOwnerRead` and `useAuthoringOperation` are unchanged. No new provider, store, client,
+repository file, public API, dependency, backend/schema/grant change or navigation guard is added.
+
+**Executed author-side verification** (isolated implementation clone; cwd `frontend/` unless noted):
+
+| Command / environment | Observed result |
+| --- | --- |
+| `npm test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx -t D1-R2 --reporter=verbose` using the final new component tests with defective `77b3128` production files | 9 failed, 5 passed, 73 existing cases excluded; exit 1. The five existing-behavior passes cover eligible read completion outside Settings and logout/authentication replacement. |
+| `npm test -- src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/routes/index.test.tsx` | 3 files, 211 tests passed; exit 0. Includes 14 new component cases and 13 new hook cases. |
+| Reused third-review scratch `independentReconciliation.test.tsx` and `independentScheduling.test.tsx` against corrected production files | 14 cases passed; exit 0. Both previously failing remount probes now pass; older-read-before-cleanup and coalescing probes remain intact. These probes are external verification artifacts, not repository additions. |
+| `npm run build` | Typecheck and production build passed; exit 0; existing chunk-size advisory. |
+| Targeted `playwright-cli`, Chrome `157.0.8103.39`, local Vite app with synthetic intercepted HTTP | Pending and 503 remount branches preserve title A and their qualified status. Actual second PUT contains title A with the description-only edit; two deliberate PUTs, no replay. Strict Mode produces two initial Course GETs (one superseded); each save adds one GET, tab remount adds none. |
+| `git diff --check` | Passed; exit 0. |
+
+The durable component cases check all three metadata fields, pending/503/network/protocol remount,
+actual second PUT payload, superseded first-save responses, eligible second-save reconciliation,
+explicit retry without PUT replay, success while Settings is absent (A, another writer, restored X),
+repeated Content/Skills/Assessments/quiz/Assignment routes, draft Stay/Leave/discard, rejected and
+unknown later writes, logout and authentication replacement. Provider hook cases check separate
+PUT/GET provenance, resolution with no Settings form, pending/failed acknowledgment across
+403/404 refusal and failed/successful same-provider recovery, Course/session/logout replacement,
+late reads, Strict Mode, unmount and remount. Existing D1/D1-R1 tests retain their causal oracle,
+including delayed mutations, consecutive saves, clean navigation, supersession and coalescing.
+Mocks establish deterministic frontend behavior; the browser exercises the real app, router,
+transport and decoders with synthetic HTTP, not real backend commit ordering or deployment.
+
+**Selective omissions and retained evidence.** D2/backend production and tests, PostgreSQL mapping,
+configuration/schema, CT17-P6 r12 grants, infrastructure, contracts and dependency/image baselines
+are unchanged from `77b3128` and `00f8084`. No backend/calendar/runtime-role/upgrade suite was rerun.
+Retain the prior independent `00f8084` results: 42 Assignment unit, 29 persistence and 3 HTTP cases,
+14-date exact SQL-epoch/text/binary/non-UTC probes, and restricted-runtime-role consumer/upgrade
+verification. The historical-row compatibility/repair decision remains separate. Standalone
+containment retains independent `3f7c184` exact-grants, denial, drift, upgrade and failure-containment
+evidence because those implementations are unchanged. These are historical independent results,
+not newly executed checks at the remediation commit.
+
+Full frontend/backend, full browser/E2E, HTTPS, MinIO, containerd, security and release qualification
+were omitted: the delta affects only Course-owned acknowledgment and Settings lifecycle, directly
+covered above; no relevant backend, infrastructure, image or dependency change invalidates their
+bounded prior evidence. Unaffected U1–U4/U6 dispositions are retained; U7/U8 remain deferred with
+the preceding provenance limitations. No omitted suite is claimed to pass at the new HEAD.
+
+This correction and its self-review are remediation-author verification, not new independent
+acceptance. A focused independent D1-R2 delta check, applicable CODEOWNER/owning-module and
+Infrastructure reviews, G7 owner confirmation, N7 disposition, required CI and protected integration
+remain separate. The Leader authorized commit/push without waiting for CI. No approval, merge,
+Issue/Project/PR metadata write, release, deployment, real-host provisioning or production-data
+access is part of this remediation; no protection against every concurrent external write is
+promised beyond CT21's unchanged full-replacement/last-serialized-successful-commit semantics.

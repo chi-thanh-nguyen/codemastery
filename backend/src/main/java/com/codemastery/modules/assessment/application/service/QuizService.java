@@ -3,14 +3,19 @@ package com.codemastery.modules.assessment.application.service;
 import com.codemastery.common.api.PageResponse;
 import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.ResourceNotFoundException;
+import com.codemastery.modules.assessment.domain.model.DifficultyLevel;
 import com.codemastery.modules.assessment.domain.model.Question;
 import com.codemastery.modules.assessment.domain.model.Quiz;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository.Member;
+import com.codemastery.modules.assessment.domain.repository.QuizRepository.PracticeQuizDifficultyRow;
 import com.codemastery.modules.course.application.service.CourseAccessService;
 import com.codemastery.modules.course.application.service.CourseManagementService;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -21,7 +26,9 @@ import java.util.function.Supplier;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * CT23.composition, CT23.publication and the QuizService bindings of CT23.bindings
@@ -91,6 +98,20 @@ public class QuizService {
         this.courseAccess = Objects.requireNonNull(courseAccess, "courseAccess");
         this.courseConfiguration = Objects.requireNonNull(courseConfiguration, "courseConfiguration");
     }
+
+    /** CT23-PRACTICE-PROFILES-2026-11-15-r1 (ADR013 §19.3): minimal practice quiz profile for Adaptive. */
+    public record PracticeQuizProfile(UUID quizId, String title, Set<DifficultyLevel> difficulties) {
+        public PracticeQuizProfile {
+            Objects.requireNonNull(quizId, "quizId");
+            Objects.requireNonNull(title, "title");
+            Objects.requireNonNull(difficulties, "difficulties");
+            difficulties = Set.copyOf(difficulties);
+        }
+    }
+
+    private static final Comparator<PracticeQuizProfile> PRACTICE_PROFILE_ORDER =
+            Comparator.comparing(PracticeQuizProfile::title)
+                    .thenComparing(profile -> profile.quizId().toString());
 
     /** Creates a hidden quiz with the exact supplied membership (an empty draft is allowed). */
     public QuizView create(UUID courseId, QuizInput input) {
@@ -205,6 +226,85 @@ public class QuizService {
                     quiz.time_limit_seconds(), true, counts.getOrDefault(quiz.id(), 0));
         }).toList();
         return new PageResponse<>(content, page, size, total);
+    }
+
+    /**
+     * CT23-PRACTICE-PROFILES-2026-11-15-r1 (ADR013 §19.3, oracle B8-P09).
+     * Joins the caller's read-only REPEATABLE READ transaction and executes one set-based query.
+     * Caller allowlist: Adaptive RecommendationService after readLearnerState admission.
+     */
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public List<PracticeQuizProfile> readPracticeQuizProfiles(UUID courseId, Set<UUID> skillIds) {
+        requireId(courseId);
+        Objects.requireNonNull(skillIds, "skillIds");
+        Set<UUID> requestedSkills = copySkillIds(skillIds);
+        // Joining an existing transaction does not apply an annotation's isolation/readOnly settings.
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isCurrentTransactionReadOnly()
+                || !Objects.equals(TransactionSynchronizationManager.getCurrentTransactionIsolationLevel(),
+                        Isolation.REPEATABLE_READ.value())) {
+            throw new IllegalStateException(
+                    "Practice quiz profile reads require a read-only REPEATABLE READ transaction");
+        }
+        if (requestedSkills.isEmpty()) {
+            return List.of();
+        }
+
+        List<PracticeQuizDifficultyRow> rows =
+                quizzes.findPublishedPracticeQuizDifficultyRows(courseId, requestedSkills);
+        if (rows == null) {
+            throw new IllegalStateException("Repository returned null practice quiz difficulty rows");
+        }
+        if (rows.isEmpty()) {
+            return List.of();
+        }
+
+        Map<UUID, String> titlesByQuiz = new HashMap<>();
+        Map<UUID, Set<DifficultyLevel>> difficultiesByQuiz = new HashMap<>();
+        for (PracticeQuizDifficultyRow row : rows) {
+            if (row == null || row.quizId() == null || !isText(row.title())) {
+                throw new IllegalStateException("Stored practice quiz profile violates V004");
+            }
+            DifficultyLevel level = parseDifficulty(row.difficulty());
+            String previousTitle = titlesByQuiz.putIfAbsent(row.quizId(), row.title());
+            if (previousTitle != null && !previousTitle.equals(row.title())) {
+                throw new IllegalStateException("Inconsistent stored title for quiz: " + row.quizId());
+            }
+            difficultiesByQuiz
+                    .computeIfAbsent(row.quizId(), ignored -> EnumSet.noneOf(DifficultyLevel.class))
+                    .add(level);
+        }
+
+        List<PracticeQuizProfile> profiles = new ArrayList<>(titlesByQuiz.size());
+        for (Map.Entry<UUID, String> entry : titlesByQuiz.entrySet()) {
+            UUID quizId = entry.getKey();
+            profiles.add(new PracticeQuizProfile(quizId, entry.getValue(), difficultiesByQuiz.get(quizId)));
+        }
+        profiles.sort(PRACTICE_PROFILE_ORDER);
+        return List.copyOf(profiles);
+    }
+
+    private static Set<UUID> copySkillIds(Set<UUID> skillIds) {
+        Set<UUID> copy = new HashSet<>(skillIds.size());
+        for (UUID skillId : skillIds) {
+            if (skillId == null) {
+                throw new IllegalArgumentException("skillIds must not contain null");
+            }
+            copy.add(skillId);
+        }
+        return Set.copyOf(copy);
+    }
+
+    private static DifficultyLevel parseDifficulty(String code) {
+        if (code == null) {
+            throw new IllegalStateException("Stored question difficulty violates V004");
+        }
+        for (DifficultyLevel level : DifficultyLevel.values()) {
+            if (level.getCode().equals(code)) {
+                return level;
+            }
+        }
+        throw new IllegalStateException("Stored question difficulty violates V004: " + code);
     }
 
     /**

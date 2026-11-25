@@ -5,40 +5,42 @@ import com.codemastery.modules.auth.application.service.UserAccountService;
 import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
 import com.codemastery.modules.auth.application.service.UserAccountService.IdentityRole;
 import com.codemastery.modules.course.domain.model.Enrollment;
+import com.codemastery.modules.course.domain.model.Course;
 import com.codemastery.modules.course.domain.model.EnrollmentStatus;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository.LessonFlags;
+import com.codemastery.modules.course.domain.repository.EnrollmentRepository.LessonPlacement;
+import com.codemastery.modules.course.domain.repository.CourseRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 
-/**
- * CT22.progress and CT22.resume (ADR006 §§3, 4, 7.2): Course-owned manual completion,
- * progress calculation and visit/resume for the current self Learner.
- *
- * <p>Writes lock the Course root first, recheck CT03 Lesson access and membership, then
- * lock the Enrollment and progress rows, at READ COMMITTED with every lock held until
- * commit. This is private Course persistence, never the Instructor-only configuration
- * guard. Reads are REPEATABLE READ and never change completion, membership or resume.
- * Manual completion never consults or changes mastery and never calls Adaptive.
- */
+/** Course-owned CT22 progress/resume and atomic participation, plus the admitted CT33 learner read. */
 @Service
 public class LessonProgressService {
     private final EnrollmentRepository enrollments;
     private final UserAccountService identities;
     private final CourseAccessService access;
+    private final CourseRepository courses;
 
-    public LessonProgressService(EnrollmentRepository enrollments, UserAccountService identities, CourseAccessService access) {
+    public LessonProgressService(EnrollmentRepository enrollments, UserAccountService identities, CourseAccessService access,
+                                 CourseRepository courses) {
         this.enrollments = Objects.requireNonNull(enrollments);
         this.identities = Objects.requireNonNull(identities);
         this.access = Objects.requireNonNull(access);
+        this.courses = Objects.requireNonNull(courses);
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -103,6 +105,98 @@ public class LessonProgressService {
         var actor = learner();
         return new LearnerResume(enrollments.latestVisit(actor.userId())
                 .map(row -> new LearnerResumePosition(row.courseId(), row.lessonId(), row.lastVisitedAt())).orElse(null));
+    }
+
+    /** ADR011 §13: one admitted snapshot, owned by the CT33/AD11 caller; no execution root is needed. */
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public LearnerCourseState readLearnerState(UUID courseId) {
+        requireId(courseId);
+        // Joining an existing transaction does not apply an annotation's isolation/readOnly settings.
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isCurrentTransactionReadOnly()
+                || !Objects.equals(TransactionSynchronizationManager.getCurrentTransactionIsolationLevel(),
+                        Isolation.REPEATABLE_READ.value())) {
+            throw new IllegalStateException("Course learner reads require a read-only REPEATABLE READ transaction");
+        }
+        access.requireLearnerCourseAccess(courseId);
+        var actor = learner();
+        var enrollment = joined(enrollments.find(actor.userId(), courseId).orElse(null));
+        return executionState(courseId, actor.userId(), enrollment);
+    }
+
+    /** ADR011 §3: actorless execution read, only under this Course's held write root. */
+    public LearnerCourseState readExecutionState(UUID courseId, UUID learnerId) {
+        requireId(courseId);
+        requireId(learnerId);
+        requireHeldRoot(courseId);
+        return executionState(courseId, learnerId, enrollments.find(learnerId, courseId).orElse(null));
+    }
+
+
+    /** ADR011 §3: monotonic skips in the caller's transaction; failures must propagate to that caller. */
+    public LearnerCourseState applyMasterySkips(UUID courseId, UUID learnerId, Set<UUID> lessonIds) {
+        requireId(courseId);
+        requireId(learnerId);
+        if (lessonIds == null || lessonIds.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("Lesson identifiers must not be null");
+        }
+        requireHeldRoot(courseId);
+        var enrollment = enrollments.lockEnrollment(learnerId, courseId).orElse(null);
+        if (enrollment == null || enrollment.status() == EnrollmentStatus.LEFT) {
+            throw new IllegalStateException("Mastery skips require a joined Enrollment");
+        }
+        var lessons = enrollments.publishedLessonPlacements(courseId, enrollment.id());
+        Set<UUID> published = new HashSet<>();
+        lessons.forEach(lesson -> published.add(lesson.lessonId()));
+        if (!published.containsAll(lessonIds)) throw new IllegalArgumentException("Lesson is not a published Lesson of the Course");
+        if (lessonIds.isEmpty()) return executionState(courseId, learnerId, enrollment.id(), enrollment.status().getStatus(), lessons);
+
+        enrollments.lockProgress(enrollment.id());
+        for (var lesson : lessons) {
+            if (lessonIds.contains(lesson.lessonId()) && !lesson.completed()) {
+                enrollments.markMasterySkipped(enrollment.id(), lesson.lessonId());
+            }
+        }
+        var after = enrollments.publishedLessonPlacements(courseId, enrollment.id());
+        var flags = after.stream().map(l -> new LessonFlags(l.lessonId(), l.completed(), l.masterySkipped())).toList();
+        var target = calculate(flags).isComplete() ? EnrollmentStatus.COMPLETED : EnrollmentStatus.ACTIVE;
+        if (target != enrollment.status()) enrollments.updateStatus(enrollment.id(), target);
+        return executionState(courseId, learnerId, enrollment.id(), target.getStatus(), after);
+    }
+
+    private LearnerCourseState executionState(UUID courseId, UUID learnerId, Enrollment enrollment) {
+        UUID enrollmentId = enrollment == null ? null : enrollment.id();
+        return executionState(courseId, learnerId, enrollmentId, enrollment == null ? "none" : enrollment.status().getStatus(),
+                enrollments.publishedLessonPlacements(courseId, enrollmentId));
+    }
+
+    private LearnerCourseState executionState(UUID courseId, UUID learnerId, UUID enrollmentId, String membership,
+                                              List<LessonPlacement> lessons) {
+        var stored = courses.findAdaptiveConfiguration(courseId)
+                .orElseThrow(() -> new IllegalStateException("Course row disappeared"));
+        if (stored.adaptiveEnabled() && stored.adaptiveSettings() == null) {
+            throw new IllegalStateException("Invalid stored adaptive configuration");
+        }
+        return new LearnerCourseState(courseId, learnerId, enrollmentId, membership, stored.adaptiveEnabled(),
+                stored.adaptiveSettings(), lessons.stream().map(LessonProgressService::lessonState).toList());
+    }
+
+    private static LessonState lessonState(LessonPlacement lesson) {
+        if (lesson.masterySkipped() && !lesson.completed()) throw new IllegalStateException("Skipped Lesson must be completed");
+        return new LessonState(lesson.lessonId(), lesson.chapterId(), lesson.chapterPosition(), lesson.lessonPosition(),
+                lesson.completed(), lesson.masterySkipped());
+    }
+
+    private void requireHeldRoot(UUID courseId) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+            throw new IllegalStateException("Course execution participation requires the held Course root");
+        }
+        var facts = courses.currentTransactionFacts();
+        if (facts == null || facts.readOnly() || !"read committed".equals(facts.isolation())
+                || !courseId.equals(facts.heldCourseRoot())) {
+            throw new IllegalStateException("Course execution participation requires the held Course root");
+        }
     }
 
     /** CT22.progress integer calculation over the published required set R, in canonical order. */
@@ -177,4 +271,15 @@ public class LessonProgressService {
     public record CourseResume(UUID courseId, UUID resumeLessonId, UUID nextLessonId) {}
     public record LearnerResumePosition(UUID courseId, UUID lessonId, Instant lastVisitedAt) {}
     public record LearnerResume(LearnerResumePosition position) {}
+    /** {@code membershipStatus} is active, completed, left or none (then enrollmentId is null). */
+    public record LearnerCourseState(UUID courseId, UUID learnerId, UUID enrollmentId,
+            String membershipStatus, boolean adaptiveEnabled, Map<String, Object> adaptiveSettings,
+            List<LessonState> lessons) {
+        public LearnerCourseState {
+            adaptiveSettings = adaptiveSettings == null ? null : Course.immutableJsonObject(adaptiveSettings);
+            lessons = List.copyOf(lessons);
+        }
+    }
+    public record LessonState(UUID lessonId, UUID chapterId, int chapterPosition,
+            int lessonPosition, boolean completed, boolean masterySkipped) {}
 }
