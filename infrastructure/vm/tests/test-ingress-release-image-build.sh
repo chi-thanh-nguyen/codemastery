@@ -26,7 +26,7 @@ docker image inspect --format 'release frontend: user {{.Config.User}}, healthch
 # The release's fontconfig dependency must use the reviewed security revision,
 # rather than the vulnerable libexpat inherited from the pinned base.
 docker run --rm --entrypoint sh "$FRONTEND_RELEASE_IMAGE" -ec '
-  apk info -v | grep -qx "libexpat-2.11.0-r0"'
+  apk info -v | grep -Fxq "libexpat-2.11.0-r0"'
 # The runtime user (UID 101) cannot change the Nginx configuration; only
 # the cache directory (and /tmp, for the pid file) stays writable.
 for image in "$FRONTEND_RELEASE_IMAGE" "$FRONTEND_LOCAL_IMAGE"; do

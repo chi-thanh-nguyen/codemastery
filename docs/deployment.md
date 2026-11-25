@@ -5466,3 +5466,26 @@ required ingress job was failing on Maven and main still had the retired
 libexpat pin. A separate main-based PR would fail on that pin. The combined PR
 lets reviewers assess both changes on the same CI merge checkout. After protected
 integration, PRs #290 and #291 can update from main and run their own checks.
+
+### Maven bootstrap self-review follow-up
+
+The required `VM HTTPS ingress` job now runs the offline integrity fixtures
+after its image builds. The fixtures reuse the builder and may reuse its
+already fetched OCI blobs. Every fixture reruns the verifier and checks the
+output of that verifier step, including the digest result and Maven version on
+success. The suite also requires failures to come from the verifier itself.
+
+The Docker URL check accepts the supported portable configuration of the
+checked-in Unix and Windows wrappers: one exact `distributionUrl=` key,
+the reviewed Apache ZIP URL, and a final LF or CRLF. Surrounding value
+whitespace is permitted. Ambiguous keys and malformed declarations are
+rejected. Wrapper repository overrides and its extracted host installations
+remain host behavior. They do not choose the Docker build distribution.
+
+Alpine v3.24 still indexes `libexpat=2.11.0-r0` at this review and its security
+database records the fixes for the two successive revisions. The release image
+uses its `libexpat.so.1` through fontconfig. The libexpat project tracks
+[unfixed issues](https://github.com/libexpat/libexpat/issues/1160), including
+[CVE-2025-66382](https://github.com/libexpat/libexpat/issues/1076). The scan is
+limited to its advisory data. Application reachability for that upstream issue
+was not established and remains part of release risk assessment.

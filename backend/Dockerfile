@@ -13,10 +13,16 @@ COPY --from=maven-distribution --chown=0:0 /usr/share/maven/ /opt/maven/
 COPY .mvn/wrapper/maven-wrapper.properties .mvn/wrapper/
 # BEGIN MAVEN DISTRIBUTION VERIFICATION
 RUN --network=none set -eu; \
+    properties=.mvn/wrapper/maven-wrapper.properties; \
+    [ "$(tail -c 1 "$properties" | wc -l)" -eq 1 ] \
+        || { echo 'Maven wrapper properties must end with a newline' >&2; exit 1; }; \
     expected_url='https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.16/apache-maven-3.9.16-bin.zip'; \
-    wrapper_url="$(awk 'sub(/^[[:space:]]*distributionUrl[[:space:]]*=[[:space:]]*/, "") { \
-        sub(/[[:space:]]+$/, ""); url = $0; count++ \
-    } END { if (count == 1) print url }' .mvn/wrapper/maven-wrapper.properties)"; \
+    wrapper_url="$(awk 'tolower($0) ~ /^[[:space:]]*distributionurl([[:space:]]*[:=]|[[:space:]]|$)/ { \
+        count++; \
+        if (sub(/^distributionUrl=/, "")) { \
+            sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); url = $0; \
+        } \
+    } END { if (count == 1) print url }' "$properties")"; \
     [ "$wrapper_url" = "$expected_url" ] || { echo 'Maven distribution pin and wrapper URL differ' >&2; exit 1; }; \
     rm -rf /opt/maven/ref; \
     tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner --format=gnu \

@@ -7622,3 +7622,36 @@ local layer reuse as cross-run GitHub cache availability.
 
 AI-assisted work: Codex inspected the Actions logs and upstream artifacts,
 implemented the Docker bootstrap change, and executed the local qualification.
+
+### PR #293 author-side Maven regression follow-up
+
+The earlier ten-case runs above apply to `94118b6`. Its GitHub E2E job reported
+114 passed and six skipped on Linux, and its release rehearsal passed. Its
+Backend job passed on attempt 2 with 1,146 unit and 594 integration tests.
+Attempt 1 had one SH05 integration failure. The parent reported exit 1
+without the child's assertion, so the original cause remains undetermined.
+
+The follow-up runs `bash infrastructure/vm/tests/test-maven-bootstrap.sh` in
+the required `VM HTTPS ingress` job. The 18 cases passed locally on amd64
+(emulated) and arm64 (native) with Docker Desktop. Cases cover the reviewed
+archive, LF and CRLF, value whitespace, comments, four distribution tree
+mutations and malformed, empty, conflicting or mismatched URL declarations.
+The harness checks the explicit build target, verifies marker placement and
+requires actual output from the verifier. Disposable controls showed that
+unrelated registry errors, command echoes, diagnostics from other steps and
+malformed markers do not count as passes.
+
+The release frontend inventory check now uses a fixed-string match. The
+synthetic inventory line `libexpat-201100-r0` matched the old regular
+expression and fails the literal check. The installed `libexpat-2.11.0-r0`
+line passes.
+
+The clean amd64 rebuild ran one Maven package command. The runtime retained
+its non-root user, read-only JAR and Java trust-store check. Comparing the
+754 JAR entries with the earlier qualification found only a build timestamp
+change. Trivy 0.76.2, using the database dated 25 November 2026 13:07 UTC,
+reported the same 29 MEDIUM and five LOW findings with no listed fixes in both
+detection modes. These scan results are a point-in-time measurement.
+
+AI-assisted work: Codex performed the author-side review, corrected the Docker
+URL check and CI regression harness, and ran the follow-up qualification.

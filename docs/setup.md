@@ -795,8 +795,10 @@ not required for these image builds.
 The build context is `backend/`. The builder uses the pinned
 `eclipse-temurin:25.0.5_8-jdk-noble` with Apache Maven 3.9.16 copied from a
 digest-pinned Docker Official Image. Before executing Maven, Docker checks the
-distribution tree against a SHA-512 derived from Apache's verified archive and
-checks that the configured Wrapper URL identifies the same version. The bootstrap
+distribution tree against a SHA-512 derived from Apache's verified archive. The
+Wrapper properties file must end in a newline (LF or CRLF) and contain one
+case-sensitive `distributionUrl=` declaration with the exact reviewed Apache ZIP
+URL. Surrounding value whitespace is allowed. The bootstrap
 layer has no network access. A fresh builder needs the pinned OCI layers from
 Docker Hub, and Maven still contacts Maven Central for project dependencies and
 plugins. `mvn package -DskipTests` runs once, compiling the test sources without
