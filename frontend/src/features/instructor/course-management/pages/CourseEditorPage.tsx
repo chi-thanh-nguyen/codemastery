@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Skeleton, TextField, Typography } from '@mui/material';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router';
@@ -358,13 +358,16 @@ export function CourseSettingsTab() {
     // Keyed by the course identity only (U5): a re-read after a save, or another writer's change, must not remount the
     // form, which would drop the "Saved" status or an unsaved draft. The form adopts new committed values itself.
     return <CourseSettingsForm key={data.id}
-        course={data} ops={ops} onSaved={() => course.reload()} setTabDirty={setTabDirty} />;
+        course={data} successfulRead={course.successfulRead} refreshError={course.error}
+        ops={ops} onSaved={course.reload} setTabDirty={setTabDirty} />;
 }
 
-function CourseSettingsForm({ course, ops, onSaved, setTabDirty }: {
+function CourseSettingsForm({ course, successfulRead, refreshError, ops, onSaved, setTabDirty }: {
     course: OwnedCourse;
+    successfulRead: number;
+    refreshError: unknown;
     ops: ReturnType<typeof useCourseOperations>;
-    onSaved: () => void;
+    onSaved: () => number;
     setTabDirty: (dirty: boolean) => void;
 }) {
     const [title, setTitle] = useState(course.title);
@@ -374,16 +377,14 @@ function CourseSettingsForm({ course, ops, onSaved, setTabDirty }: {
     const [savedNotice, setSavedNotice] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [alert, setAlert] = useState<string | null>(null);
-    // Track actual snapshots, not just metadata equality: a fresh GET can restore earlier values. A successful PUT
-    // supplies the displayed snapshot itself. Only the exact pre-save context still on screen may be ignored until
-    // the post-save GET replaces it; a newer context must not be marked adopted while the fields show the PUT body.
-    const [adopted, setAdopted] = useState(course);
-    const [awaitingReplacement, setAwaitingReplacement] = useState<OwnedCourse | null>(null);
-    const committedRef = useRef(course);
-    committedRef.current = course;
-    if (adopted !== course && awaitingReplacement !== course && !dirty && !ops.busy) {
-        setAdopted(course);
-        setAwaitingReplacement(null);
+    // A GET observed during a PUT cannot establish their commit order. Keep the acknowledged fields until a
+    // current shared GET initiated after acknowledgment succeeds. Equality and object identity prove no ordering.
+    const [adoptedRead, setAdoptedRead] = useState(successfulRead);
+    const [reconcileAfter, setReconcileAfter] = useState<number | null>(null);
+    const reconciled = reconcileAfter === null || successfulRead >= reconcileAfter;
+    if (reconcileAfter !== null && reconciled) setReconcileAfter(null);
+    if (adoptedRead !== successfulRead && reconciled && !dirty && !ops.busy) {
+        setAdoptedRead(successfulRead);
         setTitle(course.title);
         setDescription(course.description);
         setPrerequisites(course.prerequisiteDescription ?? '');
@@ -409,6 +410,7 @@ function CourseSettingsForm({ course, ops, onSaved, setTabDirty }: {
         if (Object.keys(next).length) return;
         setAlert(null);
         setSavedNotice(false);
+        setReconcileAfter(null);
         const write = {
             title: title.trim(),
             description: description.trim(),
@@ -416,19 +418,12 @@ function CourseSettingsForm({ course, ops, onSaved, setTabDirty }: {
         };
         try {
             const saved = await ops.updateMetadata(write);
-            // Keep the acknowledged values over the old context while its re-read is pending or failed (U2/U5).
-            // A context with changed metadata observed during the write is instead reconciled immediately (D1).
-            const latest = committedRef.current;
-            const stillPreSaveMetadata = latest.title === course.title && latest.description === course.description
-                && latest.prerequisiteDescription === course.prerequisiteDescription;
             setTitle(saved.title);
             setDescription(saved.description);
             setPrerequisites(saved.prerequisiteDescription ?? '');
-            setAdopted(saved);
-            setAwaitingReplacement(stillPreSaveMetadata ? latest : null);
             setDirty(false);
             setSavedNotice(true);
-            onSaved();
+            setReconcileAfter(onSaved());
         } catch (error) {
             if (isCancelled(error)) return;
             const fields = fieldErrorsFrom(error, {
@@ -446,7 +441,11 @@ function CourseSettingsForm({ course, ops, onSaved, setTabDirty }: {
         }
     }
 
-    const status = ops.busy ? 'Saving…' : savedNotice ? 'Saved' : dirty ? 'Unsaved changes' : null;
+    const status = ops.busy ? 'Saving…' : dirty ? 'Unsaved changes' : savedNotice
+        ? reconcileAfter !== null
+            ? refreshError ? "Settings saved, but the current values couldn't be loaded." : 'Settings saved. Refreshing course…'
+            : 'Saved'
+        : null;
     return <Box sx={{ display: 'grid', gap: 2.5, maxWidth: 760 }}>
         <Typography component="h2" variant="h2">Settings</Typography>
         {alert && <Alert severity="warning">{alert}</Alert>}

@@ -53,7 +53,10 @@ export interface SharedCourseContextState {
         status: 'loading' | 'ready' | 'error';
         data: OwnedCourse | null;
         error: unknown;
-        reload: () => void;
+        /** Sequence of the GET that supplied data; retained bodies keep their old sequence. */
+        successfulRead: number;
+        /** Schedules the shared read and returns its minimum eligible initiation sequence. */
+        reload: () => number;
     };
     skillGraph: OwnedSkillGraphRead;
     skills: SkillSource;
@@ -73,7 +76,19 @@ export function useCourseEditorContext(): SharedCourseContextState | null {
 }
 
 export function useSharedCourseState(courseId: string): SharedCourseContextState {
-    const courseRead = useOwnerRead(`owned-course|${courseId}`, (options) => getOwnedCourse(courseId, options));
+    // Count actual GET initiations, not renders, reload scheduling or response arrival. The existing owner-read
+    // lifecycle accepts only current, non-superseded results and retains this envelope unchanged on read failure.
+    const readSequence = useRef(0);
+    const courseRead = useOwnerRead(`owned-course|${courseId}`, async (options) => {
+        const sequence = ++readSequence.current;
+        const body = await getOwnedCourse(courseId, options);
+        return { body, sequence };
+    });
+    const reloadCourse = useCallback(() => {
+        const minimumRead = readSequence.current + 1;
+        courseRead.reload();
+        return minimumRead;
+    }, [courseRead.reload]);
     const skillGraph = useOwnedSkillGraph(courseId);
     const { reload: reloadGraph, graph, loading: graphLoading, error: graphError } = skillGraph;
     // True from an S20 skill change until a later graph read succeeds (D12-3). A failed read keeps it set,
@@ -106,7 +121,8 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
     }, []);
     const isTabDirty = useCallback(() => tabDirtyRef.current, []);
 
-    const courseData = courseRead.data;
+    const courseData = courseRead.data?.body ?? null;
+    const successfulRead = courseRead.data?.sequence ?? 0;
     const courseStatus: 'loading' | 'ready' | 'error' = courseRead.error && !courseData
         ? 'error'
         : courseData
@@ -116,8 +132,9 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
         status: courseStatus,
         data: courseData,
         error: courseRead.error,
-        reload: courseRead.reload,
-    }), [courseStatus, courseData, courseRead.error, courseRead.reload]);
+        successfulRead,
+        reload: reloadCourse,
+    }), [courseStatus, courseData, courseRead.error, successfulRead, reloadCourse]);
 
     const skills = useMemo<SkillSource>(() => ({
         status: skillGraph.error ? 'error' : skillGraph.graph ? 'ready' : 'loading',

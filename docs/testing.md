@@ -6898,3 +6898,93 @@ JDBC binding/extraction changed even though grants did not. These tests do not e
 release, real-host or independent acceptance, and no omitted suite is claimed to pass on the new HEAD.
 Required CI is left to the protected-integration gate; the Leader explicitly waived waiting for it
 in this remediation session. U7/U8, G7, N7 and CODEOWNER/technical approval gates remain unresolved.
+
+
+## PR #273 D1-R1 acknowledgment and reconciliation correction — 25 November 2026
+
+The Project Leader explicitly authorized this focused correction in the same review session:
+"PR #273 — Focused D1-R1 Remediation in the Current Independent Review Session". The preceding
+independent review at `00f8084` found that the D1 follow-up above was only partially correct.
+Its object-identity and metadata-equality branches cannot establish database commit order:
+
+- **GET before the PUT commit:** PUT A is delayed before its guarded write; B commits and a
+  publication-triggered shared GET observes B; A then commits and returns successfully. If the
+  post-save GET fails, the old form adopts B, becomes clean and says `Saved` although A is stored.
+- **Restored original metadata:** A commits, another writer restores the original X, and a shared
+  GET observes a new X snapshot before A's delayed reply arrives. If the post-save GET fails,
+  equality with the pre-save metadata suppresses X and the old form displays A with `Saved`.
+
+The first sequence is a regression introduced by the earlier D1 fix; the second is a residual.
+The original D1 sequence (A commits, B commits, GET B arrives before A's reply) can have exactly
+that same frontend response ordering. An immediate choice of A in one case and B in another is
+therefore not a valid oracle without additional server ordering metadata. This correction adds
+no such metadata or public contract. The earlier implementation and test results above remain
+historical records, not proof that D1-R1 was already resolved.
+
+**Reconciliation model.** The existing `useSharedCourseState` counts actual `getOwnedCourse`
+initiations. The one existing `useOwnerRead` carries the successful body and that initiation
+sequence together; loading, retained-body errors and cancelled/superseded results cannot advance
+successful-read evidence. The generic owner-read hook itself is unchanged. Course reload returns
+the minimum next initiation sequence and schedules the existing shared reload. Reloads coalesced
+by React need no extra GET; a later accepted publication-triggered read can also satisfy the bound.
+
+A successful Settings PUT immediately displays its acknowledged canonical metadata and clears
+only the actual draft's dirty state. It starts the existing post-save shared reload and waits for
+a current successful read with an initiation sequence at least that bound. Pre-acknowledgment GETs
+cannot reconcile this save, irrespective of their values, object identity or arrival time. While
+pending the status is `Settings saved. Refreshing course…`; after an unknown read failure it is
+`Settings saved, but the current values couldn't be loaded.` The existing stale-course alert and
+`Try again` perform one deliberate shared re-read, never a mutation replay. A successful eligible
+read reconciles a clean form with the header and restores `Saved`, including when the read returns
+the original values or an identical object in a test double. It establishes only the state observed
+by that read, not permanent global freshness.
+
+A new unsaved draft retains its fields and the existing dirty-navigation guard. A confirmed save
+awaiting reconciliation alone is not an unsaved draft and does not trigger that guard. Consecutive
+saves obtain their own causal bounds. Course/session replacement, unmount, cancellation, refusals
+and unknown mutation outcomes retain their existing behavior. The form remains keyed by Course
+identity. The two qualified status strings are the minimal presentation adjustment authorized for
+D1-R1; they do not resolve N7 or amend DESIGN r13, S18/D12-3 or CT21.authoring.
+
+**Executed verification** (isolated implementation clone, starting `00f8084`; cwd `frontend/`):
+
+| Command | Observed result |
+| --- | --- |
+| `npm test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx -t D1-R1` before production changes | 18 new component cases: 16 failed, 2 passed, 55 old cases excluded by selector; exit 1. The two existing-behavior passes are confirmed read refusals. |
+| `npm test -- src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/routes/index.test.tsx` after correction | 3 files, 184 tests passed; exit 0. Includes 18 new component cases and 4 course-context hook cases. |
+| `npm run build` | TypeScript and production build passed; exit 0; existing chunk-size advisory. |
+| `git diff --check` | Passed; exit 0. |
+
+The deterministic component matrix covers both D1-R1 sequences and original D1 with network,
+protocol and 503 reconciliation failures, asserts acknowledgment and qualified status before a
+later GET can conceal errors, then verifies explicit retry, successful adoption and no PUT replay.
+Further cases cover pre-acknowledgment and post-acknowledgment publication reads, superseded reads,
+consecutive saves, reads resolving on either side of a later acknowledgment, same-value snapshots,
+clean navigation while unresolved, Course/session replacement and confirmed read refusals.
+Existing draft, mutation cancellation, unknown-outcome and navigation tests remain. The original
+D1 test now checks the pending acknowledgment before allowing the eligible read to succeed; its
+former immediate-ordering claim is intentionally replaced, not accepted as an achievable guarantee.
+Hook tests establish success-only evidence, retained errors, same-object success, coalesced reloads,
+supersession, Course/session isolation, Strict Mode and unmount cancellation.
+
+**Retained independent evidence and selective omissions.** At `00f8084`, the preceding independent
+review passed 42 Assignment unit tests, 29 persistence cases and 3 HTTP cases, plus an independent
+14-date SQL-epoch matrix with text/binary prepared-result transfer and a non-UTC JVM. The real
+restricted-role backend consumer and V008-to-V009 upgrade harness passed with no 42501. That is
+prior independently established evidence, not new-head execution: D2 production/tests, backend,
+schema, grants, provisioning and dependencies are unchanged, so none was rerun for D1-R1. The
+historical-row compatibility limitation above remains a separate provenance/repair decision.
+
+Standalone containment is retained from the independent `3f7c184` run for unchanged ACL/provisioning,
+schema and containment scripts. Full frontend/backend suites, full browser/E2E and interactive
+browser checks are omitted: only course-context read evidence and Settings reconciliation changed,
+with actual hooks/routes and deterministic interleavings tested above; existing unrelated author
+or CI results are not relabeled as new-head independent acceptance. HTTPS, MinIO, containerd,
+security scans and release qualification are omitted because their implementations, dependencies
+and image baselines are unchanged. No release, deployment or actual-host result is inferred.
+
+These are remediation-author tests and focused self-review. New independent acceptance, Leader
+technical approval, CODEOWNER/Infrastructure review, G7/N7 disposition and protected integration
+remain separate. The Leader expressly authorized committing and pushing without waiting for CI;
+required CI remains an integration gate. No merge, Issue/Project/PR metadata write, release,
+deployment or real infrastructure provisioning is part of this correction.

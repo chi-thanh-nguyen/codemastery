@@ -11,6 +11,9 @@ import type { B3QuestionPage, B3QuizOwned } from '../api/assessmentAuthoringApi'
 import { failureStatus, isCancelled, outcomeUnknown, useOwnedQuizzes, useQuizEditor } from './useAssessmentEditor';
 import type { OwnerRead, QuizEditorOperations } from './useAssessmentEditor';
 import { useQuestionBank, useQuestionEditor } from './useQuestionBank';
+import { useSharedCourseState } from './useCourseEditor';
+import { getOwnedCourse } from '../api/instructorCourseApi';
+import type { OwnedCourse } from '../api/instructorCourseApi';
 import type { QuestionEditorOperations } from './useQuestionBank';
 import { getOwnedSkillGraph } from '../../skill-graph-editor/api/skillGraphApi';
 import { useOwnedSkillGraph } from '../../skill-graph-editor/hooks/useSkillGraph';
@@ -18,6 +21,7 @@ import type { OwnedSkillGraphRead } from '../../skill-graph-editor/hooks/useSkil
 
 vi.mock('../api/assessmentAuthoringApi', async (original) => ({ ...await original<object>(), listQuestions: vi.fn(), listOwnedQuizzes: vi.fn(), replaceUnusedQuestion: vi.fn(), createQuiz: vi.fn() }));
 vi.mock('../../skill-graph-editor/api/skillGraphApi', () => ({ getOwnedSkillGraph: vi.fn() }));
+vi.mock('../api/instructorCourseApi', async (original) => ({ ...await original<object>(), getOwnedCourse: vi.fn() }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 const courseId = '00000000-0000-4000-8000-0000000000c1';
@@ -193,5 +197,84 @@ describe('U2: a failed re-read keeps the last body only for an unknown outcome o
         expect(failureStatus(out.current!.error)).toBe(404);
         expect(out.current!.graph).toBeNull();
         expect(getOwnedSkillGraph).toHaveBeenCalledTimes(3);
+    });
+});
+
+
+describe('D1-R1: shared course read evidence', () => {
+    const body = (): OwnedCourse => ({ id: courseId, title: 'Course', description: 'Description', prerequisiteDescription: null, publicationStatus: 'hidden', chapters: [] });
+    beforeEach(() => vi.mocked(getOwnedSkillGraph).mockResolvedValue({ courseId, skills: [], prerequisites: [], mappings: [] }));
+
+    it('advances evidence only on accepted success, including a same-object response', async () => {
+        const initial = body(), read = deferred<OwnedCourse>(), retry = deferred<OwnedCourse>();
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(initial).mockReturnValueOnce(read.promise).mockReturnValueOnce(retry.promise);
+        const { out } = await render(() => useSharedCourseState(courseId));
+        const first = out.current!.course.successfulRead;
+        let required = 0;
+        await act(async () => { required = out.current!.course.reload(); });
+        expect(required).toBeGreaterThan(first);
+        expect(out.current!.course.data).toBe(initial);
+        expect(out.current!.course.successfulRead).toBe(first);
+        await act(async () => read.reject(new ApiError('protocol', 'Invalid response')));
+        expect(out.current!.course.data).toBe(initial);
+        expect(out.current!.course.successfulRead).toBe(first);
+        expect(outcomeUnknown(out.current!.course.error)).toBe(true);
+        await act(async () => { required = out.current!.course.reload(); });
+        expect(out.current!.course.error).toBeNull();
+        expect(out.current!.course.successfulRead).toBe(first);
+        await act(async () => retry.resolve(initial));
+        expect(out.current!.course.data).toBe(initial);
+        expect(out.current!.course.successfulRead).toBeGreaterThanOrEqual(required);
+        expect(getOwnedCourse).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not count a superseded success or duplicate GETs for coalesced reloads', async () => {
+        const old = deferred<OwnedCourse>(), current = deferred<OwnedCourse>();
+        vi.mocked(getOwnedCourse).mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise);
+        const { out } = await render(() => useSharedCourseState(courseId));
+        let required = 0;
+        await act(async () => { out.current!.course.reload(); required = out.current!.course.reload(); });
+        expect(getOwnedCourse).toHaveBeenCalledTimes(2);
+        expect(vi.mocked(getOwnedCourse).mock.calls[0][1]?.signal?.aborted).toBe(true);
+        await act(async () => old.resolve(body()));
+        expect(out.current!.course.data).toBeNull();
+        expect(out.current!.course.successfulRead).toBe(0);
+        await act(async () => current.resolve(body()));
+        expect(out.current!.course.successfulRead).toBeGreaterThanOrEqual(required);
+    });
+
+    it('isolates success evidence and retained data across course and session changes', async () => {
+        const pending = deferred<OwnedCourse>();
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(body()).mockReturnValueOnce(pending.promise)
+            .mockResolvedValueOnce({ ...body(), id: userId }).mockRejectedValueOnce(new ApiError('network', 'Offline'));
+        const { out, rerender } = await render(() => useSharedCourseState(courseId));
+        await act(async () => { out.current!.course.reload(); });
+        await rerender(() => useSharedCourseState(userId));
+        expect(out.current!.course.data?.id).toBe(userId);
+        const current = out.current!.course.successfulRead;
+        await act(async () => pending.resolve(body()));
+        expect(out.current!.course.successfulRead).toBe(current);
+        generation = 2;
+        await rerender(() => useSharedCourseState(userId));
+        expect(out.current!.course.data).toBeNull();
+        expect(out.current!.course.successfulRead).toBe(0);
+    });
+
+    it('retains initiation evidence under Strict Mode and aborts a read on unmount', async () => {
+        const pending = deferred<OwnedCourse>();
+        vi.mocked(getOwnedCourse).mockResolvedValue(body());
+        const { out } = await render(() => useSharedCourseState(courseId), true);
+        const previous = out.current!.course.successfulRead;
+        vi.mocked(getOwnedCourse).mockReturnValueOnce(pending.promise);
+        let required = 0;
+        await act(async () => { required = out.current!.course.reload(); });
+        expect(required).toBeGreaterThan(previous);
+        const options = vi.mocked(getOwnedCourse).mock.calls.at(-1)![1]!;
+        await act(async () => root.unmount());
+        expect(options.signal?.aborted).toBe(true);
+        expect(options.isCurrent?.()).toBe(false);
+        await act(async () => pending.resolve(body()));
+        expect(out.current!.course.successfulRead).toBe(previous);
+        root = createRoot(host);
     });
 });

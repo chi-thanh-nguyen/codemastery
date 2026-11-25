@@ -882,6 +882,209 @@ describe('U4: deleting the only question on the last page moves to the last page
     });
 });
 
+
+const saveStatuses = () => [...document.querySelectorAll('[role="status"]')].map((node) => node.textContent);
+const refreshingSettings = 'Settings saved. Refreshing course…';
+const unrefreshedSettings = "Settings saved, but the current values couldn't be loaded.";
+const pendingCourse = () => {
+    let resolve!: (value: OwnedCourse) => void, reject!: (error: unknown) => void;
+    const promise = new Promise<OwnedCourse>((done, fail) => { resolve = done; reject = fail; });
+    return { promise, resolve, reject };
+};
+
+describe('D1-R1: acknowledged Settings wait for an eligible shared read', () => {
+    const cases = ['GET-before-commit', 'restored-original', 'original-D1'] as const;
+    const failures = ['network', 'protocol', '503'] as const;
+    it.each(cases.flatMap((sequence) => failures.map((failure) => ({ sequence, failure }))))(
+        '$sequence with $failure: pending, failed and retried reconciliation remain explicit', async ({ sequence, failure }) => {
+            vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+            const original = ownedCourseFixture();
+            const acknowledged = ownedCourseFixture({ title: 'Acknowledged A', description: 'Acknowledged description A', prerequisiteDescription: 'Acknowledged prerequisites A' });
+            const observed = ownedCourseFixture({ title: sequence === 'restored-original' ? original.title : 'Observed B', publicationStatus: 'published' });
+            const reconciled = sequence === 'GET-before-commit' ? { ...acknowledged, publicationStatus: 'published' as const } : observed;
+            const write = pendingCourse(), refresh = pendingCourse(), retry = pendingCourse();
+            vi.mocked(updateOwnedCourse).mockReturnValueOnce(write.promise);
+            vi.mocked(setOwnedCoursePublication).mockResolvedValueOnce(observed);
+            vi.mocked(getOwnedCourse).mockResolvedValueOnce(original).mockResolvedValueOnce(observed)
+                .mockReturnValueOnce(refresh.promise).mockReturnValueOnce(retry.promise);
+            await mountApp(`/teach/courses/${courseId}/settings`);
+            const input = field('Course title');
+            await type('Course title', acknowledged.title);
+            await type('Description', acknowledged.description);
+            await type('Prerequisites (optional)', acknowledged.prerequisiteDescription!);
+            await click('Save changes');
+            // Same frontend order, different possible commits: B before A; A then B; or A then restored X.
+            await click('Publish course'); await click('Publish course', confirmDialog('Publish course?'));
+            expect(document.querySelector('main h1')?.textContent).toBe(observed.title);
+            await act(async () => write.resolve(acknowledged));
+            expect(field('Course title')).toBe(input);
+            expect(input.value).toBe(acknowledged.title);
+            expect(field('Description').value).toBe(acknowledged.description);
+            expect(field('Prerequisites (optional)').value).toBe(acknowledged.prerequisiteDescription);
+            expect(saveStatuses()).toContain(refreshingSettings);
+            expect(saveStatuses()).not.toContain('Saved');
+            expect(find('Save changes').hasAttribute('disabled')).toBe(true);
+            expect(text()).not.toContain('Unsaved changes');
+            expect(getOwnedCourse).toHaveBeenCalledTimes(3);
+            const error = failure === '503' ? new ApiError('http', 'Unavailable', 503) : new ApiError(failure, 'Read failed');
+            await act(async () => refresh.reject(error));
+            expect(input.value).toBe(acknowledged.title);
+            expect(field('Description').value).toBe(acknowledged.description);
+            expect(field('Prerequisites (optional)').value).toBe(acknowledged.prerequisiteDescription);
+            expect(saveStatuses()).toContain(unrefreshedSettings);
+            expect(saveStatuses()).not.toContain('Saved');
+            expect(text()).toContain('The last loaded version is shown.');
+            expect(getOwnedCourse).toHaveBeenCalledTimes(3);
+            expect(updateOwnedCourse).toHaveBeenCalledTimes(1);
+            await click('Try again');
+            expect(saveStatuses()).toContain(refreshingSettings);
+            expect(input.value).toBe(acknowledged.title);
+            expect(field('Description').value).toBe(acknowledged.description);
+            expect(field('Prerequisites (optional)').value).toBe(acknowledged.prerequisiteDescription);
+            // Reuse the exact object for B/X too: read completion, not object identity, is the evidence.
+            await act(async () => retry.resolve(reconciled));
+            expect(field('Course title')).toBe(input);
+            expect(input.value).toBe(reconciled.title);
+            expect(field('Description').value).toBe(reconciled.description);
+            expect(field('Prerequisites (optional)').value).toBe(reconciled.prerequisiteDescription ?? '');
+            expect(document.querySelector('main h1')?.textContent).toBe(reconciled.title);
+            expect(saveStatuses()).toContain('Saved');
+            expect(saveStatuses()).not.toContain(unrefreshedSettings);
+            expect(updateOwnedCourse).toHaveBeenCalledTimes(1);
+            expect(getOwnedCourse).toHaveBeenCalledTimes(4);
+        });
+
+    it('ignores a pre-acknowledgment publication read resolving after the Settings reload', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        const write = pendingCourse(), publicationRead = pendingCourse(), refresh = pendingCourse();
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture())
+            .mockReturnValueOnce(publicationRead.promise).mockReturnValueOnce(refresh.promise);
+        vi.mocked(updateOwnedCourse).mockReturnValueOnce(write.promise);
+        vi.mocked(setOwnedCoursePublication).mockResolvedValueOnce(ownedCourseFixture({ publicationStatus: 'published' }));
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        await type('Course title', 'A'); await click('Save changes');
+        await click('Publish course'); await click('Publish course', confirmDialog('Publish course?'));
+        await act(async () => write.resolve(ownedCourseFixture({ title: 'A' })));
+        expect(vi.mocked(getOwnedCourse).mock.calls[1][1]?.signal?.aborted).toBe(true);
+        await act(async () => publicationRead.resolve(ownedCourseFixture({ title: 'Stale B' })));
+        expect(field('Course title').value).toBe('A');
+        expect(saveStatuses()).toContain(refreshingSettings);
+        await act(async () => refresh.resolve(ownedCourseFixture({ title: 'Eligible C' })));
+        expect(field('Course title').value).toBe('Eligible C');
+        expect(saveStatuses()).toContain('Saved');
+        expect(getOwnedCourse).toHaveBeenCalledTimes(3);
+    });
+
+    it('allows a post-acknowledgment publication read to supersede the Settings read', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        const oldRead = pendingCourse(), publicationRead = pendingCourse();
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture())
+            .mockReturnValueOnce(oldRead.promise).mockReturnValueOnce(publicationRead.promise);
+        vi.mocked(updateOwnedCourse).mockResolvedValueOnce(ownedCourseFixture({ title: 'A' }));
+        vi.mocked(setOwnedCoursePublication).mockResolvedValueOnce(ownedCourseFixture({ title: 'B', publicationStatus: 'published' }));
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        await type('Course title', 'A'); await click('Save changes');
+        await click('Publish course'); await click('Publish course', confirmDialog('Publish course?'));
+        await act(async () => oldRead.resolve(ownedCourseFixture({ title: 'Abandoned A' })));
+        expect(field('Course title').value).toBe('A');
+        expect(saveStatuses()).toContain(refreshingSettings);
+        await act(async () => publicationRead.resolve(ownedCourseFixture({ title: 'B', publicationStatus: 'published' })));
+        expect(field('Course title').value).toBe('B');
+        expect(saveStatuses()).toContain('Saved');
+        expect(getOwnedCourse).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not let a first-save read reconcile a second acknowledgement or overwrite its draft', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        const firstRead = pendingCourse(), secondWrite = pendingCourse(), secondRead = pendingCourse(), retry = pendingCourse();
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture())
+            .mockReturnValueOnce(firstRead.promise).mockReturnValueOnce(secondRead.promise).mockReturnValueOnce(retry.promise);
+        vi.mocked(updateOwnedCourse).mockResolvedValueOnce(ownedCourseFixture({ title: 'A' })).mockReturnValueOnce(secondWrite.promise);
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        await type('Course title', 'A'); await click('Save changes');
+        await type('Course title', 'C'); await click('Save changes');
+        await act(async () => firstRead.resolve(ownedCourseFixture({ title: 'Older B' })));
+        expect(field('Course title').value).toBe('C');
+        await act(async () => secondWrite.resolve(ownedCourseFixture({ title: 'C' })));
+        expect(field('Course title').value).toBe('C');
+        expect(saveStatuses()).toContain(refreshingSettings);
+        await act(async () => secondRead.reject(new ApiError('http', 'Unavailable', 503)));
+        expect(field('Course title').value).toBe('C');
+        expect(saveStatuses()).toContain(unrefreshedSettings);
+        await click('Try again'); await act(async () => retry.resolve(ownedCourseFixture({ title: 'Observed after C' })));
+        expect(field('Course title').value).toBe('Observed after C');
+        expect(saveStatuses()).toContain('Saved');
+        expect(updateOwnedCourse).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects a delayed first-save read after the second save and keeps the second result', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        const firstRead = pendingCourse(), secondRead = pendingCourse();
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture())
+            .mockReturnValueOnce(firstRead.promise).mockReturnValueOnce(secondRead.promise);
+        vi.mocked(updateOwnedCourse).mockResolvedValueOnce(ownedCourseFixture({ title: 'A' }))
+            .mockResolvedValueOnce(ownedCourseFixture({ title: 'C' }));
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        await type('Course title', 'A'); await click('Save changes');
+        await type('Course title', 'C'); await click('Save changes');
+        await act(async () => firstRead.resolve(ownedCourseFixture({ title: 'A' })));
+        expect(field('Course title').value).toBe('C');
+        expect(saveStatuses()).toContain(refreshingSettings);
+        await act(async () => secondRead.resolve(ownedCourseFixture({ title: 'C' })));
+        expect(field('Course title').value).toBe('C');
+        expect(saveStatuses()).toContain('Saved');
+    });
+
+    it('does not guard navigation solely because acknowledged metadata could not be reconciled', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockRejectedValueOnce(new ApiError('network', 'Offline'));
+        vi.mocked(updateOwnedCourse).mockResolvedValueOnce(ownedCourseFixture({ title: 'A' }));
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        await type('Course title', 'A'); await click('Save changes');
+        expect(saveStatuses()).toContain(unrefreshedSettings);
+        await act(async () => navLink('Teaching').click()); await flush();
+        expect(location).toBe('/teach');
+        expect(confirmDialog('Leave without saving?')).toBeUndefined();
+    });
+
+    it.each(['course', 'session'] as const)('discards unresolved reconciliation after a %s replacement', async (boundary) => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        const refresh = pendingCourse();
+        let generation = 1;
+        auth = { ...auth, isCurrent: (value) => value === generation };
+        const nextId = boundary === 'course' ? '00000000-0000-4000-8000-0000000000c2' : courseId;
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockReturnValueOnce(refresh.promise)
+            .mockResolvedValueOnce(ownedCourseFixture({ id: nextId, title: 'New context' }));
+        vi.mocked(updateOwnedCourse).mockResolvedValueOnce(ownedCourseFixture({ title: 'A' }));
+        function SwitchCourse() { const navigate = useNavigate(); return <button onClick={() => navigate(`/teach/courses/${nextId}/settings`)}>Switch course probe</button>; }
+        const tree = () => <MemoryRouter initialEntries={[`/teach/courses/${courseId}/settings`]}>
+            <AuthContext.Provider value={auth}><SwitchCourse /><Where /><AppRouter catalogue={<p>Catalogue stub</p>} /></AuthContext.Provider>
+        </MemoryRouter>;
+        await act(async () => root.render(tree()));
+        await type('Course title', 'A'); await click('Save changes');
+        expect(saveStatuses()).toContain(refreshingSettings);
+        if (boundary === 'course') await click('Switch course probe');
+        else { generation = 2; auth = { ...auth, generation, user: { ...auth.user!, id: arrays.id } }; await act(async () => root.render(tree())); }
+        await settle();
+        expect(vi.mocked(getOwnedCourse).mock.calls[1][1]?.signal?.aborted).toBe(true);
+        await act(async () => refresh.resolve(ownedCourseFixture({ title: 'Old acknowledged context' })));
+        expect(field('Course title').value).toBe('New context');
+        expect(saveStatuses()).not.toContain('Saved');
+        expect(saveStatuses()).not.toContain(refreshingSettings);
+    });
+
+    it.each([403, 404])('discards acknowledged fields after a confirmed reconciliation refusal %s', async (status) => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockRejectedValueOnce(http(status));
+        vi.mocked(updateOwnedCourse).mockResolvedValueOnce(ownedCourseFixture({ title: 'A' }));
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        await type('Course title', 'A'); await click('Save changes');
+        expect(document.querySelector('input')).toBeNull();
+        expect(saveStatuses()).not.toContain('Saved');
+        expect(saveStatuses()).not.toContain(unrefreshedSettings);
+    });
+});
+
 describe('U5: Course Settings keeps "Saved" and drafts across re-reads', () => {
     it.each(['course', 'session'] as const)('D1: discards a delayed save after a %s change', async (boundary) => {
         vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
@@ -916,14 +1119,15 @@ describe('U5: Course Settings keeps "Saved" and drafts across re-reads', () => {
         expect(getOwnedCourse).toHaveBeenCalledTimes(2);
     });
 
-    it('D1: reconciles a newer shared read that precedes a delayed save reply, without another request', async () => {
+    it('D1: reconciles the delayed-response race only after the post-acknowledgment read succeeds', async () => {
         vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
         let resolveSave!: (value: OwnedCourse) => void;
         const pendingSave = new Promise<OwnedCourse>((resolve) => { resolveSave = resolve; });
+        const refresh = pendingCourse();
         const saved = ownedCourseFixture({ title: 'My saved version' });
         const newer = ownedCourseFixture({ title: 'Newer external commit', publicationStatus: 'published' });
         vi.mocked(updateOwnedCourse).mockReturnValue(pendingSave);
-        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockResolvedValue(newer);
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockResolvedValueOnce(newer).mockReturnValueOnce(refresh.promise);
         vi.mocked(setOwnedCoursePublication).mockResolvedValue(newer);
         await mountApp(`/teach/courses/${courseId}/settings`);
         const input = field('Course title');
@@ -938,8 +1142,13 @@ describe('U5: Course Settings keeps "Saved" and drafts across re-reads', () => {
         await act(async () => resolveSave(saved));
         await settle();
         expect(field('Course title')).toBe(input);
+        expect(input.value).toBe('My saved version');
+        expect(saveStatuses()).toContain(refreshingSettings);
+        expect(saveStatuses()).not.toContain('Saved');
+        await act(async () => refresh.resolve(newer));
+        expect(field('Course title')).toBe(input);
         expect(input.value).toBe('Newer external commit');
-        expect(text()).toContain('Saved');
+        expect(saveStatuses()).toContain('Saved');
         expect(getOwnedCourse).toHaveBeenCalledTimes(3);
         expect(updateOwnedCourse).toHaveBeenCalledTimes(1);
         await act(async () => navLink('Teaching').click()); await flush();
@@ -960,11 +1169,13 @@ describe('U5: Course Settings keeps "Saved" and drafts across re-reads', () => {
         await type('Course title', 'Acknowledged title');
         await click('Save changes');
         expect(input.value).toBe('Acknowledged title');
-        expect(text()).toContain('Saved');
+        expect(saveStatuses()).toContain(refreshingSettings);
         expect(document.querySelector('main h1')?.textContent).toBe('Python Foundations');
         await act(async () => rejectRead(new ApiError('http', 'unavailable', 503)));
         expect(input.value).toBe('Acknowledged title');
         expect(text()).toContain('The last loaded version is shown.');
+        expect(saveStatuses()).toContain(unrefreshedSettings);
+        expect(saveStatuses()).not.toContain('Saved');
         await click('Try again'); await settle();
         expect(field('Course title')).toBe(input);
         expect(input.value).toBe('Acknowledged title');
@@ -985,7 +1196,8 @@ describe('U5: Course Settings keeps "Saved" and drafts across re-reads', () => {
         await click('Publish course'); await click('Publish course', confirmDialog('Publish course?'));
         await act(async () => resolveSave(ownedCourseFixture({ title: 'Acknowledged title' })));
         expect(field('Course title').value).toBe('Acknowledged title');
-        expect(text()).toContain('Saved');
+        expect(saveStatuses()).toContain(refreshingSettings);
+        expect(saveStatuses()).not.toContain('Saved');
         await act(async () => resolveRead(ownedCourseFixture({ title: 'Acknowledged title', publicationStatus: 'published' })));
         expect(field('Course title').value).toBe('Acknowledged title');
         expect(getOwnedCourse).toHaveBeenCalledTimes(3);
