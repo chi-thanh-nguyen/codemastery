@@ -23,6 +23,145 @@ checks and protected integration. This records design, not newly executed tests.
 CT17's two Batch 4 operational checkpoints remain pending Leader inputs.
 Earlier dated records below retain their approval scope and history.
 
+## CO09 protected materials qualification — 25 November 2026
+
+PR #291 delivers backend CO09.file/video/rest, all eight material operations and
+the narrowly required shared file transport. Consumed records: CT03 r1, CT01's
+current ADR014 session integration, CT18.minimum and `CT18-B5-ERRORS-2026-11-12-r1`,
+`CT21-AUTHORING-2026-11-09-r1`, CT37.embed (ADR006 §6), CT09 authorization/lifecycle/
+config/interface/rest r1 (ADR010 §§4–7/11/14, corrections §§16–18), CT37.widget r1
+only for transport boundaries, CT38 validation and ADR012 §§19.2–19.3. The current
+r12 privilege matrix is extended by consumer-specific r13 in deployment.md; no real
+host grant or new operational value is selected.
+
+### Requirement-to-evidence matrix
+
+All rows below are implemented; operational and downstream acceptance are separate.
+`LearningMaterialService` is the application code location unless another owner is named.
+
+| Effective requirement | Production location | Executed evidence | Remaining gate |
+|---|---|---|---|
+| Relational create | `createRelationalMaterial`, strict `CourseStructureRequests.relationalMaterialWrite` | Course unit shape matrix; real Tomcat POST and PostgreSQL | Independent review |
+| Relational update | `updateRelationalMaterial`, existing six-column repository SQL; immutable type/ancestry | Real service and HTTP PUT, runtime-role real backend | Independent review |
+| Relational publication | `setRelationalMaterialPublication` | Service/HTTP PUT, runtime-role backend | Independent review |
+| File create, hidden default | `createFileMaterial`, guarded store-then-write | Real Tomcat POST, PostgreSQL + pinned MinIO | Operational upload/storage qualification |
+| File title update | `updateFileMaterialTitle` | Service/HTTP JSON PUT | Independent review |
+| File replacement | `replaceFileMaterialFile` | Service/HTTP multipart PUT, fresh keys and old-object removal | Operational qualification |
+| File publication | `setFileMaterialPublication` | Service/HTTP JSON PUT, Learner download after publication | Independent review |
+| Protected download | `downloadMaterialFile`, controller synchronous try-with-resources | Raw Tomcat byte/header readback; authorized owner and Learner | QA10/operational acceptance |
+| Strict text/video shapes, verbatim Markdown, exact canonical video | DTO parser and `relational`, `canonicalVideo` | `CourseServiceTest.co09ClosedShapesCanonicalVideoAndUtf8Filenames`; real text/video persistence | FE14 rendering is separate |
+| Authentication, role, ownership, concealment, membership and ancestry | Existing CT01/CT03, exact material URL rules in `SecurityConfig` | `AuthorizationIntegrationTest.co09DownloadAuthorizationConcealmentAndScopeMatrix`; deferred accessor refusal | Independent security review |
+| Admission before every part; exact parts/multiplicity; error precedence | Lazy multipart, deferred Servlet Parts, query-only request access, narrowly bypassed ordered form filter | Actual Tomcat unauthenticated401, wrong-media415 before role, malformed unauthorized403, malformed admitted400, oversized unauthorized403 and admitted413; hostile GET remains404 | Ingress transport remains operational |
+| Filename UTF-8 byte bound, PDF extension/signature, nonempty/size limit, client type ignored | `validateFilename`, buffered five-byte signature read, per-file check | Unit boundary matrix, real consumer invalid-part test, PDF sent as text/plain, raw UTF-8 filename | Explicit operator limit required |
+| No key/filename/URL metadata exposure; fresh UUIDv4 keys | Existing `Material` DTO, generated material keys | Real response checks; fresh-key/version assertion | Independent review |
+| No object key diagnostics | Existing `S3FileStorage.ProviderDiagnosticsFilter`, extended for JDBC/driver/bind/error output | Actual StatementCreatorUtils TRACE through Boot default and ECS output qualification | Application-owned output configuration only |
+| Three transaction outcomes; explicit flush; reject outer transaction | `storeThenWrite`, `Outcome`, existing Course-root guard | Real PostgreSQL COMMIT executed then lost ACK, commit-phase failure before COMMIT, injected precommit statement fault; both uncertain cases retain both objects; outer-call refusal | Operational recovery remains separate |
+| Failed store and best-effort deletion | Same lifecycle and safe cleanup | Real adapter + test-scoped faults; fresh-key delete attempted; cleanup failure leaves an unserved orphan | No orphan sweeper authorized |
+| Read-only REPEATABLE READ, release connection before open/write | `downloadRow`, programmatic snapshot | Actual PostgreSQL SHOW assertions; paused real object stream with Hikari maximum1 while another SQL request completes | Runtime pool/concurrency sizing remains separate |
+| Retry exactly once only for superseded ObjectNotFound | `downloadMaterialFile` | Real MinIO delete/replacement race, unchanged missing key, provider failure without retry | Independent review |
+| Checked closure, suppressed exceptions, header/copy/disconnect failure | Controller try-with-resources, response reset before commitment | `CourseServiceTest.co09DownloadOwnsStreamAcrossHeadersCopyDisconnectAndCloseFailure`; title close-failure regression | Real network disconnect behavior remains a QA transport gate |
+| Raw multipart/Blob transport, safe names, generation/cancellation/error semantics | Existing shared `httpClient.ts`, additive contract types | 121 HTTP transport tests and TypeScript check, including File/Blob, 413, unknown upload outcome and no replay | FE14/learner material UI not integrated here |
+| Runtime least privilege and immutable-field denial | r13 matrix, existing deploy qualification | Matrix contract sync; disposable PostgreSQL containment; real backend consumer and upgrade mechanism | No grants on shared/production DB |
+| No progress/adaptive/event side effects | No such application call in material methods | Existing Course regression and production call-path audit; combined checkout records no ContentPublishedEvent from material operations | CO12/IN15 independent review |
+
+### Executed commands and scope
+
+Java25/Maven Wrapper, disposable DP01 PostgreSQL, the pinned Compose MinIO digest
+`8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40`, ephemeral
+bucket/application identity, real loopback Tomcat, Node24 and repository Vitest were used.
+No shared database or storage was touched. Run Maven commands serially per checkout;
+a concurrent recompilation during another JVM's component scan caused one discarded
+harness startup failure, resolved by a serial rerun with no production change.
+
+```sh
+cd backend
+./mvnw -Dtest=CourseServiceTest test
+./mvnw -Dtest='CourseServiceTest#co09*' test
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#co09*'
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='AuthorizationIntegrationTest#co09*'
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#diagnosticConfidentialityDuringConcurrentLoggingInIsolatedJvm+co09RealTomcatMultipartPrecedenceAndBinaryHeaders'
+cd ../frontend
+npm ci --ignore-scripts
+npm test -- src/shared/api/httpClient.test.ts
+npm run typecheck
+cd ..
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+BUILDKIT_PROGRESS=plain docker build -t codemastery-backend:privilege-test backend
+bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
+```
+
+These are targeted commands, not a whole-suite qualification. Initial consumer execution
+ran 7 cases (6 passed; the statement-fault test double needed correction). The corrected
+case passed 1/1. The later 2-case size/HTTP run exposed R07 below; remediation passed 2/2.
+The final 2-case download/HTTP run passed 2/2 (UTF-8 filename, all eight HTTP bindings,
+raw bytes, snapshot and paused one-connection pool). Authorization passed 1/1. The
+logging/HTTP audit pair passed 2/2. Course unit coverage passed 76/76, followed by the
+three CO09-specific cases passing 3/3 after the title-close regression was added.
+Transport passed 121/121; TypeScript passed. Zero skips in successful targeted runs.
+The runtime script's first run passed the CO09 operations but failed synthetic FK
+cleanup; the fixture was corrected. The final consumer and Flyway-upgrade runs both
+passed, with zero permission-denied/42501 backend log entries. The final logging/
+consumer pair passed 2/2 after translated transaction-exception diagnostics were
+added to the output-boundary regression.
+A premature selector before the new test source existed ran 0 tests and is not evidence.
+Unchanged unrelated suites and remote CI were not repeated or awaited.
+
+### B5 oracle allocation
+
+| Oracles | CO09 ownership and evidence |
+|---|---|
+| O01–O04 | Applicable authorization, keys, PDF/filename/signature/size and precedence; unit, authorization and actual Tomcat consumer cases above |
+| O05(a)–(g) | Applicable lifecycle; real PostgreSQL/MinIO with test-only statement, store/delete and connection COMMIT faults; unknown outcomes retain both objects |
+| O06–O09 | Assignment deadlines, grading, first-submission and replacement lifecycle are AS09-owned and excluded |
+| O10 | Applicable headers and exactly one missing-superseded-object reread; real MinIO and Tomcat |
+| O11 | Assignment grading-to-quiz side effects are excluded; material no-progress/no-event behavior is checked separately |
+| O12 | FE widget/unknown-outcome UI and grading-token clauses are downstream; shared transport handling alone is delivered |
+| O13 | Applicable lazy binding and full staged precedence; raw Tomcat includes default form-filter and hostile multipart GET regressions |
+| O14 | Applicable read-only REPEATABLE READ and no connection while streaming; real one-connection pause/SQL barrier |
+| O15 | Applicable resource ownership, checked close and suppression; production copy/header paths plus real storage boundary |
+| O16 | File/Blob bytes and filename transport plus raw server byte readback apply; ZIP/submission and full widget/browser qualification remain downstream |
+
+### Comprehensive automated audit and remediation
+
+One isolated automated review covered both complete effective PR diffs, followed by
+closure checks after corrections. It is not human CODEOWNER approval.
+
+| Finding | Severity | Confirmed scenario | Correction and regression |
+|---|---|---|---|
+| CO09-R01 | P2 | Lost 201 response body classified as ordinary protocol failure | Every unusable multipart success representation is unknown outcome; response-stream rejection regression |
+| CO09-R02 | P2 | Default FormContentFilter parses malformed form PUT before authentication | Skip only material routes using OrderedFormContentFilter; real Tomcat malformed percent body yields401/415 |
+| CO09-R03 | P2 | Download query binding resolves hostile multipart before admission | Raw request/query-only access; actual GET malformed multipart yields admission404 |
+| CO09-R04 | P2 | JDBC TRACE prints private bound object key | Extend existing output deny boundary; actual JDBC TRACE default/ECS probe |
+| CO09-R05 | P3 | Title close failure strands a file stream opened for a canceled return | Close title before acquiring file; unit proves file stream never acquired |
+| CO09-R06 | P3 | Unknown-outcome log omits operation name | Constant create-file/replace-file plus row/correlation IDs, without key/filename/exception |
+| CO09-R07 | P2 | BusinessRuleException rejects413, producing500 | Use Spring MaxUploadSizeExceededException; real admitted oversized upload and direct per-file size tests pass 413 |
+
+All seven confirmed in-scope findings are corrected. No confirmed CO12 production
+defect was found. No unresolved fixable production defect is retained.
+
+### Necessary upstream additions and completion boundaries
+
+FE03 #56 owns the existing shared HTTP transport. The required multipart/binary
+extension is a small slice, estimated 10–15% of FE03's effective responsibilities:
+it extends part of one shared-HTTP responsibility while leaving routing, provider,
+guards, Auth flows, session coordination and UI intact. Existing approved files only:
+httpClient.ts, its tests and apiTypes.ts; 7 new transport cases among 121, plus typecheck.
+SH05 #154 receives only the necessary JDBC diagnostic extension in its existing
+filter and dual-format test, estimated 5–10% of its 26 functional/qualification
+responsibilities. No storage API or adapter lifecycle is substituted. These estimates
+use responsibilities, complexity and verification, not lines of code. They are the
+aggregate additions across the two PRs. No CO03/CO06/CO16 upstream slice was missing;
+the existing repository methods, guard, authoring operation and joined query are reused.
+
+AI-assisted work: Codex implemented/remediated and verified the change under the
+Project Leader's explicit task. An isolated automated reviewer reproduced defects
+and checked closure. The Leader explicitly requested TamiaoNguyen metadata using the
+verified existing associated email, with chi-thanh-nguyen as authenticated pusher.
+Original contributor commits are preserved; no independent human acceptance is claimed.
+Backend code, shared transport and API persistence availability are distinct from
+FE14/learner UI, AS09, QA10, formal review, CI and operational/release acceptance.
+
 ## SH05 storage adapter qualification — 25 November 2026
 
 `FileStorageIntegrationTest` implements the SH05 portion of ADR012 §19.3 at its

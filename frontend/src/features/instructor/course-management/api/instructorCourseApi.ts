@@ -369,3 +369,10 @@ export function setCourseLessonPublication(courseId: string, lessonId: string, p
         },
     });
 }
+
+/** CO09 backend contracts; production FE14 material editor integration is a separate consumer. */
+export type RelationalMaterialWrite =
+    | { title: string; materialType: 'text'; textContent: string }
+    | { title: string; materialType: 'external_video'; externalVideoUrl: string };
+export interface FileMaterialTitleWrite { title: string }
+export interface MaterialPublicationWrite { publicationStatus: CoursePublicationStatus }

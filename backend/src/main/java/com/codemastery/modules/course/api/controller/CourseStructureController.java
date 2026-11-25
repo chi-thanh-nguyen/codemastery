@@ -22,7 +22,14 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.Part;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Set;
+import org.springframework.web.multipart.MultipartException;
 
 import java.util.UUID;
 
@@ -238,6 +245,7 @@ public class CourseStructureController {
     @PostMapping(path = COURSE + "/lessons/{lessonId}/file-materials", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Material> createFileMaterial(@PathVariable String courseId, @PathVariable String lessonId,
                                                        MultipartHttpServletRequest request) {
+        noMaterialQuery(request);
         UUID course = parseCourseId(courseId);
         UUID lesson = parseCourseId(lessonId);
         return created(materials.createFileMaterial(course, lesson, () -> fileMaterialUpload(request)));
@@ -245,27 +253,21 @@ public class CourseStructureController {
 
     @PutMapping(path = COURSE + "/lessons/{lessonId}/file-materials/{materialId}", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Material> updateFileMaterialTitle(@PathVariable String courseId, @PathVariable String lessonId,
-                                                            @PathVariable String materialId,
-                                                            @RequestParam MultiValueMap<String, String> params,
-                                                            @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
-                                                            @RequestBody(required = false) String body) throws HttpMediaTypeNotSupportedException {
-        CourseRequest.requireJson(contentType);
-        CourseSearchRequest.noQuery(params);
-        UUID course = parseCourseId(courseId);
-        UUID lesson = parseCourseId(lessonId);
-        UUID material = parseCourseId(materialId);
-        var title = CourseStructureRequests.fileMaterialTitle(body);
-        if (title.isEmpty()) {
-            access.requireLessonOwnership(course, lesson);
-            throw CourseRequest.invalidBody();
-        }
-        return ok(materials.updateFileMaterialTitle(course, lesson, material, title.get()));
+            @PathVariable String materialId, HttpServletRequest request) throws HttpMediaTypeNotSupportedException, IOException {
+        CourseRequest.requireJson(request.getContentType());
+        noMaterialQuery(request);
+        UUID course = parseCourseId(courseId), lesson = parseCourseId(lessonId), material = parseCourseId(materialId);
+        materials.requireOwnedFile(course, lesson, material);
+        String title = CourseStructureRequests.fileMaterialTitle(new String(request.getInputStream().readAllBytes(), StandardCharsets.UTF_8))
+                .orElseThrow(CourseRequest::invalidBody);
+        return ok(materials.updateFileMaterialTitle(course, lesson, material, title));
     }
 
     @PutMapping(path = COURSE + "/lessons/{lessonId}/file-materials/{materialId}/file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<Material> replaceFileMaterialFile(@PathVariable String courseId, @PathVariable String lessonId,
                                                             @PathVariable String materialId,
                                                             MultipartHttpServletRequest request) {
+        noMaterialQuery(request);
         UUID course = parseCourseId(courseId);
         UUID lesson = parseCourseId(lessonId);
         UUID material = parseCourseId(materialId);
@@ -274,39 +276,89 @@ public class CourseStructureController {
 
     @PutMapping(path = COURSE + "/lessons/{lessonId}/file-materials/{materialId}/publication", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Material> setFileMaterialPublication(@PathVariable String courseId, @PathVariable String lessonId,
-                                                               @PathVariable String materialId,
-                                                               @RequestParam MultiValueMap<String, String> params,
-                                                               @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
-                                                               @RequestBody(required = false) String body) throws HttpMediaTypeNotSupportedException {
-        CourseRequest.requireJson(contentType);
-        CourseSearchRequest.noQuery(params);
-        UUID course = parseCourseId(courseId);
-        UUID lesson = parseCourseId(lessonId);
-        UUID material = parseCourseId(materialId);
-        var status = CourseRequest.publication(body);
-        if (status.isEmpty()) {
-            access.requireLessonOwnership(course, lesson);
-            throw CourseRequest.invalidBody();
-        }
-        return ok(materials.setFileMaterialPublication(course, lesson, material, status.get()));
+            @PathVariable String materialId, HttpServletRequest request) throws HttpMediaTypeNotSupportedException, IOException {
+        CourseRequest.requireJson(request.getContentType());
+        noMaterialQuery(request);
+        UUID course = parseCourseId(courseId), lesson = parseCourseId(lessonId), material = parseCourseId(materialId);
+        materials.requireOwnedFile(course, lesson, material);
+        var status = CourseRequest.publication(new String(request.getInputStream().readAllBytes(), StandardCharsets.UTF_8))
+                .orElseThrow(CourseRequest::invalidBody);
+        return ok(materials.setFileMaterialPublication(course, lesson, material, status));
     }
 
     /** Attachment download for an admitted Learner or owner preview; headers per ADR010 §11 (no range, no-store, nosniff). */
     @GetMapping("/api/courses/{courseId}/lessons/{lessonId}/materials/{materialId}/file")
-    public ResponseEntity<StreamingResponseBody> downloadMaterialFile(@PathVariable String courseId, @PathVariable String lessonId,
-                                                                      @PathVariable String materialId,
-                                                                      @RequestParam MultiValueMap<String, String> params) {
-        throw new UnsupportedOperationException();
+    public void downloadMaterialFile(@PathVariable String courseId, @PathVariable String lessonId,
+            @PathVariable String materialId, HttpServletRequest request,
+            HttpServletResponse response) throws IOException {
+        noMaterialQuery(request);
+        // Synchronous ownership encloses header preparation, copy, disconnect and close. An async
+        // StreamingResponseBody would leave an opened object ownerless if dispatch never began.
+        try (var file = materials.downloadMaterialFile(parseCourseId(courseId), parseCourseId(lessonId), parseCourseId(materialId))) {
+            response.setContentType(file.mediaType());
+            response.setContentLengthLong(file.contentLength());
+            response.setHeader(HttpHeaders.CONTENT_DISPOSITION, disposition(file.originalFilename()));
+            response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
+            response.setHeader("X-Content-Type-Options", "nosniff");
+            response.setStatus(200);
+            file.content().transferTo(response.getOutputStream());
+        } catch (IOException | RuntimeException failure) {
+            if (!response.isCommitted()) response.reset();
+            throw failure;
+        }
     }
 
-    /** Reads exactly the {@code title} and {@code file} parts; called by the service only after admission. */
+    private static String disposition(String filename) {
+        StringBuilder ascii = new StringBuilder();
+        filename.codePoints().forEach(c -> ascii.append(c < 128 && c != '"' && c != '\\' ? (char)c : '_'));
+        StringBuilder encoded = new StringBuilder();
+        for (byte b : filename.getBytes(StandardCharsets.UTF_8)) {
+            int c = b & 255;
+            if (c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+                    || "!#$&+-.^_`|~".indexOf(c) >= 0) encoded.append((char)c);
+            else encoded.append("%%%02X".formatted(c));
+        }
+        return "attachment; filename=\"" + ascii + "\"; filename*=UTF-8''" + encoded;
+    }
+
+    private static void noMaterialQuery(HttpServletRequest request) {
+        if (request.getQueryString() != null && !request.getQueryString().isEmpty()) throw CourseRequest.invalidBody();
+    }
+
+    /** Servlet Parts retain raw filenames and multiplicity; no Spring filename normalization. */
+    private static List<Part> parts(MultipartHttpServletRequest request, Set<String> names) {
+        try {
+            List<Part> parts = List.copyOf(request.getParts());
+            if (parts.size() != names.size() || !parts.stream().map(Part::getName).collect(java.util.stream.Collectors.toSet()).equals(names)) {
+                throw CourseRequest.invalidBody();
+            }
+            return parts;
+        } catch (org.springframework.web.multipart.MaxUploadSizeExceededException tooLarge) { throw tooLarge; }
+        catch (IllegalStateException tooLarge) { throw new org.springframework.web.multipart.MaxUploadSizeExceededException(-1); }
+        catch (jakarta.servlet.ServletException | IOException | MultipartException malformed) { throw CourseRequest.invalidBody(); }
+    }
+
     private static FileMaterialUpload fileMaterialUpload(MultipartHttpServletRequest request) {
-        throw new UnsupportedOperationException();
+        List<Part> parts = parts(request, Set.of("title", "file"));
+        Part title = parts.stream().filter(p -> p.getName().equals("title")).findFirst().orElseThrow();
+        Part file = parts.stream().filter(p -> p.getName().equals("file")).findFirst().orElseThrow();
+        if (title.getSubmittedFileName() != null || file.getSubmittedFileName() == null) throw CourseRequest.invalidBody();
+        String text;
+        try (var input = title.getInputStream()) {
+            var decoder = StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT);
+            text = decoder.decode(java.nio.ByteBuffer.wrap(input.readAllBytes())).toString();
+        } catch (IOException malformed) { throw CourseRequest.invalidBody(); }
+        // Complete title closure before acquiring the stream that ownership transfers to the service.
+        try { return new FileMaterialUpload(text, new FilePart(file.getSubmittedFileName(), file.getSize(), file.getInputStream())); }
+        catch (IOException malformed) { throw CourseRequest.invalidBody(); }
     }
 
-    /** Reads exactly the {@code file} part; called by the service only after admission. */
     private static FilePart filePart(MultipartHttpServletRequest request) {
-        throw new UnsupportedOperationException();
+        Part file = parts(request, Set.of("file")).getFirst();
+        if (file.getSubmittedFileName() == null) throw CourseRequest.invalidBody();
+        try { return new FilePart(file.getSubmittedFileName(), file.getSize(), file.getInputStream()); }
+        catch (IOException malformed) { throw CourseRequest.invalidBody(); }
     }
 
     private static <T> ResponseEntity<T> ok(T body) {

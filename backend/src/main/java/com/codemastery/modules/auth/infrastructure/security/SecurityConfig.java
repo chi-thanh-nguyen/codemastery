@@ -154,11 +154,21 @@ public class SecurityConfig {
                                 "/api/courses/{courseId}/owned-assignments/{assignmentId}").authenticated()
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/owned-assignments/{assignmentId}",
                                 "/api/courses/{courseId}/owned-assignments/{assignmentId}/publication").authenticated()
+                        // CT09/CT21 material operations: exact paths only; stage 2 precedes application role checks.
+                        .requestMatchers(HttpMethod.POST, "/api/instructor/courses/{courseId}/lessons/{lessonId}/materials",
+                                "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials").authenticated()
+                        .requestMatchers(HttpMethod.PUT, "/api/instructor/courses/{courseId}/lessons/{lessonId}/materials/{materialId}",
+                                "/api/instructor/courses/{courseId}/lessons/{lessonId}/materials/{materialId}/publication",
+                                "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials/{materialId}",
+                                "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials/{materialId}/file",
+                                "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials/{materialId}/publication").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/lessons/{lessonId}/materials/{materialId}/file").authenticated()
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),
                         UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(new MaterialUploadTransport(), JwtAuthenticationFilter.class);
         return http.build();
     }
 
@@ -179,8 +189,33 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(corsSettings.allowedOrigins());
         configuration.setAllowedMethods(List.of(HttpMethod.GET.name(), HttpMethod.POST.name(), HttpMethod.PUT.name(), HttpMethod.DELETE.name(), HttpMethod.OPTIONS.name()));
         configuration.setAllowedHeaders(List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE));
+        configuration.setExposedHeaders(List.of(HttpHeaders.CONTENT_DISPOSITION));
         configuration.setAllowCredentials(false);
         source.registerCorsConfiguration("/**", configuration);
         return source;
+    }
+
+    /** The default form filter parses PUT bodies before Security. Material handlers own body admission. */
+    @Bean
+    org.springframework.boot.servlet.filter.OrderedFormContentFilter formContentFilter() {
+        return new org.springframework.boot.servlet.filter.OrderedFormContentFilter() {
+            @Override protected boolean shouldNotFilter(jakarta.servlet.http.HttpServletRequest request) {
+                String path = request.getRequestURI().substring(request.getContextPath().length());
+                return path.matches("/api/instructor/courses/[^/]+/lessons/[^/]+/(?:file-materials|materials)(?:/[^/]+(?:/(?:file|publication))?)?");
+            }
+        };
+    }
+
+    /** ADR010 §11: do not drain a rejected protected upload merely to reuse its connection. */
+    private static final class MaterialUploadTransport extends org.springframework.web.filter.OncePerRequestFilter {
+        @Override protected void doFilterInternal(jakarta.servlet.http.HttpServletRequest request,
+                jakarta.servlet.http.HttpServletResponse response, jakarta.servlet.FilterChain chain)
+                throws java.io.IOException, jakarta.servlet.ServletException {
+            String path = request.getRequestURI().substring(request.getContextPath().length());
+            boolean upload = "POST".equals(request.getMethod()) && path.matches("/api/instructor/courses/[^/]+/lessons/[^/]+/file-materials")
+                    || "PUT".equals(request.getMethod()) && path.matches("/api/instructor/courses/[^/]+/lessons/[^/]+/file-materials/[^/]+/file");
+            if (upload) response.setHeader(HttpHeaders.CONNECTION, "close");
+            chain.doFilter(request, response);
+        }
     }
 }

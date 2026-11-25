@@ -21,7 +21,17 @@ public final class CourseStructureRequests {
 
     /** CO09: exactly one of the two closed shapes; text rules and the CT37.embed URL check are the service's. */
     public static Optional<MaterialWrite> relationalMaterialWrite(String json) {
-        throw new UnsupportedOperationException();
+        var text = CourseRequest.object(json, Set.of("title", "materialType", "textContent"))
+                .filter(input -> input.get("title").isString() && input.get("materialType").isString()
+                        && "text".equals(input.get("materialType").asString()) && input.get("textContent").isString())
+                .map(input -> new MaterialWrite(input.get("title").asString(), MaterialType.TEXT,
+                        input.get("textContent").asString(), null));
+        if (text.isPresent()) return text;
+        return CourseRequest.object(json, Set.of("title", "materialType", "externalVideoUrl"))
+                .filter(input -> input.get("title").isString() && input.get("materialType").isString()
+                        && "external_video".equals(input.get("materialType").asString()) && input.get("externalVideoUrl").isString())
+                .map(input -> new MaterialWrite(input.get("title").asString(), MaterialType.EXTERNAL_VIDEO,
+                        null, input.get("externalVideoUrl").asString()));
     }
 
     /** B5FileMaterialTitleWrite has the same closed {@code {title}} shape as ChapterWrite. */

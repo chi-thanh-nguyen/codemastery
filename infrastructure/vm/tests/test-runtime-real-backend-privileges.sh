@@ -378,6 +378,18 @@ check "the Learner Lesson body never carries the object key" "$(python3 -c 'impo
 call PUT "$owned/$authored" "$token_a" '{"title":"Hijack","description":"x","prerequisiteDescription":null}'; check "a Learner cannot author" "$STATUS" 403
 check "the stored instructor is the authenticated Instructor" "$(psql_admin <<<"SELECT u.email FROM public.courses c JOIN public.users u ON u.id=c.instructor_id WHERE c.id='$authored';")" "instructor.ad07@example.test"
 
+echo "== CO09 relational material writes (r13)"
+material_path="$owned/$authored/lessons/$lesson_a/materials"
+call POST "$material_path" "$token_i" '{"title":"Text","materialType":"text","textContent":"  code"}'
+check "CO09 hidden text creation" "$STATUS/$(field publicationStatus)/$(field textContent)" "201/hidden/  code"
+material_id="$(field id)"
+call PUT "$material_path/$material_id" "$token_i" '{"title":"Edited","materialType":"text","textContent":" replacement "}'
+check "CO09 targeted six-column content replacement" "$STATUS/$(field title)" "200/Edited"
+call PUT "$material_path/$material_id/publication" "$token_i" '{"publicationStatus":"published"}'
+check "CO09 publication" "$STATUS/$(field publicationStatus)" "200/published"
+call POST "$material_path" "$token_i" '{"title":"Video","materialType":"external_video","externalVideoUrl":"https://www.youtube-nocookie.com/embed/test_01"}'
+check "CO09 canonical video creation" "$STATUS/$(field materialType)" "201/external_video"
+
 echo "== AS09 owner assignments (r12: assignments SELECT, INSERT, UPDATE(definition, publication); submissions SELECT(id, assignment_id, graded_at))"
 assigned=/api/courses/$authored
 call POST "$assigned/assignments" "$token_i" "{\"title\":\"Project\",\"instructions\":\"Submit a ZIP\",\"deadlineAt\":\"9999-12-31T23:59:59.999999Z\",\"lessonId\":\"$lesson_a\"}"
@@ -414,6 +426,7 @@ call GET "$assigned/owned-assignments" "$token_a"; check "a Learner cannot read 
 psql_admin >/dev/null <<SQL
 DELETE FROM public.submissions WHERE assignment_id='$assignment';
 DELETE FROM public.assignments WHERE id='$assignment';
+DELETE FROM public.learning_materials WHERE lesson_id IN (SELECT id FROM public.lessons WHERE chapter_id IN ('$chapter_a','$chapter_b'));
 DELETE FROM public.lessons WHERE chapter_id IN ('$chapter_a','$chapter_b');
 DELETE FROM public.chapters WHERE course_id='$authored';
 DELETE FROM public.courses WHERE id='$authored';
@@ -506,7 +519,7 @@ check "backend log never contains a recipient address" "$(docker logs "$backend"
 echo "== no permission failure anywhere, and the matrix is unchanged"
 check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank, AS06 quiz composition, CO06 Instructor authoring, AS09 owner assignments and the IN10 audit read under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank, AS06 quiz composition, CO06 Instructor authoring, CO09 relational materials, AS09 owner assignments and the IN10 audit read under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE=codemastery-backend:privilege-test \

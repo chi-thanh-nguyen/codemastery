@@ -3096,7 +3096,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Implemented JSON result; independent review, protected integration and operational acceptance remain separate.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3126,7 +3126,7 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -3174,7 +3174,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Implemented JSON result; independent review, protected integration and operational acceptance remain separate.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3204,7 +3204,7 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -3261,7 +3261,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Implemented JSON result; independent review, protected integration and operational acceptance remain separate.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3291,7 +3291,7 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -4958,7 +4958,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; multipart parts title and file only. Admission precedes reading the part; PDF only by extension and leading bytes; store then commit inside the existing Course configuration guard. Creates a hidden file material; no key, filename or URL in JSON. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; multipart parts title and file only. Admission precedes reading the part; PDF only by extension and leading bytes; store then commit inside the existing Course configuration guard. Creates a hidden file material; no key, filename or URL in JSON. ADR010 is normative. Backend implementation is delivered in PR #291; owner review, protected integration and operational acceptance remain separate.",
         "security": [
           {
             "bearerAuth": []
@@ -5022,7 +5022,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -5047,7 +5047,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; replaces the trimmed nonblank title of a file material only. Course guard. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; replaces the trimmed nonblank title of a file material only. Course guard. ADR010 is normative. Backend implementation is delivered in PR #291; owner review, protected integration and operational acceptance remain separate.",
         "security": [
           {
             "bearerAuth": []
@@ -5117,7 +5117,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -5137,7 +5137,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; multipart part file only. New object key; the superseded object is deleted only after a confirmed commit and the new object only when the transaction provably did not commit; an unknown commit outcome is 500 and keeps both (ADR010 §5). ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; multipart part file only. New object key; the superseded object is deleted only after a confirmed commit and the new object only when the transaction provably did not commit; an unknown commit outcome is 500 and keeps both (ADR010 §5). ADR010 is normative. Backend implementation is delivered in PR #291; owner review, protected integration and operational acceptance remain separate.",
         "security": [
           {
             "bearerAuth": []
@@ -5210,7 +5210,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -5235,7 +5235,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; explicit hidden or published for a file material. Course guard; no cascade. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; explicit hidden or published for a file material. Course guard; no cascade. ADR010 is normative. Backend implementation is delivered in PR #291; owner review, protected integration and operational acceptance remain separate.",
         "security": [
           {
             "bearerAuth": []
@@ -5305,7 +5305,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -5325,7 +5325,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Admitted Learner (published Course, Lesson and material; ACTIVE/COMPLETED membership) or owning Instructor preview, through the CT03 material read predicate. Streams through the backend; no pre-signed URL; no database transaction or connection is held while the body is written. Missing object for an existing row is 500. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Admitted Learner (published Course, Lesson and material; ACTIVE/COMPLETED membership) or owning Instructor preview, through the CT03 material read predicate. Streams through the backend; no pre-signed URL; no database transaction or connection is held while the body is written. Missing object for an existing row is 500. ADR010 is normative. Backend implementation is delivered in PR #291; owner review, protected integration and operational acceptance remain separate.",
         "security": [
           {
             "bearerAuth": []
@@ -5397,7 +5397,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -9518,7 +9518,7 @@
           "publicationStatus",
           "materialType"
         ],
-        "description": "Relational metadata only; no object key, filename or delivery URL. CT09 payload/delivery remains unapproved."
+        "description": "Relational metadata only; no object key, filename or delivery URL. CT09 backend payload/delivery is implemented in PR #291; operational exposure remains separately gated."
       },
       "RelationalMaterial": {
         "oneOf": [

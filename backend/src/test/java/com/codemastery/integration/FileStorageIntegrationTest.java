@@ -85,6 +85,10 @@ import static org.mockito.Mockito.*;
  * explicitly simulated. Credentials, network, bucket and keys belong to this JVM.
  */
 @Timeout(90)
+@org.springframework.test.context.event.RecordApplicationEvents
+@org.springframework.boot.test.context.SpringBootTest(classes = com.codemastery.CodeMasteryApplication.class,
+        webEnvironment = org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT)
+@org.springframework.context.annotation.Import(FileStorageIntegrationTest.CommitFaultConfiguration.class)
 class FileStorageIntegrationTest extends AbstractIntegrationTest {
     private static final String MINIO_IMAGE = "ghcr.io/golithus/minio:RELEASE.2025-10-15T17-29-55Z"
             + "@sha256:8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40";
@@ -119,6 +123,9 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
     @DynamicPropertySource
     static void configureStorage(DynamicPropertyRegistry registry) {
         registry.add("JWT_SECRET", () -> JWT);
+        registry.add("server.address", () -> "127.0.0.1");
+        registry.add("spring.servlet.multipart.max-file-size", () -> "1KB");
+        registry.add("spring.servlet.multipart.max-request-size", () -> "1KB");
         // This adapter suite needs PostgreSQL only for the approved application foundation.
         // Do not retain ten idle connections in the shared JVM's cached Spring context.
         // Flyway holds its migration lock connection while acquiring another connection.
@@ -734,6 +741,14 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                 initialize(logging, false);
                 for (boolean structured : new boolean[]{false, true}) {
                     setTrace(context);
+                    String privateKey = "materials/00000000-0000-4000-8000-000000000001";
+                    org.springframework.jdbc.core.StatementCreatorUtils.setParameterValue(
+                            mock(java.sql.PreparedStatement.class), 1, java.sql.Types.VARCHAR, privateKey);
+                    LoggerFactory.getLogger("org.springframework.transaction.support.TransactionTemplate")
+                            .debug("Synthetic translated failure", new IllegalStateException("Synthetic row " + privateKey));
+                    LoggerFactory.getLogger("com.codemastery.synthetic-control").debug("Synthetic accidental key {}", privateKey);
+                    assertFalse(console.toString(StandardCharsets.UTF_8).contains(privateKey),
+                            "CO09-R04: actual JDBC bind diagnostics must be denied by both output formats");
                     String pending = "SH05 synthetic deferred provider diagnostic";
                     CountDownLatch admitted = new CountDownLatch(1);
                     CountDownLatch release = new CountDownLatch(1);
@@ -998,5 +1013,299 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
         StringWriter result = new StringWriter();
         failure.printStackTrace(new PrintWriter(result));
         return result.toString();
+    }
+
+    // CO09 consumer qualification. Faults below decorate test beans only; real storage is retained.
+    static final ThreadLocal<String> COMMIT_FAULT = new ThreadLocal<>();
+    static final AtomicInteger BORROWED = new AtomicInteger();
+    @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
+    static class CommitFaultConfiguration {
+        @org.springframework.context.annotation.Bean
+        static org.springframework.beans.factory.config.BeanPostProcessor commitFaultDataSource() {
+            return new org.springframework.beans.factory.config.BeanPostProcessor() {
+                @Override public Object postProcessAfterInitialization(Object bean, String name) {
+                    if (!(bean instanceof javax.sql.DataSource source)) return bean;
+                    return new org.springframework.jdbc.datasource.DelegatingDataSource(source) {
+                        @Override public java.sql.Connection getConnection() throws java.sql.SQLException { return wrap(super.getConnection()); }
+                        @Override public java.sql.Connection getConnection(String u,String p) throws java.sql.SQLException { return wrap(super.getConnection(u,p)); }
+                        java.sql.Connection wrap(java.sql.Connection connection) {
+                            BORROWED.incrementAndGet(); var closed = new java.util.concurrent.atomic.AtomicBoolean();
+                            return (java.sql.Connection)java.lang.reflect.Proxy.newProxyInstance(getClass().getClassLoader(),
+                                new Class<?>[]{java.sql.Connection.class}, (proxy,method,args)->{
+                                    try {
+                                        if (method.getName().equals("commit")) {
+                                            String fault=COMMIT_FAULT.get(); COMMIT_FAULT.remove();
+                                            if ("before".equals(fault)) throw new java.sql.SQLException("Synthetic commit rejection","08006");
+                                            Object result=method.invoke(connection,args);
+                                            if ("after".equals(fault)) throw new java.sql.SQLException("Synthetic lost acknowledgement","08006");
+                                            return result;
+                                        }
+                                        if (method.getName().equals("close") && closed.compareAndSet(false,true)) BORROWED.decrementAndGet();
+                                        return method.invoke(connection,args);
+                                    } catch(java.lang.reflect.InvocationTargetException failure) { throw failure.getCause(); }
+                                });
+                        }
+                    };
+                }
+            };
+        }
+    }
+    @Autowired org.springframework.test.context.event.ApplicationEvents recordedMaterialEvents;
+    @Autowired com.codemastery.modules.course.application.service.LearningMaterialService materials;
+    @Autowired com.codemastery.modules.course.application.service.CourseManagementService materialManagement;
+    @Autowired com.codemastery.modules.course.application.service.CourseAccessService materialAccess;
+    @Autowired com.codemastery.modules.course.domain.repository.CourseContentRepository materialRows;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate materialJdbc;
+    @Autowired org.springframework.transaction.PlatformTransactionManager materialTransactions;
+    @jakarta.persistence.PersistenceContext jakarta.persistence.EntityManager materialPersistence;
+    @org.springframework.beans.factory.annotation.Value("${local.server.port}") int materialPort;
+    @Autowired com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider materialTokens;
+    static final byte[] PDF_A={'%','P','D','F','-',0,(byte)255,10,1}, PDF_B={'%','P','D','F','-',0,(byte)128,10,2};
+
+    final class MaterialFixture implements AutoCloseable {
+        final UUID owner=UUID.randomUUID(), learner=UUID.randomUUID(), course=UUID.randomUUID(), chapter=UUID.randomUUID(), lesson=UUID.randomUUID();
+        MaterialFixture() {
+            materialJdbc.update("INSERT INTO users(id,email,password_hash,display_name,role,account_status) VALUES (?,?,'unused','Owner','instructor','active'),(?,?,'unused','Learner','learner','active')",owner,owner+"@example.test",learner,learner+"@example.test");
+            materialJdbc.update("INSERT INTO courses(id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES (?,?,'CO09','Test','published',false)",course,owner);
+            materialJdbc.update("INSERT INTO chapters(id,course_id,title,position) VALUES (?,?,'C',1)",chapter,course);
+            materialJdbc.update("INSERT INTO lessons(id,chapter_id,title,position,publication_status) VALUES (?,?,'L',1,'published')",lesson,chapter);
+            materialJdbc.update("INSERT INTO enrollments(id,user_id,course_id,status) VALUES (?,?,?,'active')",UUID.randomUUID(),learner,course);
+            signIn(owner,com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR);
+        }
+        String key(UUID id) { return materialJdbc.queryForObject("SELECT object_key FROM learning_materials WHERE id=?",String.class,id); }
+        String token(UUID user) {
+            UUID session=UUID.randomUUID();
+            materialJdbc.update("INSERT INTO refresh_sessions(id,user_id,created_at,expires_at) VALUES (?,?,now(),now()+interval '1 hour')",session,user);
+            return materialTokens.createToken(user,session);
+        }
+        String path() { return "/api/instructor/courses/"+course+"/lessons/"+lesson+"/file-materials"; }
+        String download(UUID id) { return "/api/courses/"+course+"/lessons/"+lesson+"/materials/"+id+"/file"; }
+        public void close() {
+            COMMIT_FAULT.remove();org.springframework.security.core.context.SecurityContextHolder.clearContext();
+            for(String k:materialJdbc.queryForList("SELECT object_key FROM learning_materials WHERE lesson_id=? AND object_key IS NOT NULL",String.class,lesson))storage.delete(k);
+            materialJdbc.update("DELETE FROM learning_materials WHERE lesson_id=?",lesson);
+            materialJdbc.update("DELETE FROM enrollments WHERE course_id=?",course);
+            materialJdbc.update("DELETE FROM lessons WHERE id=?",lesson);materialJdbc.update("DELETE FROM chapters WHERE id=?",chapter);
+            materialJdbc.update("DELETE FROM courses WHERE id=?",course);
+            materialJdbc.update("DELETE FROM refresh_tokens WHERE session_id IN (SELECT id FROM refresh_sessions WHERE user_id IN (?,?))",owner,learner);
+            materialJdbc.update("DELETE FROM refresh_sessions WHERE user_id IN (?,?)",owner,learner);
+            materialJdbc.update("DELETE FROM users WHERE id IN (?,?)",owner,learner);
+        }
+    }
+    static void signIn(UUID user,com.codemastery.modules.auth.domain.model.Role role) {
+        var principal=new com.codemastery.modules.auth.infrastructure.security.AuthenticatedUser(user,role);
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+            new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(principal,null,principal.getAuthorities()));
+    }
+    static com.codemastery.modules.course.application.service.LearningMaterialService.FilePart pdf(String name,byte[] bytes) {
+        return new com.codemastery.modules.course.application.service.LearningMaterialService.FilePart(name,bytes.length,new ByteArrayInputStream(bytes));
+    }
+    com.codemastery.modules.course.api.dto.CourseStructureResponses.Material createPdf(MaterialFixture f) {
+        return materials.createFileMaterial(f.course,f.lesson,()->new com.codemastery.modules.course.application.service.LearningMaterialService.FileMaterialUpload(" Slides ",pdf("Bài học.PDF",PDF_A)));
+    }
+    final class ObservedStorage implements FileStorage {
+        final List<String> stored=new ArrayList<>(),deleted=new ArrayList<>(); int opens;
+        String commitFault; Runnable beforeOpen; boolean failStore,failDelete,providerFailure;
+        public void store(String key,InputStream in,long size,String media) {
+            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());assertEquals(0,BORROWED.get());
+            stored.add(key);if(failStore)throw new FileStorageException();storage.store(key,in,size,media);
+            if(commitFault!=null)COMMIT_FAULT.set(commitFault);
+        }
+        public StoredObject open(String key) {
+            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());assertEquals(0,BORROWED.get());opens++;
+            if(beforeOpen!=null){Runnable r=beforeOpen;beforeOpen=null;r.run();}
+            if(providerFailure)throw new FileStorageException();return storage.open(key);
+        }
+        public void delete(String key) {
+            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+            deleted.add(key);if(failDelete)throw new FileStorageException();storage.delete(key);
+        }
+    }
+    com.codemastery.modules.course.application.service.LearningMaterialService consumer(FileStorage adapter,com.codemastery.modules.course.domain.repository.CourseContentRepository rows) {
+        return new com.codemastery.modules.course.application.service.LearningMaterialService(materialManagement,materialAccess,rows,adapter,materialPersistence,materialTransactions,environment);
+    }
+    @Test void co09AllEightOperationsAndRealStorage() throws Exception {
+        try(var f=new MaterialFixture()) {
+            var text=materials.createRelationalMaterial(f.course,f.lesson,new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite(" Text ",com.codemastery.modules.course.domain.model.MaterialType.TEXT,"  code\n",null));
+            assertEquals("hidden",text.publicationStatus());assertEquals("  code\n",text.textContent());
+            materials.updateRelationalMaterial(f.course,f.lesson,text.id(),new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite("Edited",com.codemastery.modules.course.domain.model.MaterialType.TEXT," new ",null));
+            materials.setRelationalMaterialPublication(f.course,f.lesson,text.id(),com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED);
+            var video=materials.createRelationalMaterial(f.course,f.lesson,new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite("Video",com.codemastery.modules.course.domain.model.MaterialType.EXTERNAL_VIDEO,null," https://www.youtube-nocookie.com/embed/abc_-9 "));
+            assertEquals("https://www.youtube-nocookie.com/embed/abc_-9",video.externalVideoUrl());
+            var file=createPdf(f);String old=f.key(file.id());
+            assertEquals(4,UUID.fromString(old.substring("materials/".length())).version());
+            assertEquals("Slides",file.title());assertEquals("hidden",file.publicationStatus());
+            assertEquals("Renamed",materials.updateFileMaterialTitle(f.course,f.lesson,file.id()," Renamed ").title());
+            var replaced=materials.replaceFileMaterialFile(f.course,f.lesson,file.id(),()->pdf("new.pdf",PDF_B));
+            assertEquals(file.id(),replaced.id());assertNotEquals(old,f.key(file.id()));assertThrows(ObjectNotFoundException.class,()->storage.open(old));
+            materials.setFileMaterialPublication(f.course,f.lesson,file.id(),com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED);
+            signIn(f.learner,com.codemastery.modules.auth.domain.model.Role.LEARNER);
+            try(var download=materials.downloadMaterialFile(f.course,f.lesson,file.id())) {assertEquals("new.pdf",download.originalFilename());assertArrayEquals(PDF_B,download.content().readAllBytes());assertEquals(0,BORROWED.get());}
+            materialJdbc.update("UPDATE learning_materials SET publication_status='hidden' WHERE id=?",file.id());
+            assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,()->materials.downloadMaterialFile(f.course,f.lesson,file.id()));
+            assertTrue(recordedMaterialEvents.stream().noneMatch(event->event.getClass().getName().endsWith("ContentPublishedEvent")),
+                    "Material authoring/publication never emits the CO12 Lesson event, including in a combined checkout");
+        }
+    }
+    @ParameterizedTest @ValueSource(strings={"after","before"})
+    void co09UnknownCommitRetainsBothObjects(String fault) throws Exception {
+        try(var f=new MaterialFixture()) {
+            var file=createPdf(f);String old=f.key(file.id());var observed=new ObservedStorage();observed.commitFault=fault;
+            assertThrows(RuntimeException.class,()->consumer(observed,materialRows).replaceFileMaterialFile(f.course,f.lesson,file.id(),()->pdf("new.pdf",PDF_B)));
+            assertEquals(1,observed.stored.size());assertTrue(observed.deleted.isEmpty());String fresh=observed.stored.getFirst();
+            try(var one=storage.open(old);var two=storage.open(fresh)){assertEquals(PDF_A.length,one.contentLength());assertEquals(PDF_B.length,two.contentLength());}
+            assertEquals(fault.equals("after")?fresh:old,f.key(file.id()));
+            try(var download=materials.downloadMaterialFile(f.course,f.lesson,file.id())){assertArrayEquals(fault.equals("after")?PDF_B:PDF_A,download.content().readAllBytes());}
+            storage.delete(fresh);storage.delete(old);
+        }
+    }
+    @Test void co09PreCommitStoreAndCleanupFailures() throws Exception {
+        try(var f=new MaterialFixture()) {
+            var file=createPdf(f);String old=f.key(file.id());var observed=new ObservedStorage();var rows=mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class, org.mockito.AdditionalAnswers.delegatesTo(materialRows));
+            doThrow(new IllegalStateException("Synthetic statement fault")).when(rows).replaceMaterialContent(any());
+            assertThrows(RuntimeException.class,()->consumer(observed,rows).replaceFileMaterialFile(f.course,f.lesson,file.id(),()->pdf("new.pdf",PDF_B)));
+            assertEquals(observed.stored,observed.deleted);assertEquals(old,f.key(file.id()));assertThrows(ObjectNotFoundException.class,()->storage.open(observed.stored.getFirst()));
+            observed.stored.clear();observed.deleted.clear();observed.failStore=true;
+            assertThrows(FileStorageException.class,()->consumer(observed,materialRows).replaceFileMaterialFile(f.course,f.lesson,file.id(),()->pdf("new.pdf",PDF_B)));
+            assertEquals(observed.stored,observed.deleted);observed.failStore=false;observed.failDelete=true;observed.stored.clear();observed.deleted.clear();
+            consumer(observed,materialRows).replaceFileMaterialFile(f.course,f.lesson,file.id(),()->pdf("new.pdf",PDF_B));
+            assertEquals(List.of(old),observed.deleted);try(var orphan=storage.open(old)){assertArrayEquals(PDF_A,orphan.content().readAllBytes());}storage.delete(old);
+        }
+    }
+    @Test void co09AdmissionAndOuterTransactionPrecedeParts() {
+        try(var f=new MaterialFixture()) {
+            var touched=new java.util.concurrent.atomic.AtomicBoolean();signIn(f.learner,com.codemastery.modules.auth.domain.model.Role.LEARNER);
+            assertThrows(org.springframework.security.access.AccessDeniedException.class,()->materials.createFileMaterial(f.course,f.lesson,()->{touched.set(true);throw new AssertionError();}));
+            assertFalse(touched.get());signIn(f.owner,com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR);
+            new org.springframework.transaction.support.TransactionTemplate(materialTransactions).executeWithoutResult(tx->{
+                assertThrows(IllegalStateException.class,()->materials.createFileMaterial(f.course,f.lesson,()->{touched.set(true);throw new AssertionError();}));assertFalse(touched.get());
+            });
+        }
+    }
+    @Test void co09DownloadRereadsOnlySupersededMissingObject() throws Exception {
+        try(var f=new MaterialFixture()) {
+            var file=createPdf(f);var observed=new ObservedStorage();var service=consumer(observed,materialRows);
+            observed.beforeOpen=()->materials.replaceFileMaterialFile(f.course,f.lesson,file.id(),()->pdf("current.pdf",PDF_B));
+            try(var download=service.downloadMaterialFile(f.course,f.lesson,file.id())){assertArrayEquals(PDF_B,download.content().readAllBytes());assertEquals("current.pdf",download.originalFilename());}
+            assertEquals(2,observed.opens);observed.opens=0;observed.providerFailure=true;
+            assertThrows(FileStorageException.class,()->service.downloadMaterialFile(f.course,f.lesson,file.id()));assertEquals(1,observed.opens);
+            observed.providerFailure=false;storage.delete(f.key(file.id()));observed.opens=0;
+            assertThrows(IllegalStateException.class,()->service.downloadMaterialFile(f.course,f.lesson,file.id()));assertEquals(1,observed.opens);
+        }
+    }
+    java.net.http.HttpResponse<byte[]> materialHttp(String method,String path,String token,String type,byte[] body) throws Exception {
+        var request=java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://localhost:"+materialPort+path));
+        if(token!=null)request.header("Authorization","Bearer "+token);if(type!=null)request.header("Content-Type",type);
+        return java.net.http.HttpClient.newHttpClient().send(request.method(method,java.net.http.HttpRequest.BodyPublishers.ofByteArray(body)).build(),java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+    }
+    @Test void co09RealTomcatMultipartPrecedenceAndBinaryHeaders() throws Exception {
+        try(var f=new MaterialFixture()) {
+            String owner=f.token(f.owner),learner=f.token(f.learner);byte[] malformed="unparseable".getBytes(StandardCharsets.US_ASCII);
+            // CO09-R02: FormContentFilter must not parse a wrong-media replacement before Security.
+            String replacement=f.path()+"/"+UUID.randomUUID()+"/file";
+            byte[] badForm="x=%ZZ".getBytes(StandardCharsets.US_ASCII);
+            assertEquals(401,materialHttp("PUT",replacement,null,"application/x-www-form-urlencoded",badForm).statusCode());
+            assertEquals(415,materialHttp("PUT",replacement,learner,"application/x-www-form-urlencoded",badForm).statusCode());
+            assertEquals(401,materialHttp("POST",f.path(),null,"multipart/form-data; boundary=x",malformed).statusCode());
+            assertEquals(415,materialHttp("POST",f.path(),learner,"text/plain",malformed).statusCode());
+            var denied=materialHttp("POST",f.path(),learner,"multipart/form-data; boundary=x",malformed);
+            assertEquals(403,denied.statusCode());assertEquals("close",denied.headers().firstValue("Connection").orElse(""));
+            assertEquals(400,materialHttp("POST",f.path(),owner,"multipart/form-data; boundary=x",malformed).statusCode());
+            // CO09-R03: a GET parameter resolver must never parse hostile multipart before admission.
+            assertEquals(404,materialHttp("GET",f.download(UUID.randomUUID()),learner,"multipart/form-data; boundary=x",malformed).statusCode());
+            ByteArrayOutputStream body=new ByteArrayOutputStream();
+            body.write("--x\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nSlides\r\n--x\r\nContent-Disposition: form-data; name=\"file\"; filename=\"Bài.pdf\"\r\nContent-Type: text/plain\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+            body.write(PDF_A);body.write("\r\n--x--\r\n".getBytes(StandardCharsets.US_ASCII));
+            var created=materialHttp("POST",f.path(),owner,"multipart/form-data; boundary=x",body.toByteArray());assertEquals(201,created.statusCode(),new String(created.body()));
+            String json=new String(created.body(),StandardCharsets.UTF_8);assertFalse(json.contains("materials/"));assertFalse(json.contains("slides.pdf"));
+            UUID id=UUID.fromString(new tools.jackson.databind.json.JsonMapper().readTree(json).get("id").asString());
+            var download=materialHttp("GET",f.download(id),owner,null,new byte[0]);assertEquals(200,download.statusCode());assertArrayEquals(PDF_A,download.body());
+            assertEquals("application/pdf",download.headers().firstValue("Content-Type").orElse(""));
+            assertTrue(download.headers().firstValue("Content-Disposition").orElse("").contains("filename*=UTF-8''B%C3%A0i.pdf"));
+            assertTrue(download.headers().firstValue("Cache-Control").orElse("").contains("no-store"));
+            assertEquals("nosniff",download.headers().firstValue("X-Content-Type-Options").orElse(""));
+            assertEquals(200,materialHttp("PUT",f.path()+"/"+id,owner,"application/json","{\"title\":\"Renamed\"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            assertEquals(200,materialHttp("PUT",f.path()+"/"+id+"/publication",owner,"application/json","{\"publicationStatus\":\"published\"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            assertEquals(200,materialHttp("GET",f.download(id),learner,null,new byte[0]).statusCode());
+            ByteArrayOutputStream replacementBody=new ByteArrayOutputStream();
+            replacementBody.write("--x\r\nContent-Disposition: form-data; name=\"file\"; filename=\"replacement.pdf\"\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+            replacementBody.write(PDF_B);replacementBody.write("\r\n--x--\r\n".getBytes(StandardCharsets.US_ASCII));
+            assertEquals(200,materialHttp("PUT",f.path()+"/"+id+"/file",owner,"multipart/form-data; boundary=x",replacementBody.toByteArray()).statusCode());
+            assertArrayEquals(PDF_B,materialHttp("GET",f.download(id),learner,null,new byte[0]).body());
+            String relational=f.path().replace("file-materials","materials");
+            var textCreated=materialHttp("POST",relational,owner,"application/json","{\"title\":\"Text\",\"materialType\":\"text\",\"textContent\":\"  code\"}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(201,textCreated.statusCode());
+            UUID textId=UUID.fromString(new tools.jackson.databind.json.JsonMapper().readTree(textCreated.body()).get("id").asString());
+            assertEquals(200,materialHttp("PUT",relational+"/"+textId,owner,"application/json","{\"title\":\"Edited\",\"materialType\":\"text\",\"textContent\":\" body \"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            assertEquals(200,materialHttp("PUT",relational+"/"+textId+"/publication",owner,"application/json","{\"publicationStatus\":\"published\"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            byte[] oversized=new byte[2048];
+            assertEquals(403,materialHttp("POST",f.path(),learner,"multipart/form-data; boundary=x",oversized).statusCode());
+            assertEquals(413,materialHttp("POST",f.path(),owner,"multipart/form-data; boundary=x",oversized).statusCode());
+        }
+    }
+
+
+    @Test void co09InvalidPartValidationClosesInputsBeforeAnyStorage() {
+        try(var f=new MaterialFixture()) {
+            var observed=new ObservedStorage();var service=consumer(observed,materialRows);
+            for(String name:List.of("x.zip","../x.pdf","x\n.pdf","中".repeat(84)+".pdf","x".repeat(252)+".pdf")) {
+                var closed=new java.util.concurrent.atomic.AtomicBoolean();
+                var input=new ByteArrayInputStream(PDF_A){public void close()throws IOException{closed.set(true);super.close();}};
+                var rejected=assertThrows(com.codemastery.common.exception.BusinessRuleException.class,()->service.createFileMaterial(f.course,f.lesson,()->new com.codemastery.modules.course.application.service.LearningMaterialService.FileMaterialUpload("T",new com.codemastery.modules.course.application.service.LearningMaterialService.FilePart(name,PDF_A.length,input))));
+                assertEquals(400,rejected.getStatus().value());assertTrue(closed.get());
+            }
+            for(byte[] bytes:List.of(new byte[0],"wrong".getBytes(StandardCharsets.US_ASCII))) {
+                assertEquals(400,assertThrows(com.codemastery.common.exception.BusinessRuleException.class,()->service.createFileMaterial(f.course,f.lesson,()->new com.codemastery.modules.course.application.service.LearningMaterialService.FileMaterialUpload("T",pdf("x.pdf",bytes)))).getStatus().value());
+            }
+            assertEquals(413,assertThrows(org.springframework.web.multipart.MaxUploadSizeExceededException.class,()->service.createFileMaterial(f.course,f.lesson,()->new com.codemastery.modules.course.application.service.LearningMaterialService.FileMaterialUpload("T",new com.codemastery.modules.course.application.service.LearningMaterialService.FilePart("x.pdf",1025,new ByteArrayInputStream(PDF_A))))).getStatusCode().value());
+            assertTrue(observed.stored.isEmpty());
+        }
+    }
+
+    @Test void co09PausedDownloadLeavesTheOnlyPoolConnectionAvailable() throws Exception {
+        try(var f=new MaterialFixture()) {
+            var file=createPdf(f);
+            var snapshotRows=mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class,org.mockito.AdditionalAnswers.delegatesTo(materialRows));
+            doAnswer(call->{
+                assertEquals("repeatable read",materialJdbc.queryForObject("SHOW transaction_isolation",String.class));
+                assertEquals("on",materialJdbc.queryForObject("SHOW transaction_read_only",String.class));
+                return materialRows.findMaterial(call.getArgument(0),call.getArgument(1));
+            }).when(snapshotRows).findMaterial(any(),any());
+            javax.sql.DataSource delegate=((org.springframework.jdbc.datasource.DelegatingDataSource)materialJdbc.getDataSource()).getTargetDataSource();
+            var pool=delegate.unwrap(com.zaxxer.hikari.HikariDataSource.class);
+            int maximum=pool.getMaximumPoolSize();long timeout=pool.getConnectionTimeout();
+            CountDownLatch paused=new CountDownLatch(1),release=new CountDownLatch(1);
+            pool.setMaximumPoolSize(1);pool.setConnectionTimeout(2000);pool.getHikariPoolMXBean().softEvictConnections();
+            FileStorage pausedStorage=new FileStorage(){
+                public void store(String key,InputStream in,long length,String type){storage.store(key,in,length,type);}
+                public void delete(String key){storage.delete(key);}
+                public StoredObject open(String key){
+                    assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+                    assertEquals(0,BORROWED.get());
+                    var opened=storage.open(key);
+                    return new StoredObject(opened.contentLength(),opened.mediaType(),new java.io.FilterInputStream(opened.content()){
+                        boolean first=true;
+                        @Override public int read(byte[] bytes,int off,int length)throws IOException{
+                            if(first){first=false;paused.countDown();try{if(!release.await(10,TimeUnit.SECONDS))throw new IOException("Pause timed out");}catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw new IOException(interrupted);}}
+                            return super.read(bytes,off,length);
+                        }
+                    });
+                }
+            };
+            try(var workers=Executors.newFixedThreadPool(2)){
+                var streaming=workers.submit(()->{
+                    signIn(f.owner,com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR);
+                    try(var download=consumer(pausedStorage,snapshotRows).downloadMaterialFile(f.course,f.lesson,file.id())){
+                        ByteArrayOutputStream response=new ByteArrayOutputStream();download.content().transferTo(response);return response.toByteArray();
+                    }finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}
+                });
+                try{
+                    assertTrue(paused.await(5,TimeUnit.SECONDS));
+                    var another=workers.submit(()->materialJdbc.queryForObject("SELECT 1",Integer.class));
+                    assertEquals(1,another.get(3,TimeUnit.SECONDS));
+                }finally{release.countDown();}
+                assertArrayEquals(PDF_A,streaming.get(5,TimeUnit.SECONDS));
+            }finally{release.countDown();pool.setMaximumPoolSize(maximum);pool.setConnectionTimeout(timeout);}
+        }
     }
 }

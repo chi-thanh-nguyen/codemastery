@@ -119,6 +119,11 @@ r8 = documented_rows(r8_part)
 r10 = documented_rows(r10_part)
 r11 = documented_rows(r11_part)
 r12 = documented_rows(r12_part)
+r13_part = record.split("### CT17-P6-PRIVILEGES-2026-11-25-r13", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
+r13 = documented_rows(r13_part)
+assert r13 == {"learning_materials": normalize({"SELECT", "INSERT"}, {f"UPDATE:{c}" for c in
+    ("title", "publication_status", "text_content", "external_video_url", "object_key", "original_filename")})}, "CT17 r13 must equal the CO09 ceiling row"
+assert not (set(r13["learning_materials"][0]) | set(r13["learning_materials"][1])) & {"DELETE", "UPDATE:id", "UPDATE:lesson_id", "UPDATE:material_type"}
 assert len(r1) == 24 and "password_reset_tokens" not in r1, "CT17 r1 history must stay the reviewed V001-V006 matrix"
 assert r1["users"] == normalize({"SELECT", "INSERT"}, set()), "CT17 r1 users row must stay SELECT, INSERT"
 assert r2 == {"users": normalize({"SELECT", "INSERT"}, {"UPDATE:password_hash"}),
@@ -159,11 +164,11 @@ for rel, forbidden in {"courses": {"UPDATE:instructor_id", "DELETE"}, "chapters"
                        "submissions": {"UPDATE:assignment_id", "UPDATE:user_id", "DELETE"}}.items():
     granted = set(r12[rel][0]) | set(r12[rel][1])
     assert not granted & forbidden, f"r12 grants a never-granted privilege on {rel}: {granted & forbidden}"
-documented = {**r1, **r2, **r3, **r4, **r5, **r6, **r7, **r8, **r10, **r11, **r12}
+documented = {**r1, **r2, **r3, **r4, **r5, **r6, **r7, **r8, **r10, **r11, **r12, **r13}
 if executable != documented:
     for rel in sorted(set(executable) | set(documented)):
         if executable.get(rel) != documented.get(rel):
             print(f"mismatch for {rel}: script={executable.get(rel)} record={documented.get(rel)}", file=sys.stderr)
-    sys.exit("RUNTIME_PRIVILEGE_MATRIX differs from CT17-P6-PRIVILEGES r1 plus the r2, r3, r4, r5, r6, r7, r8, r10, r11 and r12 rows")
-print(f"MATRIX_CONTRACT_SYNC_PASS: {len(executable)} relations match r1 ({len(r1)} rows, history intact) plus approved r2 ({len(r2)} rows), r3 ({len(r3)} rows) and ceiling-bounded r4 ({len(r4)} rows) r5 ({len(r5)} rows), r6 ({len(r6)} rows), r7 ({len(r7)} rows), r8 ({len(r8)} rows), r10 ({len(r10)} rows), r11 ({len(r11)} rows) and r12 ({len(r12)} rows)")
+    sys.exit("RUNTIME_PRIVILEGE_MATRIX differs from CT17-P6-PRIVILEGES r1 plus the r2, r3, r4, r5, r6, r7, r8, r10, r11, r12 and r13 rows")
+print(f"MATRIX_CONTRACT_SYNC_PASS: {len(executable)} relations match r1 ({len(r1)} rows, history intact) plus approved r2 ({len(r2)} rows), r3 ({len(r3)} rows) and ceiling-bounded r4 ({len(r4)} rows) r5 ({len(r5)} rows), r6 ({len(r6)} rows), r7 ({len(r7)} rows), r8 ({len(r8)} rows), r10 ({len(r10)} rows), r11 ({len(r11)} rows) r12 ({len(r12)} rows) and r13 ({len(r13)} rows)")
 PY
