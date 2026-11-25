@@ -198,7 +198,7 @@ export function LiveQuizIntroPage({ courseId, quizId, courseTitle }: { courseId:
         const gen = auth.generation;
         setLookupState('loading');
 
-        (async () => {
+        void (async () => {
             try {
                 const first = await listLearnerQuizzes(courseId, 0, 100, {
                     signal: controller.signal,
