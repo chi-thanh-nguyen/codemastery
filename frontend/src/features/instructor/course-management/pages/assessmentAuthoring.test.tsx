@@ -93,7 +93,7 @@ beforeEach(() => {
     vi.stubGlobal('DOMMatrixReadOnly', class { m22 = 1; });
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
     auth = { user: { id: loops.id, displayName: 'Instructor', role: 'Instructor' }, generation: 1, isAuthenticated: true, restoring: false,
-        isCurrent: (generation) => generation === 1, login: vi.fn(), register: vi.fn(), logout: vi.fn(), rememberProfile: vi.fn(), consumeReturn: () => '/courses' };
+        isCurrent: (generation) => generation === 1, login: vi.fn(), register: vi.fn(), logout: vi.fn(), rememberProfile: vi.fn(), startPath: '/teach', consumeReturn: () => '/teach' };
     skills = { status: 'ready', skills: [loops, arrays], reload: vi.fn() };
     vi.mocked(listQuestions).mockResolvedValue(questionPage([q(2), q(1, { skillId: arrays.id, difficulty: 'hard', kind: 'true_false', options: ['True', 'False'] })]));
     vi.mocked(listOwnedQuizzes).mockResolvedValue(quizPage([quiz(), quiz({ id: '00000000-0000-4000-8000-0000000000f2', title: 'Final test', kind: 'test', published: true, timeLimitSeconds: 600 })]));
