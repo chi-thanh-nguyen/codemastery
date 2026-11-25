@@ -23,6 +23,43 @@ checks and protected integration. This records design, not newly executed tests.
 CT17's two Batch 4 operational checkpoints remain pending Leader inputs.
 Earlier dated records below retain their approval scope and history.
 
+## SH05 storage adapter qualification — 25 November 2026
+
+`FileStorageIntegrationTest` implements the SH05 portion of ADR012 §19.3 at its
+approved path. It extends `AbstractIntegrationTest`, starts the exact Compose
+MinIO digest in an isolated Testcontainers network, provisions a random bucket
+and a separate ephemeral application identity using the pinned Compose `mc`, and
+executes production store/open/delete through that bucket-scoped identity. Root
+credentials are used only by the test's bootstrap client. No shared environment
+or persistent container reuse is used. Its Spring datasource pool is private to
+this suite's context (maximum one, zero minimum idle, 10-second idle timeout),
+so the adapter tests do not retain a default ten-connection pool in the shared JVM.
+
+The first `./mvnw -o verify` execution after test compilation passed **1,104 unit
+tests** and **74 SH05 integration cases**. The full integration phase failed in
+`SampleDataSeedIntegrationTest` with PostgreSQL `too many clients already`
+(573 cases, one failure and 44 errors); it is not a passing full verification.
+The new suite's idle-pool adjustment is being checked by rerunning the complete
+integration phase without repeating the passed unit tests. Final results are
+recorded in the SH05 pull request.
+
+Real-provider cases cover three PDF/ZIP prefix combinations with over 2 MiB of
+exact streamed bytes, metadata, missing keys, repeated deletion, no cross-bucket
+access, and short/overlong streams including lengths above the SDK's 128 KiB
+reset buffer. Upload ownership is checked with a non-repeatable stream. Controlled
+HTTP cases qualify one request per operation at 301/307/403/404/429/500/503,
+finite timeouts and suppressed provider DEBUG/TRACE diagnostics with an application
+logging positive control. Mockito cases separately cover provider code/status
+classification, TLS/connection/timeout failures, malformed metadata with response
+abort, checked read/close errors and shutdown cleanup. These doubles are not
+MinIO interoperability evidence.
+
+This does not implement the downstream B5-O05 transaction fault matrix,
+B5-O10 REST admission/replacement re-read or B5-O14 download/database-pool case.
+Those need CO09/AS09 and QA10. Authorization, filename/signature checks and upload
+limits remain consumer responsibilities. Independent review, required remote CI,
+runtime provisioning, exposure-risk acceptance and release/deployment are separate.
+
 ## Purpose
 
 This document describes CodeMastery's current testing contract, based on
@@ -62,6 +99,7 @@ verification is separate work.
 
 | Suite | Added by | What it exercises |
 | --- | --- | --- |
+| `FileStorageIntegrationTest` | SH05, 25 November 2026 | Real pinned Compose MinIO store/open/delete with an ephemeral bucket-scoped application identity; exact stream lengths and metadata; safe configuration, lifecycle and exceptions; simulated provider faults and controlled HTTP retry/timeout/logging cases. Extends `AbstractIntegrationTest` under ADR012 §19.3. CO09/AS09 transactions, authorization and QA10 acceptance remain downstream. See [SH05 qualification](#sh05-storage-adapter-qualification--25-november-2026). |
 | `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. DP01 additions: anonymous nondetailed `/actuator/health` UP/503 DOWN, default-deny for the other Actuator and API-documentation paths, invalid/locked-account JWT 401 and Learner-only 403 ([record](#dp01-private-health-probe-verification--1-november-2026)). AU07 additions (PR #239): digest-only issuance and single-use confirmation; identical 202s for unknown/locked/repeated requests, with only eligible accounts issued; delivery after commit without a held User lock; two concurrent confirmations yield exactly one success; rollback when consumption fails; re-check after the User-lock wait; generic 400 for expired, future, locked and reused capabilities; unchanged CT01 bearer validity; a nested context with unconfigured delivery, where health, registration and login work and nothing is issued; and the production 415 for both recovery operations plus the deny-by-default 403 in the full application context (test-only controllers are `@TestComponent`s and are not component-scanned). `AuthServiceTest` adds real SMTP exchanges with an isolated loopback STARTTLS server: delivery only after STARTTLS and successful AUTH, and no message for a server that does not offer AUTH, rejected credentials, missing STARTTLS, or an untrusted or wrongly named certificate. Uses an ephemeral JWT secret. |
 | `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119; CO03/CO14, PR #262; CO06 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations; CO03.content owner rows, scoped reads, appends, reorders and materials, and CO14 adaptive-field storage ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `AdaptiveLearningFlowIntegrationTest` | CO14, PR #262 | The Course part of B1-O14/B1-O15: the configuration guard's real transactions, root lock lifetime, outer joining, incompatible contexts, stale managed state, contention with enrollment and NOWAIT, plus the Course storage handoff. Adaptive (AD08) cases are not implemented ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
@@ -785,8 +823,10 @@ test-count or coverage-percentage claim is made for them.
 - **Deployment.** No test reaches the real VM or checks outside-network access
   (DP01 #71, DP03 #72). The private `/actuator/health` probe is verified only
   locally and in CI ([record](#dp01-private-health-probe-verification--1-november-2026)).
-- **Object storage.** No backend storage adapter exists, so no test covers file
-  upload or delivery (CT09).
+- **Object storage.** SH05 qualifies the backend storage adapter as described in
+  [its scoped record](#sh05-storage-adapter-qualification--25-november-2026).
+  CO09/AS09 file upload/download REST, authorization and transaction lifecycle
+  verification remain downstream QA10 work.
 - **Assistive technology.** No test establishes actual screen-reader output; no
   manual VoiceOver, NVDA or TalkBack session has been recorded.
 - **DESIGN r12 behavior.** FE34 (#255, PR #261) adds unit, component and browser-harness

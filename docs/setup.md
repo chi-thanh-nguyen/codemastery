@@ -2085,6 +2085,40 @@ implement r2; do not infer concurrent-output protection or full interrupted-run
 recovery from them. New lifecycle behavior requires separate implementation and
 qualification; no environment variable or runnable command is added here.
 
+## SH05 storage adapter configuration — 25 November 2026
+
+SH05 implements `FileStorage` and its lazy `S3FileStorage` component under ADR010
+§§4–7, including the §16–18 corrections. This implements the storage boundary;
+CO09/AS09 file admission, REST delivery and transaction lifecycles remain downstream.
+The earlier dated implementation snapshots below retain their historical meaning.
+
+The adapter consumes only the existing `codemastery.storage.*` properties and
+`STORAGE_ENDPOINT`, `STORAGE_REGION`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`,
+`STORAGE_SECRET_KEY`, `STORAGE_PATH_STYLE_ACCESS` bindings. It validates them when
+a consumer creates the bean; unrelated features do not require storage credentials.
+Invalid consumed settings stop bean creation with the input name and no value.
+Existing localhost/region/bucket/path-style fallbacks remain local convenience,
+not approved deployment values. Supply an application identity provisioned by the
+initializer; the adapter neither reads `MINIO_ROOT_*` nor provisions resources.
+
+The Project Leader explicitly approved internal timeouts in the SH05 implementation
+task on 25 November 2026: connection 5 seconds, socket read 30 seconds, attempt and
+complete API call 60 seconds each, with no retry and no new environment variable.
+Pool acquisition is bounded by the same connection timeout. These are adapter
+settings, not an upload limit or a production capacity qualification. The existing
+AWS SDK Apache transport is configured through its public SPI; no dependency changes.
+SDK and Apache HTTP diagnostics are suppressed at their Logback source, including
+DEBUG/TRACE wire and signing output; application logging remains available.
+
+Upload input streams belong to the caller. `open` returns a caller-owned
+`StoredObject`; use try-with-resources across header preparation and body copying.
+Read/close failures remain checked `IOException` with safe diagnostics. Input
+length must be positive and exact, and the key/media type must match CT09. Upload
+filename/signature/size-limit checks and authorization belong to the consumers.
+The adapter does not buffer the full upload or perform compensating deletion:
+the CT09 consumer owns the single best-effort cleanup of its fresh, unreferenced
+key on failed store. No new retention, overwrite or orphan policy is introduced.
+
 ## Batch 5 storage configuration, file transport and widget — 12 November 2026
 
 [ADR010](decisions/010-batch-05-contract-approvals.md) approves CT09.config,
