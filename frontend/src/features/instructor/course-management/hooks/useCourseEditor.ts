@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
 import { DEFAULT_PAGE_SIZE } from '../api/assessmentAuthoringApi';
 import {
     createCourseChapter, createCourseLesson, createOwnedCourse, getOwnedCourse, listOwnedCourses,
@@ -74,46 +74,48 @@ export function useCourseEditorContext(): SharedCourseContextState | null {
 
 export function useSharedCourseState(courseId: string): SharedCourseContextState {
     const courseRead = useOwnerRead(`owned-course|${courseId}`, (options) => getOwnedCourse(courseId, options));
-    const [overrideCourse, setOverrideCourse] = useState<{ id: string; data: OwnedCourse } | null>(null);
     const skillGraph = useOwnedSkillGraph(courseId);
+    const { reload: reloadGraph, graph, loading: graphLoading } = skillGraph;
+    // True from an S20 skill change until a later graph read succeeds (D12-3). A failed read keeps it set,
+    // so the next deliberate opening of the Questions view or the question form reads once more. It is
+    // never cleared during render and never triggers a read on its own: a failed read is retried only by
+    // such an opening or by "Try again" (CT16.minimum: no automatic GET retry).
     const skillsStaleRef = useRef(false);
     const tabDirtyRef = useRef(false);
 
-    // Clear stale flag once a new graph arrives.
-    if (skillGraph.graph && !skillGraph.loading) {
-        skillsStaleRef.current = false;
-    }
-
-    const reloadCourse = useCallback(() => {
-        setOverrideCourse(null);
-        courseRead.reload();
-    }, [courseRead]);
+    const graphLoadingRef = useRef(graphLoading);
+    useEffect(() => {
+        graphLoadingRef.current = graphLoading;
+        if (graph && !graphLoading) skillsStaleRef.current = false;
+    }, [graph, graphLoading]);
 
     const notifySkillsChanged = useCallback(() => {
         skillsStaleRef.current = true;
-        skillGraph.reload();
-    }, [skillGraph]);
+        reloadGraph();
+    }, [reloadGraph]);
 
     const refreshSkillsIfStale = useCallback(() => {
-        if (skillsStaleRef.current || skillGraph.error) {
-            skillsStaleRef.current = false;
-            skillGraph.reload();
-        }
-    }, [skillGraph]);
+        // A read already in flight (for example the one notifySkillsChanged started) answers the staleness.
+        if (skillsStaleRef.current && !graphLoadingRef.current) reloadGraph();
+    }, [reloadGraph]);
 
     const setTabDirty = useCallback((dirty: boolean) => {
         tabDirtyRef.current = dirty;
     }, []);
     const isTabDirty = useCallback(() => tabDirtyRef.current, []);
 
-    const currentData = overrideCourse && overrideCourse.id === courseId && !courseRead.loading
-        ? overrideCourse.data
-        : courseRead.data;
-    const courseStatus: 'loading' | 'ready' | 'error' = courseRead.error && !currentData
+    const courseData = courseRead.data;
+    const courseStatus: 'loading' | 'ready' | 'error' = courseRead.error && !courseData
         ? 'error'
-        : currentData
+        : courseData
             ? 'ready'
             : 'loading';
+    const course = useMemo(() => ({
+        status: courseStatus,
+        data: courseData,
+        error: courseRead.error,
+        reload: courseRead.reload,
+    }), [courseStatus, courseData, courseRead.error, courseRead.reload]);
 
     const skills = useMemo<SkillSource>(() => ({
         status: skillGraph.error ? 'error' : skillGraph.graph ? 'ready' : 'loading',
@@ -123,17 +125,12 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
 
     return useMemo(() => ({
         courseId,
-        course: {
-            status: courseStatus,
-            data: currentData,
-            error: courseRead.error,
-            reload: reloadCourse,
-        },
+        course,
         skillGraph,
         skills,
         notifySkillsChanged,
         refreshSkillsIfStale,
         setTabDirty,
         isTabDirty,
-    }), [courseId, courseStatus, currentData, courseRead.error, reloadCourse, skillGraph, skills, notifySkillsChanged, refreshSkillsIfStale, setTabDirty, isTabDirty]);
+    }), [courseId, course, skillGraph, skills, notifySkillsChanged, refreshSkillsIfStale, setTabDirty, isTabDirty]);
 }

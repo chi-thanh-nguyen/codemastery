@@ -1,5 +1,5 @@
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { Link, matchRoutes, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { Alert, Box, Button, ListItemIcon, MenuItem } from '@mui/material';
 import { LoginPage } from '../features/auth/pages/LoginPage';
@@ -9,10 +9,11 @@ import { ForgotPasswordRoute } from '../features/auth/pages/ForgotPasswordPage';
 import { ResetPasswordRoute } from '../features/auth/pages/ResetPasswordPage';
 import { ProtectedRoute } from './guards/ProtectedRoute';
 import { useAuth } from '../features/auth/hooks/useAuth';
-import { DashboardLayout, Page } from '../layouts/DashboardLayout';
+import { DashboardLayout, Page, ShellNavigationContext, useShellNavigation, useShellNavigationRegistry } from '../layouts/DashboardLayout';
 import { AccountMenu, AccountMenuDivider } from '../shared/components/AppHeader';
 import { PresentationIcon } from '../shared/components/PresentationIcon';
 import { SystemStateView } from '../shared/components/StatusViews';
+import { isPlainClick } from '../shared/components/SidebarNav';
 import type { NavItem } from '../shared/components/SidebarNav';
 import { CourseCataloguePage } from '../features/catalogue/pages/CourseCataloguePage';
 import { CourseMembershipActions, MyCoursesPage } from '../features/learning/pages/MyCoursesPage';
@@ -69,11 +70,15 @@ const startFor = (role?: UserRole) => role === 'Learner' ? '/home' : role === 'I
 
 /** Header utilities: account menu for a session, sign-in actions otherwise. Hiding links is not authorization. */
 export function SessionNavigation() {
-    const auth = useAuth(), navigate = useNavigate(), { signOut } = useContext(SessionEndContext);
+    const auth = useAuth(), navigate = useNavigate(), { signOut } = useContext(SessionEndContext), shell = useShellNavigation();
     // No sign-in actions flash while a reload restores the session from the refresh cookie.
     if (!auth.isAuthenticated && auth.restoring) return null;
     if (auth.isAuthenticated && auth.user) return <AccountMenu displayName={auth.user.displayName} role={auth.user.role} renderItems={(close) => [
-        <MenuItem key="profile" component={Link} to="/profile" onClick={close}><ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="user" sx={{ fontSize: 20 }} /></ListItemIcon>Profile</MenuItem>,
+        <MenuItem key="profile" component={Link} to="/profile" onClick={(event: MouseEvent) => {
+            close();
+            // A plain click asks a mounted editor with unsaved edits first; Cmd/Ctrl-click still opens a new tab.
+            if (shell && isPlainClick(event)) { event.preventDefault(); shell.attempt(() => navigate('/profile')); }
+        }}><ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="user" sx={{ fontSize: 20 }} /></ListItemIcon>Profile</MenuItem>,
         <AccountMenuDivider key="divider" />,
         <MenuItem key="sign-out" onClick={() => { close(); signOut(); navigate('/login', { replace: true }); }}>
             <ListItemIcon sx={{ minWidth: 0 }}><PresentationIcon name="sign-out" sx={{ fontSize: 20 }} /></ListItemIcon>Sign out
@@ -114,12 +119,15 @@ function Workspace() {
             ]
             : [{ id: '/courses', href: '/courses', label: 'Catalogue', icon: <PresentationIcon name="catalogue" /> }];
     const brand = auth.isAuthenticated ? startFor(auth.user?.role) : '/';
-    return <DashboardLayout navItems={navItems} selectedNavId={currentSection(location.pathname)} onNavSelect={(path) => navigate(path)}
-        headerActions={<SessionNavigation />} brandHref={brand} onBrandSelect={() => navigate(brand)}
+    // Primary navigation and the home link ask a mounted editor with unsaved edits before leaving (S19).
+    const shell = useShellNavigationRegistry();
+    return <ShellNavigationContext.Provider value={shell}><DashboardLayout navItems={navItems} selectedNavId={currentSection(location.pathname)}
+        onNavSelect={(path) => shell.attempt(() => navigate(path))}
+        headerActions={<SessionNavigation />} brandHref={brand} onBrandSelect={() => shell.attempt(() => navigate(brand))}
         // Like the header, the drawer shows no sign-in action while the restore runs (F2).
         drawerFooter={auth.isAuthenticated || auth.restoring ? undefined : <Button component={Link} to="/register" variant="contained" color="onChrome" fullWidth>Create account</Button>}>
         <Outlet />
-    </DashboardLayout>;
+    </DashboardLayout></ShellNavigationContext.Provider>;
 }
 function RouteFocus() {
     const { pathname } = useLocation();

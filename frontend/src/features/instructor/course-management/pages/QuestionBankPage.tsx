@@ -145,6 +145,7 @@ export interface AssessmentsPageProps {
 export function AssessmentsPage({ courseId, skills, headingLevel = 'h1', courseContext }: AssessmentsPageProps) {
     const sharedCtx = useCourseEditorContext();
     const resolvedCourse = courseContext ?? sharedCtx?.course;
+    const refreshSkillsIfStale = sharedCtx?.refreshSkillsIfStale;
     const [params, setParams] = useSearchParams();
     const view = assessmentsViewFrom(params.get('view'));
     const location = useLocation(), navigate = useNavigate();
@@ -161,9 +162,11 @@ export function AssessmentsPage({ courseId, skills, headingLevel = 'h1', courseC
         const value = (location.state as { notice?: unknown } | null)?.notice;
         return handoverNotices.find((item) => item === value) ?? null;
     });
+    // Opening the Questions view re-reads a graph that S20 changed (D12-3). The callback is stable and never
+    // reloads after a failed read on its own, so this runs once per view change, not once per render.
     useEffect(() => {
-        if (view === 'questions') sharedCtx?.refreshSkillsIfStale();
-    }, [view, sharedCtx]);
+        if (view === 'questions') refreshSkillsIfStale?.();
+    }, [view, refreshSkillsIfStale]);
     useEffect(() => {
         // Consume the handover once so a reload or history visit does not repeat it.
         if ((location.state as { notice?: unknown } | null)?.notice !== undefined) navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null });
@@ -173,11 +176,13 @@ export function AssessmentsPage({ courseId, skills, headingLevel = 'h1', courseC
     const [newQuestion, setNewQuestion] = useState(0);
     const onRefused = useCallback((status: number | undefined) => setRefusal(status), []);
     if (refusal !== undefined) return <CourseUnavailable status={refusal} />;
-    return <Box component="section" aria-labelledby="assessments-title" sx={{ display: 'grid', gap: 2.5 }}>
+    // minmax(0, 1fr): the segmented switch and the stacked rows must not widen the section past a 320–390 px
+    // viewport, where the canvas clips overflow (overflow-x: clip) and the clipped part cannot be scrolled to.
+    return <Box component="section" aria-labelledby="assessments-title" sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 2.5, minWidth: 0 }}>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
             <Typography id="assessments-title" component={headingLevel} variant={headingLevel === 'h1' ? 'h1' : 'h2'}>Assessments</Typography>
         </Box>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 2, minWidth: 0, '& > *': { minWidth: 0, maxWidth: '100%' } }}>
             <SegmentedControl label="Assessment views" value={view} onChange={(next) => { setNotice(null); setView(next); }} controls="assessments-view"
                 options={[
                     { value: 'questions', label: 'Questions', icon: 'quiz' },
@@ -185,13 +190,13 @@ export function AssessmentsPage({ courseId, skills, headingLevel = 'h1', courseC
                     { value: 'assignments', label: 'Assignments', icon: 'assignment' },
                 ]} />
             {view === 'questions'
-                ? <Button variant="contained" onClick={() => { sharedCtx?.refreshSkillsIfStale(); setNewQuestion((value) => value + 1); }} startIcon={<PresentationIcon name="plus" />}>New question</Button>
+                ? <Button variant="contained" onClick={() => setNewQuestion((value) => value + 1)} startIcon={<PresentationIcon name="plus" />}>New question</Button>
                 : view === 'quizzes'
                     ? <Button component={Link} to={quizPath(courseId, 'new')} variant="contained" startIcon={<PresentationIcon name="plus" />}>New quiz</Button>
                     : <Button component={Link} to={assignmentPath(courseId, 'new')} variant="contained" startIcon={<PresentationIcon name="plus" />}>New assignment</Button>}
         </Box>
         {notice && <Typography role="status" sx={{ color: 'text.secondary' }}>{notice}</Typography>}
-        <Box id="assessments-view">
+        <Box id="assessments-view" sx={{ minWidth: 0 }}>
             {view === 'questions'
                 ? <QuestionsView key={courseId} courseId={courseId} page={page} createRequest={newQuestion} onPage={(next) => setPaging({ view, page: next })} skills={skills} onNotice={setNotice} onRefused={onRefused} />
                 : view === 'quizzes'
@@ -203,7 +208,7 @@ export function AssessmentsPage({ courseId, skills, headingLevel = 'h1', courseC
 
 function QuestionsView({ courseId, page, createRequest, onPage, skills, onNotice, onRefused }: { courseId: string; page: number; createRequest: number; onPage: (page: number) => void; skills: SkillSource;
     onNotice: (notice: string | null) => void; onRefused: (status: number | undefined) => void }) {
-    const sharedCtx = useCourseEditorContext();
+    const refreshSkillsIfStale = useCourseEditorContext()?.refreshSkillsIfStale;
     const bank = useQuestionBank(courseId, page);
     const lookup = useSkillLookup(skills);
     const [editing, setEditing] = useState<{ key: number; question: B3Question | null } | null>(null);
@@ -211,15 +216,15 @@ function QuestionsView({ courseId, page, createRequest, onPage, skills, onNotice
     useEffect(() => { if (data) ensure(data.content.map((question) => question.skillId)); }, [data, ensure]);
     useEffect(() => { if (courseRefused(error)) onRefused(failureStatus(error)); }, [error, onRefused]);
     const open = useCallback((question: B3Question | null) => {
-        sharedCtx?.refreshSkillsIfStale();
+        refreshSkillsIfStale?.();
         onNotice(null);
         setEditing({ key: Date.now(), question });
-    }, [onNotice, sharedCtx]);
+    }, [onNotice, refreshSkillsIfStale]);
     const handled = useRef(createRequest);
     useEffect(() => { if (createRequest !== handled.current) { handled.current = createRequest; open(null); } }, [createRequest, open]);
     const skillCell = (question: B3Question): ReactNode => lookup.name(question.skillId) ?? <Skeleton width={96} aria-label="Loading the skill name" />;
     const noSkillsYet = skills.status === 'ready' && skills.skills.length === 0;
-    return <Box sx={{ display: 'grid', gap: 2 }}>
+    return <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 2 }}>
         {skills.status === 'error' && <Alert severity="error" action={<Button size="small" variant="text" onClick={skills.reload}>Try again</Button>}>Skills couldn&apos;t be loaded.</Alert>}
         {bank.error && !courseRefused(bank.error)
             ? <ErrorView title="Questions couldn't be loaded." message={errorMessage(bank.error)} onRetry={bank.reload} />

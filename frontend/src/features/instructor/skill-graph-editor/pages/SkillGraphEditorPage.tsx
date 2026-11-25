@@ -13,7 +13,7 @@ import { SkillGraphCanvas } from '../components/SkillGraphCanvas';
 import { SkillForm } from '../components/SkillForm';
 import { LessonSkillMappingTable } from '../components/LessonSkillMappingTable';
 import { AdaptiveSettingsPanel } from '../components/AdaptiveSettingsPanel';
-import type { EditableSkill, MappingLesson, ReadinessCheck } from '../types/skillGraphTypes';
+import type { EditableSkill, GraphSkill, MappingLesson, ReadinessCheck } from '../types/skillGraphTypes';
 import { useSkillGraphMutations } from '../hooks/useSkillGraph';
 import type { OwnedSkillGraph } from '../api/skillGraphApi';
 import { useCourseEditorContext } from '../../course-management/hooks/useCourseEditor';
@@ -34,14 +34,19 @@ export function CourseSkillsSection() {
     const { courseId, course, skillGraph, notifySkillsChanged } = useCourseEditorContext()!;
     const mutations = useSkillGraphMutations(courseId);
     const [tab, setTab] = useState<ProductionSkillTab>('graph');
-    const [selectedId, setSelectedId] = useState<string | null>(null);
-    const [adding, setAdding] = useState(false);
+    // The open aside form: `skillId` null adds a skill. The key changes only for a deliberate new opening, so a
+    // partially saved draft (for example a created skill whose prerequisite was refused) stays on screen.
+    const [form, setForm] = useState<{ key: number; skillId: string | null } | null>(null);
+    // The created skill until the re-read graph lists it.
+    const [created, setCreated] = useState<GraphSkill | null>(null);
     const [formError, setFormError] = useState<string | null>(null);
-    const [confirmDelete, setConfirmDelete] = useState<EditableSkill | null>(null);
+    const [confirmDelete, setConfirmDelete] = useState<GraphSkill | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
+    const openForm = (skillId: string | null) => { setFormError(null); setForm({ key: Date.now(), skillId }); };
 
     const graph = skillGraph.graph;
-    const editableSkills = useMemo<EditableSkill[]>(() => {
+    // CT05 returns no question references, so no question count is shown (DESIGN.md shared screen rules).
+    const editableSkills = useMemo<GraphSkill[]>(() => {
         if (!graph) return [];
         const prereqBySkill = new Map<string, string[]>();
         for (const edge of graph.prerequisites) {
@@ -56,11 +61,13 @@ export function CourseSkillsSection() {
                 name: skill.name,
                 description: skill.description ?? '',
                 prerequisiteIds: prereqBySkill.get(skill.id) ?? [],
-                questionCount: 0,
             }));
     }, [graph]);
 
-    const selected = editableSkills.find((skill) => skill.id === selectedId) ?? null;
+    const formSkill = form?.skillId
+        ? editableSkills.find((skill) => skill.id === form.skillId) ?? (created?.id === form.skillId ? created : null)
+        : null;
+    const selectedId = form?.skillId ?? null;
 
     if (skillGraph.loading && !graph) {
         return <LoadingView message="Loading skills…" variant="block" />;
@@ -69,6 +76,15 @@ export function CourseSkillsSection() {
         return <ErrorView title="Skills couldn't be loaded." message={errorMessage(skillGraph.error)} onRetry={skillGraph.reload} />;
     }
 
+    const nameOf = (skillId: string) => editableSkills.find((skill) => skill.id === skillId)?.name ?? 'the selected skill';
+
+    /**
+     * CT05 has no multi-step transaction: the skill write and each prerequisite edge commit on their own. The
+     * steps run in order (edge additions first, because a cycle refusal is their expected failure, then edge
+     * removals, then name and description), stop at the first failure without any compensating write, and the
+     * outcome names what was saved and what was refused. The graph is re-read after every attempt and the
+     * draft stays on screen; nothing is retried.
+     */
     async function saveSkill(draft: { id?: string; name: string; description: string; prerequisiteIds: string[] }) {
         setFormError(null);
         setNotice(null);
@@ -76,47 +92,103 @@ export function CourseSkillsSection() {
             name: draft.name.trim(),
             description: /\S/.test(draft.description) ? draft.description.trim() : null,
         };
+        const saved: string[] = [];
+        let skillId = draft.id;
+        let skillName = payload.name;
+        const steps: { label: string; run: () => Promise<unknown>; refusal: (status: number | undefined) => string }[] = [];
+        const current = formSkill;
+        const existing = new Set(current?.prerequisiteIds ?? []);
+        const desired = new Set(draft.prerequisiteIds);
+        const metadataChanged = !current || current.name !== payload.name || (current.description || null) !== payload.description;
+        if (skillId) {
+            // Steps for an existing skill; a new skill's prerequisite steps are added after it is created.
+            for (const prerequisiteId of draft.prerequisiteIds.filter((id) => !existing.has(id))) {
+                steps.push(prerequisiteStep(() => skillId!, prerequisiteId));
+            }
+            for (const prerequisiteId of [...existing].filter((id) => !desired.has(id))) {
+                const prerequisite = nameOf(prerequisiteId);
+                steps.push({ label: `removed ${prerequisite} as a prerequisite`,
+                    run: () => mutations.removePrerequisite(skillId!, prerequisiteId),
+                    refusal: () => `${prerequisite} couldn't be removed as a prerequisite.` });
+            }
+            if (metadataChanged) {
+                steps.push({ label: 'the name and description', run: () => mutations.updateSkill(skillId!, payload),
+                    refusal: () => "The name and description couldn't be saved." });
+            }
+        }
+        function prerequisiteStep(target: () => string, prerequisiteId: string) {
+            const prerequisite = nameOf(prerequisiteId);
+            return {
+                label: `${prerequisite} as a prerequisite`,
+                run: () => mutations.addPrerequisite(target(), prerequisiteId),
+                // CT05 addCoursePrerequisite: 409 is exactly a new edge that would close a cycle (self-edges are 400).
+                refusal: (status: number | undefined) => status === 409
+                    ? `${prerequisite} can't be a prerequisite of ${skillName}, because it would create a cycle of prerequisites.`
+                    : `${prerequisite} couldn't be added as a prerequisite.`,
+            };
+        }
         try {
+            if (!skillId) {
+                const result = await mutations.createSkill(payload);
+                skillId = result.id;
+                skillName = result.name;
+                saved.push(`the skill ${result.name}`);
+                const fallback: GraphSkill = { id: result.id, name: result.name, description: result.description ?? '', prerequisiteIds: [] };
+                setCreated(fallback);
+                // Keep the same form (and its draft) but bind it to the created skill, so a further save edits it
+                // instead of creating a duplicate.
+                setForm((value) => value ? { key: value.key, skillId: result.id } : value);
+                for (const prerequisiteId of draft.prerequisiteIds) steps.push(prerequisiteStep(() => skillId!, prerequisiteId));
+            }
+            for (let index = 0; index < steps.length; index += 1) {
+                const step = steps[index];
+                try {
+                    await step.run();
+                    saved.push(step.label);
+                } catch (error) {
+                    if (isCancelled(error)) return;
+                    const notAttempted = steps.length - index - 1;
+                    const what = outcomeUnknown(error)
+                        ? `We couldn't confirm whether this change was saved: ${step.label}.`
+                        : failureStatus(error) === 404
+                            ? `${step.refusal(404)} A skill it needs is no longer available.`
+                            : step.refusal(failureStatus(error));
+                    setFormError([
+                        saved.length ? `Saved: ${saved.join('; ')}.` : 'Nothing was saved.',
+                        what,
+                        notAttempted ? `${notAttempted} other ${notAttempted === 1 ? 'change was' : 'changes were'} not attempted.` : '',
+                        'Your edits are still here.',
+                    ].filter(Boolean).join(' '));
+                    notifySkillsChanged();
+                    return;
+                }
+            }
+            notifySkillsChanged();
             if (!draft.id) {
-                const created = await mutations.createSkill(payload);
-                for (const prereqId of draft.prerequisiteIds) {
-                    await mutations.addPrerequisite(created.id, prereqId);
-                }
-                setAdding(false);
-                setSelectedId(created.id);
-                notifySkillsChanged();
                 setNotice('Skill added.');
-                return;
+                // Every requested edge committed: the opened form starts from the saved state until the re-read lands.
+                setCreated((value) => value && { ...value, prerequisiteIds: [...draft.prerequisiteIds] });
+                setForm({ key: Date.now(), skillId });
+            } else {
+                setNotice(steps.length ? 'Skill saved.' : 'No changes to save.');
             }
-            const existingPrereqs = new Set(selected?.prerequisiteIds ?? []);
-            const desiredPrereqs = new Set(draft.prerequisiteIds);
-            await mutations.updateSkill(draft.id, payload);
-            for (const prereqId of draft.prerequisiteIds) {
-                if (!existingPrereqs.has(prereqId)) {
-                    await mutations.addPrerequisite(draft.id, prereqId);
-                }
-            }
-            for (const prereqId of existingPrereqs) {
-                if (!desiredPrereqs.has(prereqId)) {
-                    await mutations.removePrerequisite(draft.id, prereqId);
-                }
-            }
-            notifySkillsChanged();
-            setNotice('Skill saved.');
         } catch (error) {
+            // Only the creation itself reaches here: nothing was saved, or its outcome is unknown.
             if (isCancelled(error)) return;
+            setFormError(outcomeUnknown(error)
+                ? "We couldn't confirm whether the skill was added. Check the skill list before adding it again."
+                : error instanceof ApiError ? error.message : 'Something went wrong on our side. Try again in a moment.');
             notifySkillsChanged();
-            setFormError(error instanceof ApiError ? error.message : 'Something went wrong on our side. Try again in a moment.');
         }
     }
 
-    async function removeSkill(skill: EditableSkill) {
+    async function removeSkill(skill: GraphSkill) {
         setConfirmDelete(null);
         setFormError(null);
         setNotice(null);
         try {
             await mutations.deleteSkill(skill.id);
-            setSelectedId(null);
+            setForm(null);
             notifySkillsChanged();
             setNotice('Skill deleted.');
         } catch (error) {
@@ -130,11 +202,12 @@ export function CourseSkillsSection() {
         }
     }
 
+    const showForm = form !== null && (form.skillId === null || formSkill !== null);
     return <Box sx={{ display: 'grid', gap: 2.5 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
             <Typography component="h2" variant="h2">Skills</Typography>
             {tab === 'graph' && <Button variant="contained" disabled={mutations.busy}
-                onClick={() => { setSelectedId(null); setFormError(null); setAdding(true); }}
+                onClick={() => openForm(null)}
                 startIcon={<PresentationIcon name="plus" />}>Add skill</Button>}
         </Box>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
@@ -143,36 +216,36 @@ export function CourseSkillsSection() {
                 options={[{ value: 'graph', label: 'Skill graph' }, { value: 'mapping', label: 'Lesson mapping' }]} />
         </Box>
         {notice && <Typography role="status" sx={{ color: 'text.secondary' }}>{notice}</Typography>}
-        {tab === 'graph' && (editableSkills.length === 0 && !adding
+        {tab === 'graph' && (editableSkills.length === 0 && !showForm
             ? <EmptyView icon="graph" headingLevel="h3" title="No skills yet"
                 message="Add the skills this course teaches, then link prerequisites."
-                action={<Button variant="outlined" onClick={() => { setFormError(null); setAdding(true); }}>Add skill</Button>} />
+                action={<Button variant="outlined" onClick={() => openForm(null)}>Add skill</Button>} />
             : <Box sx={{ display: 'grid', gap: 3, gridTemplateColumns: { xs: 'minmax(0,1fr)', lg: 'minmax(0,1fr) 360px' }, alignItems: 'start' }}>
                 <Box sx={{ display: 'grid', gap: 1.5 }}>
                     <SkillGraphCanvas skills={editableSkills} selectedId={selectedId}
-                        onSelect={(id) => { setAdding(false); setFormError(null); setSelectedId(id); }}
+                        onSelect={(id) => (id ? openForm(id) : setForm(null))}
                         label={`Skill graph for ${course.data?.title ?? 'course'}`} />
                     <Box component="ul" aria-label="Course skills" sx={{ listStyle: 'none', m: 0, p: 0, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                         {editableSkills.map((skill) => <Box component="li" key={skill.id}>
                             <Chip
                                 label={skill.name}
-                                onClick={() => { setAdding(false); setFormError(null); setSelectedId(skill.id === selectedId ? null : skill.id); }}
+                                onClick={() => (skill.id === selectedId ? setForm(null) : openForm(skill.id))}
                                 variant={skill.id === selectedId ? 'filled' : 'outlined'}
                                 color={skill.id === selectedId ? 'primary' : 'default'} />
                         </Box>)}
                     </Box>
                 </Box>
-                {adding || selected
+                {showForm
                     ? <Tile sx={{ display: 'grid', gap: 2 }}>
                         <ProductionSkillForm
-                            key={adding ? 'new' : selected!.id}
-                            skill={adding ? null : selected}
+                            key={form.key}
+                            skill={formSkill}
                             skills={editableSkills}
                             busy={mutations.busy}
                             serverError={formError}
                             onSave={(draft) => void saveSkill(draft)}
-                            onCancel={() => { setAdding(false); setSelectedId(null); setFormError(null); }}
-                            onDelete={selected ? () => setConfirmDelete(selected) : undefined} />
+                            onCancel={() => { setForm(null); setFormError(null); }}
+                            onDelete={formSkill ? () => setConfirmDelete(formSkill) : undefined} />
                     </Tile>
                     : <EmptyView compact icon="graph" headingLevel="h3" title="Select a skill"
                         message="Select a skill to edit it and its prerequisites, or add a new skill." />}
@@ -192,8 +265,8 @@ export function CourseSkillsSection() {
 }
 
 function ProductionSkillForm({ skill, skills, busy, serverError, onSave, onCancel, onDelete }: {
-    skill: EditableSkill | null;
-    skills: EditableSkill[];
+    skill: GraphSkill | null;
+    skills: GraphSkill[];
     busy: boolean;
     serverError: string | null;
     onSave: (draft: { id?: string; name: string; description: string; prerequisiteIds: string[] }) => void;
@@ -238,7 +311,7 @@ function ProductionSkillForm({ skill, skills, busy, serverError, onSave, onCance
 function ProductionLessonMapping({ courseChapters, graph, skills, mutations, onCourseReload, onGraphChanged }: {
     courseChapters: { id: string; title: string; position: number; lessons: { id: string; title: string; position: number; publicationStatus: 'hidden' | 'published' }[] }[];
     graph: OwnedSkillGraph;
-    skills: EditableSkill[];
+    skills: GraphSkill[];
     mutations: ReturnType<typeof useSkillGraphMutations>;
     onCourseReload: () => void;
     onGraphChanged: () => void;
@@ -247,6 +320,21 @@ function ProductionLessonMapping({ courseChapters, graph, skills, mutations, onC
     const [savingLessonId, setSavingLessonId] = useState<string | null>(null);
     const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
     const [menuTarget, setMenuTarget] = useState<{ lessonId: string; anchor: HTMLElement } | null>(null);
+    // Focus to restore after a map or unmap: the row's controls are disabled while it saves and a removed chip
+    // unmounts, so focus would otherwise fall back to <body>. When the change succeeded (or its outcome is
+    // unknown) focus waits for the re-read graph, so it lands on a control that still exists.
+    const [pendingFocus, setPendingFocus] = useState<{ lessonId: string; graph: OwnedSkillGraph | null } | null>(null);
+    const rows = useRef(new Map<string, HTMLElement>());
+    useEffect(() => {
+        if (!pendingFocus || savingLessonId !== null || mutations.busy) return;
+        if (pendingFocus.graph !== null && graph === pendingFocus.graph) return;
+        const row = rows.current.get(pendingFocus.lessonId);
+        setPendingFocus(null);
+        const target = row?.querySelector<HTMLElement>('[data-mapping-add]:not([disabled])')
+            ?? row?.querySelector<HTMLElement>('[data-mapping-remove]:not([disabled])')
+            ?? row?.querySelector<HTMLElement>('[data-mapping-title]');
+        target?.focus();
+    }, [pendingFocus, savingLessonId, mutations.busy, graph]);
 
     const allLessonIds = useMemo(() => new Set(
         courseChapters.flatMap((chapter) => chapter.lessons.map((lesson) => lesson.id.toLowerCase())),
@@ -272,7 +360,7 @@ function ProductionLessonMapping({ courseChapters, graph, skills, mutations, onC
             message="Every published lesson needs at least one mapped skill before adaptive mode can be enabled." />;
     }
 
-    const mappedByLesson = new Map<string, EditableSkill[]>();
+    const mappedByLesson = new Map<string, GraphSkill[]>();
     const skillById = new Map(skills.map((skill) => [skill.id.toLowerCase(), skill]));
     for (const pair of graph.mappings) {
         const skill = skillById.get(pair.skillId.toLowerCase());
@@ -290,12 +378,15 @@ function ProductionLessonMapping({ courseChapters, graph, skills, mutations, onC
         try {
             if (mode === 'map') await mutations.mapLesson(lessonId, skillId);
             else await mutations.unmapLesson(lessonId, skillId);
+            setPendingFocus({ lessonId, graph });
             onGraphChanged();
         } catch (error) {
             if (isCancelled(error)) return;
             if (outcomeUnknown(error)) {
+                setPendingFocus({ lessonId, graph });
                 onGraphChanged();
             } else {
+                setPendingFocus({ lessonId, graph: null });
                 setRowErrors((current) => ({
                     ...current,
                     [lessonId]: error instanceof ApiError ? error.message : 'Something went wrong on our side. Try again in a moment.',
@@ -318,13 +409,14 @@ function ProductionLessonMapping({ courseChapters, graph, skills, mutations, onC
                         const mapped = mappedByLesson.get(lesson.id.toLowerCase()) ?? [];
                         const rowBusy = savingLessonId === lesson.id || mutations.busy;
                         const unmappedSkills = skills.filter((skill) => !mapped.some((entry) => entry.id === skill.id));
-                        return <Box component="li" key={lesson.id} sx={{
+                        return <Box component="li" key={lesson.id}
+                            ref={(element: HTMLElement | null) => { if (element) rows.current.set(lesson.id, element); else rows.current.delete(lesson.id); }} sx={{
                             display: 'grid', gap: 1.5, px: { xs: 2, sm: 3 }, py: 2,
                             borderBottom: `1px solid ${roles.line.hairline}`, '&:last-child': { borderBottom: 0 },
                         }}>
                             <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
                                 <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 1 }}>
-                                    <Typography sx={{ fontWeight: 600 }}>{lesson.title}</Typography>
+                                    <Typography data-mapping-title tabIndex={-1} sx={{ fontWeight: 600 }}>{lesson.title}</Typography>
                                     <PublicationPill published={lesson.publicationStatus === 'published'} />
                                     {mapped.length === 0 && (
                                         <StatusPill size="tag" tone={lesson.publicationStatus === 'published' ? 'butter' : 'neutral'}>
@@ -334,7 +426,7 @@ function ProductionLessonMapping({ courseChapters, graph, skills, mutations, onC
                                 </Box>
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                     {savingLessonId === lesson.id && <Typography role="status" variant="body2" sx={{ color: 'text.secondary' }}>Saving…</Typography>}
-                                    <Button size="small" variant="outlined" disabled={rowBusy || unmappedSkills.length === 0}
+                                    <Button data-mapping-add size="small" variant="outlined" disabled={rowBusy || unmappedSkills.length === 0}
                                         onClick={(event) => setMenuTarget({ lessonId: lesson.id, anchor: event.currentTarget })}
                                         startIcon={<PresentationIcon name="plus" />}>
                                         Add skill
@@ -352,7 +444,7 @@ function ProductionLessonMapping({ courseChapters, graph, skills, mutations, onC
                                         border: `1px solid ${roles.line.hairline}`,
                                     }}>
                                     <Typography variant="body2">{skill.name}</Typography>
-                                    <IconButton size="small" disabled={rowBusy}
+                                    <IconButton data-mapping-remove size="small" disabled={rowBusy}
                                         aria-label={`Remove ${skill.name} from ${lesson.title}`}
                                         onClick={() => void mutateMapping(lesson.id, skill.id, 'unmap')}>
                                         <PresentationIcon name="close" sx={{ fontSize: 16 }} />

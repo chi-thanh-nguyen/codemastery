@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, Box, Button, ListSubheader, MenuItem, TextField, Typography } from '@mui/material';
 import { Link, useLocation, useNavigate } from 'react-router';
+import { useNavigationGuard } from '../../../../layouts/DashboardLayout';
 import { Tile } from '../../../../shared/components/Tile';
 import { SegmentedControl } from '../../../../shared/components/ViewRail';
 import { StatusPill } from '../../../../shared/components/StatusPill';
@@ -90,12 +91,40 @@ export function assignmentWrite(draft: AssignmentFormDraft, baseline: { input: s
     };
 }
 
+const rfc3339Instant = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(?:([Zz])|([+-])(\d{2}):(\d{2}))$/;
+
+/**
+ * An RFC 3339 instant as whole UTC seconds plus microseconds, or null when it is not one. JavaScript `Date` keeps
+ * only milliseconds, so it cannot tell `…00.123456Z` from `…00.123999Z` (ADR010 §8 deadlines carry microseconds).
+ * Digits below the microsecond must be zero, as the server requires.
+ */
+export function instantMicros(value: string): { seconds: number; micros: number } | null {
+    const match = rfc3339Instant.exec(value);
+    if (!match) return null;
+    const [, year, month, day, hour, minute, second, fraction = '', zulu, sign, offsetHours, offsetMinutes] = match;
+    if (fraction.length > 6 && !/^0+$/.test(fraction.slice(6))) return null;
+    // setUTCFullYear keeps years 0000–0099 literal (Date.UTC would map them to 1900–1999).
+    const date = new Date(0);
+    date.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
+    date.setUTCHours(Number(hour), Number(minute), Number(second), 0);
+    const local = date.getTime();
+    if (Number.isNaN(local)) return null;
+    const offset = zulu ? 0 : (sign === '-' ? -1 : 1) * (Number(offsetHours) * 3600 + Number(offsetMinutes) * 60);
+    return { seconds: local / 1000 - offset, micros: Number(fraction.slice(0, 6).padEnd(6, '0')) };
+}
+
+/** True when both texts name the same instant to the microsecond (offsets and trailing zeros may differ). */
+export function sameInstant(left: string, right: string): boolean {
+    const a = instantMicros(left), b = instantMicros(right);
+    return a !== null && b !== null && a.seconds === b.seconds && a.micros === b.micros;
+}
+
 export function sameAssignment(draft: AssignmentFormDraft, baseline: { input: string; iso: string } | null, current: B5OwnedAssignment): boolean {
     const write = assignmentWrite(draft, baseline);
     const sameLesson = (write.lessonId ?? '').toLowerCase() === (current.lessonId ?? '').toLowerCase();
     return write.title === current.title &&
         write.instructions === current.instructions &&
-        Date.parse(write.deadlineAt) === Date.parse(current.deadlineAt) &&
+        sameInstant(write.deadlineAt, current.deadlineAt) &&
         sameLesson;
 }
 
@@ -144,7 +173,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     const [alert, setAlert] = useState<AssignmentAlert | null>(null);
     const [notice, setNotice] = useState<string | null>(() => (location.state as { notice?: unknown } | null)?.notice === CREATED ? CREATED : null);
     const [confirm, setConfirm] = useState<'publish' | 'hide' | 'leave' | null>(null);
-    const [leaveTo, setLeaveTo] = useState<string | null>(null);
+    const [leaveTo, setLeaveTo] = useState<{ go: () => void } | null>(null);
 
     const dirtyRef = useRef(dirty);
     dirtyRef.current = dirty;
@@ -212,12 +241,19 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
 
     const go = (to: string) => {
         if (dirtyRef.current && !noAccess) {
-            setLeaveTo(to);
+            setLeaveTo({ go: () => navigate(to) });
             setConfirm('leave');
         } else {
             navigate(to);
         }
     };
+    // Shell navigation (Teaching, Catalogue, the home link, Profile) asks through the same confirmation (S19).
+    useNavigationGuard((proceed) => {
+        if (!dirtyRef.current || noAccess) return false;
+        setLeaveTo({ go: proceed });
+        setConfirm('leave');
+        return true;
+    });
 
     const change = (patch: Partial<AssignmentFormDraft>) => {
         setDraft((current) => ({ ...current, ...patch }));
@@ -493,7 +529,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
         <ConfirmDialog open={confirm === 'leave'} isDestructive title="Leave without saving?" message="Your changes will be lost."
             cancelLabel="Stay" confirmLabel="Leave"
             onCancel={() => { setConfirm(null); setLeaveTo(null); }}
-            onConfirm={() => { setConfirm(null); setDirty(false); dirtyRef.current = false; if (leaveTo) navigate(leaveTo); }} />
+            onConfirm={() => { setConfirm(null); setLeaveTo(null); setDirty(false); dirtyRef.current = false; leaveTo?.go(); }} />
     </Box>;
 }
 

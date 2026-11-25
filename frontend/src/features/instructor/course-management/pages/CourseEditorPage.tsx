@@ -2,7 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Skeleton, TextField, Typography } from '@mui/material';
 import { Outlet, useLocation, useNavigate, useParams } from 'react-router';
-import { Page } from '../../../../layouts/DashboardLayout';
+import { Page, useNavigationGuard } from '../../../../layouts/DashboardLayout';
 import { PageHeader } from '../../../../shared/components/PageHeader';
 import type { Crumb } from '../../../../shared/components/PageHeader';
 import { SegmentedControl } from '../../../../shared/components/ViewRail';
@@ -61,9 +61,16 @@ export function CourseEditorFrame() {
     const tab = activeTabFrom(location.pathname);
     const regionId = `${useId()}-course-tab`;
     const [confirmPub, setConfirmPub] = useState<CoursePublicationStatus | null>(null);
-    const [leaveTarget, setLeaveTarget] = useState<string | null>(null);
+    const [leaveTarget, setLeaveTarget] = useState<{ go: () => void } | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
     const [alert, setAlert] = useState<string | null>(null);
+    // Shell navigation away from a tab with unsaved changes (the Settings form) uses the same confirmation as
+    // the tab switch, so one dialog appears whichever control started the navigation (S18/S19).
+    useNavigationGuard((proceed) => {
+        if (!isTabDirty()) return false;
+        setLeaveTarget({ go: proceed });
+        return true;
+    });
 
     if (course.error && courseRefused(course.error)) {
         return <Page><CourseUnavailable status={failureStatus(course.error)} /></Page>;
@@ -93,7 +100,7 @@ export function CourseEditorFrame() {
     const go = (to: string) => {
         if (to === location.pathname) return;
         if (isTabDirty()) {
-            setLeaveTarget(to);
+            setLeaveTarget({ go: () => navigate(to) });
         } else {
             setNotice(null);
             setAlert(null);
@@ -154,7 +161,7 @@ export function CourseEditorFrame() {
             onCancel={() => setConfirmPub(null)} onConfirm={() => void applyPublication('hidden')} />
         <ConfirmDialog open={leaveTarget !== null} isDestructive title="Leave without saving?" message="Your changes will be lost."
             cancelLabel="Stay" confirmLabel="Leave" onCancel={() => setLeaveTarget(null)}
-            onConfirm={() => { const next = leaveTarget!; setLeaveTarget(null); setTabDirty(false); setNotice(null); setAlert(null); navigate(next); }} />
+            onConfirm={() => { const next = leaveTarget!; setLeaveTarget(null); setTabDirty(false); setNotice(null); setAlert(null); next.go(); }} />
     </Page>;
 }
 

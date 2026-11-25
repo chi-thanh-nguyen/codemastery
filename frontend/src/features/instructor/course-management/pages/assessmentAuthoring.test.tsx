@@ -13,14 +13,16 @@ import {
     setAssignmentPublication, setQuizPublication,
 } from '../api/assessmentAuthoringApi';
 import type { B3Question, B3QuestionPage, B3QuizOwned, B3QuizOwnedPage, B5OwnedAssignment, B5OwnedAssignmentPage } from '../api/assessmentAuthoringApi';
-import { getOwnedCourse } from '../api/instructorCourseApi';
+import { getOwnedCourse, listOwnedCourses } from '../api/instructorCourseApi';
 import type { OwnedCourse } from '../api/instructorCourseApi';
 import { AssessmentsPage, formatTimeLimit } from './QuestionBankPage';
 import { QuizEditor, difficultySummary, timeLimitSeconds } from './QuizEditorPage';
 import { AssignmentEditor } from './AssignmentEditorPage';
 import type { SkillSource } from '../components/QuestionForm';
 import { AppRouter } from '../../../../routes';
-import { getOwnedSkillGraph } from '../../skill-graph-editor/api/skillGraphApi';
+import { addCoursePrerequisite, createCourseSkill, getOwnedSkillGraph, mapCourseLessonSkill, removeCoursePrerequisite, unmapCourseLessonSkill, updateCourseSkill } from '../../skill-graph-editor/api/skillGraphApi';
+import type { OwnedSkillGraph } from '../../skill-graph-editor/api/skillGraphApi';
+import { instantMicros, sameAssignment, sameInstant } from './AssignmentEditorPage';
 
 vi.mock('../api/assessmentAuthoringApi', async (original) => ({
     ...await original<object>(), listQuestions: vi.fn(), createQuestion: vi.fn(), readQuestion: vi.fn(), replaceUnusedQuestion: vi.fn(), deleteUnusedQuestion: vi.fn(),
@@ -28,10 +30,11 @@ vi.mock('../api/assessmentAuthoringApi', async (original) => ({
     listOwnedAssignments: vi.fn(), createAssignment: vi.fn(), readOwnedAssignment: vi.fn(), replaceAssignment: vi.fn(), setAssignmentPublication: vi.fn(),
 }));
 vi.mock('../api/instructorCourseApi', async (original) => ({
-    ...await original<object>(), getOwnedCourse: vi.fn(),
+    ...await original<object>(), getOwnedCourse: vi.fn(), listOwnedCourses: vi.fn(),
 }));
 vi.mock('../../skill-graph-editor/api/skillGraphApi', async (original) => ({
-    ...await original<object>(), getOwnedSkillGraph: vi.fn(),
+    ...await original<object>(), getOwnedSkillGraph: vi.fn(), createCourseSkill: vi.fn(), updateCourseSkill: vi.fn(), addCoursePrerequisite: vi.fn(),
+    removeCoursePrerequisite: vi.fn(), mapCourseLessonSkill: vi.fn(), unmapCourseLessonSkill: vi.fn(),
 }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -471,8 +474,11 @@ describe('production routes and shared course shell (CT16.routes, D12-3)', () =>
         expect(location).toBe('/teach/courses/00000000-0000-4000-8000-0000000000c1/assignments/00000000-0000-4000-8000-0000000000d9');
     });
 
-    it('surfaces 400 field errors, 404 skill rejection and 403 read-only lock in QuestionEditorSheet', async () => {
+    it('shows a production 400 (no field errors) at form level, and 404 skill rejection and 403 read-only lock in QuestionEditorSheet', async () => {
+        // The CT23 backend answers 400 with a generic detail and no `errors[]`, and the shared client keeps no
+        // field errors for these operations: the form-level alert is the production behavior.
         vi.mocked(createQuestion)
+            .mockRejectedValueOnce(http(400, 'Please check the supplied information.'))
             .mockRejectedValueOnce(http(400, 'Please check the supplied information.', { prompt: 'Prompt invalid.' }))
             .mockRejectedValueOnce(http(404, 'The requested resource is unavailable.'))
             .mockRejectedValueOnce(http(403, 'You do not have permission to perform this action.'));
@@ -483,6 +489,12 @@ describe('production routes and shared course shell (CT16.routes, D12-3)', () =>
         await act(async () => sheet.querySelector<HTMLInputElement>('input[type="radio"]')!.click());
         await choose('Skill', 'Arrays', sheet); await choose('Difficulty', 'Easy', sheet);
 
+        await click('Save question', sheet);
+        expect(sheet.textContent).toContain('Please check the supplied information.');
+        expect(sheet.textContent).not.toContain('Prompt invalid.');
+
+        // HYPOTHETICAL, not production evidence: field mapping is kept for a future contract that returns
+        // decoded field errors; no current CT23 response produces this ApiError.
         await click('Save question', sheet);
         expect(sheet.textContent).toContain('Prompt invalid.');
 
@@ -504,5 +516,207 @@ describe('production routes and shared course shell (CT16.routes, D12-3)', () =>
         expect(getOwnedCourse).not.toHaveBeenCalled();
         expect(getOwnedSkillGraph).not.toHaveBeenCalled();
         expect(listQuestions).not.toHaveBeenCalled();
+    });
+});
+
+// --- PR #273 audit remediation regressions (N1–N6, N10) ---
+
+const variables = { id: '00000000-0000-4000-8000-0000000000a3', name: 'Variables', description: null };
+const graphOf = (patch: Partial<OwnedSkillGraph> = {}): OwnedSkillGraph => ({ courseId, skills: [loops, variables], prerequisites: [{ skillId: loops.id, prerequisiteSkillId: variables.id }], mappings: [], ...patch });
+async function mountApp(path: string) {
+    // Destinations outside this feature are stubbed: the catalogue through AppRouter's own slot, Teaching's list by its client.
+    vi.mocked(listOwnedCourses).mockResolvedValue({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 });
+    await act(async () => root.render(<MemoryRouter initialEntries={[path]}><AuthContext.Provider value={auth}><Where />
+        <AppRouter catalogue={<p>Catalogue stub</p>} /></AuthContext.Provider></MemoryRouter>));
+    await flush();
+}
+/** Several macrotask turns: a render/effect/reload loop would keep issuing requests across them. */
+const settle = async (turns = 25) => { for (let index = 0; index < turns; index += 1) await flush(); };
+const navLink = (name: string) => [...document.querySelectorAll<HTMLElement>('header a, nav a')].find((item) => item.textContent?.trim() === name || item.getAttribute('aria-label') === name)!;
+
+describe('N1: the skill graph read is never retried automatically inside the course editor shell', () => {
+    it('makes one read under a persistent 500, and "Try again" makes exactly one more', async () => {
+        vi.mocked(getOwnedSkillGraph).mockRejectedValue(new ApiError('http', 'x', 500));
+        vi.mocked(listQuestions).mockResolvedValue(questionPage([q(1)]));
+        await mountApp(`/teach/courses/${courseId}/assessments`);
+        await settle();
+        expect(text()).toContain("Skills couldn't be loaded.");
+        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(1);
+
+        // Switching views re-renders the shell and the page; neither reads again.
+        await click('Quizzes'); await click('Questions'); await settle();
+        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(1);
+
+        await click('Try again');
+        await settle();
+        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(2);
+        expect(text()).toContain("Skills couldn't be loaded.");
+    });
+
+    it('re-reads a graph that an S20 change left stale once when the Questions view opens, not continuously', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValueOnce(graphOf()).mockRejectedValue(new ApiError('network', 'down'));
+        vi.mocked(createCourseSkill).mockRejectedValue(new ApiError('network', 'down'));
+        vi.mocked(listQuestions).mockResolvedValue(questionPage([q(1)]));
+        await mountApp(`/teach/courses/${courseId}/skills`);
+        await click('Add skill');
+        await type('Skill name', 'Arrays');
+        await act(async () => find('Add skill', document.querySelector('form')!).click()); await settle();
+        // The unknown creation re-reads the graph once (S20); that read fails.
+        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(2);
+
+        await click('Assessments'); await settle();
+        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(3);
+        await click('Quizzes'); await settle();
+        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(3);
+    });
+});
+
+describe('N3/N4: skill saves report exactly what CT05 committed, and no invented question count', () => {
+    async function openSkill(name: string) {
+        const chip = [...document.querySelectorAll<HTMLElement>('[aria-label="Course skills"] [role="button"]')].find((item) => item.textContent === name)!;
+        await act(async () => chip.click()); await flush();
+    }
+    async function addPrerequisite(name: string) {
+        await type('Prerequisites', name);
+        const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((item) => item.textContent === name)!;
+        await act(async () => option.click()); await flush();
+    }
+
+    it('shows no question count in the graph although CT05 returns none', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        await mountApp(`/teach/courses/${courseId}/skills`);
+        const node = document.querySelector<HTMLElement>('[aria-label^="Variables,"]')!;
+        expect(node.getAttribute('aria-label')).toBe('Variables, 0 prerequisites');
+        expect(document.querySelector('[aria-label^="Loops,"]')!.getAttribute('aria-label')).toBe('Loops, 1 prerequisite');
+        expect(text()).not.toMatch(/\d+ questions?/);
+    });
+
+    it('runs edge additions first, so a cycle refusal saves nothing, keeps the draft and re-reads the graph', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        vi.mocked(addCoursePrerequisite).mockRejectedValue(http(409, 'The request conflicts with existing information.'));
+        await mountApp(`/teach/courses/${courseId}/skills`);
+        await openSkill('Variables');
+        await type('Skill name', 'Variables renamed');
+        await addPrerequisite('Loops');
+        await click('Save skill');
+        expect(addCoursePrerequisite).toHaveBeenCalledWith(courseId, variables.id, loops.id, expect.anything());
+        expect(updateCourseSkill).not.toHaveBeenCalled();
+        expect(text()).toContain('Nothing was saved. Loops can\'t be a prerequisite of Variables renamed, because it would create a cycle of prerequisites. 1 other change was not attempted. Your edits are still here.');
+        expect(text()).not.toContain('Skill saved.');
+        expect(field('Skill name').value).toBe('Variables renamed');
+        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(2);
+    });
+
+    it('names a committed step when a later step fails', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf({ prerequisites: [] }));
+        vi.mocked(addCoursePrerequisite).mockResolvedValue(undefined);
+        vi.mocked(updateCourseSkill).mockRejectedValue(http(400, 'Please check the supplied information.'));
+        await mountApp(`/teach/courses/${courseId}/skills`);
+        await openSkill('Variables');
+        await type('Skill name', 'Variables renamed');
+        await addPrerequisite('Loops');
+        await click('Save skill');
+        expect(text()).toContain("Saved: Loops as a prerequisite. The name and description couldn't be saved. Your edits are still here.");
+        expect(text()).not.toContain('Skill saved.');
+    });
+
+    it('keeps a created skill bound to the form when its prerequisite is refused, so saving again edits instead of duplicating', async () => {
+        const arraysSkill = { id: '00000000-0000-4000-8000-0000000000a4', name: 'Arrays', description: null };
+        vi.mocked(getOwnedSkillGraph).mockResolvedValueOnce(graphOf()).mockResolvedValue(graphOf({ skills: [loops, variables, arraysSkill] }));
+        vi.mocked(createCourseSkill).mockResolvedValue(arraysSkill);
+        vi.mocked(addCoursePrerequisite).mockRejectedValueOnce(http(404, 'The requested resource is unavailable.')).mockResolvedValue(undefined);
+        await mountApp(`/teach/courses/${courseId}/skills`);
+        await click('Add skill');
+        await type('Skill name', 'Arrays');
+        await addPrerequisite('Variables');
+        await act(async () => find('Add skill', document.querySelector('form')!).click()); await settle();
+        expect(createCourseSkill).toHaveBeenCalledTimes(1);
+        expect(text()).toContain("Saved: the skill Arrays. Variables couldn't be added as a prerequisite. A skill it needs is no longer available. Your edits are still here.");
+        expect(field('Skill name').value).toBe('Arrays');
+
+        await click('Save skill');
+        expect(createCourseSkill).toHaveBeenCalledTimes(1);
+        expect(addCoursePrerequisite).toHaveBeenLastCalledWith(courseId, arraysSkill.id, variables.id, expect.anything());
+        expect(text()).toContain('Skill saved.');
+    });
+});
+
+describe('N5: shell navigation asks before an editor with unsaved edits is left', () => {
+    it('asks on Teaching from a dirty assignment editor; Stay keeps the route and draft, Leave navigates once', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment());
+        await mountApp(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Assignment title', 'Unsaved title');
+        await act(async () => navLink('Teaching').click()); await flush();
+        expect(confirmDialog('Leave without saving?')).toBeTruthy();
+        expect(location).toBe(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await click('Stay', confirmDialog('Leave without saving?'));
+        expect(location).toBe(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        expect(field('Assignment title').value).toBe('Unsaved title');
+
+        await act(async () => navLink('Teaching').click()); await flush();
+        expect(dialogs().filter((item) => item.textContent?.includes('Leave without saving?'))).toHaveLength(1);
+        await click('Leave', confirmDialog('Leave without saving?'));
+        expect(location).toBe('/teach');
+    });
+
+    it('asks on the home link from a dirty quiz editor, and not at all once nothing is unsaved', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        vi.mocked(readOwnedQuiz).mockResolvedValue(quiz());
+        vi.mocked(replaceUnusedHiddenQuiz).mockResolvedValue(quiz({ title: 'Renamed quiz' }));
+        await mountApp(`/teach/courses/${courseId}/quizzes/${quizId}`);
+        await type('Quiz title', 'Renamed quiz');
+        await act(async () => navLink('CodeMastery home').click()); await flush();
+        expect(confirmDialog('Leave without saving?')).toBeTruthy();
+        await click('Stay', confirmDialog('Leave without saving?'));
+        await click('Save changes');
+        await act(async () => navLink('Catalogue').click()); await flush();
+        expect(dialogs().some((item) => item.textContent?.includes('Leave without saving?'))).toBe(false);
+        expect(location).toBe('/courses');
+    });
+});
+
+describe('N6: keyboard focus stays in the lesson row after mapping and unmapping', () => {
+    it('returns focus to the row instead of <body>', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValueOnce(graphOf())
+            .mockResolvedValueOnce(graphOf({ mappings: [{ lessonId: lessonOneId, skillId: loops.id }] }))
+            .mockResolvedValue(graphOf());
+        vi.mocked(mapCourseLessonSkill).mockResolvedValue(undefined);
+        vi.mocked(unmapCourseLessonSkill).mockResolvedValue(undefined);
+        await mountApp(`/teach/courses/${courseId}/skills`);
+        await click('Lesson mapping');
+        const row = () => [...document.querySelectorAll<HTMLElement>('li')].find((item) => item.querySelector('[data-mapping-title]')?.textContent === 'For Loops')!;
+        await act(async () => find('Add skill', row()).click()); await flush();
+        const option = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === 'Loops')!;
+        await act(async () => option.click()); await settle();
+        expect(mapCourseLessonSkill).toHaveBeenCalledWith(courseId, lessonOneId, loops.id, expect.anything());
+        expect(document.activeElement).not.toBe(document.body);
+        expect(row().contains(document.activeElement)).toBe(true);
+
+        await act(async () => find('Remove Loops from For Loops', row()).click()); await settle();
+        expect(unmapCourseLessonSkill).toHaveBeenCalledTimes(1);
+        expect(row().contains(document.activeElement)).toBe(true);
+        expect(document.activeElement?.textContent).toContain('Add skill');
+    });
+});
+
+describe('N10: assignment instants are compared to the microsecond', () => {
+    it('distinguishes sub-millisecond differences and accepts equivalent representations', () => {
+        expect(sameInstant('2026-12-01T10:00:00.123456Z', '2026-12-01T10:00:00.123999Z')).toBe(false);
+        expect(sameInstant('2026-12-01T10:00:00.000400Z', '2026-12-01T10:00:00Z')).toBe(false);
+        expect(sameInstant('2026-12-01T10:00:00.123456Z', '2026-12-01T17:00:00.1234560+07:00')).toBe(true);
+        expect(sameInstant('2026-12-01T10:00:00Z', '2026-12-01t10:00:00.000z')).toBe(true);
+        expect(sameInstant('2026-12-01T00:30:00-02:30', '2026-12-01T03:00:00Z')).toBe(true);
+        expect(instantMicros('2026-12-01T10:00:00.1234567Z')).toBeNull();
+        expect(new Date(instantMicros('0050-01-01T00:00:00Z')!.seconds * 1000).getUTCFullYear()).toBe(50);
+    });
+
+    it('confirms an unknown-outcome save only when the deadline matches to the microsecond', () => {
+        const draft = { title: 'Lab', instructions: 'Do it.', deadlineInput: '2026-12-01T17:00', lessonId: null };
+        const baseline = { input: '2026-12-01T17:00', iso: '2026-12-01T10:00:00.123456Z' };
+        const current = assignment({ title: 'Lab', instructions: 'Do it.', lessonId: null, deadlineAt: '2026-12-01T10:00:00.123456Z' });
+        expect(sameAssignment(draft, baseline, current)).toBe(true);
+        expect(sameAssignment(draft, baseline, { ...current, deadlineAt: '2026-12-01T10:00:00.123999Z' })).toBe(false);
+        expect(sameAssignment(draft, baseline, { ...current, deadlineAt: '2026-12-01T17:00:00.123456+07:00' })).toBe(true);
     });
 });

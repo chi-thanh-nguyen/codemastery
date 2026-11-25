@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, Box, Button, Checkbox, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, TextField, Typography, useMediaQuery, useTheme } from '@mui/material';
 import { Link, useLocation, useNavigate } from 'react-router';
+import { useNavigationGuard } from '../../../../layouts/DashboardLayout';
 import { Tile, CircleAction } from '../../../../shared/components/Tile';
 import { SegmentedControl } from '../../../../shared/components/ViewRail';
 import { StatusPill } from '../../../../shared/components/StatusPill';
@@ -160,7 +161,7 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
     const [alert, setAlert] = useState<EditorAlert | null>(null);
     const [notice, setNotice] = useState<string | null>(() => (location.state as { notice?: unknown } | null)?.notice === CREATED ? CREATED : null);
     const [confirm, setConfirm] = useState<'publish' | 'hide' | 'delete' | 'leave' | null>(null);
-    const [leaveTo, setLeaveTo] = useState<string | null>(null);
+    const [leaveTo, setLeaveTo] = useState<{ go: () => void } | null>(null);
     const [picking, setPicking] = useState(false);
     const [moved, setMoved] = useState('');
     const dirtyRef = useRef(dirty);
@@ -196,7 +197,13 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
     }, [dirty, noAccess]);
 
     /** In-app leaving with unsaved edits asks first; browser Back cannot be intercepted (A15). */
-    const go = (to: string) => { if (dirtyRef.current && !noAccess) { setLeaveTo(to); setConfirm('leave'); } else navigate(to); };
+    const go = (to: string) => { if (dirtyRef.current && !noAccess) { setLeaveTo({ go: () => navigate(to) }); setConfirm('leave'); } else navigate(to); };
+    // Shell navigation (Teaching, Catalogue, the home link, Profile) asks through the same confirmation (S19).
+    useNavigationGuard((proceed) => {
+        if (!dirtyRef.current || noAccess) return false;
+        setLeaveTo({ go: proceed }); setConfirm('leave');
+        return true;
+    });
     const change = (patch: Partial<QuizFormDraft>) => { setDraft((current) => ({ ...current, ...patch })); setDirty(true); setErrors({}); setNotice(null); };
 
     /** Re-read after an unknown outcome or a refusal; `confirmed` decides whether the read shows that the change committed. */
@@ -439,7 +446,7 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
         <ConfirmDialog open={confirm === 'delete'} isDestructive title="Delete this quiz?" message="This can't be undone." confirmLabel="Delete quiz"
             onCancel={() => setConfirm(null)} onConfirm={() => void remove()} />
         <ConfirmDialog open={confirm === 'leave'} isDestructive title="Leave without saving?" message="Your changes will be lost." cancelLabel="Stay" confirmLabel="Leave"
-            onCancel={() => { setConfirm(null); setLeaveTo(null); }} onConfirm={() => { setConfirm(null); setDirty(false); dirtyRef.current = false; if (leaveTo) navigate(leaveTo); }} />
+            onCancel={() => { setConfirm(null); setLeaveTo(null); }} onConfirm={() => { setConfirm(null); setLeaveTo(null); setDirty(false); dirtyRef.current = false; leaveTo?.go(); }} />
     </Box>;
 }
 

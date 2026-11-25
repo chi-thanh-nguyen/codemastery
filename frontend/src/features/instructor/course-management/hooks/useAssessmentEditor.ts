@@ -70,7 +70,9 @@ export function useOwnerRead<T>(key: string | null, load: (options: AuthoringReq
     }, [identity, generation, isCurrent, revision]);
     const reload = useCallback(() => setRevision((value) => value + 1), []);
     const matches = identity !== null && state.identity === identity;
-    return { data: matches ? state.data : null, loading: identity !== null && (!matches || state.loading), error: matches ? state.error : null, reload };
+    const data = matches ? state.data : null, loading = identity !== null && (!matches || state.loading), error = matches ? state.error : null;
+    // A stable identity per observable state, so consumers' effects and memoized contexts do not re-run on every render.
+    return useMemo(() => ({ data, loading, error, reload }), [data, loading, error, reload]);
 }
 
 /**

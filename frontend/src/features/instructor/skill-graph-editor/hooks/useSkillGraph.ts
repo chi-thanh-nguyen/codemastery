@@ -40,7 +40,9 @@ export function useOwnedSkillGraph(courseId: string): OwnedSkillGraphRead {
     }, [identity, courseId, generation, isCurrent, revision]);
     const reload = useCallback(() => setRevision((value) => value + 1), []);
     const matches = identity !== null && state.identity === identity;
-    return { graph: matches ? state.graph : null, loading: identity !== null && (!matches || state.loading), error: matches ? state.error : null, reload };
+    const graph = matches ? state.graph : null, loading = identity !== null && (!matches || state.loading), error = matches ? state.error : null;
+    // Stable per observable state: the course editor context and its consumers' effects must not change identity on every render.
+    return useMemo(() => ({ graph, loading, error, reload }), [graph, loading, error, reload]);
 }
 
 /** Single-flight CT05 skill, prerequisite and lesson-mapping mutations bound to the session generation. */
