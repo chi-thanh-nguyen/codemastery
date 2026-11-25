@@ -6776,7 +6776,7 @@ An ultrareview of PR #273 at `49eaff6` reported findings U1–U8. The Project Le
 - **U6 (confirmed, fixed):** a deadline such as `9999-12-31T23:59:59-05:00` normalizes to year 10000 in UTC. `Instant.toString()` then renders `+10000-01-01T04:59:59Z`, which the frontend decoder (four-digit year) and RFC 3339 reject. Create and replace now answer 400 unless the UTC instant lies in years 0000–9999. The check runs in the request parser and again in `AssignmentService`. Microsecond precision and the API format are unchanged. OpenAPI states the rule.
 - **U7, U8 (deferred):** the duplicated read and mutation hooks and the duplicated API decoders are maintainability debt, not defects. U2 needed the same small change in both read hooks. Merging them would add a dependency from `skill-graph-editor` to `course-management`, whose hooks already import `skill-graph-editor`, for no correctness gain. No refactor was made.
 
-Observation, not changed: Hibernate binds `Instant` through the hybrid Julian/Gregorian calendar, so instants before 1582-10-15 are stored a few days apart from their ISO value. Every value still round-trips exactly through the application and SQL order is monotonic, as `AssessmentPersistenceIntegrationTest` asserts. This applies to every `timestamptz` column and predates this pull request.
+**Historical persistence claim corrected by D2:** the original boundary test checked symmetric application round-trips for three selected values and their SQL order. It did not prove correct stored UTC instants or universal ordering/round-trip behavior. The subsequent independent review at `3f7c184` found that `0000-01-01T00:00:00Z` stored SQL epoch `-62167046400` instead of `-62167219200`, and `1500-03-10T00:00:00Z` failed with SQLSTATE `22008`. D2 corrects the Assignment-local mapping and replaces that insufficient oracle as recorded below. No conclusion about every other timestamp mapping is established by these Assignment tests.
 
 Executed locally on macOS arm64 (Docker Engine 29.8.1) from an isolated worktree:
 
@@ -6835,3 +6835,66 @@ These are remediation-author executions and self-review, not a new independent a
 CODEOWNER approval. No new interactive browser or full E2E run is claimed. Earlier exact-tree CI and
 the preceding independent review's infrastructure/containment evidence remain historical; the D1
 change does not modify those implementations. Required CI and owner/governance gates remain open.
+
+
+## PR #273 D2 Assignment UTC persistence follow-up — 25 November 2026
+
+The same explicit D1/D2 implementation authorization covers this Assignment-only correction.
+`AssignmentEntity.deadline_at` now selects a nested `DeadlineJdbcType`: the existing Hibernate
+JDBC 4.2 OffsetDateTime binder supplies INSERT and targeted JPQL definition UPDATE values, while
+an ISO-text extractor constructs the proleptic Gregorian date with PostgreSQL BC converted to
+ISO year zero before date validation. This avoids both the previous hybrid-calendar conversion
+and the driver's OffsetDateTime-reader failure on the valid `0000-02-29` leap day. The text reader
+accepts the driver's ISO timestamps with fractional seconds and offsets including historical
+seconds; tests cover UTC, America/New_York and Asia/Ho_Chi_Minh, including local calendar years
+outside the UTC representation bounds.
+
+The domain/entity API remains `Instant`, the physical column remains `timestamptz`, and the
+normalized UTC years 0000–9999 and microsecond validation are unchanged. AssignmentMapper,
+AssignmentService, parser/REST shape, SQL column lists, READ COMMITTED writes, native FOR UPDATE
+and REPEATABLE READ owner snapshots are unchanged. There is no global Hibernate setting,
+dependency, migration, new repository file, grant or contract amendment.
+
+Verification uses real disposable PostgreSQL. The durable repository tests independently check
+SQL `extract(epoch)` using exact BigDecimal arithmetic after INSERT and targeted UPDATE, then
+store PostgreSQL text literals and verify extraction through JPQL, native paging and native lock
+plus refresh. Fifteen values cover both boundaries, ISO year-zero leap day, historical century
+rules, the exact 1500-03-10 failure, dates on both sides of the 1582 cutover and its intervening
+ISO dates, microseconds and a modern date. A separate SQL ordering/range-comparison case covers
+historical and modern instants. The HTTP test checks create, replace and a fresh GET for six
+representative values, along with independent SQL epoch assertions.
+
+**Existing-data compatibility:** no stored data is rewritten. A row previously written by the
+incorrect mapping may contain a shifted SQL instant even when the old symmetric reader returned
+the intended input. The new reader returns the actual persisted instant, so such a row can now
+produce a different historical deadline. Correctly stored PostgreSQL values now read correctly.
+An operator must separately audit provenance and intended deadlines before any repair: neither
+a blanket date offset nor an automatic migration is authorized. No existing host or production
+data was inspected, and this task establishes no count of affected rows.
+
+
+Executed from the same isolated clone, macOS arm64 / Temurin 25.0.4.1 / Docker Engine 29.8.1;
+the final backend container uses the repository-pinned Temurin 25.0.5+8 Dockerfile:
+
+| Command or check | Observed result |
+| --- | --- |
+| `cd backend && ./mvnw -o -B -Dtest=SubmissionServiceTest '-Dit.test=AssessmentPersistenceIntegrationTest#assignmentDeadlineBoundariesRoundTripThroughPostgresqlAtMicrosecondPrecision+assignmentDeadlineSqlOrderingAndComparisonsUseUtcInstants' verify` before the mapping fix | 42 unit tests passed; 16 selected integration cases produced 9 assertion failures and 2 persistence errors, including the original epoch mismatch and `22008`; exit 1 |
+| `cd backend && ./mvnw -o -B -Dtest=SubmissionServiceTest '-Dit.test=AssessmentPersistenceIntegrationTest,AuthorizationIntegrationTest$AssignmentAuthoringEndpoints' verify` with the final mapping | 42 unit tests and 32 integration cases passed, no failures/errors/skips, exit 0: 29 Assessment persistence cases and 3 Assignment HTTP cases, including existing authorization/precedence and restricted-role lock/column tests |
+| `docker build -t codemastery-review/pr273-d1d2:01a211a3-final backend` | Repository Dockerfile build passed, exit 0; isolated review tag, not a release artifact |
+| `test-runtime-real-backend-privileges.sh` using that image (only its two image references changed in the external runner) | Consumer HTTP and V008-to-V009 upgrade suites passed, exit 0; historical POST returned 201, replacement to year zero and fresh GET returned 200; exact SQL epochs were `-14825894400.000000` and `-62167219200.000000`; existing final matrix checks passed with zero permission-denied/42501 log entries |
+| `bash -n infrastructure/vm/tests/test-runtime-real-backend-privileges.sh`; `git diff --check` | Both passed, exit 0 |
+
+During implementation, selecting the standard JDBC 4.2 mapping alone exposed the driver's
+`0000-02-29` extraction failure; an explicit-calendar Timestamp reader also failed the historical
+instant oracles. Those candidates were rejected, not accepted as passing evidence. The final local
+extractor passed the unchanged date/epoch assertions, including the expanded timezone checks.
+
+Selective verification: the full backend suite, full browser E2E, interactive browser checks,
+standalone PostgreSQL containment, HTTPS/MinIO/containerd, release qualification and security scans
+were not rerun. The preceding review's results at `3f7c184` are retained only for unaffected behavior:
+D1 changes no shell/transport/route contract, and D2 changes no schema, ACL, deployment implementation,
+image baseline or unrelated timestamp field. The affected runtime-consumer suite was rerun because
+JDBC binding/extraction changed even though grants did not. These tests do not establish full-app,
+release, real-host or independent acceptance, and no omitted suite is claimed to pass on the new HEAD.
+Required CI is left to the protected-integration gate; the Leader explicitly waived waiting for it
+in this remediation session. U7/U8, G7, N7 and CODEOWNER/technical approval gates remain unresolved.

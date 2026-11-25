@@ -385,6 +385,20 @@ check "create an Assignment at the latest representable deadline (INSERT)" "$STA
 assignment="$(field id)"
 call POST "$assigned/assignments" "$token_i" '{"title":"Late","instructions":"x","deadlineAt":"9999-12-31T23:59:59-05:00","lessonId":null}'
 check "a deadline past year 9999 in UTC is a 400 (U6)" "$STATUS" 400
+# D2: exercise JDBC INSERT, targeted UPDATE and fresh extraction under the real r12 runtime role.
+# The SQL epoch oracle is independent of the application's date conversion.
+call POST "$assigned/assignments" "$token_i" '{"title":"Historical","instructions":"I","deadlineAt":"1500-03-10T00:00:00Z","lessonId":null}'
+check "historical leap-day INSERT no longer fails with 22008" "$STATUS/$(field deadlineAt)" "201/1500-03-10T00:00:00Z"
+historical="$(field id)"
+check "historical INSERT stores the exact SQL epoch" "$(psql_admin <<<"SELECT extract(epoch FROM deadline_at) FROM public.assignments WHERE id='$historical';")" "-14825894400.000000"
+call GET "$assigned/owned-assignments/$historical" "$token_i"
+check "historical owner re-read preserves the UTC instant" "$STATUS/$(field deadlineAt)" "200/1500-03-10T00:00:00Z"
+call PUT "$assigned/owned-assignments/$historical" "$token_i" '{"title":"Historical","instructions":"I","deadlineAt":"0000-01-01T00:00:00Z","lessonId":null}'
+check "year-zero targeted replacement" "$STATUS/$(field deadlineAt)" "200/0000-01-01T00:00:00Z"
+check "year-zero UPDATE stores the exact SQL epoch" "$(psql_admin <<<"SELECT extract(epoch FROM deadline_at) FROM public.assignments WHERE id='$historical';")" "-62167219200.000000"
+call GET "$assigned/owned-assignments/$historical" "$token_i"
+check "year-zero owner re-read preserves the UTC instant" "$STATUS/$(field deadlineAt)" "200/0000-01-01T00:00:00Z"
+psql_admin >/dev/null <<<"DELETE FROM public.assignments WHERE id='$historical';"
 call PUT "$assigned/owned-assignments/$assignment" "$token_i" '{"title":"Project 2","instructions":"Submit a PDF","deadlineAt":"2026-12-01T10:00:00.000001+07:00","lessonId":null}'
 check "replace under the FOR UPDATE row lock (targeted UPDATE)" "$STATUS/$(field deadlineAt)/$(field lessonId)" "200/2026-12-01T03:00:00.000001Z/None"
 call PUT "$assigned/owned-assignments/$assignment/publication" "$token_i" '{"publicationStatus":"published"}'

@@ -2621,6 +2621,40 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test
+        void historicalAssignmentDeadlinesCreateReplaceAndReadWithExactSqlInstants() throws Exception {
+            String bearer = sessionToken(owner);
+            String base = "/api/courses/" + course;
+            for (String input : List.of("0000-01-01T00:00:00Z", "1500-03-10T00:00:00Z",
+                    "1582-10-04T23:59:59.999999Z", "1582-10-15T00:00:00.000001Z",
+                    "2026-12-01T10:00:00.123456+07:00", "9999-12-31T23:59:59.999999Z")) {
+                Instant expected = java.time.OffsetDateTime.parse(input).toInstant();
+                java.math.BigDecimal epoch = java.math.BigDecimal.valueOf(expected.getEpochSecond())
+                        .add(java.math.BigDecimal.valueOf(expected.getNano(), 9));
+                String body = "{\"title\":\"Historical\",\"instructions\":\"I\",\"deadlineAt\":\"" + input + "\",\"lessonId\":null}";
+                String created = mvc.perform(post(base + "/assignments")
+                                .header("Authorization", "Bearer " + bearer).contentType(MediaType.APPLICATION_JSON).content(body))
+                        .andExpect(status().isCreated())
+                        .andExpect(jsonPath("$.deadlineAt").value(expected.toString()))
+                        .andReturn().getResponse().getContentAsString();
+                UUID id = UUID.fromString(JSON.readTree(created).get("id").asString());
+                for (UUID persisted : List.of(id, assignment)) {
+                    if (persisted.equals(assignment)) {
+                        mvc.perform(request(HttpMethod.PUT, base + "/owned-assignments/" + assignment)
+                                        .header("Authorization", "Bearer " + bearer).contentType(MediaType.APPLICATION_JSON).content(body))
+                                .andExpect(status().isOk())
+                                .andExpect(jsonPath("$.deadlineAt").value(expected.toString()));
+                    }
+                    assertEquals(0, epoch.compareTo(jdbc.queryForObject(
+                            "SELECT extract(epoch FROM deadline_at) FROM assignments WHERE id = ?",
+                            java.math.BigDecimal.class, persisted)), input);
+                    mvc.perform(get(base + "/owned-assignments/" + persisted).header("Authorization", "Bearer " + bearer))
+                            .andExpect(status().isOk())
+                            .andExpect(jsonPath("$.deadlineAt").value(expected.toString()));
+                }
+            }
+        }
+
+        @Test
         void createReadReplacePublishAndListReturnCommittedRowsInCollateCOrderWithCounts() throws Exception {
             String bearer = sessionToken(owner);
             String base = "/api/courses/" + course;

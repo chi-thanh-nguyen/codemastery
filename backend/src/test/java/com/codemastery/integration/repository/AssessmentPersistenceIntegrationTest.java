@@ -721,45 +721,93 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
         }
     }
 
-    /** U6: the representable deadline boundaries survive PostgreSQL timestamptz unchanged. */
-    @Test
+    /** D2: compare SQL instants independently, not just symmetric application conversions. */
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {
+            "0000-01-01T00:00:00Z", "0000-02-29T12:34:56.123456Z", "0001-01-01T00:00:00Z",
+            "1500-02-28T23:59:59.999999Z", "1500-03-01T00:00:00Z", "1500-03-10T00:00:00Z",
+            "1500-03-11T00:00:00.000001Z", "1582-10-04T23:59:59.999999Z",
+            "1582-10-05T00:00:00Z", "1582-10-14T23:59:59.999999Z", "1582-10-15T00:00:00.000001Z",
+            "1600-02-29T12:00:00Z", "1700-03-01T00:00:00Z", "2026-12-01T10:00:00.123456Z",
+            "9999-12-31T23:59:59.999999Z"
+    })
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
-    void assignmentDeadlineBoundariesRoundTripThroughPostgresqlAtMicrosecondPrecision() {
+    void assignmentDeadlineBoundariesRoundTripThroughPostgresqlAtMicrosecondPrecision(String input) {
         UUID instructor = user("instructor");
         UUID courseId = UUID.randomUUID();
-        UUID latest = UUID.randomUUID();
-        UUID earliest = UUID.randomUUID();
-        UUID micro = UUID.randomUUID();
-        Instant latestDeadline = com.codemastery.modules.assessment.application.service.AssignmentService
-                .LATEST_REPRESENTABLE_DEADLINE;
-        Instant earliestDeadline = com.codemastery.modules.assessment.application.service.AssignmentService
-                .EARLIEST_REPRESENTABLE_DEADLINE;
-        Instant microDeadline = Instant.parse("1582-10-15T00:00:00.000001Z");
+        UUID id = UUID.randomUUID();
+        Instant deadline = Instant.parse(input);
         jdbc.update("INSERT INTO courses (id, instructor_id, title, description, publication_status, adaptive_enabled) "
-                + "VALUES (?, ?, 'U6 course', 'U6 fixture', 'hidden', false)", courseId, instructor);
+                + "VALUES (?, ?, 'D2 course', 'D2 fixture', 'hidden', false)", courseId, instructor);
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
         try {
+            tx.executeWithoutResult(status -> assignmentRepository.insert(
+                    new Assignment(id, courseId, null, "Inserted", "I", deadline, "hidden")));
+            assertAssignmentSqlEpoch(id, deadline);
+            tx.executeWithoutResult(status -> assertEquals(deadline,
+                    assignmentRepository.findInCourse(id, courseId).orElseThrow().deadline_at()));
+
+            // A targeted JPQL UPDATE must use the field's JDBC type too, including the historical leap-day probe.
+            tx.executeWithoutResult(status -> assignmentRepository.updateDefinition(
+                    id, courseId, null, "Replaced", "I2", deadline));
+            assertAssignmentSqlEpoch(id, deadline);
             tx.executeWithoutResult(status -> {
-                assignmentRepository.insert(new Assignment(latest, courseId, null, "Latest", "I", latestDeadline, "hidden"));
-                assignmentRepository.insert(new Assignment(earliest, courseId, null, "Earliest", "I", earliestDeadline, "hidden"));
-                assignmentRepository.insert(new Assignment(micro, courseId, null, "Micro", "I", microDeadline, "hidden"));
+                Assignment read = assignmentRepository.findInCourse(id, courseId).orElseThrow();
+                assertEquals("Replaced", read.title());
+                assertEquals(deadline, read.deadline_at());
             });
-            tx.executeWithoutResult(status -> {
-                assertEquals(latestDeadline, assignmentRepository.findInCourse(latest, courseId).orElseThrow().deadline_at());
-                assertEquals(earliestDeadline, assignmentRepository.findInCourse(earliest, courseId).orElseThrow().deadline_at());
-                assertEquals(microDeadline, assignmentRepository.findInCourse(micro, courseId).orElseThrow().deadline_at());
-            });
-            assertEquals("9999-12-31 23:59:59.999999+00", jdbc.queryForObject(
-                    "SELECT to_char(deadline_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US') || '+00' FROM assignments WHERE id = ?",
-                    String.class, latest));
-            // The JDBC timestamp binding uses the hybrid Julian/Gregorian calendar, so instants before
-            // 1582-10-15 are stored a few days apart from their ISO value. Every value still round-trips
-            // exactly through the application (above) and SQL order stays monotonic (below).
-            assertEquals(List.of(earliest, micro, latest), jdbc.queryForList(
-                    "SELECT id FROM assignments WHERE course_id = ? ORDER BY deadline_at", UUID.class, courseId));
+
+            // Store via a PostgreSQL text cast, independent of Hibernate and java.sql.Timestamp.
+            // PostgreSQL has no year zero: ISO 0000 is year 0001 BC.
+            String literal = input.replace('T', ' ').replace("Z", "+00");
+            if (literal.startsWith("0000-")) literal = "0001-" + literal.substring(5) + " BC";
+            jdbc.update("UPDATE assignments SET deadline_at = CAST(? AS timestamptz) WHERE id = ?", literal, id);
+            assertAssignmentSqlEpoch(id, deadline);
+            for (String zone : List.of("UTC", "America/New_York", "Asia/Ho_Chi_Minh")) {
+                tx.executeWithoutResult(status -> {
+                    jdbc.execute("SET LOCAL TIME ZONE '" + zone + "'");
+                    assertEquals(deadline, assignmentRepository.findInCourse(id, courseId).orElseThrow().deadline_at(), zone);
+                    assertEquals(deadline, assignmentRepository.findPageInCourse(courseId, 0, 20).getFirst().deadline_at(), zone);
+                    assertEquals(deadline, assignmentRepository.findInCourseForUpdate(id, courseId).orElseThrow().deadline_at(), zone);
+                });
+            }
         } finally {
             jdbc.update("DELETE FROM assignments WHERE course_id = ?", courseId);
             jdbc.update("DELETE FROM courses WHERE id = ?", courseId);
+            jdbc.update("DELETE FROM users WHERE id = ?", instructor);
+        }
+    }
+
+    private void assertAssignmentSqlEpoch(UUID id, Instant expected) {
+        BigDecimal epoch = BigDecimal.valueOf(expected.getEpochSecond()).add(BigDecimal.valueOf(expected.getNano(), 9));
+        BigDecimal stored = jdbc.queryForObject("SELECT extract(epoch FROM deadline_at) FROM assignments WHERE id = ?",
+                BigDecimal.class, id);
+        assertEquals(0, epoch.compareTo(stored), () -> expected + ": expected SQL epoch " + epoch + ", actual " + stored);
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void assignmentDeadlineSqlOrderingAndComparisonsUseUtcInstants() {
+        UUID instructor = user("instructor"), course = UUID.randomUUID();
+        List<Instant> deadlines = List.of(Instant.parse("0000-01-01T00:00:00Z"),
+                Instant.parse("1500-03-09T23:59:59.999999Z"), Instant.parse("1500-03-10T00:00:00Z"),
+                Instant.parse("1582-10-14T23:59:59.999999Z"), Instant.parse("1582-10-15T00:00:00Z"),
+                Instant.parse("2026-12-01T00:00:00Z"), Instant.parse("9999-12-31T23:59:59.999999Z"));
+        List<UUID> ids = deadlines.stream().map(value -> UUID.randomUUID()).toList();
+        jdbc.update("INSERT INTO courses (id,instructor_id,title,description,publication_status,adaptive_enabled) "
+                + "VALUES (?,?,'D2 ordering','D2 fixture','hidden',false)", course, instructor);
+        try {
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                for (int index = deadlines.size() - 1; index >= 0; index--) {
+                    assignmentRepository.insert(new Assignment(ids.get(index), course, null, "D2", "I", deadlines.get(index), "hidden"));
+                }
+            });
+            assertEquals(ids, jdbc.queryForList("SELECT id FROM assignments WHERE course_id = ? ORDER BY deadline_at", UUID.class, course));
+            assertEquals(ids.subList(0, 2), jdbc.queryForList("SELECT id FROM assignments WHERE course_id = ? "
+                    + "AND deadline_at < '1500-03-10T00:00:00Z'::timestamptz ORDER BY deadline_at", UUID.class, course));
+        } finally {
+            jdbc.update("DELETE FROM assignments WHERE course_id = ?", course);
+            jdbc.update("DELETE FROM courses WHERE id = ?", course);
             jdbc.update("DELETE FROM users WHERE id = ?", instructor);
         }
     }
