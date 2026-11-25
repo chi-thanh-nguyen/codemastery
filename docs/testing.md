@@ -7510,3 +7510,14 @@ rendered verification, eligible formal review of the corrected HEAD, required gr
 CI, independent QA and protected integration. The prior approval at 10d3198 is not
 approval of the remediation. No merge, deployment, release or Project acceptance
 is performed by this task.
+
+
+Post-push harness follow-up: SonarCloud on `0582fd6` flagged the local polling
+condition `pendingRead` as unchanged within its loop (new-code reliability gate).
+The bounded loop was updated by an asynchronous request callback, but the probe
+now uses an explicit request-start receipt and a bounded 7-second deadline with
+cleanup instead. Held reads are released together, including superseded requests.
+This changes test synchronization only, with no production implementation change;
+no rule suppression, tolerance change or removed assertion. Focused browser verification passes 6 cases in each of Firefox 155 and WebKit 26.6,
+and the 8 harness lifecycle tests pass for this follow-up; the earlier full
+matrix and runtime-source evidence remain applicable to the identical application.

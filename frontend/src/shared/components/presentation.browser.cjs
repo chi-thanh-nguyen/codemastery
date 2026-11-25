@@ -1597,8 +1597,8 @@ function assertWorkspaceGeometry(measured, width) {
 }
 
 /** Focused FE32 regression mode; controlled APIs, actual production shell and a temporary full-capacity fixture. */
-async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl) {
-    const result = { engine, version: null, passed: [], failed: [], notExercised: [], measurements: [] };
+async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl, selection = 'all') {
+    const result = { engine, selection, version: null, passed: [], failed: [], notExercised: [], measurements: [] };
     const dir = path.join(out, engine); fs.mkdirSync(dir, { recursive: true });
     let browser;
     try { browser = await playwright[engine].launch({ headless: true }); }
@@ -1611,7 +1611,7 @@ async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl) {
     const ready = async (page) => { await page.locator('header').first().waitFor(); await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(300); };
     const longName = 'Alexandria Nguyễn Montgomery';
     try {
-        for (const track of ['production', 'future-fixture']) for (const role of track === 'production' ? ['Anonymous', 'Learner', 'Instructor', 'Administrator'] : ['Learner', 'Instructor', 'Administrator']) {
+        for (const track of selection === 'focus' ? [] : ['production', 'future-fixture']) for (const role of track === 'production' ? ['Anonymous', 'Learner', 'Instructor', 'Administrator'] : ['Learner', 'Instructor', 'Administrator']) {
             for (const width of [360, 899, 900, 1199, 1200, 1440]) for (const preference of ['light', 'dark', 'system']) {
                 const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: preference === 'system' ? 'dark' : 'light' });
                 await context.addInitScript((value) => localStorage.setItem('codemastery.theme', value), preference);
@@ -1641,7 +1641,7 @@ async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl) {
             }
         }
         // Every possible active full-menu item, with both short and long names, at the capacity boundaries.
-        for (const role of ['Instructor', 'Administrator']) for (const width of [900, 1200]) for (const displayName of ['short', 'long']) {
+        for (const role of selection === 'focus' ? [] : ['Instructor', 'Administrator']) for (const width of [900, 1200]) for (const displayName of ['short', 'long']) {
             const context = await browser.newContext({ viewport: { width, height: 900 } }), page = await context.newPage();
             try {
                 await page.goto(new URL(`${role === 'Instructor' ? '/teach' : '/admin'}?role=${role}&name=${displayName}`, fixtureUrl).href); await ready(page);
@@ -1660,7 +1660,19 @@ async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl) {
                 const context = await browser.newContext({ viewport: { width: 1200, height: 900 } });
                 const api = createApi(); Object.assign(api.state, { role: 'Instructor', displayName: longName, restore: true });
                 await context.route('**/api/**', api.handle);
-                let release, pendingRead = false, hold = true;
+                let hold = true, acknowledgeRead;
+                let readStarted = new Promise((done) => { acknowledgeRead = done; });
+                const heldReads = new Set();
+                const release = () => { hold = false; for (const done of heldReads) done(); heldReads.clear(); };
+                const armRead = () => { hold = true; readStarted = new Promise((done) => { acknowledgeRead = done; }); };
+                const waitForRead = async () => {
+                    let timeout;
+                    try {
+                        await Promise.race([readStarted, new Promise((_, reject) => {
+                            timeout = setTimeout(() => reject(new Error('owned Course GET did not start')), 7000);
+                        })]);
+                    } finally { clearTimeout(timeout); }
+                };
                 let course = { id: primaryId, title: 'Delayed owned Course', description: 'Synthetic Course for focus regression.', publicationStatus: 'hidden', prerequisiteDescription: null, chapters: [] };
                 await context.route('**/api/instructor/courses**', async (route) => {
                     const p = new URL(route.request().url()).pathname;
@@ -1668,7 +1680,7 @@ async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl) {
                     if (p.endsWith('/skill-graph')) return route.fulfill(ok({ courseId: primaryId, skills: [], prerequisites: [], mappings: [] }));
                     if (p === `/api/instructor/courses/${primaryId}`) {
                         if (route.request().method() === 'PUT') { course = { ...course, ...route.request().postDataJSON() }; return route.fulfill(ok(course)); }
-                        if (hold) { pendingRead = true; await new Promise((done) => { release = done; }); }
+                        if (hold) await new Promise((done) => { heldReads.add(done); acknowledgeRead(); });
                         return route.fulfill(ok(course)).catch(() => undefined);
                     }
                     return route.fallback();
@@ -1676,9 +1688,8 @@ async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl) {
                 const page = await context.newPage(); page.setDefaultTimeout(7000);
                 try {
                     await page.goto(new URL('/teach', baseUrl).href); await page.getByRole('link', { name: new RegExp(course.title) }).click();
-                    // Wait for the controlled request, without releasing its response.
-                    for (let attempt = 0; !pendingRead && attempt < 100; attempt++) await page.waitForTimeout(10);
-                    assert(pendingRead, 'owned Course GET did not start');
+                    // The route handler acknowledges its held request; no polling or timing guess.
+                    await waitForRead();
                     const account = page.getByRole('button', { name: /^Account menu/ });
                     if (scenario === 'user-focus' || scenario === 'user-input') {
                         await account.focus();
@@ -1692,7 +1703,7 @@ async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl) {
                         await peer.evaluate(() => { const channel = new BroadcastChannel('codemastery-auth'); channel.postMessage({ type: 'signed-in' }); channel.close(); }); await peer.close();
                         await page.getByRole('heading', { name: "You don't have access to this page" }).waitFor();
                     }
-                    hold = false; release();
+                    release();
                     if (scenario === 'navigation-away' || scenario === 'session-replacement') {
                         await page.waitForTimeout(100); assert.equal(await page.getByRole('heading', { name: course.title, exact: true }).count(), 0);
                     } else {
@@ -1703,19 +1714,19 @@ async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl) {
                             await page.getByRole('button', { name: 'Settings', exact: true }).click();
                             const description = page.getByLabel('Description');
                             await description.fill('Acknowledged description');
-                            hold = true; pendingRead = false;
+                            armRead();
                             await page.getByRole('button', { name: 'Save changes', exact: true }).click();
                             await page.getByText('Settings saved. Refreshing course…', { exact: true }).waitFor();
-                            assert(pendingRead, 'post-save Course GET did not start');
+                            await waitForRead();
                             await description.fill('Ongoing unsaved input');
-                            hold = false; release();
+                            release();
                             await page.waitForTimeout(150);
                             assert(await description.evaluate((e) => e === document.activeElement), 'background GET stole input focus');
                             assert.equal(await description.inputValue(), 'Ongoing unsaved input');
                         }
                     }
                     await page.screenshot({ path: path.join(dir, `focus-${scenario}.png`) });
-                } finally { hold = false; release?.(); await context.close(); }
+                } finally { release(); await context.close(); }
             });
         }
     } finally { await browser.close(); }
