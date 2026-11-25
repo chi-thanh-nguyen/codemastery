@@ -357,8 +357,7 @@ export function LiveQuizIntroPage({ courseId, quizId, courseTitle }: { courseId:
                         Resume attempt
                     </Button>
                 ) : (
-                    <Button variant="contained" sx={{ mt: 3 }} onClick={() => void handleStart()} disabled={starting}>
-                        {starting ? 'Starting…' : history && history.length > 0 ? 'Start another attempt' : 'Start quiz'}
+                    <Button variant="contained" sx={{ mt: 3 }} onClick={() => { void handleStart(); }} disabled={starting}>                        {starting ? 'Starting…' : history && history.length > 0 ? 'Start another attempt' : 'Start quiz'}
                     </Button>
                 )}
             </Tile>

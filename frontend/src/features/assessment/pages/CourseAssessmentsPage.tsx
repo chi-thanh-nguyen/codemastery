@@ -62,8 +62,8 @@ export function CourseAssessmentsPage({ courseTitle, items, filter, onFilterChan
     </Page>;
 }
 
-export const CURRENT_DOC_INSTANCE = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-
+let docInstanceCounter = 0;
+export const CURRENT_DOC_INSTANCE = `doc-${Date.now()}-${++docInstanceCounter}`;
 export function LiveCourseAssessmentsPage({ courseId, courseTitle }: { courseId: string; courseTitle: string }) {
     const auth = useAuth();
     const navigate = useNavigate();
