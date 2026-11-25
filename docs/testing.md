@@ -23,6 +23,217 @@ checks and protected integration. This records design, not newly executed tests.
 CT17's two Batch 4 operational checkpoints remain pending Leader inputs.
 Earlier dated records below retain their approval scope and history.
 
+## SH05 storage adapter qualification — 25 November 2026
+
+`FileStorageIntegrationTest` implements the SH05 portion of ADR012 §19.3 at its
+approved path. It extends `AbstractIntegrationTest`, starts the exact Compose
+MinIO digest in an isolated Testcontainers network, provisions a random bucket
+and a separate ephemeral application identity using the pinned Compose `mc`, and
+executes production store/open/delete through that bucket-scoped identity. Root
+credentials are used only by the test's bootstrap client. No shared environment
+or persistent container reuse is used. Its Spring datasource pool is private to
+this suite's context (maximum two, zero minimum idle, 10-second idle timeout),
+so the adapter tests do not retain a default ten-connection pool in the shared JVM.
+
+The first `./mvnw -o verify` execution after test compilation passed **1,104 unit
+tests** and **74 SH05 integration cases**. The full integration phase failed in
+`SampleDataSeedIntegrationTest` with PostgreSQL `too many clients already`
+(573 cases, one failure and 44 errors); it is not a passing full verification.
+The first pool adjustment used a maximum of one and failed during Flyway
+initialization (74 SH05 context errors); Flyway needs a second connection while
+holding its migration lock. Self-audit finding SH05-A01 corrects the suite's
+maximum to two, with zero minimum idle and a 10-second idle timeout. The complete
+integration phase then passed **572 cases, zero failures/errors/skips**, including
+all **74 SH05 cases** and **47 seed cases**, using:
+
+```bash
+./mvnw -o test-compile failsafe:integration-test failsafe:verify jacoco:report
+```
+
+This reran the materially affected integration phase; the already passed 1,104
+unit tests and production source were unchanged. It is separate execution evidence,
+not a claim that the earlier `./mvnw -o verify` invocation passed. The passing
+MinIO container was `e032f3db685bb99130fffd9a78f5d4b0b4fa5b938f8e2a12037abb4e933d25d6`,
+with image/config identity
+`sha256:8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40`.
+PostgreSQL 17.11 was built by the shared DP01 foundation; Java was Temurin 25.0.4.1
+and Docker Engine 29.8.1 on the local ARM64 host. No deployment was performed.
+
+The PR-wide author self-audit inspected the exact interface and exception hierarchy,
+key/type rules, upload truncation/underflow and non-repeatable streams, provider
+code/status classification, safe logging and IO errors, metadata-abort ownership,
+configuration validation/lazy startup, transport/client cleanup, and architecture,
+placement and scope. SH05-A01 was the confirmed actionable finding; no production
+contract defect was confirmed. Its final delta review includes the corrected pool
+and this evidence update. This is not independent review or acceptance.
+
+Real-provider cases cover three PDF/ZIP prefix combinations with over 2 MiB of
+exact streamed bytes, metadata, missing keys, repeated deletion, no cross-bucket
+access, and short/overlong streams including lengths above the SDK's 128 KiB
+reset buffer. Upload ownership is checked with a non-repeatable stream. Controlled
+HTTP cases qualify one request per operation at 301/307/403/404/429/500/503,
+finite timeouts and suppressed provider DEBUG/TRACE diagnostics with an application
+logging positive control. Mockito cases separately cover provider code/status
+classification, TLS/connection/timeout failures, malformed metadata with response
+abort, checked read/close errors and shutdown cleanup. These doubles are not
+MinIO interoperability evidence.
+
+This does not implement the downstream B5-O05 transaction fault matrix,
+B5-O10 REST admission/replacement re-read or B5-O14 download/database-pool case.
+Those need CO09/AS09 and QA10. Authorization, filename/signature checks and upload
+limits remain consumer responsibilities. Independent review, required remote CI,
+runtime provisioning, exposure-risk acceptance and release/deployment are separate.
+
+### SH05-R01 first lifecycle remediation — 25 November 2026 (historical)
+
+**Superseded by round 2 below.** The following records the first author-side
+remediation and its executed evidence; the subsequent independent concurrency
+review found its continuous-confidentiality claim incomplete.
+
+An independent full-PR review of `bba812e` confirmed P2 SH05-R01: Boot logging
+initialization removed the constructor-installed filter, and a retained adapter
+then emitted SDK/Apache diagnostics containing the synthetic object key and access
+identity. Raw secret-key disclosure was not established. That head's passing CI
+did not cover logging reinitialization.
+
+The remediation keeps one context-owned filter/reset listener. Logback 1.5.38
+detaches appenders, stops and clears turbo filters, then fires reset callbacks.
+Boot 4.1.1 additionally stops the context first, which removes even reset-resistant
+context listeners. The filter's stop hook re-registers its listener before the next
+reset callback restores source denial, before new output is attached. No per-call
+repair, background thread, new namespace suppression or changed storage behavior
+is introduced. The guard is not removed when an individual adapter/context closes.
+
+`diagnosticConfidentialitySurvivesLoggingLifecycleInIsolatedJvm` runs its nested
+`LoggingLifecycleProbe` in a child JVM. It retains the same real adapters through
+four actual Boot initializations (including ECS), Joran XML reconfiguration and
+twenty Logback resets, with explicit SDK/Apache TRACE child levels. Two Spring
+contexts, closing one while the other remains usable, invalid consumed config,
+concurrent DELETE failures and an active returned download are exercised against
+an ephemeral loopback HTTP fixture. A barrier admits a DELETE and pauses its response
+before Boot initialization while the returned download is also active; neither
+requires operation-entry repair. Captured provider events are zero; generated
+key/access/secret strings and signed Authorization diagnostics are absent, while
+application-log positive controls remain present. The fixture's own JDK HTTP-server
+JUL request logging is disabled only in this child; production SDK/Apache TRACE
+remains enabled. One filter/listener remains after repeated initialization.
+
+The child owns and closes its server, workers, contexts and streams. The parent
+bounds/terminates it and deletes its temporary output. Process-wide logging resets,
+levels, appenders, console capture and listeners cannot contaminate another suite.
+The final regression was also executed with the original `bba812e` adapter compiled
+into isolated classes: it failed on observable provider diagnostic emission after
+Boot initialization. It therefore detects the original defect rather than merely
+checking for a named filter.
+
+Executed after remediation from `backend/`:
+
+```bash
+./mvnw -o -DskipTests test-compile
+./mvnw -o '-Dit.test=FileStorageIntegrationTest#diagnosticConfidentialitySurvivesLoggingLifecycleInIsolatedJvm+syntheticHttpFailuresAreNotRetriedOrLoggedEvenAtTrace+contextShutdownClosesClientAndTransportEvenWhenClientCloseFails+simulatedTransportAndUnclassified404FailuresAreSafeAndNeverMissingObjects+simulatedReadAndCloseFailuresKeepCheckedSemanticsWithoutProviderDiagnostics+unusedAdapterDoesNotResolveOptionalConfigurationAndConsumptionFailsClosed+consumptionRejectsMissingPlaceholderAndUnresolvableConfiguration' test-compile failsafe:integration-test failsafe:verify
+```
+
+Compilation and all 18 selected cases passed, with zero failures/errors/skips.
+The lifecycle case was rerun alone and passed after tightening child cleanup and
+adding the final in-flight Boot barriers. The nested probe also passed directly.
+Development candidates that used
+only a reset listener, or restored a listener from status callbacks, failed this
+regression and were replaced before commit; they are not passing evidence.
+This is remediation-author verification and a delta-focused self-audit, not fresh
+independent acceptance. No new JaCoCo percentage or complete local verify is claimed.
+The earlier 1,104-unit/572-integration CI pass belongs to the pre-remediation tree.
+Interface, streaming, metadata/error mapping, timeout/retry, upload/download close
+and SH05-A01 pool code are byte-identical outside the diagnostic guard. Unaffected
+storage matrices and unrelated backend/frontend/E2E/VM suites were not repeated.
+Fresh independent delta review and required new-head CI remain integration gates;
+remote CI is not awaited or manually rerun.
+
+
+### SH05-R01 round 2: output-boundary confidentiality — 25 November 2026
+
+The independent delta review of `1ba256d3504b8879ce4d26b805585be3a022460e`
+classified SH05-R01 as **PARTIALLY_FIXED**, P2. Source restoration after reset was
+correct but did not prevent a logging call admitted while turbo filters were
+absent from reaching a newly attached appender. Its network-free synthetic
+check recorded 999 provider events during 10,000 resets, with initial denial,
+application controls and one final filter/listener. This established provider
+event escape, not disclosure of actual credentials or protected data.
+
+The Leader authorized the bounded round-2 correction and explicitly added
+`backend/src/main/resources/logback-spring.xml` plus its single repository-tree
+entry to the allowed file scope. The supplied console configuration installs
+`S3FileStorage.ProviderDiagnosticsFilter` before starting/attaching output, using
+the existing Boot defaults and `logging.structured.format.console` setting.
+Pattern output and ECS remain available. The filter denies exactly the previously
+suppressed SDK/Apache namespaces and returns NEUTRAL for application logging.
+No dependency, environment variable, destination or storage-interface change is
+introduced. Constructor-time TurboFilter/listener registration is removed.
+
+Correctness depends on delivery, not eventual filter registration: Logback 1.5.38
+`AppenderBase`/`UnsynchronizedAppenderBase.doAppend` checks each appender's filter
+chain before output. Every live old/new sink has its own stateless deny filter;
+stopping/detaching an old sink does not remove its chain, and Joran constructs
+and configures a replacement before starting/attaching it. A provider event
+admitted before/during reset is therefore denied even when delivered afterwards.
+There is no adapter-owned hook, shared listener list, callback lock or repair
+thread. Alternative Joran/programmatic outputs must retain this boundary first in every filter chain;
+arbitrary unfiltered output or deliberate hook removal remains outside scope.
+
+`diagnosticConfidentialityDuringConcurrentLoggingInIsolatedJvm` launches the
+network-free `LoggingConcurrencyProbe`. Its principal check pauses an ordinary
+synthetic provider log using Logback's public sequence-number hook, which runs
+inside event construction after source admission and before appender lookup.
+It completes actual Boot reconfiguration, then releases delivery to the new
+output. Both default and ECS output deny the pending diagnostic and emit the
+application positive control; the encoder type is also checked. This uses
+barriers rather than relying on repetition to hit the scheduling gap.
+
+The same child checks an already-admitted event against unfiltered (must capture)
+and guarded (must deny) sinks, exact provider namespace boundaries, and application
+output. Four ordinary provider-logging workers then overlap 1,000 lock-protected
+resets with fresh guarded sinks: zero provider output, application controls present
+and one confidentiality filter per active appender. The parent enforces its
+60-second bound, forced termination and temporary-output deletion. The child
+releases barriers before closing its executor and stops its logging context.
+No parent-JVM logging state or outer container fixture is initialized by the child.
+
+The existing lifecycle child retains real SDK requests against a synthetic loopback
+server, default/ECS Boot initialization, Joran, twenty resets, retained adapters,
+two Spring contexts, context closure, invalid consumed settings, an active returned
+stream and a barrier-admitted DELETE. As in supported application startup, initial
+output is configured before consuming the adapter; the same adapters then survive
+all four reinitializations. Its test sinks carry the same output filter as production.
+The original sensitive-string assertions and application positive controls remain.
+The shared PostgreSQL foundation and SH05-A01 pool configuration are unchanged.
+
+Executed from `backend/` during round 2:
+
+```bash
+./mvnw -o -DskipTests test-compile
+./mvnw -o '-Dit.test=FileStorageIntegrationTest#diagnosticConfidentialityDuringConcurrentLoggingInIsolatedJvm+diagnosticConfidentialitySurvivesLoggingLifecycleInIsolatedJvm+syntheticHttpFailuresAreNotRetriedOrLoggedEvenAtTrace+contextShutdownClosesClientAndTransportEvenWhenClientCloseFails+simulatedTransportAndUnclassified404FailuresAreSafeAndNeverMissingObjects+simulatedReadAndCloseFailuresKeepCheckedSemanticsWithoutProviderDiagnostics+unusedAdapterDoesNotResolveOptionalConfigurationAndConsumptionFailsClosed+consumptionRejectsMissingPlaceholderAndUnresolvableConfiguration' test-compile failsafe:integration-test failsafe:verify
+```
+
+Compilation and 19 selected cases passed, zero failures/errors/skips. The final
+two lifecycle/concurrency cases were rerun through Failsafe after tightening the
+observable-output assertion ordering; both passed. Both children also passed directly. A scratch-only mutation removed the output filters from a
+classpath copy of the XML: the final concurrency child failed on observable
+**Deferred provider event reached new output**, before registration-count checks.
+This supplements the historical first-remediation failure; it is an output-boundary
+omission control, not a claim to rerun the entire earlier revision. No tracked file
+or PR history was changed for the negative control.
+
+Non-logging adapter text (normalizing only logging imports/guard/call) and the exact
+interface remain byte-identical to `1ba256d`; the POM, configuration bindings,
+timeouts/retry, IO/stream ownership and test pool are unchanged. Unaffected full
+backend, streaming/MinIO, frontend/E2E and VM matrices were not repeated. No complete
+local verify or new JaCoCo percentage is claimed. The 16 successful checks at
+`1ba256d` are historical baseline evidence, not checks of this correction.
+
+Author-side obligation assessment after the focused audit: interface 6/6, adapter
+20/20, overall 26/26. This is remediation-author verification, not fresh independent
+acceptance. Independent delta review, eligible protected approval, final-head CI,
+current-main requirements and downstream/operational qualification remain separate.
+
 ## Purpose
 
 This document describes CodeMastery's current testing contract, based on
@@ -62,6 +273,7 @@ verification is separate work.
 
 | Suite | Added by | What it exercises |
 | --- | --- | --- |
+| `FileStorageIntegrationTest` | SH05, 25 November 2026 | Real pinned Compose MinIO store/open/delete with an ephemeral bucket-scoped application identity; exact stream lengths and metadata; safe configuration, lifecycle and exceptions; simulated provider faults and controlled HTTP retry/timeout/logging cases. Extends `AbstractIntegrationTest` under ADR012 §19.3. CO09/AS09 transactions, authorization and QA10 acceptance remain downstream. See [SH05 qualification](#sh05-storage-adapter-qualification--25-november-2026). |
 | `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. DP01 additions: anonymous nondetailed `/actuator/health` UP/503 DOWN, default-deny for the other Actuator and API-documentation paths, invalid/locked-account JWT 401 and Learner-only 403 ([record](#dp01-private-health-probe-verification--1-november-2026)). AU07 additions (PR #239): digest-only issuance and single-use confirmation; identical 202s for unknown/locked/repeated requests, with only eligible accounts issued; delivery after commit without a held User lock; two concurrent confirmations yield exactly one success; rollback when consumption fails; re-check after the User-lock wait; generic 400 for expired, future, locked and reused capabilities; unchanged CT01 bearer validity; a nested context with unconfigured delivery, where health, registration and login work and nothing is issued; and the production 415 for both recovery operations plus the deny-by-default 403 in the full application context (test-only controllers are `@TestComponent`s and are not component-scanned). `AuthServiceTest` adds real SMTP exchanges with an isolated loopback STARTTLS server: delivery only after STARTTLS and successful AUTH, and no message for a server that does not offer AUTH, rejected credentials, missing STARTTLS, or an untrusted or wrongly named certificate. Uses an ephemeral JWT secret. |
 | `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119; CO03/CO14, PR #262; CO06 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations; CO03.content owner rows, scoped reads, appends, reorders and materials, and CO14 adaptive-field storage ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `AdaptiveLearningFlowIntegrationTest` | CO14, PR #262 | The Course part of B1-O14/B1-O15: the configuration guard's real transactions, root lock lifetime, outer joining, incompatible contexts, stale managed state, contention with enrollment and NOWAIT, plus the Course storage handoff. Adaptive (AD08) cases are not implemented ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
@@ -785,8 +997,10 @@ test-count or coverage-percentage claim is made for them.
 - **Deployment.** No test reaches the real VM or checks outside-network access
   (DP01 #71, DP03 #72). The private `/actuator/health` probe is verified only
   locally and in CI ([record](#dp01-private-health-probe-verification--1-november-2026)).
-- **Object storage.** No backend storage adapter exists, so no test covers file
-  upload or delivery (CT09).
+- **Object storage.** SH05 qualifies the backend storage adapter as described in
+  [its scoped record](#sh05-storage-adapter-qualification--25-november-2026).
+  CO09/AS09 file upload/download REST, authorization and transaction lifecycle
+  verification remain downstream QA10 work.
 - **Assistive technology.** No test establishes actual screen-reader output; no
   manual VoiceOver, NVDA or TalkBack session has been recorded.
 - **DESIGN r12 behavior.** FE34 (#255, PR #261) adds unit, component and browser-harness
