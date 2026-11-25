@@ -2085,6 +2085,63 @@ implement r2; do not infer concurrent-output protection or full interrupted-run
 recovery from them. New lifecycle behavior requires separate implementation and
 qualification; no environment variable or runnable command is added here.
 
+## SH05 storage adapter configuration — 25 November 2026
+
+SH05 implements `FileStorage` and its lazy `S3FileStorage` component under ADR010
+§§4–7, including the §16–18 corrections. This implements the storage boundary;
+CO09/AS09 file admission, REST delivery and transaction lifecycles remain downstream.
+The earlier dated implementation snapshots below retain their historical meaning.
+
+The adapter consumes only the existing `codemastery.storage.*` properties and
+`STORAGE_ENDPOINT`, `STORAGE_REGION`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`,
+`STORAGE_SECRET_KEY`, `STORAGE_PATH_STYLE_ACCESS` bindings. It validates them when
+a consumer creates the bean; unrelated features do not require storage credentials.
+Invalid consumed settings stop bean creation with the input name and no value.
+Existing localhost/region/bucket/path-style fallbacks remain local convenience,
+not approved deployment values. Supply an application identity provisioned by the
+initializer; the adapter neither reads `MINIO_ROOT_*` nor provisions resources.
+
+The Project Leader explicitly approved internal timeouts in the SH05 implementation
+task on 25 November 2026: connection 5 seconds, socket read 30 seconds, attempt and
+complete API call 60 seconds each, with no retry and no new environment variable.
+Pool acquisition is bounded by the same connection timeout. These are adapter
+settings, not an upload limit or a production capacity qualification. The existing
+AWS SDK Apache transport is configured through its public SPI; no dependency changes.
+SDK and Apache HTTP diagnostics are denied at the output boundary, including
+DEBUG/TRACE wire and signing output; application logging remains available.
+`backend/src/main/resources/logback-spring.xml` configures the existing console
+output with `S3FileStorage.ProviderDiagnosticsFilter` before the appender starts
+or is attached. It reuses Boot's patterns, charset and threshold and the existing
+`logging.structured.format.console` setting (including the deployed ECS format).
+The Project Leader authorized this additional configuration file and its structure
+entry for SH05-R01 round 2 on 25 November 2026. No dependency, environment input,
+output destination or storage contract is added.
+
+A source TurboFilter can admit an event while its list is being reset; that event
+can reach a newly attached appender after source denial is restored. The output
+filter instead checks each event immediately before output, including an event
+admitted before or during reconfiguration. Old appenders retain their filter
+until stopped; replacement appenders start with their own filter. The stateless
+filter owns no adapter, listener, thread or transport resource. Closing a Spring
+context does not remove another adapter or active download's protection. There is
+no constructor-time logging registration or lifecycle repair callback.
+
+Application logging is configured before Spring consumes the adapter. Alternative
+Joran configurations and programmatic test sinks must install the same filter
+first in the chain before starting/attaching every output; a custom unfiltered appender or deliberate
+replacement/removal of the confidentiality boundary is outside this guarantee.
+Ordinary reset/stop/start and reinitialization with the supplied configuration
+remain supported on the existing Boot 4.1.1 / Logback 1.5.38 versions.
+
+Upload input streams belong to the caller. `open` returns a caller-owned
+`StoredObject`; use try-with-resources across header preparation and body copying.
+Read/close failures remain checked `IOException` with safe diagnostics. Input
+length must be positive and exact, and the key/media type must match CT09. Upload
+filename/signature/size-limit checks and authorization belong to the consumers.
+The adapter does not buffer the full upload or perform compensating deletion:
+the CT09 consumer owns the single best-effort cleanup of its fresh, unreferenced
+key on failed store. No new retention, overwrite or orphan policy is introduced.
+
 ## Batch 5 storage configuration, file transport and widget — 12 November 2026
 
 [ADR010](decisions/010-batch-05-contract-approvals.md) approves CT09.config,
