@@ -1,23 +1,26 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../../auth/hooks/useAuth';
-import { ApiError } from '../../../../shared/types/apiTypes';
-import { getOwnedSkillGraph } from '../api/skillGraphApi';
-import type { OwnedSkillGraph } from '../api/skillGraphApi';
+import { ApiError, cancelled } from '../../../../shared/types/apiTypes';
+import {
+    addCoursePrerequisite, createCourseSkill, deleteCourseSkill, getOwnedSkillGraph,
+    mapCourseLessonSkill, removeCoursePrerequisite, unmapCourseLessonSkill, updateCourseSkill,
+} from '../api/skillGraphApi';
+import type { OwnedSkillGraph, SkillGraphRequestOptions, SkillWritePayload } from '../api/skillGraphApi';
 
 export interface OwnedSkillGraphRead {
     /** The decoded graph of the current course and session, or null. */
     graph: OwnedSkillGraph | null;
     loading: boolean;
     error: unknown;
-    /** A fresh read, for "Try again" and for a stale copy (a skill referenced elsewhere is missing). */
+    /** A fresh read, for "Try again", after mutations, and for a stale copy. */
     reload: () => void;
 }
 
 /**
- * Read-only `getOwnedSkillGraph` state (CT05.representation; DESIGN.md D12-3). The composing owner
- * (the route, and later the course editor shell) holds it and passes the graph to the views that
- * need it (CT16.final-state F1); there is no shared cache. A course or session change discards the
- * previous graph before the new read starts. The S20 editing state is FE18's and is not part of this hook.
+ * `getOwnedSkillGraph` state (CT05.representation; DESIGN.md D12-3). The composing owner
+ * (the course editor shell) holds one read per course and session and passes the graph to the
+ * views that need it (CT16.final-state F1); there is no shared module cache. A course or session
+ * change discards the previous graph before the new read starts.
  */
 export function useOwnedSkillGraph(courseId: string): OwnedSkillGraphRead {
     const auth = useAuth(), generation = auth.generation, authenticated = auth.isAuthenticated, isCurrent = auth.isCurrent;
@@ -38,4 +41,37 @@ export function useOwnedSkillGraph(courseId: string): OwnedSkillGraphRead {
     const reload = useCallback(() => setRevision((value) => value + 1), []);
     const matches = identity !== null && state.identity === identity;
     return { graph: matches ? state.graph : null, loading: identity !== null && (!matches || state.loading), error: matches ? state.error : null, reload };
+}
+
+/** Single-flight CT05 skill, prerequisite and lesson-mapping mutations bound to the session generation. */
+export function useSkillGraphMutations(courseId: string) {
+    const auth = useAuth(), generation = auth.generation, isCurrent = auth.isCurrent;
+    const alive = useRef(false), work = useRef<AbortController | null>(null);
+    const [busy, setBusy] = useState(false);
+    useEffect(() => {
+        alive.current = true;
+        return () => { alive.current = false; work.current?.abort(); work.current = null; };
+    }, []);
+    const run = useCallback(<T,>(operation: (options: SkillGraphRequestOptions) => Promise<T>): Promise<T> => {
+        if (work.current || !alive.current) return Promise.reject(cancelled());
+        const controller = new AbortController();
+        work.current = controller;
+        const current = () => alive.current && work.current === controller && isCurrent(generation);
+        setBusy(true);
+        return operation({ signal: controller.signal, isCurrent: current })
+            .then((value) => { if (!current()) throw cancelled(); return value; },
+                (error: unknown) => { throw current() ? error : cancelled(); })
+            .finally(() => { if (work.current === controller) { work.current = null; if (alive.current) setBusy(false); } });
+    }, [generation, isCurrent]);
+
+    const actions = useMemo(() => ({
+        createSkill: (payload: SkillWritePayload) => run((options) => createCourseSkill(courseId, payload, options)),
+        updateSkill: (skillId: string, payload: SkillWritePayload) => run((options) => updateCourseSkill(courseId, skillId, payload, options)),
+        deleteSkill: (skillId: string) => run((options) => deleteCourseSkill(courseId, skillId, options)),
+        addPrerequisite: (skillId: string, prerequisiteSkillId: string) => run((options) => addCoursePrerequisite(courseId, skillId, prerequisiteSkillId, options)),
+        removePrerequisite: (skillId: string, prerequisiteSkillId: string) => run((options) => removeCoursePrerequisite(courseId, skillId, prerequisiteSkillId, options)),
+        mapLesson: (lessonId: string, skillId: string) => run((options) => mapCourseLessonSkill(courseId, lessonId, skillId, options)),
+        unmapLesson: (lessonId: string, skillId: string) => run((options) => unmapCourseLessonSkill(courseId, lessonId, skillId, options)),
+    }), [courseId, run]);
+    return { busy, run, ...actions };
 }

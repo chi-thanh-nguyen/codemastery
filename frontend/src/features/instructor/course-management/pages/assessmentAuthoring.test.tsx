@@ -8,12 +8,16 @@ import { AuthContext } from '../../../../app/providers/AuthProvider';
 import type { AuthContextValue } from '../../../../app/providers/AuthProvider';
 import { ApiError } from '../../../../shared/types/apiTypes';
 import {
-    createQuestion, createQuiz, deleteUnusedHiddenQuiz, deleteUnusedQuestion, listOwnedQuizzes, listQuestions, readOwnedQuiz, readQuestion,
-    replaceUnusedHiddenQuiz, replaceUnusedQuestion, setQuizPublication,
+    createAssignment, createQuestion, createQuiz, deleteUnusedHiddenQuiz, deleteUnusedQuestion, listOwnedAssignments, listOwnedQuizzes,
+    listQuestions, readOwnedAssignment, readOwnedQuiz, readQuestion, replaceAssignment, replaceUnusedHiddenQuiz, replaceUnusedQuestion,
+    setAssignmentPublication, setQuizPublication,
 } from '../api/assessmentAuthoringApi';
-import type { B3Question, B3QuestionPage, B3QuizOwned, B3QuizOwnedPage } from '../api/assessmentAuthoringApi';
+import type { B3Question, B3QuestionPage, B3QuizOwned, B3QuizOwnedPage, B5OwnedAssignment, B5OwnedAssignmentPage } from '../api/assessmentAuthoringApi';
+import { getOwnedCourse } from '../api/instructorCourseApi';
+import type { OwnedCourse } from '../api/instructorCourseApi';
 import { AssessmentsPage, formatTimeLimit } from './QuestionBankPage';
 import { QuizEditor, difficultySummary, timeLimitSeconds } from './QuizEditorPage';
+import { AssignmentEditor } from './AssignmentEditorPage';
 import type { SkillSource } from '../components/QuestionForm';
 import { AppRouter } from '../../../../routes';
 import { getOwnedSkillGraph } from '../../skill-graph-editor/api/skillGraphApi';
@@ -21,8 +25,14 @@ import { getOwnedSkillGraph } from '../../skill-graph-editor/api/skillGraphApi';
 vi.mock('../api/assessmentAuthoringApi', async (original) => ({
     ...await original<object>(), listQuestions: vi.fn(), createQuestion: vi.fn(), readQuestion: vi.fn(), replaceUnusedQuestion: vi.fn(), deleteUnusedQuestion: vi.fn(),
     listOwnedQuizzes: vi.fn(), createQuiz: vi.fn(), readOwnedQuiz: vi.fn(), replaceUnusedHiddenQuiz: vi.fn(), deleteUnusedHiddenQuiz: vi.fn(), setQuizPublication: vi.fn(),
+    listOwnedAssignments: vi.fn(), createAssignment: vi.fn(), readOwnedAssignment: vi.fn(), replaceAssignment: vi.fn(), setAssignmentPublication: vi.fn(),
 }));
-vi.mock('../../skill-graph-editor/api/skillGraphApi', () => ({ getOwnedSkillGraph: vi.fn() }));
+vi.mock('../api/instructorCourseApi', async (original) => ({
+    ...await original<object>(), getOwnedCourse: vi.fn(),
+}));
+vi.mock('../../skill-graph-editor/api/skillGraphApi', async (original) => ({
+    ...await original<object>(), getOwnedSkillGraph: vi.fn(),
+}));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 const courseId = '00000000-0000-4000-8000-0000000000c1';
@@ -35,27 +45,73 @@ const quiz = (patch: Partial<B3QuizOwned> = {}): B3QuizOwned => ({ id: quizId, c
     questions: [{ position: 1, question: q(1) }, { position: 2, question: q(2) }], ...patch });
 const questionPage = (content: B3Question[], patch: Partial<B3QuestionPage> = {}): B3QuestionPage => ({ content, page: 0, size: 20, totalElements: content.length, totalPages: content.length ? 1 : 0, ...patch });
 const quizPage = (content: B3QuizOwned[], patch: Partial<B3QuizOwnedPage> = {}): B3QuizOwnedPage => ({ content, page: 0, size: 20, totalElements: content.length, totalPages: content.length ? 1 : 0, ...patch });
-const http = (status: number, message = 'The request conflicts with existing information.') => new ApiError('http', message, status);
+const lessonOneId = '00000000-0000-4000-8000-0000000000b1';
+const lessonHiddenId = '00000000-0000-4000-8000-0000000000b2';
+const assignmentId = '00000000-0000-4000-8000-0000000000d1';
+const assignment = (patch: Partial<B5OwnedAssignment> = {}): B5OwnedAssignment => ({
+    id: assignmentId,
+    courseId,
+    lessonId: lessonHiddenId,
+    title: 'Loops Lab',
+    instructions: '  # Lab instructions\nSubmit a ZIP.\n',
+    deadlineAt: '2026-12-01T12:00:00.123456Z',
+    publicationStatus: 'hidden',
+    submissionCount: 4,
+    gradedCount: 2,
+    ...patch,
+});
+const assignmentPage = (content: B5OwnedAssignment[], patch: Partial<B5OwnedAssignmentPage> = {}): B5OwnedAssignmentPage => ({
+    content, page: 0, size: 20, totalElements: content.length, totalPages: content.length ? 1 : 0, ...patch,
+});
+const ownedCourseFixture = (patch: Partial<OwnedCourse> = {}): OwnedCourse => ({
+    id: courseId,
+    title: 'Python Foundations',
+    description: 'Variables, loops and functions.',
+    publicationStatus: 'hidden',
+    prerequisiteDescription: null,
+    chapters: [{
+        id: '00000000-0000-4000-8000-0000000000e1',
+        title: 'Control Flow',
+        position: 1,
+        lessons: [
+            { id: lessonOneId, chapterId: '00000000-0000-4000-8000-0000000000e1', title: 'For Loops', contentMarkdown: null, position: 1, publicationStatus: 'published', materials: [] },
+            { id: lessonHiddenId, chapterId: '00000000-0000-4000-8000-0000000000e1', title: 'While Loops', contentMarkdown: null, position: 2, publicationStatus: 'hidden', materials: [] },
+        ],
+    }],
+    ...patch,
+});
+const http = (status: number, message = 'The request conflicts with existing information.', fields?: Record<string, string>) =>
+    new ApiError('http', message, status, undefined, fields);
 
 let host: HTMLDivElement, root: Root, auth: AuthContextValue, skills: SkillSource, location = '';
 beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', class { observe() { /* jsdom */ } unobserve() { /* jsdom */ } disconnect() { /* jsdom */ } });
+    vi.stubGlobal('DOMMatrixReadOnly', class { m22 = 1; });
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
     auth = { user: { id: loops.id, displayName: 'Instructor', role: 'Instructor' }, generation: 1, isAuthenticated: true, restoring: false,
         isCurrent: (generation) => generation === 1, login: vi.fn(), register: vi.fn(), logout: vi.fn(), rememberProfile: vi.fn(), consumeReturn: () => '/courses' };
     skills = { status: 'ready', skills: [loops, arrays], reload: vi.fn() };
     vi.mocked(listQuestions).mockResolvedValue(questionPage([q(2), q(1, { skillId: arrays.id, difficulty: 'hard', kind: 'true_false', options: ['True', 'False'] })]));
     vi.mocked(listOwnedQuizzes).mockResolvedValue(quizPage([quiz(), quiz({ id: '00000000-0000-4000-8000-0000000000f2', title: 'Final test', kind: 'test', published: true, timeLimitSeconds: 600 })]));
+    vi.mocked(listOwnedAssignments).mockResolvedValue(assignmentPage([assignment(), assignment({ id: '00000000-0000-4000-8000-0000000000d2', title: 'Final Project', lessonId: null, publicationStatus: 'published', submissionCount: 0, gradedCount: 0 })]));
+    vi.mocked(getOwnedCourse).mockResolvedValue(ownedCourseFixture());
 });
-afterEach(async () => { await act(async () => root.unmount()); host.remove(); document.body.innerHTML = ''; vi.resetAllMocks(); });
+afterEach(async () => { await act(async () => root.unmount()); host.remove(); document.body.innerHTML = ''; vi.unstubAllGlobals(); vi.resetAllMocks(); });
 
 function Where() { const value = useLocation(); location = `${value.pathname}${value.search}`; return null; }
 async function mount(path: string) {
+    const courseContext = { status: 'ready' as const, data: ownedCourseFixture(), reload: vi.fn() };
     await act(async () => root.render(<MemoryRouter initialEntries={[path]}><AuthContext.Provider value={auth}><Where /><Routes>
-        <Route path="/teach/courses/:courseId/assessments" element={<AssessmentsPage courseId={courseId} skills={skills} />} />
+        <Route path="/teach/courses/:courseId/assessments" element={<AssessmentsPage courseId={courseId} skills={skills} courseContext={courseContext} />} />
         <Route path="/teach/courses/:courseId/quizzes/:quizId" element={<QuizRoute />} />
+        <Route path="/teach/courses/:courseId/assignments/:assignmentId" element={<AssignmentRoute courseContext={courseContext} />} />
     </Routes></AuthContext.Provider></MemoryRouter>));
 }
 function QuizRoute() { const id = useParams().quizId!; return <QuizEditor key={id} courseId={courseId} quizId={id} skills={skills} />; }
+function AssignmentRoute({ courseContext }: { courseContext: { status: 'loading' | 'ready' | 'error'; data: OwnedCourse | null; reload: () => void } }) {
+    const id = useParams().assignmentId!;
+    return <AssignmentEditor key={id} courseId={courseId} assignmentId={id} courseContext={courseContext} />;
+}
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 const buttons = (scope: ParentNode = document) => [...scope.querySelectorAll<HTMLElement>('button,a,[role="button"]')];
 function find(text: string, scope: ParentNode = document) {
@@ -90,14 +146,28 @@ const text = () => document.body.textContent ?? '';
 
 describe('Assessments page (S19, D12-2)', () => {
     it('opens Questions for a missing or unknown view and shows rows in API order with graph skill names', async () => {
-        await mount(`/teach/courses/${courseId}/assessments?view=assignments`);
+        await mount(`/teach/courses/${courseId}/assessments?view=unknown`);
         expect(document.querySelector('h1')?.textContent).toBe('Assessments');
         expect(listQuestions).toHaveBeenCalledWith(courseId, 0, 20, expect.objectContaining({ signal: expect.any(AbortSignal) }));
         const rows = [...document.querySelectorAll('tbody tr')].map((row) => row.textContent);
         expect(rows[0]).toContain('Question 2'); expect(rows[0]).toContain('Loops'); expect(rows[0]).toContain('Single choice');
         expect(rows[1]).toContain('Question 1'); expect(rows[1]).toContain('Arrays'); expect(rows[1]).toContain('True/false'); expect(rows[1]).toContain('Hard');
-        expect(text()).not.toContain('Assignments'); expect(text()).not.toContain('Search');
+        expect(text()).toContain('Assignments'); expect(text()).not.toContain('Search');
         expect(listOwnedQuizzes).not.toHaveBeenCalled();
+        expect(listOwnedAssignments).not.toHaveBeenCalled();
+    });
+    it('opens Assignments for ?view=assignments and renders lesson labels, submission counts and actions', async () => {
+        await mount(`/teach/courses/${courseId}/assessments?view=assignments`);
+        expect(listOwnedAssignments).toHaveBeenCalledWith(courseId, 0, 20, expect.anything());
+        expect(find('New assignment').getAttribute('href')).toBe(`/teach/courses/${courseId}/assignments/new`);
+        const rows = [...document.querySelectorAll('tbody tr')].map((row) => row.textContent);
+        expect(rows[0]).toContain('Loops Lab');
+        expect(rows[0]).toContain('While Loops (hidden)');
+        expect(rows[0]).toContain('Hidden');
+        expect(rows[1]).toContain('Final Project');
+        expect(rows[1]).toContain('—');
+        expect(rows[1]).toContain('Published');
+        expect(find('Open assignment: Loops Lab').getAttribute('href')).toBe(`/teach/courses/${courseId}/assignments/${assignmentId}`);
     });
     it('switches views by replacing the URL and reads each view from its first page', async () => {
         vi.mocked(listQuestions).mockResolvedValue(questionPage([q(1)], { totalElements: 21, totalPages: 2 }));
@@ -328,19 +398,111 @@ describe('time limits and difficulty mix', () => {
     });
 });
 
-describe('production routes (CT16.routes)', () => {
-    it('routes the Assessments page for Instructors and composes the skill graph read', async () => {
+describe('production routes and shared course shell (CT16.routes, D12-3)', () => {
+    it('wraps Assessments, Skills, Quiz editor and Assignment editor in one CourseEditorShell sharing getOwnedCourse and getOwnedSkillGraph', async () => {
+        vi.mocked(getOwnedCourse).mockResolvedValue(ownedCourseFixture());
         vi.mocked(getOwnedSkillGraph).mockResolvedValue({ courseId, skills: [loops], prerequisites: [], mappings: [] });
         vi.mocked(listQuestions).mockResolvedValue(questionPage([q(1)]));
-        await act(async () => root.render(<MemoryRouter initialEntries={[`/teach/courses/${courseId}/assessments`]}><AuthContext.Provider value={auth}><AppRouter /></AuthContext.Provider></MemoryRouter>));
+        vi.mocked(readOwnedQuiz).mockResolvedValue(quiz());
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment());
+
+        await act(async () => root.render(<MemoryRouter initialEntries={[`/teach/courses/${courseId}/assessments`]}><AuthContext.Provider value={auth}><Where /><AppRouter /></AuthContext.Provider></MemoryRouter>));
         await flush();
-        expect(document.querySelector('main h1')?.textContent).toBe('Assessments');
-        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(1); expect(listQuestions).toHaveBeenCalledTimes(1);
-        expect([...document.querySelectorAll('tbody tr')][0].textContent).toContain('Loops');
+        expect(document.querySelector('main h1')?.textContent).toBe('Python Foundations');
+        expect(document.querySelector('#assessments-title')?.textContent).toBe('Assessments');
+        expect(getOwnedCourse).toHaveBeenCalledTimes(1);
+        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(1);
+        expect(listQuestions).toHaveBeenCalledTimes(1);
+
+        // Switching to Skills and back to Assessments reuses the shell's shared reads without duplicating requests.
+        await click('Skills');
+        expect(location).toBe(`/teach/courses/${courseId}/skills`);
+        expect(getOwnedCourse).toHaveBeenCalledTimes(1);
+        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(1);
+
+        await click('Assessments');
+        await click('Quizzes');
+        await click('Open quiz: Loops check');
+        expect(location).toBe(`/teach/courses/${courseId}/quizzes/${quizId}`);
+        expect(document.querySelector('main h1')?.textContent).toBe('Loops check');
+        expect(getOwnedCourse).toHaveBeenCalledTimes(1);
+        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(1);
+
+        await click('Back to quizzes');
+        await click('Assignments');
+        await click('Open assignment: Loops Lab');
+        expect(location).toBe(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        expect(document.querySelector('main h1')?.textContent).toBe('Loops Lab');
+        expect(text()).toContain('Submitted 4 · Graded 2');
+        expect(getOwnedCourse).toHaveBeenCalledTimes(1);
     });
-    it('denies other roles before any assessment request', async () => {
+
+    it('creates, edits and publishes an assignment while preserving untouched microsecond deadlines', async () => {
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment());
+        vi.mocked(replaceAssignment).mockImplementation(async (_course, _id, write) => assignment({
+            title: write.title, instructions: write.instructions, deadlineAt: write.deadlineAt, lessonId: write.lessonId,
+        }));
+        vi.mocked(setAssignmentPublication).mockResolvedValue(assignment({ publicationStatus: 'published' }));
+
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Assignment title', 'Updated Loops Lab');
+        await click('Save changes');
+        // Untouched deadline preserves exact microsecond ISO string from server.
+        expect(replaceAssignment).toHaveBeenCalledWith(courseId, assignmentId, expect.objectContaining({
+            title: 'Updated Loops Lab',
+            deadlineAt: '2026-12-01T12:00:00.123456Z',
+            lessonId: lessonHiddenId,
+        }), expect.anything());
+        expect(text()).toContain('Saved');
+
+        await click('Publish assignment');
+        await click('Publish assignment', confirmDialog('Publish assignment?'));
+        expect(setAssignmentPublication).toHaveBeenCalledWith(courseId, assignmentId, 'published', expect.anything());
+        expect(text()).toContain('Assignment published.');
+
+        vi.mocked(createAssignment).mockResolvedValue(assignment({ id: '00000000-0000-4000-8000-0000000000d9' }));
+        await act(async () => root.unmount()); root = createRoot(host);
+        await mount(`/teach/courses/${courseId}/assignments/new`);
+        await type('Assignment title', 'New Lab');
+        await type('Instructions', 'Write tests.');
+        await type('Deadline', '2026-12-20T14:30');
+        await click('Create assignment');
+        expect(createAssignment).toHaveBeenCalledTimes(1);
+        expect(location).toBe('/teach/courses/00000000-0000-4000-8000-0000000000c1/assignments/00000000-0000-4000-8000-0000000000d9');
+    });
+
+    it('surfaces 400 field errors, 404 skill rejection and 403 read-only lock in QuestionEditorSheet', async () => {
+        vi.mocked(createQuestion)
+            .mockRejectedValueOnce(http(400, 'Please check the supplied information.', { prompt: 'Prompt invalid.' }))
+            .mockRejectedValueOnce(http(404, 'The requested resource is unavailable.'))
+            .mockRejectedValueOnce(http(403, 'You do not have permission to perform this action.'));
+        await mount(`/teach/courses/${courseId}/assessments`);
+        await click('New question');
+        const sheet = dialog();
+        await type('Question', 'Q?', sheet); await type('Option 1', 'A', sheet); await type('Option 2', 'B', sheet);
+        await act(async () => sheet.querySelector<HTMLInputElement>('input[type="radio"]')!.click());
+        await choose('Skill', 'Arrays', sheet); await choose('Difficulty', 'Easy', sheet);
+
+        await click('Save question', sheet);
+        expect(sheet.textContent).toContain('Prompt invalid.');
+
+        await type('Question', 'Q2?', sheet);
+        await click('Save question', sheet);
+        expect(skills.reload).toHaveBeenCalledTimes(1);
+        expect(sheet.textContent).toContain('This skill is no longer available. Choose another skill.');
+
+        await choose('Skill', 'Loops', sheet);
+        await click('Save question', sheet);
+        expect(sheet.textContent).toContain("You don't have access to this course.");
+        expect(find('Save question', sheet).hasAttribute('disabled')).toBe(true);
+    });
+
+    it('denies other roles before any assessment or course request', async () => {
         auth = { ...auth, user: { id: loops.id, displayName: 'Learner', role: 'Learner' } };
         await act(async () => root.render(<MemoryRouter initialEntries={[`/teach/courses/${courseId}/quizzes/new`]}><AuthContext.Provider value={auth}><AppRouter /></AuthContext.Provider></MemoryRouter>));
-        expect(text()).toContain("You don't have access to this page"); expect(getOwnedSkillGraph).not.toHaveBeenCalled(); expect(listQuestions).not.toHaveBeenCalled();
+        expect(text()).toContain("You don't have access to this page");
+        expect(getOwnedCourse).not.toHaveBeenCalled();
+        expect(getOwnedSkillGraph).not.toHaveBeenCalled();
+        expect(listQuestions).not.toHaveBeenCalled();
     });
 });

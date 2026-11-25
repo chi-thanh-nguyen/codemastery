@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../../auth/hooks/useAuth';
 import { ApiError, cancelled } from '../../../../shared/types/apiTypes';
 import {
-    createQuiz, deleteUnusedHiddenQuiz, DEFAULT_PAGE_SIZE, listOwnedQuizzes, readOwnedQuiz, replaceUnusedHiddenQuiz, setQuizPublication,
+    createAssignment, createQuiz, deleteUnusedHiddenQuiz, DEFAULT_PAGE_SIZE, listOwnedAssignments, listOwnedQuizzes,
+    readOwnedAssignment, readOwnedQuiz, replaceAssignment, replaceUnusedHiddenQuiz, setAssignmentPublication, setQuizPublication,
 } from '../api/assessmentAuthoringApi';
-import type { AuthoringRequestOptions, B3QuizOwnedPage, B3QuizWrite } from '../api/assessmentAuthoringApi';
+import type {
+    AssignmentPublicationStatus, AuthoringRequestOptions, B3QuizOwnedPage, B3QuizWrite, B5AssignmentWrite, B5OwnedAssignmentPage,
+} from '../api/assessmentAuthoringApi';
 
 /*
  * Assessment authoring state (CT16.final-state F1): transient state stays in these hooks and the
@@ -19,6 +22,20 @@ export const failureStatus = (error: unknown) => error instanceof ApiError && er
 /** No HTTP outcome was confirmed: a network failure, a 5xx or an invalid response (DESIGN.md S19 "unknown outcome"). */
 export const outcomeUnknown = (error: unknown) => error instanceof ApiError &&
     (error.kind === 'network' || error.kind === 'protocol' || error.kind === 'http' && (error.status ?? 0) >= 500);
+
+/**
+ * Extracts field-level 400 validation messages from a decoded ProblemDetail (DESIGN.md F14).
+ * Unknown field names stay at the form level rather than being silently dropped.
+ */
+export function fieldErrorsFrom(error: unknown, mapping: Readonly<Record<string, string>>): Record<string, string> {
+    if (!(error instanceof ApiError) || error.kind !== 'http' || error.status !== 400 || !error.fields) return {};
+    const out: Record<string, string> = {};
+    for (const [serverKey, message] of Object.entries(error.fields)) {
+        const localKey = mapping[serverKey];
+        if (localKey && message) out[localKey] = message;
+    }
+    return out;
+}
 
 export interface OwnerRead<T> {
     /** The decoded body for the current key and session, or null. */
@@ -87,6 +104,11 @@ export function useOwnedQuizzes(courseId: string, page: number, size = DEFAULT_P
     return useOwnerRead(`owned-quizzes|${courseId}|${page}|${size}`, (options) => listOwnedQuizzes(courseId, page, size, options));
 }
 
+/** `b5ListOwnedAssignments` for the Assignments view: one page in API order. */
+export function useOwnedAssignments(courseId: string, page: number, size = DEFAULT_PAGE_SIZE): OwnerRead<B5OwnedAssignmentPage> {
+    return useOwnerRead(`owned-assignments|${courseId}|${page}|${size}`, (options) => listOwnedAssignments(courseId, page, size, options));
+}
+
 /** The quiz editor's operations (CT23.composition/publication). Each call resolves only with a decoded, current result. */
 export function useQuizEditor(courseId: string) {
     const { busy, run } = useAuthoringOperation();
@@ -101,3 +123,17 @@ export function useQuizEditor(courseId: string) {
     return { busy, ...operations };
 }
 export type QuizEditorOperations = ReturnType<typeof useQuizEditor>;
+
+/** The assignment editor's operations (CT10.rest). Each call resolves only with a decoded, current result. */
+export function useAssignmentEditor(courseId: string) {
+    const { busy, run } = useAuthoringOperation();
+    const operations = useMemo(() => ({
+        read: (assignmentId: string) => run((options) => readOwnedAssignment(courseId, assignmentId, options)),
+        create: (write: B5AssignmentWrite) => run((options) => createAssignment(courseId, write, options)),
+        replace: (assignmentId: string, write: B5AssignmentWrite) => run((options) => replaceAssignment(courseId, assignmentId, write, options)),
+        setPublication: (assignmentId: string, status: AssignmentPublicationStatus) =>
+            run((options) => setAssignmentPublication(courseId, assignmentId, status, options)),
+    }), [courseId, run]);
+    return { busy, ...operations };
+}
+export type AssignmentEditorOperations = ReturnType<typeof useAssignmentEditor>;

@@ -27,7 +27,13 @@ const detail = { ...course, prerequisiteDescription: null, syllabus: [] };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 function Probe() { auth = useAuth(); navigate = useNavigate(); return null; }
 beforeEach(() => {
-    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T10:00:00Z')); vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080'); fetcher = vi.fn((url: string, _init?: RequestInit) => Promise.resolve(json(new URL(url).pathname.startsWith('/api/courses/') ? detail : page))); vi.stubGlobal('fetch', fetcher);
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T10:00:00Z')); vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080');
+    fetcher = vi.fn((url: string, _init?: RequestInit) => {
+        const pathname = new URL(url).pathname;
+        if (pathname === '/api/instructor/courses') return Promise.resolve(json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }));
+        return Promise.resolve(json(pathname.startsWith('/api/courses/') ? detail : page));
+    });
+    vi.stubGlobal('fetch', fetcher);
     window.history.replaceState(null, '', '/'); localStorage.clear(); sessionStorage.clear(); host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); window.history.replaceState(null, '', '/'); vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); });
@@ -96,9 +102,8 @@ describe('real declarative routing and Profile', () => {
         await formLogin(); expect(location.pathname).toBe('/profile'); expect(location.search + location.hash).toBe(''); // Consumed once: a second read falls back to the Learner's start page, never /profile again.
         expect(auth.consumeReturn()).toBe('/home'); expect(host.querySelector('dl')?.textContent).toContain('Person A');
     });
-    // Leader instruction, 7 November 2026: a Learner's default destination is Learner home; other roles keep the
-    // CT16 /courses fallback. A caller-supplied return target is still never authority.
-    it.each([['Learner', '/home'], ['Instructor', '/courses'], ['Administrator', '/courses']])('login sends a %s to %s for arbitrary supplied return targets', async (role, start) => {
+    // CT16.routes: Learner starts at /home, Instructor at /teach once Teaching home is routed, Administrator at /courses.
+    it.each([['Learner', '/home'], ['Instructor', '/teach'], ['Administrator', '/courses']])('login sends a %s to %s for arbitrary supplied return targets', async (role, start) => {
         await mount('/login?returnTo=/api/secrets'); await formLogin('Person A', role); expect(location.pathname).toBe(start); expect(location.search + location.hash).toBe('');
     });
     it.each(['Learner', 'Instructor', 'Administrator'])('shows exactly the validated three fields for %s without any Profile request', async (role) => {
@@ -207,8 +212,13 @@ it('serves the public landing page at / with public navigation and no request', 
     await click('Catalogue'); expect(location.pathname).toBe('/courses');
     expect(host.querySelector('header a[aria-label="CodeMastery home"]')?.getAttribute('href')).toBe('/');
 });
-it.each([['Learner', '/home'], ['Instructor', '/courses'], ['Administrator', '/courses']])('sends a signed-in %s from / to %s and points the logo there', async (role, start) => {
-    fetcher.mockImplementation((url: string) => Promise.resolve(json(new URL(url).pathname === '/api/me/courses' ? membershipPage() : page)));
+it.each([['Learner', '/home'], ['Instructor', '/teach'], ['Administrator', '/courses']])('sends a signed-in %s from / to %s and points the logo there', async (role, start) => {
+    fetcher.mockImplementation((url: string) => {
+        const pathname = new URL(url).pathname;
+        if (pathname === '/api/me/courses') return Promise.resolve(json(membershipPage()));
+        if (pathname === '/api/instructor/courses') return Promise.resolve(json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }));
+        return Promise.resolve(json(page));
+    });
     await mount('/courses'); await login('Role test', role); await go('/');
     expect(location.pathname).toBe(start);
     expect(host.querySelector('header a[aria-label="CodeMastery home"]')?.getAttribute('href')).toBe(start);
@@ -373,7 +383,7 @@ describe('FE34 theme preference across routes and the session', () => {
         await act(async () => root.render(<App />));
         expect(host.textContent).toContain('Restoring your session…');
         await act(async () => resolve(json(loginResponse('Person A', 'Instructor'))));
-        expect(location.pathname).toBe('/courses');
+        expect(location.pathname).toBe('/teach');
         expect(host.querySelectorAll('button[aria-label^="Theme:"]')).toHaveLength(1);
         expect(document.documentElement.dataset.colorScheme).toBe('dark');
     });
@@ -394,7 +404,7 @@ describe('FE34 theme preference across routes and the session', () => {
         expect(location.pathname).toBe('/login');
         expect(document.documentElement.dataset.colorScheme).toBe('dark');
         await formLogin('Person B', 'Instructor');
-        expect(location.pathname).toBe('/courses');
+        expect(location.pathname).toBe('/teach');
         expect(themeButton()?.getAttribute('aria-label')).toBe('Theme: Dark');
         await chooseTheme('Light');
         await signOutFromMenu();
@@ -802,5 +812,31 @@ describe('FE06 password recovery routes (CT02, CT16.routes)', () => {
         expect(host.querySelector('form [role="status"]')).toBeNull();
         expect(host.querySelector('[aria-busy="true"] [role="status"]')).toBeNull();
         expect(host.querySelector('main span[role="status"]')?.textContent).toBe('Sending the reset link…');
+    });
+});
+
+describe('FE32 Instructor navigation and parent-aware active section (CT16.routes)', () => {
+    it('shows Teaching and Catalogue for Instructors and keeps Teaching active across /teach subroutes', async () => {
+        await mount('/courses');
+        await login('Teacher', 'Instructor');
+        expect([...host.querySelectorAll('header nav a')].map((link) => link.textContent)).toEqual(['Teaching', 'Catalogue']);
+        await go('/teach');
+        expect(host.querySelector('main h1')?.textContent).toBe('Teaching');
+        expect(host.querySelector('header nav [aria-current="page"]')?.textContent).toBe('Teaching');
+        await go('/teach/courses/new');
+        expect(host.querySelector('main h1')?.textContent).toBe('Create course');
+        expect(host.querySelector('header nav [aria-current="page"]')?.textContent).toBe('Teaching');
+    });
+
+    it.each(['Learner', 'Administrator'] as const)('denies %s on /teach and /teach/courses/new without issuing Instructor API calls', async (role) => {
+        await mount('/courses');
+        await login('Other', role);
+        expect(host.querySelector('header a[href="/teach"]')).toBeNull();
+        fetcher.mockClear();
+        await go('/teach');
+        expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
+        await go('/teach/courses/new');
+        expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
+        expect(fetcher).not.toHaveBeenCalled();
     });
 });

@@ -4,6 +4,7 @@
  * No request is mocked. The session-ordering tests (ADR014 §§15–16) only delay one real
  * refresh request until a chosen moment; its request and response are never altered.
  */
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { accountMenuName, expect, expectNoPageOverflow, fixture, gotoAfterRestore, newAccount, registerThroughApi, signIn, signOut, target, test, watchAuthorization } from '../fixtures/auth-fixture';
@@ -458,7 +459,8 @@ test.describe('accounts and sessions', () => {
     test('an Instructor sees access denied for My courses and the API refuses membership changes', async ({ page }) => {
         const instructor = target.instructor;
         test.skip(!instructor, 'Needs an Instructor account (created by the disposable stack).');
-        await signIn(page, instructor!, 'courses');
+        await signIn(page, instructor!, 'teach');
+        await expect(page.getByRole('heading', { level: 1, name: 'Teaching' })).toBeVisible();
         await expect(page.getByRole('link', { name: 'My courses' })).toHaveCount(0);
         // In-app history navigation keeps the in-memory session (a typed URL would reload and restore it from the cookie).
         await page.evaluate(() => { history.pushState(null, '', '/my-courses'); dispatchEvent(new PopStateEvent('popstate')); });
@@ -609,5 +611,134 @@ test.describe('REST contract smoke (API only)', () => {
             const far = await request.get(api('/api/courses?page=107374183&size=20'));
             expect(await far.json()).toEqual({ content: [], page: 107374183, size: 20, totalElements: fixture.publishedCount, totalPages: 2 });
         }
+    });
+});
+
+test.describe('instructor course, skill graph and assessment authoring', () => {
+    test('authors a hidden course with content, skill mapping, question bank, quiz and assignment', async ({ page }) => {
+        const instructor = target.instructor;
+        test.skip(!instructor, 'Needs an Instructor account (created by the disposable stack).');
+        test.setTimeout(90_000);
+        const tag = randomUUID().slice(0, 8);
+        const courseTitle = `E2E Authoring ${tag}`;
+
+        await signIn(page, instructor!, 'teach');
+        await expect(page.getByRole('heading', { level: 1, name: 'Teaching' })).toBeVisible();
+        await page.getByRole('link', { name: 'Create course' }).first().click();
+        await expect(page).toHaveURL(/\/teach\/courses\/new$/);
+
+        await page.getByRole('textbox', { name: 'Course title' }).fill(courseTitle);
+        await page.getByRole('textbox', { name: 'Description' }).fill('End-to-end authoring verification course.');
+        await page.getByRole('button', { name: 'Create course' }).click();
+        await expect(page).toHaveURL(/\/teach\/courses\/[0-9a-f-]{36}$/i);
+        await expect(page.getByRole('heading', { level: 1, name: courseTitle })).toBeVisible();
+        await expectNoPageOverflow(page);
+
+        // Content tab: add a chapter and a hidden lesson (keeps the course hidden so public catalogue counts stay invariant).
+        await page.getByRole('button', { name: 'Add chapter' }).first().click();
+        const chapterDialog = page.getByRole('dialog', { name: 'Add chapter' });
+        await chapterDialog.getByRole('textbox', { name: 'Chapter title' }).fill('Variables & State');
+        await chapterDialog.getByRole('button', { name: 'Add chapter' }).click();
+        await expect(page.getByRole('heading', { name: 'Chapter 1: Variables & State' })).toBeVisible();
+
+        await page.getByRole('button', { name: 'Add lesson' }).click();
+        const lessonDialog = page.getByRole('dialog', { name: 'Add lesson' });
+        await lessonDialog.getByRole('textbox', { name: 'Lesson title' }).fill('Intro to Variables');
+        await lessonDialog.getByRole('button', { name: 'Add lesson' }).click();
+        await expect(page.getByText('Intro to Variables')).toBeVisible();
+
+        // Skills tab: create a skill and map it to the lesson.
+        await page.getByRole('button', { name: 'Skills', exact: true }).click();
+        await expect(page).toHaveURL(/\/skills$/);
+        await page.getByRole('button', { name: 'Add skill' }).first().click();
+        await page.getByRole('textbox', { name: 'Skill name' }).fill('Variable Binding');
+        await page.locator('form').getByRole('button', { name: 'Add skill' }).click();
+        await expect(page.getByRole('status').filter({ hasText: 'Skill added.' })).toBeVisible();
+
+        await page.getByRole('button', { name: 'Lesson mapping', exact: true }).click();
+        await page.getByRole('button', { name: 'Add skill' }).click();
+        await page.getByRole('menuitem', { name: 'Variable Binding' }).click();
+        await expect(page.getByRole('button', { name: 'Remove Variable Binding from Intro to Variables' })).toBeVisible();
+        await expectNoPageOverflow(page);
+
+        // Assessments tab -> Questions view: create a single-choice question tagged with the new skill.
+        await page.getByRole('button', { name: 'Assessments', exact: true }).click();
+        await expect(page).toHaveURL(/\/assessments$/);
+        await page.getByRole('button', { name: 'New question' }).click();
+        const sheet = page.getByRole('dialog', { name: 'New question' });
+        await sheet.getByRole('textbox', { name: 'Question' }).fill('What does let x = 2 bind?');
+        await sheet.getByLabel('Option 1', { exact: true }).fill('A mutable binding to 2');
+        await sheet.getByLabel('Option 2', { exact: true }).fill('A type alias');
+        await sheet.getByRole('radio', { name: 'Option 1 is correct' }).check();
+        await sheet.getByRole('combobox', { name: /^Skill/ }).click();
+        await page.getByRole('option', { name: /Variable Binding/ }).click();
+        await sheet.getByRole('combobox', { name: /^Difficulty/ }).click();
+        await page.getByRole('option', { name: 'Medium' }).click();
+        await sheet.getByRole('button', { name: 'Save question' }).click();
+        await expect(page.getByRole('status').filter({ hasText: 'Question saved.' })).toBeVisible();
+        await expect(page.getByText('What does let x = 2 bind?')).toBeVisible();
+        await expectNoPageOverflow(page);
+
+        // Assessments tab -> Quizzes view: create, publish, hide and delete a quiz.
+        await page.getByRole('button', { name: 'Quizzes', exact: true }).click();
+        await expect(page).toHaveURL(/\/assessments\?view=quizzes$/);
+        await page.getByRole('link', { name: 'New quiz' }).click();
+        await expect(page).toHaveURL(/\/quizzes\/new$/);
+        await page.getByRole('textbox', { name: 'Quiz title' }).fill('Variables Check');
+        await page.getByRole('combobox', { name: /^Quiz kind/ }).click();
+        await page.getByRole('option', { name: 'Practice' }).click();
+        await page.getByRole('textbox', { name: 'Minutes' }).fill('5');
+        await page.getByRole('textbox', { name: 'Seconds' }).fill('0');
+        await page.getByRole('button', { name: 'Add questions' }).click();
+        const picker = page.getByRole('dialog', { name: 'Add questions' });
+        await picker.getByRole('checkbox').check();
+        await picker.getByRole('button', { name: 'Add questions' }).click();
+        await expect(page.getByText('All questions are Medium. Learners can be recommended this quiz as Medium practice.')).toBeVisible();
+        await page.getByRole('button', { name: 'Create quiz' }).click();
+        await expect(page).toHaveURL(/\/quizzes\/[0-9a-f-]{36}$/i);
+        await expect(page.getByRole('status').filter({ hasText: 'Quiz created. It stays hidden until you publish it.' })).toBeVisible();
+        await expectNoPageOverflow(page);
+
+        await page.getByRole('button', { name: 'Publish quiz' }).click();
+        await page.getByRole('dialog', { name: 'Publish quiz?' }).getByRole('button', { name: 'Publish quiz' }).click();
+        await expect(page.getByRole('status').filter({ hasText: 'Quiz published.' })).toBeVisible();
+
+        await page.getByRole('button', { name: 'Hide quiz' }).click();
+        await page.getByRole('dialog', { name: 'Hide quiz?' }).getByRole('button', { name: 'Hide quiz' }).click();
+        await expect(page.getByRole('status').filter({ hasText: 'Quiz hidden.' })).toBeVisible();
+
+        await page.getByRole('button', { name: 'Delete quiz' }).click();
+        await page.getByRole('dialog', { name: 'Delete this quiz?' }).getByRole('button', { name: 'Delete quiz' }).click();
+        await expect(page).toHaveURL(/\/assessments\?view=quizzes$/);
+        await expect(page.getByRole('status').filter({ hasText: 'Quiz deleted.' })).toBeVisible();
+
+        // Assessments tab -> Assignments view: create, publish, hide and verify row in list.
+        await page.getByRole('button', { name: 'Assignments', exact: true }).click();
+        await expect(page).toHaveURL(/\/assessments\?view=assignments$/);
+        await page.getByRole('link', { name: 'New assignment' }).click();
+        await expect(page).toHaveURL(/\/assignments\/new$/);
+        await page.getByRole('textbox', { name: 'Assignment title' }).fill('Lab 1: Variables');
+        await page.getByRole('textbox', { name: 'Instructions' }).fill('Submit a ZIP archive with your solution.');
+        await page.getByLabel(/^Deadline/).fill('2026-12-15T18:00');
+        await page.getByRole('combobox', { name: /^Related lesson/ }).click();
+        await page.getByRole('option', { name: 'Intro to Variables (hidden)' }).click();
+        await page.getByRole('button', { name: 'Create assignment' }).click();
+        await expect(page).toHaveURL(/\/assignments\/[0-9a-f-]{36}$/i);
+        await expect(page.getByRole('status').filter({ hasText: 'Assignment created. It stays hidden until you publish it.' })).toBeVisible();
+        await expectNoPageOverflow(page);
+
+        await page.getByRole('button', { name: 'Publish assignment' }).click();
+        await page.getByRole('dialog', { name: 'Publish assignment?' }).getByRole('button', { name: 'Publish assignment' }).click();
+        await expect(page.getByRole('status').filter({ hasText: 'Assignment published.' })).toBeVisible();
+
+        await page.getByRole('button', { name: 'Hide assignment' }).click();
+        await page.getByRole('dialog', { name: 'Hide assignment?' }).getByRole('button', { name: 'Hide assignment' }).click();
+        await expect(page.getByRole('status').filter({ hasText: 'Assignment hidden.' })).toBeVisible();
+
+        await page.getByRole('link', { name: 'Back to assignments' }).click();
+        await expect(page).toHaveURL(/\/assessments\?view=assignments$/);
+        await expect(page.getByRole('link', { name: 'Lab 1: Variables', exact: true })).toBeVisible();
+        await expect(page.getByText('Intro to Variables (hidden)')).toBeVisible();
+        await expectNoPageOverflow(page);
     });
 });

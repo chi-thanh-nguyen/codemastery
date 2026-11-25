@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, Box, Button, Checkbox, Drawer, FormControlLabel, IconButton, ListItemText, MenuItem, Radio, TextField, Typography, useMediaQuery, useTheme } from '@mui/material';
+import { Link } from 'react-router';
 import { SegmentedControl } from '../../../../shared/components/ViewRail';
 import { PresentationIcon } from '../../../../shared/components/PresentationIcon';
 import { ConfirmDialog } from '../../../../shared/components/ConfirmDialog';
@@ -9,7 +10,7 @@ import { ApiError } from '../../../../shared/types/apiTypes';
 import type { QuestionDraft, SkillOption } from '../types/courseManagementTypes';
 import type { B3Question, B3QuestionWrite, QuestionDifficulty, QuestionKind } from '../api/assessmentAuthoringApi';
 import { useQuestionEditor } from '../hooks/useQuestionBank';
-import { failureStatus, isCancelled, outcomeUnknown } from '../hooks/useAssessmentEditor';
+import { failureStatus, fieldErrorsFrom, isCancelled, outcomeUnknown } from '../hooks/useAssessmentEditor';
 
 /*
  * S19 question form (DESIGN.md r12, D10-4; ADR007 §4): kind, plain-text prompt, options with
@@ -96,7 +97,15 @@ export function validateQuestion(draft: QuestionFormDraft): Record<string, strin
 }
 
 /** The form fields shared by the production sheet and the design preview. */
-export function QuestionFields({ draft, onChange, errors, skills, disabled = false }: { draft: QuestionFormDraft; onChange: (next: QuestionFormDraft) => void; errors: Record<string, string>; skills: SkillSource; disabled?: boolean }) {
+export function QuestionFields({ draft, onChange, errors, skills, disabled = false, skillsHref, onGoToSkills }: {
+    draft: QuestionFormDraft;
+    onChange: (next: QuestionFormDraft) => void;
+    errors: Record<string, string>;
+    skills: SkillSource;
+    disabled?: boolean;
+    skillsHref?: string;
+    onGoToSkills?: () => void;
+}) {
     const set = (patch: Partial<QuestionFormDraft>) => onChange({ ...draft, ...patch });
     const mark = (key: string, value: boolean) => set({ options: draft.options.map((item) => draft.kind === 'multiple_choice' ? (item.key === key ? { ...item, correct: value } : item) : { ...item, correct: item.key === key }) });
     const sorted = sortSkills(skills.skills);
@@ -125,8 +134,11 @@ export function QuestionFields({ draft, onChange, errors, skills, disabled = fal
             {draft.kind !== 'true_false' && <Button variant="text" sx={{ mt: 1 }} disabled={disabled} onClick={() => set({ options: [...draft.options, option()] })} startIcon={<PresentationIcon name="plus" />}>Add option</Button>}
         </Box>
         <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, alignItems: 'start' }}>
-            {skills.status === 'error' ? <Alert severity="error" action={<Button size="small" variant="text" onClick={skills.reload}>Try again</Button>}>Skills couldn't be loaded.</Alert>
-                : skills.status === 'ready' && sorted.length === 0 ? <Alert severity="info">This course has no skills yet. Add a skill in the Skills tab first.</Alert>
+            {skills.status === 'error' ? <Alert severity="error" action={<Button size="small" variant="text" onClick={skills.reload}>Try again</Button>}>Skills couldn&apos;t be loaded.</Alert>
+                : skills.status === 'ready' && sorted.length === 0 ? <Alert severity="info"
+                    action={skillsHref ? <Button component={Link} to={skillsHref} onClick={onGoToSkills} size="small" variant="text">Go to Skills</Button> : undefined}>
+                    This course has no skills yet. Add a skill in the Skills tab first.
+                </Alert>
                     : <TextField select label="Skill" value={skills.status === 'ready' ? draft.skillId : ''} onChange={(event) => set({ skillId: event.target.value })} required disabled={disabled || skills.status !== 'ready'}
                         error={!!errors.skillId} helperText={errors.skillId ?? (skills.status === 'loading' ? 'Loading skills…' : 'Each question checks one skill.')}
                         slotProps={{ select: { renderValue: (value) => sorted.find((skill) => skill.id === value)?.name ?? 'Skill unavailable' } }}>
@@ -158,10 +170,17 @@ function QuestionSheet({ open, title, onClose, closeDisabled, children, footer }
 
 type SheetAlert =
     | { type: 'conflict-save' | 'conflict-delete' | 'error'; message: string }
-    | { type: 'not-found' | 'unknown-create' | 'load-failed' }
+    | { type: 'not-found' | 'unknown-create' | 'load-failed' | 'no-access' }
     /** An unknown outcome: `current` is the re-read version (null until a re-read succeeds). */
     | { type: 'unknown'; current: B3Question | null; expected: QuestionFormDraft | null; deleting: boolean };
 const messageOf = (error: unknown) => error instanceof ApiError ? error.message : 'Something went wrong on our side. Try again in a moment.';
+const QUESTION_FIELD_MAP = {
+    prompt: 'prompt',
+    options: 'options',
+    correctOptions: 'correct',
+    skillId: 'skillId',
+    difficulty: 'difficulty',
+} as const;
 
 export interface QuestionEditorSheetProps {
     courseId: string;
@@ -170,6 +189,8 @@ export interface QuestionEditorSheetProps {
     skills: SkillSource;
     /** Re-read the skill graph once when a skill is missing from it. */
     ensureSkills: (skillIds: readonly string[]) => void;
+    /** Optional route to the course's Skills tab when the course has no skills yet (S19). */
+    skillsHref?: string;
     /** Leave without a change. */
     onClose: () => void;
     /** A confirmed save or delete; the bank page is re-read. */
@@ -177,12 +198,13 @@ export interface QuestionEditorSheetProps {
 }
 
 /** Production question form: mount it with a key per opened question so each opening starts from a fresh read. */
-export function QuestionEditorSheet({ courseId, question, skills, ensureSkills, onClose, onDone }: QuestionEditorSheetProps) {
+export function QuestionEditorSheet({ courseId, question, skills, ensureSkills, skillsHref, onClose, onDone }: QuestionEditorSheetProps) {
     const editor = useQuestionEditor(courseId);
     const questionId = question?.id ?? null;
     const [snapshot, setSnapshot] = useState<B3Question | null>(null);
     const [reading, setReading] = useState(questionId !== null);
     const [gone, setGone] = useState(false);
+    const [noAccess, setNoAccess] = useState(false);
     const [draft, setDraft] = useState<QuestionFormDraft>(() => question ? draftFromQuestion(question) : emptyQuestionDraft());
     const [dirty, setDirty] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
@@ -214,6 +236,7 @@ export function QuestionEditorSheet({ courseId, question, skills, ensureSkills, 
             const status = failureStatus(error);
             // After an unknown deletion, a missing definition confirms that the deletion committed.
             if (mode === 'unknown' && deleting && status === 404) { latest.current.onDone('deleted'); return; }
+            if (status === 403) { setNoAccess(true); setAlert({ type: 'no-access' }); return; }
             if (status === 404) { setGone(true); setAlert({ type: 'not-found' }); }
             else setAlert(mode === 'unknown' ? { type: 'unknown', current: null, expected, deleting } : { type: 'load-failed' });
         }
@@ -224,12 +247,12 @@ export function QuestionEditorSheet({ courseId, question, skills, ensureSkills, 
     const skillsReady = skills.status === 'ready' && skills.skills.length > 0;
     // Another save is offered only after the question was read (on opening and after an unknown outcome).
     const awaitingRead = reading || alert?.type === 'load-failed' || alert?.type === 'unknown' && alert.current === null;
-    const canSave = !editor.busy && skillsReady && !awaitingRead;
+    const canSave = !editor.busy && !noAccess && skillsReady && !awaitingRead;
 
     async function save(asNew: boolean) {
         const next = validateQuestion(draft);
         setErrors(next);
-        if (Object.keys(next).length || !skillsReady) return;
+        if (Object.keys(next).length || !skillsReady || noAccess) return;
         const target = !asNew && questionId !== null && !gone ? questionId : null;
         const sent = draft;
         setAlert(null);
@@ -239,9 +262,50 @@ export function QuestionEditorSheet({ courseId, question, skills, ensureSkills, 
         } catch (error) {
             if (isCancelled(error)) return;
             const status = failureStatus(error);
-            if (target && status === 409) setAlert({ type: 'conflict-save', message: messageOf(error) });
-            else if (target && status === 404) { setGone(true); setAlert({ type: 'not-found' }); }
-            else if (outcomeUnknown(error)) {
+            if (status === 403) {
+                setNoAccess(true);
+                setAlert({ type: 'no-access' });
+                return;
+            }
+            if (status === 400) {
+                const mapped = fieldErrorsFrom(error, QUESTION_FIELD_MAP);
+                if (Object.keys(mapped).length) {
+                    setErrors(mapped);
+                    return;
+                }
+            }
+            if (target && status === 409) {
+                setAlert({ type: 'conflict-save', message: messageOf(error) });
+                return;
+            }
+            if (status === 404) {
+                if (!target) {
+                    // S19: a rejected skill on create is surfaced at the Skill field, and the graph is re-read.
+                    skills.reload();
+                    setErrors({ skillId: 'This skill is no longer available. Choose another skill.' });
+                    return;
+                }
+                if (snapshot && sent.skillId.toLowerCase() !== snapshot.skillId.toLowerCase()) {
+                    skills.reload();
+                    try {
+                        const current = await read(target);
+                        setSnapshot(current);
+                        setErrors({ skillId: 'This skill is no longer available. Choose another skill.' });
+                        return;
+                    } catch (readError) {
+                        if (isCancelled(readError)) return;
+                        if (failureStatus(readError) === 403) {
+                            setNoAccess(true);
+                            setAlert({ type: 'no-access' });
+                            return;
+                        }
+                    }
+                }
+                setGone(true);
+                setAlert({ type: 'not-found' });
+                return;
+            }
+            if (outcomeUnknown(error)) {
                 if (target) { setAlert({ type: 'unknown', current: null, expected: sent, deleting: false }); await reread('unknown', sent); }
                 else setAlert({ type: 'unknown-create' });
             } else setAlert({ type: 'error', message: messageOf(error) });
@@ -249,7 +313,7 @@ export function QuestionEditorSheet({ courseId, question, skills, ensureSkills, 
     }
     async function remove() {
         setConfirm(null);
-        if (questionId === null) return;
+        if (questionId === null || noAccess) return;
         setAlert(null);
         try {
             await editor.remove(questionId);
@@ -257,16 +321,17 @@ export function QuestionEditorSheet({ courseId, question, skills, ensureSkills, 
         } catch (error) {
             if (isCancelled(error)) return;
             const status = failureStatus(error);
-            if (status === 409) setAlert({ type: 'conflict-delete', message: messageOf(error) });
+            if (status === 403) { setNoAccess(true); setAlert({ type: 'no-access' }); }
+            else if (status === 409) setAlert({ type: 'conflict-delete', message: messageOf(error) });
             else if (status === 404) { setGone(true); setAlert({ type: 'not-found' }); }
             else if (outcomeUnknown(error)) { setAlert({ type: 'unknown', current: null, expected: null, deleting: true }); await reread('unknown', null, true); }
             else setAlert({ type: 'error', message: messageOf(error) });
         }
     }
     const discard = () => { setAlert(null); setErrors({}); if (snapshot) { setDraft(draftFromQuestion(snapshot)); setDirty(false); } void reread('discard'); };
-    const requestClose = () => { if (editor.busy) return; if (dirty) setConfirm('discard'); else onClose(); };
+    const requestClose = () => { if (editor.busy) return; if (dirty && !noAccess) setConfirm('discard'); else onClose(); };
 
-    const editing = questionId !== null && !gone;
+    const editing = questionId !== null && !gone && !noAccess;
     const actions = (...buttons: ReactNode[]) => <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>{buttons}</Box>;
     const alertView = (() => {
         if (!alert) return null;
@@ -274,16 +339,18 @@ export function QuestionEditorSheet({ courseId, question, skills, ensureSkills, 
             case 'conflict-save': return <Alert severity="warning" action={actions(
                 <Button key="new" size="small" variant="text" onClick={() => void save(true)} disabled={!canSave}>Save as a new question</Button>,
                 <Button key="discard" size="small" variant="text" onClick={discard} disabled={editor.busy}>Discard my edits</Button>)}>
-                {alert.message} This question can't be changed, for example because learners have answered it. Your edits are still here.</Alert>;
-            case 'conflict-delete': return <Alert severity="warning">This question can't be deleted, for example because it is in a quiz or has been answered. {alert.message}</Alert>;
+                {alert.message} This question can&apos;t be changed, for example because learners have answered it. Your edits are still here.</Alert>;
+            case 'conflict-delete': return <Alert severity="warning">This question can&apos;t be deleted, for example because it is in a quiz or has been answered. {alert.message}</Alert>;
             case 'not-found': return <Alert severity="warning" action={actions(
                 <Button key="back" size="small" variant="text" onClick={onClose} disabled={editor.busy}>Back to the question bank</Button>,
                 dirty && <Button key="new" size="small" variant="text" onClick={() => void save(true)} disabled={!canSave}>Save as a new question</Button>)}>This question is no longer available.</Alert>;
-            case 'unknown-create': return <Alert severity="warning">We couldn't confirm whether the question was created. Check the question bank before creating it again.</Alert>;
+            case 'no-access': return <Alert severity="error" action={<Button size="small" variant="text" onClick={onClose}>Close</Button>}>
+                You don&apos;t have access to this course. Only the course&apos;s instructor can manage its assessments.</Alert>;
+            case 'unknown-create': return <Alert severity="warning">We couldn&apos;t confirm whether the question was created. Check the question bank before creating it again.</Alert>;
             case 'unknown': return <Alert severity="warning" action={alert.current === null && !reading ? <Button size="small" variant="text" onClick={() => void reread('unknown', alert.expected, alert.deleting)} disabled={editor.busy}>Try again</Button> : undefined}>
-                We couldn't confirm whether your changes were saved.
+                We couldn&apos;t confirm whether your changes were saved.
                 {alert.current && <Box component="span" sx={{ display: 'block', mt: 1 }}>Current version: <Box component="span" sx={{ whiteSpace: 'pre-line' }}>{alert.current.prompt}</Box> · {questionKindLabel[alert.current.kind]} · {difficultyLabel[alert.current.difficulty]}</Box>}</Alert>;
-            case 'load-failed': return <Alert severity="error" action={<Button size="small" variant="text" onClick={() => void reread(snapshot ? 'discard' : 'open')} disabled={editor.busy || reading}>Try again</Button>}>The question couldn't be loaded.</Alert>;
+            case 'load-failed': return <Alert severity="error" action={<Button size="small" variant="text" onClick={() => void reread(snapshot ? 'discard' : 'open')} disabled={editor.busy || reading}>Try again</Button>}>The question couldn&apos;t be loaded.</Alert>;
             case 'error': return <Alert severity="error">{alert.message}</Alert>;
         }
     })();
@@ -298,7 +365,8 @@ export function QuestionEditorSheet({ courseId, question, skills, ensureSkills, 
         </>}>
         <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 2.5 }}>
             {alertView}
-            <QuestionFields draft={draft} onChange={change} errors={errors} skills={skills} disabled={editor.busy || reading} />
+            <QuestionFields draft={draft} onChange={change} errors={errors} skills={skills} disabled={editor.busy || reading || noAccess}
+                skillsHref={skillsHref} onGoToSkills={() => { setDirty(false); onClose(); }} />
         </Box>
         <ConfirmDialog open={confirm === 'discard'} isDestructive title="Discard your changes?" message="Your changes will be lost." cancelLabel="Keep editing" confirmLabel="Discard"
             onCancel={() => setConfirm(null)} onConfirm={() => { setConfirm(null); onClose(); }} />

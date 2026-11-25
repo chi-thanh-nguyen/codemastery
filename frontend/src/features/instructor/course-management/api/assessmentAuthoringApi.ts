@@ -2,14 +2,16 @@ import { request } from '../../../../shared/api/httpClient';
 import { ApiError, isRecord, protocolError } from '../../../../shared/types/apiTypes';
 
 /*
- * CT23 Instructor authoring client (ADR007 §§4–7; OpenAPI b3* owner operations). Every response is
- * decoded strictly: exact members, UUID identities bound to the request, the question kind/mask rules
- * and coherent pages. Ordering is the server's (questions by UUID, quizzes by title then UUID); the
- * client never sorts, filters or derives usage, which no owner DTO returns (DESIGN.md A16).
+ * CT23 & CT10 Instructor authoring client (ADR007 §§4–7, ADR010 §§8, 12; OpenAPI b3* and b5* owner
+ * operations). Every response is decoded strictly: exact members, UUID identities bound to the
+ * request, question kind/mask rules, RFC 3339 timestamps and coherent pages. Ordering is the
+ * server's (questions by UUID; quizzes and assignments by title then UUID); the client never sorts,
+ * filters or derives usage, which no owner DTO returns (DESIGN.md A16).
  */
 export type QuestionKind = 'single_choice' | 'multiple_choice' | 'true_false';
 export type QuestionDifficulty = 'easy' | 'medium' | 'hard';
 export type QuizKind = 'diagnostic' | 'practice' | 'test';
+export type AssignmentPublicationStatus = 'hidden' | 'published';
 
 export interface AuthoringRequestOptions { signal?: AbortSignal; isCurrent?: () => boolean }
 
@@ -40,20 +42,53 @@ export interface B3QuizOwned {
 }
 export type B3QuizOwnedPage = B3Page<B3QuizOwned>;
 
+export interface B5AssignmentWrite {
+    title: string;
+    instructions: string;
+    deadlineAt: string;
+    lessonId: string | null;
+}
+export interface B5OwnedAssignment {
+    id: string;
+    courseId: string;
+    lessonId: string | null;
+    title: string;
+    instructions: string;
+    deadlineAt: string;
+    publicationStatus: AssignmentPublicationStatus;
+    submissionCount: number;
+    gradedCount: number;
+}
+export type B5OwnedAssignmentPage = B3Page<B5OwnedAssignment>;
+
 /** OpenAPI `B3QuizWrite.timeLimitSeconds` and `B3QuizOwned` integer bounds. */
 export const MAX_TIME_LIMIT_SECONDS = 2147483647;
 export const MAX_PAGE_SIZE = 100;
 export const DEFAULT_PAGE_SIZE = 20;
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const rfc3339Micros = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?([Zz]|[+-]\d{2}:\d{2})$/;
 const questionKinds: readonly QuestionKind[] = ['single_choice', 'multiple_choice', 'true_false'];
 const difficulties: readonly QuestionDifficulty[] = ['easy', 'medium', 'hard'];
 const quizKinds: readonly QuizKind[] = ['diagnostic', 'practice', 'test'];
+const publicationStatuses: readonly AssignmentPublicationStatus[] = ['hidden', 'published'];
 const integer = (value: unknown, minimum: number, maximum = Number.MAX_SAFE_INTEGER): value is number =>
     Number.isSafeInteger(value) && (value as number) >= minimum && (value as number) <= maximum;
 const text = (value: unknown): value is string => typeof value === 'string' && /\S/.test(value);
 const id = (value: unknown): value is string => typeof value === 'string' && uuid.test(value);
 const same = (left: string, right: string) => left.toLowerCase() === right.toLowerCase();
+
+function rfc3339Valid(value: unknown): value is string {
+    if (typeof value !== 'string') return false;
+    const match = rfc3339Micros.exec(value);
+    if (!match) return false;
+    const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+    const hour = Number(match[4]), minute = Number(match[5]), second = Number(match[6]);
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if (month < 1 || month > 12 || day < 1 || day > days[month - 1] || hour > 23 || minute > 59 || second > 59) return false;
+    return !Number.isNaN(Date.parse(value.toUpperCase()));
+}
 
 function exact(value: unknown, keys: readonly string[]): Record<string, unknown> {
     if (!isRecord(value) || Object.keys(value).length !== keys.length || !keys.every((key) => Object.hasOwn(value, key))) throw protocolError();
@@ -102,6 +137,26 @@ function decodeQuiz(value: unknown): B3QuizOwned {
         published: row.published, questionCount: row.questionCount, questions };
 }
 
+function decodeAssignment(value: unknown): B5OwnedAssignment {
+    const row = exact(value, ['id', 'courseId', 'lessonId', 'title', 'instructions', 'deadlineAt', 'publicationStatus', 'submissionCount', 'gradedCount']);
+    if (!id(row.id) || !id(row.courseId) || (row.lessonId !== null && !id(row.lessonId)) ||
+        !text(row.title) || !text(row.instructions) || !rfc3339Valid(row.deadlineAt) ||
+        !publicationStatuses.includes(row.publicationStatus as AssignmentPublicationStatus) ||
+        !integer(row.submissionCount, 0, MAX_TIME_LIMIT_SECONDS) ||
+        !integer(row.gradedCount, 0, row.submissionCount as number)) throw protocolError();
+    return {
+        id: row.id,
+        courseId: row.courseId,
+        lessonId: row.lessonId as string | null,
+        title: row.title,
+        instructions: row.instructions,
+        deadlineAt: row.deadlineAt,
+        publicationStatus: row.publicationStatus as AssignmentPublicationStatus,
+        submissionCount: row.submissionCount as number,
+        gradedCount: row.gradedCount as number,
+    };
+}
+
 function pageDecoder<T>(item: (value: unknown) => T, page: number, size: number) {
     return (value: unknown): B3Page<T> => {
         const row = exact(value, ['content', 'page', 'size', 'totalElements', 'totalPages']);
@@ -124,9 +179,14 @@ const quizFor = (courseId: string, quizId?: string) => (value: unknown) => {
     if (!same(quiz.courseId, courseId) || quizId !== undefined && !same(quiz.id, quizId)) throw protocolError();
     return quiz;
 };
-const pageCourse = (courseId: string, decode: (value: unknown) => B3QuizOwnedPage) => (value: unknown) => {
+const assignmentFor = (courseId: string, assignmentId?: string) => (value: unknown) => {
+    const assignment = decodeAssignment(value);
+    if (!same(assignment.courseId, courseId) || assignmentId !== undefined && !same(assignment.id, assignmentId)) throw protocolError();
+    return assignment;
+};
+const pageCourse = <T extends { courseId: string }>(courseId: string, decode: (value: unknown) => B3Page<T>) => (value: unknown) => {
     const result = decode(value);
-    if (result.content.some((quiz) => !same(quiz.courseId, courseId))) throw protocolError();
+    if (result.content.some((entry) => !same(entry.courseId, courseId))) throw protocolError();
     return result;
 };
 
@@ -198,4 +258,37 @@ export function setQuizPublication(courseId: string, quizId: string, published: 
             if (quiz.published !== published) throw protocolError();
             return quiz;
         }, body: { publicationStatus: published ? 'published' : 'hidden' } });
+}
+
+// --- CT10.rest owner assignments (AS09) ---
+
+/** `b5ListOwnedAssignments`: hidden and published assignments, title COLLATE C then UUID. */
+export function listOwnedAssignments(courseId: string, page = 0, size = DEFAULT_PAGE_SIZE, options: AuthoringRequestOptions = {}): Promise<B5OwnedAssignmentPage> {
+    if (!pageValid(page, size)) return invalidPage();
+    return request(`${course(courseId)}/owned-assignments`, { ...options, method: 'GET', auth: 'authenticated', expectedStatus: 200,
+        decode: pageCourse(courseId, pageDecoder(decodeAssignment, page, size)), query: pageQuery(page, size) });
+}
+/** `b5CreateAssignment`: creates a hidden assignment. */
+export function createAssignment(courseId: string, payload: B5AssignmentWrite, options: AuthoringRequestOptions = {}): Promise<B5OwnedAssignment> {
+    return request(`${course(courseId)}/assignments`, { ...options, method: 'POST', auth: 'authenticated', expectedStatus: 201,
+        decode: assignmentFor(courseId), body: payload });
+}
+/** `b5ReadOwnedAssignment`. */
+export function readOwnedAssignment(courseId: string, assignmentId: string, options: AuthoringRequestOptions = {}): Promise<B5OwnedAssignment> {
+    return request(`${course(courseId)}/owned-assignments/${encodeURIComponent(assignmentId)}`, { ...options, method: 'GET', auth: 'authenticated', expectedStatus: 200,
+        decode: assignmentFor(courseId, assignmentId) });
+}
+/** `b5ReplaceAssignment`: full replacement of title, instructions, deadlineAt and lessonId. */
+export function replaceAssignment(courseId: string, assignmentId: string, payload: B5AssignmentWrite, options: AuthoringRequestOptions = {}): Promise<B5OwnedAssignment> {
+    return request(`${course(courseId)}/owned-assignments/${encodeURIComponent(assignmentId)}`, { ...options, method: 'PUT', auth: 'authenticated', expectedStatus: 200,
+        decode: assignmentFor(courseId, assignmentId), body: payload });
+}
+/** `b5SetAssignmentPublication`: explicit `hidden` or `published` assignment publication status. */
+export function setAssignmentPublication(courseId: string, assignmentId: string, publicationStatus: AssignmentPublicationStatus, options: AuthoringRequestOptions = {}): Promise<B5OwnedAssignment> {
+    return request(`${course(courseId)}/owned-assignments/${encodeURIComponent(assignmentId)}/publication`, { ...options, method: 'PUT', auth: 'authenticated', expectedStatus: 200,
+        decode: (value) => {
+            const assignment = assignmentFor(courseId, assignmentId)(value);
+            if (assignment.publicationStatus !== publicationStatus) throw protocolError();
+            return assignment;
+        }, body: { publicationStatus } });
 }

@@ -20,10 +20,13 @@ import { CourseDetailPage } from '../features/catalogue/pages/CourseDetailPage';
 import { LandingPage, LandingRestoringView } from '../features/catalogue/pages/LandingPage';
 import { LearnerHome } from '../features/learning/pages/LearnerHomePage';
 import type { UserRole } from '../features/auth/types/authTypes';
+import { CreateCoursePage, TeachingHomePage } from '../features/instructor/course-management/pages/InstructorCoursesPage';
+import { CourseContentTab, CourseEditorFrame, CourseEditorShell, CourseSettingsTab } from '../features/instructor/course-management/pages/CourseEditorPage';
 import { AssessmentsPage } from '../features/instructor/course-management/pages/QuestionBankPage';
 import { QuizEditor } from '../features/instructor/course-management/pages/QuizEditorPage';
-import type { SkillSource } from '../features/instructor/course-management/components/QuestionForm';
-import { useOwnedSkillGraph } from '../features/instructor/skill-graph-editor/hooks/useSkillGraph';
+import { AssignmentEditor } from '../features/instructor/course-management/pages/AssignmentEditorPage';
+import { useCourseEditorContext } from '../features/instructor/course-management/hooks/useCourseEditor';
+import { CourseSkillsSection } from '../features/instructor/skill-graph-editor/pages/SkillGraphEditorPage';
 
 // The landing page's example map pulls in the graph library, so it loads on demand.
 const ExampleMasteryMap = lazy(() => import('../features/mastery/components/ExampleMasteryMap'));
@@ -58,8 +61,11 @@ function SignIn() {
     return <LoginPage notice={shown ? <Alert severity="info" role="status">Your session ended. Sign in again to continue.</Alert> : undefined} />;
 }
 
-/** Where a signed-in role starts: Learner home, otherwise the catalogue. Sign-in uses the same rule (AuthProvider `consumeReturn`). */
-const startFor = (role?: UserRole) => role === 'Learner' ? '/home' : '/courses';
+/**
+ * CT16.routes start pages: Learner `/home`, Instructor `/teach` (now routed in production),
+ * Administrator `/courses` until `/admin` is routed. Sign-in uses the same rule (`consumeReturn`).
+ */
+const startFor = (role?: UserRole) => role === 'Learner' ? '/home' : role === 'Instructor' ? '/teach' : '/courses';
 
 /** Header utilities: account menu for a session, sign-in actions otherwise. Hiding links is not authorization. */
 export function SessionNavigation() {
@@ -80,22 +86,33 @@ export function SessionNavigation() {
     </>;
 }
 
-/** Parent-aware current destination: child routes keep their section active. */
-function currentSection(pathname: string) {
+const LEARNER_WORKSPACE_SUBPATH = /^\/courses\/[^/]+\/(learn|lessons|diagnostic|mastery|assessments|quizzes|attempts|assignments)(\/|$)/;
+
+/** Parent-aware current destination (DESIGN.md › Information architecture, CT16.routes). */
+export function currentSection(pathname: string) {
     if (pathname === '/home') return '/home';
+    if (pathname === '/teach' || pathname.startsWith('/teach/courses')) return '/teach';
+    if (pathname === '/my-courses' || LEARNER_WORKSPACE_SUBPATH.test(pathname)) return '/my-courses';
     if (pathname === '/courses' || pathname.startsWith('/courses/')) return '/courses';
-    if (pathname === '/my-courses') return '/my-courses';
     return undefined;
 }
 
 function Workspace() {
     const auth = useAuth(), navigate = useNavigate(), location = useLocation();
-    const learner = auth.isAuthenticated && auth.user?.role === 'Learner';
-    // DESIGN.md › Primary navigation: only implemented destinations are shown.
-    const navItems: NavItem[] = [
-        ...(learner ? [{ id: '/home', href: '/home', label: 'Home', icon: <PresentationIcon name="home" /> }] : []),
-        { id: '/courses', href: '/courses', label: 'Catalogue', icon: <PresentationIcon name="catalogue" /> },
-        ...(learner ? [{ id: '/my-courses', href: '/my-courses', label: 'My courses', icon: <PresentationIcon name="my-courses" /> }] : [])];
+    const role = auth.isAuthenticated ? auth.user?.role : undefined;
+    // DESIGN.md › Primary navigation (FE32): only implemented destinations for the active role are shown.
+    const navItems: NavItem[] = role === 'Learner'
+        ? [
+            { id: '/home', href: '/home', label: 'Home', icon: <PresentationIcon name="home" /> },
+            { id: '/courses', href: '/courses', label: 'Catalogue', icon: <PresentationIcon name="catalogue" /> },
+            { id: '/my-courses', href: '/my-courses', label: 'My courses', icon: <PresentationIcon name="my-courses" /> },
+        ]
+        : role === 'Instructor'
+            ? [
+                { id: '/teach', href: '/teach', label: 'Teaching', icon: <PresentationIcon name="book" /> },
+                { id: '/courses', href: '/courses', label: 'Catalogue', icon: <PresentationIcon name="catalogue" /> },
+            ]
+            : [{ id: '/courses', href: '/courses', label: 'Catalogue', icon: <PresentationIcon name="catalogue" /> }];
     const brand = auth.isAuthenticated ? startFor(auth.user?.role) : '/';
     return <DashboardLayout navItems={navItems} selectedNavId={currentSection(location.pathname)} onNavSelect={(path) => navigate(path)}
         headerActions={<SessionNavigation />} brandHref={brand} onBrandSelect={() => navigate(brand)}
@@ -132,23 +149,24 @@ function NotFound() {
     return <Page><SystemStateView icon="search" title="Page not found" message="Check the address, or continue from the catalogue."
         actions={<Button component={Link} to="/courses" variant="contained">Browse courses</Button>} /></Page>;
 }
+
 /**
- * FE15 Instructor assessment authoring (CT16.routes: `/teach/courses/:courseId/assessments`, `…/quizzes/:quizId`
- * with the literal `new`). Routes compose features (CT16.final-state F1): the course's skill graph read
- * (`getOwnedSkillGraph`, D12-3) is held here and passed to the question bank and quiz editor. The course
- * editor shell and its header (FE14) and the Teaching navigation item (FE14/FE32) are not delivered yet.
+ * Course-scoped Instructor authoring views inside `CourseEditorShell` (`D12-3`):
+ * `getOwnedCourse` and `getOwnedSkillGraph` are held once by the shell and shared across tabs and editors.
  */
-function useCourseSkills(courseId: string): SkillSource {
-    const { graph, error, reload } = useOwnedSkillGraph(courseId);
-    return useMemo(() => ({ status: error ? 'error' : graph ? 'ready' : 'loading', skills: graph?.skills ?? [], reload }), [graph, error, reload]);
-}
-function CourseAssessments() {
-    const courseId = useParams().courseId!, skills = useCourseSkills(courseId);
-    return <Page><AssessmentsPage key={courseId} courseId={courseId} skills={skills} /></Page>;
+function CourseAssessmentsTab() {
+    const { courseId, skills, course } = useCourseEditorContext()!;
+    return <AssessmentsPage key={courseId} courseId={courseId} skills={skills} headingLevel="h2" courseContext={course} />;
 }
 function CourseQuizEditor() {
-    const { courseId, quizId } = useParams(), skills = useCourseSkills(courseId!);
-    return <Page width="reading"><QuizEditor key={`${courseId}:${quizId}`} courseId={courseId!} quizId={quizId!} skills={skills} /></Page>;
+    const { quizId } = useParams();
+    const { courseId, skills } = useCourseEditorContext()!;
+    return <Page width="reading"><QuizEditor key={`${courseId}:${quizId}`} courseId={courseId} quizId={quizId!} skills={skills} /></Page>;
+}
+function CourseAssignmentEditor() {
+    const { assignmentId } = useParams();
+    const { courseId, course } = useCourseEditorContext()!;
+    return <Page width="reading"><AssignmentEditor key={`${courseId}:${assignmentId}`} courseId={courseId} assignmentId={assignmentId!} courseContext={course} /></Page>;
 }
 
 /** The isolated design preview's route (CT14, CT16). */
@@ -179,8 +197,19 @@ export function AppRouter({ catalogue, preview }: { catalogue?: ReactNode; previ
             <Route path="/home" element={<ProtectedRoute roles={['Learner']}><LearnerHome key={auth.generation} /></ProtectedRoute>} />
             <Route path="/my-courses" element={<ProtectedRoute roles={['Learner']}><MyCoursesPage key={auth.generation} /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
-            <Route path="/teach/courses/:courseId/assessments" element={<ProtectedRoute roles={['Instructor']}><CourseAssessments key={auth.generation} /></ProtectedRoute>} />
-            <Route path="/teach/courses/:courseId/quizzes/:quizId" element={<ProtectedRoute roles={['Instructor']}><CourseQuizEditor key={auth.generation} /></ProtectedRoute>} />
+            <Route path="/teach" element={<ProtectedRoute roles={['Instructor']}><TeachingHomePage key={auth.generation} /></ProtectedRoute>} />
+            <Route path="/teach/courses/new" element={<ProtectedRoute roles={['Instructor']}><CreateCoursePage key={auth.generation} /></ProtectedRoute>} />
+            <Route path="/teach/courses/:courseId" element={<ProtectedRoute roles={['Instructor']}><CourseEditorShell key={auth.generation} /></ProtectedRoute>}>
+                <Route element={<CourseEditorFrame />}>
+                    <Route index element={<CourseContentTab />} />
+                    <Route path="content" element={<CourseContentTab />} />
+                    <Route path="skills" element={<CourseSkillsSection />} />
+                    <Route path="assessments" element={<CourseAssessmentsTab />} />
+                    <Route path="settings" element={<CourseSettingsTab />} />
+                </Route>
+                <Route path="quizzes/:quizId" element={<CourseQuizEditor />} />
+                <Route path="assignments/:assignmentId" element={<CourseAssignmentEditor />} />
+            </Route>
             <Route path="*" element={<NotFound />} />
         </Route>
     </Routes><RouteFocus /></SessionEndProvider>;

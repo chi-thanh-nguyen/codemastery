@@ -16,7 +16,7 @@ import { radius, roles } from '../../../../app/theme/theme';
 import { ApiError } from '../../../../shared/types/apiTypes';
 import { MAX_TIME_LIMIT_SECONDS } from '../api/assessmentAuthoringApi';
 import type { B3Question, B3QuizOwned, B3QuizWrite, QuizKind } from '../api/assessmentAuthoringApi';
-import { failureStatus, isCancelled, outcomeUnknown, useQuizEditor } from '../hooks/useAssessmentEditor';
+import { failureStatus, fieldErrorsFrom, isCancelled, outcomeUnknown, useQuizEditor } from '../hooks/useAssessmentEditor';
 import { useQuestionBank } from '../hooks/useQuestionBank';
 import { difficultyLabel as levelLabel, questionKindLabel, useSkillLookup } from '../components/QuestionForm';
 import type { SkillSource } from '../components/QuestionForm';
@@ -24,7 +24,7 @@ import { CourseUnavailable, PublicationPill, assessmentsPath, errorMessage, quiz
 
 export interface QuizEditorPageProps { initial: QuizDraft; questions: QuestionDraft[]; skills: SkillOption[]; onSave: (quiz: QuizDraft) => void; onCancel: () => void }
 
-/** S19 Quiz editor: kind, time limit (stored as seconds), ordered questions, visibility (US-12). */
+/** S19 Quiz editor preview component: kind, time limit (stored as seconds), ordered questions, visibility (US-12). */
 export function QuizEditorPage({ initial, questions, skills, onSave, onCancel }: QuizEditorPageProps) {
     const [draft, setDraft] = useState(initial), [errors, setErrors] = useState<Record<string, string>>({}), [saved, setSaved] = useState(false);
     const set = (patch: Partial<QuizDraft>) => { setDraft((current) => ({ ...current, ...patch })); setSaved(false); };
@@ -121,9 +121,15 @@ export function difficultySummary(kind: QuizKind | '', questions: readonly B3Que
 }
 
 const CREATED = 'Quiz created. It stays hidden until you publish it.';
+const QUIZ_FIELD_MAP = {
+    title: 'title',
+    kind: 'kind',
+    timeLimitSeconds: 'time',
+    questionIds: 'questions',
+} as const;
 type EditorAlert =
     | { type: 'conflict-save' | 'conflict-delete' | 'conflict-publication' | 'error'; message: string }
-    | { type: 'not-found' | 'unknown-create' }
+    | { type: 'not-found' | 'unknown-create' | 'no-access' }
     /** An unknown outcome: the re-read version, or null until a re-read succeeds. */
     | { type: 'unknown'; current: B3QuizOwned | null; retry: () => void };
 const messageOf = (error: unknown) => error instanceof ApiError ? error.message : 'Something went wrong on our side. Try again in a moment.';
@@ -149,6 +155,7 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
     const [draft, setDraft] = useState<QuizFormDraft>(emptyQuizDraft);
     const [dirty, setDirty] = useState(false);
     const [gone, setGone] = useState(false);
+    const [noAccess, setNoAccess] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [alert, setAlert] = useState<EditorAlert | null>(null);
     const [notice, setNotice] = useState<string | null>(() => (location.state as { notice?: unknown } | null)?.notice === CREATED ? CREATED : null);
@@ -182,14 +189,14 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
     }, [creating, quizId, read, revision]);
     useEffect(() => { if (draft.questions.length) ensure(draft.questions.map((question) => question.skillId)); }, [draft.questions, ensure]);
     useEffect(() => {
-        if (!dirty) return;
+        if (!dirty || noAccess) return;
         const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
         window.addEventListener('beforeunload', warn);
         return () => window.removeEventListener('beforeunload', warn);
-    }, [dirty]);
+    }, [dirty, noAccess]);
 
     /** In-app leaving with unsaved edits asks first; browser Back cannot be intercepted (A15). */
-    const go = (to: string) => { if (dirtyRef.current) { setLeaveTo(to); setConfirm('leave'); } else navigate(to); };
+    const go = (to: string) => { if (dirtyRef.current && !noAccess) { setLeaveTo(to); setConfirm('leave'); } else navigate(to); };
     const change = (patch: Partial<QuizFormDraft>) => { setDraft((current) => ({ ...current, ...patch })); setDirty(true); setErrors({}); setNotice(null); };
 
     /** Re-read after an unknown outcome or a refusal; `confirmed` decides whether the read shows that the change committed. */
@@ -203,7 +210,9 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
             if (confirmed?.(current)) { setAlert(null); onConfirmed(); } else setAlert({ type: 'unknown', current, retry });
         } catch (error) {
             if (isCancelled(error)) return;
-            if (failureStatus(error) === 404) {
+            const status = failureStatus(error);
+            if (status === 403) { setNoAccess(true); setAlert({ type: 'no-access' }); return; }
+            if (status === 404) {
                 if (deleting) { navigate(listPath, { replace: true, state: { notice: 'Quiz deleted.' } }); return; }
                 setGone(true); setAlert({ type: 'not-found' }); return;
             }
@@ -212,6 +221,7 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
     }, [quiz, read, navigate, listPath]);
 
     async function create() {
+        if (noAccess) return;
         const next = validateQuiz(draft);
         setErrors(next);
         if (Object.keys(next).length) return;
@@ -222,11 +232,17 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
             navigate(quizPath(courseId, created.id), { replace: true, state: { notice: CREATED } });
         } catch (error) {
             if (isCancelled(error)) return;
+            const status = failureStatus(error);
+            if (status === 403) { setNoAccess(true); setAlert({ type: 'no-access' }); return; }
+            if (status === 400) {
+                const mapped = fieldErrorsFrom(error, QUIZ_FIELD_MAP);
+                if (Object.keys(mapped).length) { setErrors(mapped); return; }
+            }
             setAlert(outcomeUnknown(error) ? { type: 'unknown-create' } : { type: 'error', message: messageOf(error) });
         }
     }
     async function save() {
-        if (!quiz) return;
+        if (!quiz || noAccess) return;
         const next = validateQuiz(draft);
         setErrors(next);
         if (Object.keys(next).length) return;
@@ -238,6 +254,11 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
         } catch (error) {
             if (isCancelled(error)) return;
             const status = failureStatus(error);
+            if (status === 403) { setNoAccess(true); setAlert({ type: 'no-access' }); return; }
+            if (status === 400) {
+                const mapped = fieldErrorsFrom(error, QUIZ_FIELD_MAP);
+                if (Object.keys(mapped).length) { setErrors(mapped); return; }
+            }
             if (status === 409) setAlert({ type: 'conflict-save', message: messageOf(error) });
             else if (status === 404) { setGone(true); setAlert({ type: 'not-found' }); }
             else if (outcomeUnknown(error)) {
@@ -248,7 +269,7 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
     }
     async function publication(published: boolean) {
         setConfirm(null);
-        if (!quiz) return;
+        if (!quiz || noAccess) return;
         setAlert(null); setNotice(null);
         try {
             const updated = await editor.setPublication(quiz.id, published);
@@ -257,6 +278,7 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
         } catch (error) {
             if (isCancelled(error)) return;
             const status = failureStatus(error);
+            if (status === 403) { setNoAccess(true); setAlert({ type: 'no-access' }); return; }
             if (status === 409) {
                 setAlert({ type: 'conflict-publication', message: messageOf(error) });
                 // F14: the view re-reads the resource before another attempt.
@@ -270,7 +292,7 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
     }
     async function remove() {
         setConfirm(null);
-        if (!quiz) return;
+        if (!quiz || noAccess) return;
         setAlert(null); setNotice(null);
         try {
             await editor.remove(quiz.id);
@@ -279,6 +301,7 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
         } catch (error) {
             if (isCancelled(error)) return;
             const status = failureStatus(error);
+            if (status === 403) { setNoAccess(true); setAlert({ type: 'no-access' }); return; }
             if (status === 409) setAlert({ type: 'conflict-delete', message: messageOf(error) });
             else if (status === 404) { setGone(true); setAlert({ type: 'not-found' }); }
             else if (outcomeUnknown(error)) { setAlert({ type: 'unknown', current: null, retry: () => undefined }); await recheck(null, () => undefined, true); }
@@ -291,7 +314,10 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
         try { const current = await read(quiz.id); setQuiz(current); setDraft(draftFromQuiz(current)); setDirty(false); }
         catch (error) {
             if (isCancelled(error)) return;
-            if (failureStatus(error) === 404) { setGone(true); setAlert({ type: 'not-found' }); } else setAlert({ type: 'error', message: messageOf(error) });
+            const status = failureStatus(error);
+            if (status === 403) { setNoAccess(true); setAlert({ type: 'no-access' }); }
+            else if (status === 404) { setGone(true); setAlert({ type: 'not-found' }); }
+            else setAlert({ type: 'error', message: messageOf(error) });
         }
     };
     const move = (index: number, direction: -1 | 1) => {
@@ -315,7 +341,7 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
     </Box>;
 
     const published = quiz?.published ?? false;
-    const readOnly = published || gone || editor.busy;
+    const readOnly = published || gone || noAccess || editor.busy;
     const summary = difficultySummary(draft.kind, draft.questions);
     const inQuiz = new Set(draft.questions.map((question) => question.id.toLowerCase()));
     const alertView = (() => {
@@ -325,31 +351,33 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
             case 'conflict-save': return <Alert severity="warning" action={row(
                 <Button key="new" size="small" variant="text" onClick={() => void create()} disabled={editor.busy}>Create a new quiz from these settings</Button>,
                 <Button key="discard" size="small" variant="text" onClick={() => void discard()} disabled={editor.busy}>Discard my edits</Button>)}>
-                {alert.message} This quiz can't be changed, for example because learners have started it. Your edits are still here.</Alert>;
-            case 'conflict-delete': return <Alert severity="warning">This quiz can't be deleted because learners have started it. {alert.message}</Alert>;
-            case 'conflict-publication': return <Alert severity="warning">{alert.message}</Alert>;
+                {alert.message} This quiz can&apos;t be changed, for example because learners have started it. Your edits are still here.</Alert>;
+            case 'conflict-delete': return <Alert severity="warning">This quiz can&apos;t be deleted because learners have started it. {alert.message}</Alert>;
+            case 'conflict-publication': return <Alert severity="warning">{alert.message}{quiz?.questionCount === 0 ? ' Add at least one question and save before publishing.' : ''}</Alert>;
             case 'not-found': return <Alert severity="warning" action={row(
                 <Button key="back" size="small" variant="text" onClick={() => go(listPath)}>Back to quizzes</Button>,
-                <Button key="new" size="small" variant="text" onClick={() => void create()} disabled={editor.busy}>Create a new quiz from these settings</Button>)}>
-                This quiz isn't available. It may have been deleted.</Alert>;
+                <Button key="new" size="small" variant="text" onClick={() => void create()} disabled={editor.busy || noAccess}>Create a new quiz from these settings</Button>)}>
+                This quiz isn&apos;t available. It may have been deleted.</Alert>;
+            case 'no-access': return <Alert severity="error" action={<Button component={Link} to="/courses" size="small" variant="text">Back to catalogue</Button>}>
+                You don&apos;t have access to this course. Only the course&apos;s instructor can manage its assessments.</Alert>;
             case 'unknown-create': return <Alert severity="warning" action={<Button size="small" variant="text" onClick={() => go(listPath)}>Go to quizzes</Button>}>
-                We couldn't confirm whether the quiz was created. Check the quiz list before creating it again.</Alert>;
+                We couldn&apos;t confirm whether the quiz was created. Check the quiz list before creating it again.</Alert>;
             case 'unknown': return <Alert severity="warning" action={alert.current === null && !editor.busy ? <Button size="small" variant="text" onClick={alert.retry}>Try again</Button> : undefined}>
-                We couldn't confirm whether your changes were saved.
+                We couldn&apos;t confirm whether your changes were saved.
                 {alert.current && <Box component="span" sx={{ display: 'block', mt: 1 }}>Current version: {alert.current.title} · {quizKindLabel[alert.current.kind]} · {alert.current.questionCount} {alert.current.questionCount === 1 ? 'question' : 'questions'} · {alert.current.published ? 'Published' : 'Hidden'}</Box>}</Alert>;
             case 'error': return <Alert severity="error">{alert.message}</Alert>;
         }
     })();
-    const status = editor.busy ? 'Saving…' : notice ?? (dirty ? 'Unsaved changes' : null);
+    const status = editor.busy ? 'Saving…' : notice ?? (dirty && !noAccess ? 'Unsaved changes' : null);
     // minmax(0, 1fr) columns let long prompts ellipsize instead of widening the page at 360 px.
     return <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 3, maxWidth: 960 }}>
         <PageHeader title={creating ? 'New quiz' : quiz?.title ?? 'Quiz'} back={{ label: 'Back to quizzes', href: listPath, onClick: () => go(listPath) }}
             meta={quiz && <PublicationPill published={published} />}
-            actions={quiz && !gone && (published
+            actions={quiz && !gone && !noAccess && (published
                 ? <Button variant="outlined" onClick={() => setConfirm('hide')} disabled={editor.busy} startIcon={<PresentationIcon name="eye-off" />}>Hide quiz</Button>
                 : <Button variant="contained" onClick={() => setConfirm('publish')} disabled={editor.busy || dirty} startIcon={<PresentationIcon name="eye" />}>Publish quiz</Button>)} />
-        {quiz && !published && !gone && dirty && <Typography variant="body2" sx={{ color: 'text.secondary', mt: -2 }}>Save your changes before publishing.</Typography>}
-        {published && !gone && <Alert severity="info">Hide this quiz to edit it. Quizzes that learners have already started can't be edited, even when hidden.</Alert>}
+        {quiz && !published && !gone && !noAccess && dirty && <Typography variant="body2" sx={{ color: 'text.secondary', mt: -2 }}>Save your changes before publishing.</Typography>}
+        {published && !gone && !noAccess && <Alert severity="info">Hide this quiz to edit it. Quizzes that learners have already started can&apos;t be edited, even when hidden.</Alert>}
         {alertView}
         <Tile padding={{ xs: 3, sm: 4 }} sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 2.5 }}>
             <Typography variant="h3" component="h2">Quiz settings</Typography>
@@ -374,6 +402,7 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
                 <Typography id="quiz-questions" variant="h3" component="h2">Questions ({draft.questions.length})</Typography>
                 {!readOnly && <Button variant="outlined" onClick={() => setPicking(true)} startIcon={<PresentationIcon name="plus" />}>Add questions</Button>}
             </Box>
+            {errors.questions && <Alert severity="error">{errors.questions}</Alert>}
             {draft.questions.length === 0
                 ? <EmptyView compact icon="quiz" headingLevel="h3" title="No questions yet" message="Add questions from the question bank." />
                 : <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 1 }}>
@@ -394,11 +423,11 @@ export function QuizEditor({ courseId, quizId, skills }: QuizEditorProps) {
             {summary && <Typography variant="body2" sx={{ color: 'text.secondary' }}>{summary}</Typography>}
         </Tile>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center' }}>
-            {creating
+            {!noAccess && (creating
                 ? <Button variant="contained" onClick={() => void create()} disabled={editor.busy} aria-busy={editor.busy || undefined}>Create quiz</Button>
                 : gone ? <Button variant="contained" onClick={() => void create()} disabled={editor.busy}>Create a new quiz from these settings</Button>
-                    : !published && <Button variant="contained" onClick={() => void save()} disabled={editor.busy || !dirty} aria-busy={editor.busy || undefined}>Save changes</Button>}
-            {quiz && !published && !gone && <Button variant="outlined" color="error" onClick={() => setConfirm('delete')} disabled={editor.busy} startIcon={<PresentationIcon name="trash" />}>Delete quiz</Button>}
+                    : !published && <Button variant="contained" onClick={() => void save()} disabled={editor.busy || !dirty} aria-busy={editor.busy || undefined}>Save changes</Button>)}
+            {quiz && !published && !gone && !noAccess && <Button variant="outlined" color="error" onClick={() => setConfirm('delete')} disabled={editor.busy} startIcon={<PresentationIcon name="trash" />}>Delete quiz</Button>}
             {status && <Typography role="status" variant="body2" sx={{ color: 'text.secondary' }}>{status}</Typography>}
         </Box>
         {picking && <QuestionPicker courseId={courseId} inQuiz={inQuiz} skillName={lookup.name} ensureSkills={ensure} onCancel={() => setPicking(false)}

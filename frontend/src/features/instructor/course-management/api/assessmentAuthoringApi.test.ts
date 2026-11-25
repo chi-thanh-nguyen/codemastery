@@ -2,9 +2,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bindAuthSession } from '../../../../shared/api/httpClient';
 import {
-    createQuestion, createQuiz, deleteUnusedHiddenQuiz, deleteUnusedQuestion, listOwnedQuizzes, listQuestions, questionShapeValid, readOwnedQuiz,
-    readQuestion, replaceUnusedHiddenQuiz, replaceUnusedQuestion, setQuizPublication,
+    createAssignment, createQuestion, createQuiz, deleteUnusedHiddenQuiz, deleteUnusedQuestion, listOwnedAssignments, listOwnedQuizzes,
+    listQuestions, questionShapeValid, readOwnedAssignment, readOwnedQuiz, readQuestion, replaceAssignment, replaceUnusedHiddenQuiz,
+    replaceUnusedQuestion, setAssignmentPublication, setQuizPublication,
 } from './assessmentAuthoringApi';
+import {
+    createCourseChapter, createCourseLesson, createOwnedCourse, getOwnedCourse, listOwnedCourses,
+    orderChapterLessons, setCourseLessonPublication, setOwnedCoursePublication, updateOwnedCourse,
+} from './instructorCourseApi';
 
 const courseId = '00000000-0000-4000-8000-0000000000c1';
 const skillId = '00000000-0000-4000-8000-0000000000a1';
@@ -134,5 +139,108 @@ describe('CT23.composition and CT23.publication bindings', () => {
         fetcher.mockResolvedValueOnce(json(quiz)); await expect(setQuizPublication(courseId, quizId, true)).rejects.toMatchObject({ kind: 'protocol' });
         fetcher.mockResolvedValueOnce(json(quiz)); await setQuizPublication(courseId, quizId, false);
         expect(JSON.parse(call(2).init.body as string)).toEqual({ publicationStatus: 'hidden' });
+    });
+});
+
+describe('CT10.rest owner assignment bindings', () => {
+    const assignmentId = '00000000-0000-4000-8000-0000000000d1';
+    const lessonId = '00000000-0000-4000-8000-0000000000b1';
+    const assignment = {
+        id: assignmentId,
+        courseId,
+        lessonId,
+        title: 'Project 1',
+        instructions: '  # Submit PDF or ZIP\n',
+        deadlineAt: '2026-12-01T12:00:00.123456Z',
+        publicationStatus: 'hidden' as const,
+        submissionCount: 3,
+        gradedCount: 1,
+    };
+    const write = { title: 'Project 1', instructions: assignment.instructions, deadlineAt: assignment.deadlineAt, lessonId };
+
+    it('lists, creates, reads, replaces and updates publication with strict decoding', async () => {
+        fetcher.mockResolvedValueOnce(json(page([assignment])));
+        expect((await listOwnedAssignments(courseId)).content).toEqual([assignment]);
+        expect(call(0).url).toBe(`http://localhost:8080/api/courses/${courseId}/owned-assignments?page=0&size=20`);
+
+        fetcher.mockResolvedValueOnce(json(assignment, 201));
+        expect(await createAssignment(courseId, write)).toEqual(assignment);
+        expect(call(1).url).toBe(`http://localhost:8080/api/courses/${courseId}/assignments`);
+
+        fetcher.mockResolvedValueOnce(json(assignment));
+        expect(await readOwnedAssignment(courseId, assignmentId)).toEqual(assignment);
+
+        fetcher.mockResolvedValueOnce(json(assignment));
+        expect(await replaceAssignment(courseId, assignmentId, write)).toEqual(assignment);
+        expect(call(3).init.method).toBe('PUT');
+
+        fetcher.mockResolvedValueOnce(json({ ...assignment, publicationStatus: 'published' }));
+        expect((await setAssignmentPublication(courseId, assignmentId, 'published')).publicationStatus).toBe('published');
+    });
+
+    it.each([
+        ['gradedCount exceeding submissionCount', { ...assignment, submissionCount: 1, gradedCount: 2 }],
+        ['sub-microsecond deadlineAt', { ...assignment, deadlineAt: '2026-12-01T12:00:00.1234567Z' }],
+        ['another course', { ...assignment, courseId: skillId }],
+        ['extra property', { ...assignment, open: true }],
+    ])('rejects %s', async (_, bad) => {
+        fetcher.mockResolvedValue(json(bad));
+        await expect(readOwnedAssignment(courseId, assignmentId)).rejects.toMatchObject({ kind: 'protocol' });
+    });
+});
+
+describe('CT21.authoring owned course and structure bindings', () => {
+    const chapterId = '00000000-0000-4000-8000-0000000000e1';
+    const lessonId = '00000000-0000-4000-8000-0000000000b1';
+    const ownedCourse = {
+        id: courseId,
+        title: 'Python Foundations',
+        description: 'Variables, loops and functions.',
+        publicationStatus: 'hidden' as const,
+        prerequisiteDescription: null,
+        chapters: [{
+            id: chapterId,
+            title: 'Getting Started',
+            position: 1,
+            lessons: [{
+                id: lessonId,
+                chapterId,
+                title: 'Hello Python',
+                contentMarkdown: '# Welcome',
+                position: 1,
+                publicationStatus: 'hidden' as const,
+                materials: [],
+            }],
+        }],
+    };
+
+    it('decodes owned course summaries, full tree, chapters and lessons strictly', async () => {
+        fetcher.mockResolvedValueOnce(json(page([{ id: courseId, title: ownedCourse.title, description: ownedCourse.description, publicationStatus: 'hidden' }])));
+        expect((await listOwnedCourses()).content).toHaveLength(1);
+        expect(call(0).url).toBe('http://localhost:8080/api/instructor/courses?page=0&size=20');
+
+        fetcher.mockResolvedValueOnce(json(ownedCourse, 201));
+        expect((await createOwnedCourse({ title: ownedCourse.title, description: ownedCourse.description, prerequisiteDescription: null })).id).toBe(courseId);
+
+        fetcher.mockResolvedValueOnce(json(ownedCourse));
+        expect((await getOwnedCourse(courseId)).chapters[0].lessons[0].title).toBe('Hello Python');
+
+        fetcher.mockResolvedValueOnce(json({ ...ownedCourse, title: 'Updated' }));
+        expect((await updateOwnedCourse(courseId, { title: 'Updated', description: ownedCourse.description, prerequisiteDescription: null })).title).toBe('Updated');
+
+        fetcher.mockResolvedValueOnce(json({ ...ownedCourse, publicationStatus: 'published' }));
+        expect((await setOwnedCoursePublication(courseId, 'published')).publicationStatus).toBe('published');
+
+        fetcher.mockResolvedValueOnce(json(ownedCourse.chapters[0], 201));
+        expect((await createCourseChapter(courseId, 'Getting Started')).id).toBe(chapterId);
+
+        fetcher.mockResolvedValueOnce(json(ownedCourse.chapters[0].lessons[0], 201));
+        expect((await createCourseLesson(courseId, chapterId, { title: 'Hello Python', contentMarkdown: '# Welcome' })).id).toBe(lessonId);
+
+        fetcher.mockResolvedValueOnce(json({ orderedIds: [lessonId] }));
+        expect(await orderChapterLessons(courseId, chapterId, [lessonId])).toEqual([lessonId]);
+
+        fetcher.mockResolvedValueOnce(json({ ...ownedCourse.chapters[0].lessons[0], publicationStatus: 'published' }));
+        expect((await setCourseLessonPublication(courseId, lessonId, 'published')).publicationStatus).toBe('published');
     });
 });

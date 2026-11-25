@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, Box, Button, Skeleton, Typography } from '@mui/material';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
@@ -8,28 +8,37 @@ import { StatusPill } from '../../../../shared/components/StatusPill';
 import { CircleAction } from '../../../../shared/components/Tile';
 import { PresentationIcon } from '../../../../shared/components/PresentationIcon';
 import { SegmentedControl } from '../../../../shared/components/ViewRail';
+import { formatDate } from '../../../../shared/utils/format';
 import { QuestionEditorSheet, QuestionForm, difficultyLabel, emptyQuestionDraft, questionKindLabel, useSkillLookup } from '../components/QuestionForm';
 import type { SkillSource } from '../components/QuestionForm';
 import type { QuestionDraft, SkillOption } from '../types/courseManagementTypes';
-import type { B3Question, B3QuizOwned, QuizKind } from '../api/assessmentAuthoringApi';
+import type { B3Question, B3QuizOwned, B5OwnedAssignment, QuizKind } from '../api/assessmentAuthoringApi';
+import type { OwnedCourse } from '../api/instructorCourseApi';
 import { useQuestionBank } from '../hooks/useQuestionBank';
-import { failureStatus, useOwnedQuizzes } from '../hooks/useAssessmentEditor';
+import { failureStatus, useOwnedAssignments, useOwnedQuizzes } from '../hooks/useAssessmentEditor';
+import { useCourseEditorContext } from '../hooks/useCourseEditor';
 
 /*
- * S19 Assessments page (DESIGN.md r12, D12-2): `/teach/courses/:courseId/assessments`. Each view is its
- * own paginated owner read shown in API order, with no client-side filtering, sorting or filter
- * controls. The view is kept in `?view=` (recommended by DESIGN.md; FE15 owner confirmation pending,
- * G7). The Assignments view is FE16's deliverable and is not routed until G7 is confirmed and FE16
- * delivers it, so `?view=assignments` opens Questions like any unknown value.
+ * S19 Assessments page (DESIGN.md r12, D12-2): `/teach/courses/:courseId/assessments`.
+ * Segmented switch `Questions | Quizzes | Assignments` with `?view=questions|quizzes|assignments`.
+ * Each view is its own paginated owner read shown in API order, with no client-side filtering,
+ * sorting or filter controls. Note: G7 owner confirmation on Issues #200/#201 remains tracked as
+ * a governance record gate while both FE15 and FE16 views are integrated here under Leader authorization.
  */
 
-export type AssessmentsView = 'questions' | 'quizzes';
-export const assessmentsViewFrom = (value: string | null): AssessmentsView => value === 'quizzes' ? 'quizzes' : 'questions';
+export type AssessmentsView = 'questions' | 'quizzes' | 'assignments';
+export const assessmentsViewFrom = (value: string | null): AssessmentsView =>
+    value === 'quizzes' ? 'quizzes' : value === 'assignments' ? 'assignments' : 'questions';
 export const assessmentsPath = (courseId: string, view: AssessmentsView = 'questions') =>
-    `/teach/courses/${encodeURIComponent(courseId)}/assessments${view === 'quizzes' ? '?view=quizzes' : ''}`;
-export const quizPath = (courseId: string, quizId: string) => `/teach/courses/${encodeURIComponent(courseId)}/quizzes/${encodeURIComponent(quizId)}`;
+    `/teach/courses/${encodeURIComponent(courseId)}/assessments${view === 'questions' ? '' : `?view=${view}`}`;
+export const quizPath = (courseId: string, quizId: string) =>
+    `/teach/courses/${encodeURIComponent(courseId)}/quizzes/${encodeURIComponent(quizId)}`;
+export const assignmentPath = (courseId: string, assignmentId: string) =>
+    `/teach/courses/${encodeURIComponent(courseId)}/assignments/${encodeURIComponent(assignmentId)}`;
+export const skillsPath = (courseId: string) =>
+    `/teach/courses/${encodeURIComponent(courseId)}/skills`;
 export const quizKindLabel: Record<QuizKind, string> = { diagnostic: 'Placement diagnostic', practice: 'Practice', test: 'Test' };
-/** Notices handed over by the quiz editor through navigation state; only these exact values are shown. */
+/** Notices handed over by child editors through navigation state; only these exact values are shown. */
 const handoverNotices = ['Quiz deleted.'] as const;
 
 /** "1 min 35 s", from exact seconds. */
@@ -42,6 +51,78 @@ export function PublicationPill({ published }: { published: boolean }) {
 }
 const excerpt = (text: string) => text.length > 48 ? `${text.slice(0, 48).trimEnd()}…` : text;
 
+export function localTimeZone(): string {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch {
+        return 'UTC';
+    }
+}
+
+export function formatDeadlineDisplay(isoString: string): { absolute: string; relative: string } {
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return { absolute: isoString, relative: '' };
+    const timeZone = localTimeZone();
+    const absolute = formatDate(date, {
+        locale: 'en-US',
+        options: { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone, timeZoneName: 'short' },
+    }) || isoString;
+    const diffMs = date.getTime() - Date.now();
+    const absMs = Math.abs(diffMs);
+    const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+    let span: string;
+    if (absMs >= 86_400_000) span = rtf.format(Math.round(diffMs / 86_400_000), 'day');
+    else if (absMs >= 3_600_000) span = rtf.format(Math.round(diffMs / 3_600_000), 'hour');
+    else span = rtf.format(Math.round(diffMs / 60_000), 'minute');
+    return { absolute, relative: diffMs <= 0 ? `Past due (${span})` : `Due ${span}` };
+}
+
+export interface CourseLessonSource {
+    status: 'loading' | 'ready' | 'error';
+    data: OwnedCourse | null;
+    reload: () => void;
+}
+
+export function useLessonLookup(course: CourseLessonSource | undefined) {
+    const reread = useRef(new Set<string>());
+    const status = course?.status ?? 'ready';
+    const data = course?.data ?? null;
+    const reload = course?.reload;
+
+    const byId = useMemo(() => {
+        const map = new Map<string, { title: string; publicationStatus: 'hidden' | 'published' }>();
+        for (const chapter of data?.chapters ?? []) {
+            for (const lesson of chapter.lessons) {
+                map.set(lesson.id.toLowerCase(), { title: lesson.title, publicationStatus: lesson.publicationStatus });
+            }
+        }
+        return map;
+    }, [data]);
+
+    const ensure = useCallback((lessonIds: readonly (string | null)[]) => {
+        if (!course || status !== 'ready' || !reload) return;
+        const missing = lessonIds
+            .filter((value): value is string => typeof value === 'string' && value.length > 0)
+            .map((value) => value.toLowerCase())
+            .filter((lessonId) => !byId.has(lessonId) && !reread.current.has(lessonId));
+        if (!missing.length) return;
+        missing.forEach((lessonId) => reread.current.add(lessonId));
+        reload();
+    }, [course, status, reload, byId]);
+
+    const label = useCallback((lessonId: string | null): string | null => {
+        if (lessonId === null) return '—';
+        if (!course) return 'Lesson unavailable';
+        if (status === 'loading' && !data) return null;
+        if (status === 'error' && !data) return 'Lesson unavailable';
+        const found = byId.get(lessonId.toLowerCase());
+        if (!found) return 'Lesson unavailable';
+        return found.publicationStatus === 'hidden' ? `${found.title} (hidden)` : found.title;
+    }, [course, status, data, byId]);
+
+    return { label, ensure };
+}
+
 /** F14 course states for a course read refused before any row is shown. */
 export function CourseUnavailable({ status }: { status: number | undefined }) {
     const back = <Button component={Link} to="/courses" variant="contained">Back to catalogue</Button>;
@@ -53,13 +134,17 @@ export const courseRefused = (error: unknown) => [400, 403, 404].includes(failur
 
 export interface AssessmentsPageProps {
     courseId: string;
-    /** The course's skill graph read, held by the composing route (D12-3). */
+    /** The course's skill graph read, held by the composing route/shell (D12-3). */
     skills: SkillSource;
-    /** `h1` while the page is routed on its own; `h2` once a course editor header provides the page title. */
+    /** `h1` while standalone; `h2` inside the S18 Course Editor shell header. */
     headingLevel?: 'h1' | 'h2';
+    /** Optional course lesson tree for the Assignments view (defaults to CourseEditorContext when mounted in shell). */
+    courseContext?: CourseLessonSource;
 }
 
-export function AssessmentsPage({ courseId, skills, headingLevel = 'h1' }: AssessmentsPageProps) {
+export function AssessmentsPage({ courseId, skills, headingLevel = 'h1', courseContext }: AssessmentsPageProps) {
+    const sharedCtx = useCourseEditorContext();
+    const resolvedCourse = courseContext ?? sharedCtx?.course;
     const [params, setParams] = useSearchParams();
     const view = assessmentsViewFrom(params.get('view'));
     const location = useLocation(), navigate = useNavigate();
@@ -77,6 +162,9 @@ export function AssessmentsPage({ courseId, skills, headingLevel = 'h1' }: Asses
         return handoverNotices.find((item) => item === value) ?? null;
     });
     useEffect(() => {
+        if (view === 'questions') sharedCtx?.refreshSkillsIfStale();
+    }, [view, sharedCtx]);
+    useEffect(() => {
         // Consume the handover once so a reload or history visit does not repeat it.
         if ((location.state as { notice?: unknown } | null)?.notice !== undefined) navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null });
     }, [location, navigate]);
@@ -91,39 +179,53 @@ export function AssessmentsPage({ courseId, skills, headingLevel = 'h1' }: Asses
         </Box>
         <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
             <SegmentedControl label="Assessment views" value={view} onChange={(next) => { setNotice(null); setView(next); }} controls="assessments-view"
-                options={[{ value: 'questions', label: 'Questions', icon: 'quiz' }, { value: 'quizzes', label: 'Quizzes', icon: 'list' }]} />
+                options={[
+                    { value: 'questions', label: 'Questions', icon: 'quiz' },
+                    { value: 'quizzes', label: 'Quizzes', icon: 'list' },
+                    { value: 'assignments', label: 'Assignments', icon: 'assignment' },
+                ]} />
             {view === 'questions'
-                ? <Button variant="contained" onClick={() => setNewQuestion((value) => value + 1)} startIcon={<PresentationIcon name="plus" />}>New question</Button>
-                : <Button component={Link} to={quizPath(courseId, 'new')} variant="contained" startIcon={<PresentationIcon name="plus" />}>New quiz</Button>}
+                ? <Button variant="contained" onClick={() => { sharedCtx?.refreshSkillsIfStale(); setNewQuestion((value) => value + 1); }} startIcon={<PresentationIcon name="plus" />}>New question</Button>
+                : view === 'quizzes'
+                    ? <Button component={Link} to={quizPath(courseId, 'new')} variant="contained" startIcon={<PresentationIcon name="plus" />}>New quiz</Button>
+                    : <Button component={Link} to={assignmentPath(courseId, 'new')} variant="contained" startIcon={<PresentationIcon name="plus" />}>New assignment</Button>}
         </Box>
         {notice && <Typography role="status" sx={{ color: 'text.secondary' }}>{notice}</Typography>}
         <Box id="assessments-view">
             {view === 'questions'
                 ? <QuestionsView key={courseId} courseId={courseId} page={page} createRequest={newQuestion} onPage={(next) => setPaging({ view, page: next })} skills={skills} onNotice={setNotice} onRefused={onRefused} />
-                : <QuizzesView key={courseId} courseId={courseId} page={page} onPage={(next) => setPaging({ view, page: next })} onRefused={onRefused} />}
+                : view === 'quizzes'
+                    ? <QuizzesView key={courseId} courseId={courseId} page={page} onPage={(next) => setPaging({ view, page: next })} onRefused={onRefused} />
+                    : <AssignmentsView key={courseId} courseId={courseId} page={page} onPage={(next) => setPaging({ view, page: next })} courseContext={resolvedCourse} onRefused={onRefused} />}
         </Box>
     </Box>;
 }
 
 function QuestionsView({ courseId, page, createRequest, onPage, skills, onNotice, onRefused }: { courseId: string; page: number; createRequest: number; onPage: (page: number) => void; skills: SkillSource;
     onNotice: (notice: string | null) => void; onRefused: (status: number | undefined) => void }) {
+    const sharedCtx = useCourseEditorContext();
     const bank = useQuestionBank(courseId, page);
     const lookup = useSkillLookup(skills);
     const [editing, setEditing] = useState<{ key: number; question: B3Question | null } | null>(null);
     const { data, error } = bank, { ensure } = lookup;
     useEffect(() => { if (data) ensure(data.content.map((question) => question.skillId)); }, [data, ensure]);
     useEffect(() => { if (courseRefused(error)) onRefused(failureStatus(error)); }, [error, onRefused]);
-    const open = useCallback((question: B3Question | null) => { onNotice(null); setEditing({ key: Date.now(), question }); }, [onNotice]);
+    const open = useCallback((question: B3Question | null) => {
+        sharedCtx?.refreshSkillsIfStale();
+        onNotice(null);
+        setEditing({ key: Date.now(), question });
+    }, [onNotice, sharedCtx]);
     const handled = useRef(createRequest);
     useEffect(() => { if (createRequest !== handled.current) { handled.current = createRequest; open(null); } }, [createRequest, open]);
     const skillCell = (question: B3Question): ReactNode => lookup.name(question.skillId) ?? <Skeleton width={96} aria-label="Loading the skill name" />;
+    const noSkillsYet = skills.status === 'ready' && skills.skills.length === 0;
     return <Box sx={{ display: 'grid', gap: 2 }}>
-        {skills.status === 'error' && <Alert severity="error" action={<Button size="small" variant="text" onClick={skills.reload}>Try again</Button>}>Skills couldn't be loaded.</Alert>}
+        {skills.status === 'error' && <Alert severity="error" action={<Button size="small" variant="text" onClick={skills.reload}>Try again</Button>}>Skills couldn&apos;t be loaded.</Alert>}
         {bank.error && !courseRefused(bank.error)
             ? <ErrorView title="Questions couldn't be loaded." message={errorMessage(bank.error)} onRetry={bank.reload} />
             : <DataTable label="Questions" loading={!data} rows={data?.content ?? []} getRowId={(question) => question.id}
-                // "Go to Skills" waits for the Skills route (FE18): no link to an unimplemented page (CT16.routes activation rule).
-                empty={<EmptyView icon="quiz" title="No questions yet" message="Each question is tagged with a skill and a difficulty." />}
+                empty={<EmptyView icon="quiz" title="No questions yet" message="Each question is tagged with a skill and a difficulty."
+                    action={noSkillsYet ? <Button component={Link} to={skillsPath(courseId)} variant="outlined">Go to Skills</Button> : undefined} />}
                 columns={[
                     { key: 'prompt', header: 'Question', primary: true, render: (question) => <Typography sx={{ fontWeight: 600, whiteSpace: 'pre-line', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{question.prompt}</Typography> },
                     { key: 'kind', header: 'Kind', render: (question) => questionKindLabel[question.kind] },
@@ -134,6 +236,7 @@ function QuestionsView({ courseId, page, createRequest, onPage, skills, onNotice
                 actions={(question) => <CircleAction label={`Edit question: ${excerpt(question.prompt)}`} icon="edit" variant="fill" onClick={() => open(question)} />}
                 footer={data && <PaginationBar page={data.page} totalPages={data.totalPages} totalItems={data.totalElements} pageSize={data.size} itemsOnPage={data.content.length} onChange={onPage} noun="questions" nounOne="question" />} />}
         {editing && <QuestionEditorSheet key={editing.key} courseId={courseId} question={editing.question} skills={skills} ensureSkills={ensure}
+            skillsHref={skillsPath(courseId)}
             onClose={() => setEditing(null)}
             onDone={(outcome) => { setEditing(null); onNotice(outcome === 'saved' ? 'Question saved.' : 'Question deleted.'); bank.reload(); }} />}
     </Box>;
@@ -156,6 +259,69 @@ function QuizzesView({ courseId, page, onPage, onRefused }: { courseId: string; 
         ]}
         actions={(quiz) => <Button component={Link} to={quizPath(courseId, quiz.id)} variant="outlined" size="small" aria-label={`Open quiz: ${quiz.title}`}>Open</Button>}
         footer={data && <PaginationBar page={data.page} totalPages={data.totalPages} totalItems={data.totalElements} pageSize={data.size} itemsOnPage={data.content.length} onChange={onPage} noun="quizzes" nounOne="quiz" />} />;
+}
+
+function AssignmentsView({ courseId, page, onPage, courseContext, onRefused }: {
+    courseId: string;
+    page: number;
+    onPage: (page: number) => void;
+    courseContext: CourseLessonSource | undefined;
+    onRefused: (status: number | undefined) => void;
+}) {
+    const assignments = useOwnedAssignments(courseId, page);
+    const lessonLookup = useLessonLookup(courseContext);
+    const { data, error } = assignments;
+    const { ensure } = lessonLookup;
+    useEffect(() => { if (data) ensure(data.content.map((item) => item.lessonId)); }, [data, ensure]);
+    useEffect(() => { if (courseRefused(error)) onRefused(failureStatus(error)); }, [error, onRefused]);
+
+    if (assignments.error && !courseRefused(assignments.error)) {
+        return <ErrorView title="Assignments couldn't be loaded." message={errorMessage(assignments.error)} onRetry={assignments.reload} />;
+    }
+
+    return <DataTable label="Assignments" loading={!data} rows={data?.content ?? []} getRowId={(item) => item.id}
+        empty={<EmptyView icon="assignment" title="No assignments yet" message="Create an assignment with instructions and a deadline." />}
+        columns={[
+            {
+                key: 'title',
+                header: 'Title',
+                primary: true,
+                render: (assignment: B5OwnedAssignment) => <Typography component={Link} to={assignmentPath(courseId, assignment.id)} sx={{ fontWeight: 600, color: 'inherit' }}>{assignment.title}</Typography>,
+            },
+            {
+                key: 'deadline',
+                header: 'Deadline',
+                render: (assignment) => {
+                    const formatted = formatDeadlineDisplay(assignment.deadlineAt);
+                    return <Box>
+                        <Typography variant="body2" className="cm-tabular">{formatted.absolute}</Typography>
+                        {formatted.relative && <Typography variant="caption" sx={{ color: 'text.secondary' }}>{formatted.relative}</Typography>}
+                    </Box>;
+                },
+            },
+            {
+                key: 'lesson',
+                header: 'Related lesson',
+                render: (assignment) => lessonLookup.label(assignment.lessonId) ?? <Skeleton width={112} aria-label="Loading the related lesson" />,
+            },
+            {
+                key: 'publication',
+                header: 'Publication',
+                render: (assignment) => <PublicationPill published={assignment.publicationStatus === 'published'} />,
+            },
+            {
+                key: 'submitted',
+                header: 'Submitted',
+                render: (assignment) => <span className="cm-tabular">{assignment.submissionCount}</span>,
+            },
+            {
+                key: 'graded',
+                header: 'Graded',
+                render: (assignment) => <span className="cm-tabular">{assignment.gradedCount}</span>,
+            },
+        ]}
+        actions={(assignment) => <Button component={Link} to={assignmentPath(courseId, assignment.id)} variant="outlined" size="small" aria-label={`Open assignment: ${assignment.title}`}>Open</Button>}
+        footer={data && <PaginationBar page={data.page} totalPages={data.totalPages} totalItems={data.totalElements} pageSize={data.size} itemsOnPage={data.content.length} onChange={onPage} noun="assignments" nounOne="assignment" />} />;
 }
 
 /** F14 network and server wording; other refusals keep the safe client message. */

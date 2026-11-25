@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { bindAuthSession } from '../../../../shared/api/httpClient';
-import { getOwnedSkillGraph } from './skillGraphApi';
+import {
+    addCoursePrerequisite, createCourseSkill, deleteCourseSkill, getOwnedSkillGraph,
+    mapCourseLessonSkill, removeCoursePrerequisite, unmapCourseLessonSkill, updateCourseSkill,
+} from './skillGraphApi';
 
 const courseId = '00000000-0000-4000-8000-0000000000c1';
 const loops = { id: '00000000-0000-4000-8000-0000000000a1', name: 'Loops', description: null };
@@ -39,4 +42,34 @@ it.each([
 ])('rejects %s', async (_, value) => {
     fetcher.mockResolvedValue(json(value));
     await expect(getOwnedSkillGraph(courseId)).rejects.toMatchObject({ kind: 'protocol' });
+});
+
+it('sends CT05 skill, prerequisite and lesson-mapping mutations with 201, 200 and 204 no-content modes', async () => {
+    const empty204 = () => new Response(null, { status: 204 });
+    fetcher.mockResolvedValueOnce(json(loops, 201));
+    expect(await createCourseSkill(courseId, { name: 'Loops', description: null })).toEqual(loops);
+    expect(fetcher.mock.calls[0][0]).toBe(`http://localhost:8080/api/courses/${courseId}/skills`);
+
+    fetcher.mockResolvedValueOnce(json({ ...loops, description: 'Updated' }));
+    expect((await updateCourseSkill(courseId, loops.id, { name: 'Loops', description: 'Updated' })).description).toBe('Updated');
+
+    fetcher.mockResolvedValueOnce(empty204());
+    await deleteCourseSkill(courseId, loops.id);
+    expect(fetcher.mock.calls[2][1].method).toBe('DELETE');
+
+    fetcher.mockResolvedValueOnce(empty204());
+    await addCoursePrerequisite(courseId, lists.id, loops.id);
+    expect(fetcher.mock.calls[3][0]).toBe(`http://localhost:8080/api/courses/${courseId}/skills/${lists.id}/prerequisites/${loops.id}`);
+
+    fetcher.mockResolvedValueOnce(empty204());
+    await removeCoursePrerequisite(courseId, lists.id, loops.id);
+    expect(fetcher.mock.calls[4][1].method).toBe('DELETE');
+
+    fetcher.mockResolvedValueOnce(empty204());
+    await mapCourseLessonSkill(courseId, lessonId, loops.id);
+    expect(fetcher.mock.calls[5][0]).toBe(`http://localhost:8080/api/courses/${courseId}/lessons/${lessonId}/skills/${loops.id}`);
+
+    fetcher.mockResolvedValueOnce(empty204());
+    await unmapCourseLessonSkill(courseId, lessonId, loops.id);
+    expect(fetcher.mock.calls[6][1].method).toBe('DELETE');
 });
