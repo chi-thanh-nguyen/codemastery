@@ -18,6 +18,7 @@ import { radius, roles } from '../../../../app/theme/theme';
 import { ApiError } from '../../../../shared/types/apiTypes';
 import { failureStatus, fieldErrorsFrom, isCancelled, outcomeUnknown } from '../hooks/useAssessmentEditor';
 import { CourseEditorContext, useCourseEditorContext, useCourseOperations, useSharedCourseState } from '../hooks/useCourseEditor';
+import type { SettingsAcknowledgment } from '../hooks/useCourseEditor';
 import type { CoursePublicationStatus, OwnedCourse } from '../api/instructorCourseApi';
 import { CourseUnavailable, courseRefused, errorMessage } from './QuestionBankPage';
 
@@ -352,37 +353,39 @@ export function CourseContentTab() {
 
 /** S18 Settings tab: course title, description, optional prerequisites text, and metadata save. */
 export function CourseSettingsTab() {
-    const { courseId, course, setTabDirty } = useCourseEditorContext()!;
+    const { courseId, course, settingsAcknowledgment, acknowledgeSettings, setTabDirty } = useCourseEditorContext()!;
     const ops = useCourseOperations(courseId);
     const data = course.data!;
     // Keyed by the course identity only (U5): a re-read after a save, or another writer's change, must not remount the
     // form, which would drop the "Saved" status or an unsaved draft. The form adopts new committed values itself.
     return <CourseSettingsForm key={data.id}
         course={data} successfulRead={course.successfulRead} refreshError={course.error}
-        ops={ops} onSaved={course.reload} setTabDirty={setTabDirty} />;
+        acknowledgment={settingsAcknowledgment} ops={ops} onSaved={acknowledgeSettings}
+        onUnknown={course.reload} setTabDirty={setTabDirty} />;
 }
 
-function CourseSettingsForm({ course, successfulRead, refreshError, ops, onSaved, setTabDirty }: {
+function CourseSettingsForm({ course, successfulRead, refreshError, acknowledgment, ops, onSaved, onUnknown, setTabDirty }: {
     course: OwnedCourse;
     successfulRead: number;
     refreshError: unknown;
+    acknowledgment: SettingsAcknowledgment | null;
     ops: ReturnType<typeof useCourseOperations>;
-    onSaved: () => number;
+    onSaved: (metadata: OwnedCourse) => void;
+    onUnknown: () => number;
     setTabDirty: (dirty: boolean) => void;
 }) {
-    const [title, setTitle] = useState(course.title);
-    const [description, setDescription] = useState(course.description);
-    const [prerequisites, setPrerequisites] = useState(course.prerequisiteDescription ?? '');
+    const baseline = acknowledgment?.metadata ?? course;
+    const [title, setTitle] = useState(baseline.title);
+    const [description, setDescription] = useState(baseline.description);
+    const [prerequisites, setPrerequisites] = useState(baseline.prerequisiteDescription ?? '');
     const [dirty, setDirty] = useState(false);
-    const [savedNotice, setSavedNotice] = useState(false);
+    const [savedNotice, setSavedNotice] = useState(acknowledgment !== null);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [alert, setAlert] = useState<string | null>(null);
     // A GET observed during a PUT cannot establish their commit order. Keep the acknowledged fields until a
     // current shared GET initiated after acknowledgment succeeds. Equality and object identity prove no ordering.
     const [adoptedRead, setAdoptedRead] = useState(successfulRead);
-    const [reconcileAfter, setReconcileAfter] = useState<number | null>(null);
-    const reconciled = reconcileAfter === null || successfulRead >= reconcileAfter;
-    if (reconcileAfter !== null && reconciled) setReconcileAfter(null);
+    const reconciled = acknowledgment === null;
     if (adoptedRead !== successfulRead && reconciled && !dirty && !ops.busy) {
         setAdoptedRead(successfulRead);
         setTitle(course.title);
@@ -410,7 +413,6 @@ function CourseSettingsForm({ course, successfulRead, refreshError, ops, onSaved
         if (Object.keys(next).length) return;
         setAlert(null);
         setSavedNotice(false);
-        setReconcileAfter(null);
         const write = {
             title: title.trim(),
             description: description.trim(),
@@ -423,7 +425,7 @@ function CourseSettingsForm({ course, successfulRead, refreshError, ops, onSaved
             setPrerequisites(saved.prerequisiteDescription ?? '');
             setDirty(false);
             setSavedNotice(true);
-            setReconcileAfter(onSaved());
+            onSaved(saved);
         } catch (error) {
             if (isCancelled(error)) return;
             const fields = fieldErrorsFrom(error, {
@@ -434,7 +436,7 @@ function CourseSettingsForm({ course, successfulRead, refreshError, ops, onSaved
             if (Object.keys(fields).length) { setErrors(fields); return; }
             if (outcomeUnknown(error)) {
                 setAlert("We couldn't confirm whether your changes were saved.");
-                onSaved();
+                onUnknown();
                 return;
             }
             setAlert(error instanceof ApiError ? error.message : 'Something went wrong on our side. Try again in a moment.');
@@ -442,7 +444,7 @@ function CourseSettingsForm({ course, successfulRead, refreshError, ops, onSaved
     }
 
     const status = ops.busy ? 'Saving…' : dirty ? 'Unsaved changes' : savedNotice
-        ? reconcileAfter !== null
+        ? acknowledgment !== null
             ? refreshError ? "Settings saved, but the current values couldn't be loaded." : 'Settings saved. Refreshing course…'
             : 'Saved'
         : null;

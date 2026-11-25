@@ -278,3 +278,84 @@ describe('D1-R1: shared course read evidence', () => {
         root = createRoot(host);
     });
 });
+
+describe('D1-R2: provider-owned Settings acknowledgment', () => {
+    const body = (title = 'Read X'): OwnedCourse => ({ id: courseId, title, description: `Description ${title}`, prerequisiteDescription: `Prerequisites ${title}`, publicationStatus: 'hidden', chapters: [] });
+    beforeEach(() => vi.mocked(getOwnedSkillGraph).mockResolvedValue({ courseId, skills: [], prerequisites: [], mappings: [] }));
+
+    it('keeps PUT provenance separate and completes reconciliation without a mounted Settings form', async () => {
+        const refresh = deferred<OwnedCourse>();
+        const initial = body(), saved = body('Acknowledged A');
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(initial).mockReturnValueOnce(refresh.promise);
+        const { out } = await render(() => useSharedCourseState(courseId));
+        const read = out.current!.course.successfulRead;
+        await act(async () => out.current!.acknowledgeSettings(saved));
+        expect(out.current!.course.data).toBe(initial);
+        expect(out.current!.course.successfulRead).toBe(read);
+        expect(out.current!.settingsAcknowledgment?.metadata).toEqual({ title: saved.title, description: saved.description, prerequisiteDescription: saved.prerequisiteDescription });
+        const bound = out.current!.settingsAcknowledgment!.reconcileAfter;
+        expect(bound).toBeGreaterThan(read);
+        await act(async () => refresh.resolve(initial));
+        expect(out.current!.course.successfulRead).toBeGreaterThanOrEqual(bound);
+        expect(out.current!.settingsAcknowledgment).toBeNull();
+        expect(out.current!.course.data).toBe(initial);
+        expect(getOwnedCourse).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([403, 404].flatMap(status => ['pending', 'failed'].map(state => ({ status, state }))))('$status after $state reconciliation erases acknowledgment through recovery in the same provider', async ({ status, state }) => {
+        const refresh = deferred<OwnedCourse>();
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(body()).mockReturnValueOnce(refresh.promise);
+        const { out } = await render(() => useSharedCourseState(courseId));
+        await act(async () => out.current!.acknowledgeSettings(body('Acknowledged A')));
+        if (state === 'failed') await act(async () => refresh.reject(new ApiError('http', 'Unavailable', 503)));
+        expect(out.current!.settingsAcknowledgment).not.toBeNull();
+        vi.mocked(getOwnedCourse).mockRejectedValueOnce(new ApiError('http', 'Refused', status));
+        await act(async () => { out.current!.course.reload(); });
+        expect(out.current!.course.data).toBeNull(); expect(out.current!.settingsAcknowledgment).toBeNull();
+        // Even a failed recovery, then a successful same-resource recovery, must not resurrect A.
+        vi.mocked(getOwnedCourse).mockRejectedValueOnce(new ApiError('network', 'Offline'));
+        await act(async () => { out.current!.course.reload(); });
+        expect(out.current!.settingsAcknowledgment).toBeNull();
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(body('Recovered B'));
+        await act(async () => { out.current!.course.reload(); });
+        if (state === 'pending') await act(async () => refresh.resolve(body('Late A')));
+        expect(out.current!.course.data?.title).toBe('Recovered B');
+        expect(out.current!.settingsAcknowledgment).toBeNull();
+    });
+
+    it.each(['course', 'session', 'logout'].flatMap(boundary => ['pending', 'failed'].map(state => ({ boundary, state }))))('$boundary replacement discards $state acknowledgment even when the hook owner survives', async ({ boundary, state }) => {
+        const refresh = deferred<OwnedCourse>();
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(body()).mockReturnValueOnce(refresh.promise);
+        const { out, rerender } = await render(() => useSharedCourseState(courseId));
+        await act(async () => out.current!.acknowledgeSettings(body('Acknowledged A')));
+        if (state === 'failed') await act(async () => refresh.reject(new ApiError('network', 'Offline')));
+        expect(out.current!.settingsAcknowledgment).not.toBeNull();
+        const nextId = boundary === 'course' ? userId : courseId;
+        if (boundary === 'session') generation++;
+        if (boundary === 'logout') { generation++; auth = { ...auth, generation, user: null, isAuthenticated: false }; }
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce({ ...body('New identity'), id: nextId });
+        await rerender(() => useSharedCourseState(nextId));
+        expect(out.current!.settingsAcknowledgment).toBeNull();
+        if (state === 'pending') await act(async () => refresh.resolve(body('Late A')));
+        expect(out.current!.course.data?.title).toBe(boundary === 'logout' ? undefined : 'New identity');
+        expect(out.current!.settingsAcknowledgment).toBeNull();
+    });
+
+    it.each(['pending', 'failed'])('Strict Mode provider unmount discards %s state and cancels late work', async state => {
+        vi.mocked(getOwnedCourse).mockResolvedValue(body());
+        const refresh = deferred<OwnedCourse>();
+        const { out } = await render(() => useSharedCourseState(courseId), true);
+        vi.mocked(getOwnedCourse).mockReturnValueOnce(refresh.promise);
+        await act(async () => out.current!.acknowledgeSettings(body('Acknowledged A')));
+        const options = vi.mocked(getOwnedCourse).mock.calls.at(-1)![1]!;
+        if (state === 'failed') await act(async () => refresh.reject(new ApiError('protocol', 'Invalid response')));
+        expect(out.current!.settingsAcknowledgment).not.toBeNull();
+        await act(async () => root.unmount()); root = createRoot(host);
+        expect(options.signal!.aborted).toBe(true); expect(options.isCurrent!()).toBe(false);
+        vi.mocked(getOwnedCourse).mockResolvedValue(body('New mount'));
+        const next = await render(() => useSharedCourseState(courseId), true);
+        if (state === 'pending') await act(async () => refresh.resolve(body('Late A')));
+        expect(next.out.current!.course.data?.title).toBe('New mount');
+        expect(next.out.current!.settingsAcknowledgment).toBeNull();
+    });
+});

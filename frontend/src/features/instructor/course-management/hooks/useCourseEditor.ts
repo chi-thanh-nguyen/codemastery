@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth } from '../../../auth/hooks/useAuth';
 import { DEFAULT_PAGE_SIZE } from '../api/assessmentAuthoringApi';
 import {
     createCourseChapter, createCourseLesson, createOwnedCourse, getOwnedCourse, listOwnedCourses,
@@ -47,6 +48,11 @@ export function useCourseOperations(courseId: string) {
     return { busy, ...actions };
 }
 
+export interface SettingsAcknowledgment {
+    metadata: OwnedCourseWrite;
+    reconcileAfter: number;
+}
+
 export interface SharedCourseContextState {
     courseId: string;
     course: {
@@ -60,6 +66,9 @@ export interface SharedCourseContextState {
     };
     skillGraph: OwnedSkillGraphRead;
     skills: SkillSource;
+    /** Confirmed metadata awaiting a causally eligible GET; never a draft or shared-read evidence. */
+    settingsAcknowledgment: SettingsAcknowledgment | null;
+    acknowledgeSettings: (metadata: OwnedCourseWrite) => void;
     /** Marks that S20 changed skills in this document, and triggers a fresh graph read. */
     notifySkillsChanged: () => void;
     /** Re-reads the skill graph if an earlier S20 skill mutation has not been freshly read yet (D12-3). */
@@ -76,6 +85,9 @@ export function useCourseEditorContext(): SharedCourseContextState | null {
 }
 
 export function useSharedCourseState(courseId: string): SharedCourseContextState {
+    const auth = useAuth();
+    const identity = auth.isAuthenticated ? `${auth.generation}|${courseId}` : null;
+    const [settingsSave, setSettingsSave] = useState<(SettingsAcknowledgment & { identity: string }) | null>(null);
     // Count actual GET initiations, not renders, reload scheduling or response arrival. The existing owner-read
     // lifecycle accepts only current, non-superseded results and retains this envelope unchanged on read failure.
     const readSequence = useRef(0);
@@ -123,6 +135,21 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
 
     const courseData = courseRead.data?.body ?? null;
     const successfulRead = courseRead.data?.sequence ?? 0;
+    // The provider outlives Settings. Retain only confirmed metadata while its read is unresolved, so a remounted
+    // form cannot use the pre-save body for another full replacement. Resolve here even with Settings absent.
+    // A refusal drops courseData; erase the acknowledgment before recovery can make it visible again.
+    const settingsAcknowledgment = settingsSave && settingsSave.identity === identity && courseData
+        && successfulRead < settingsSave.reconcileAfter ? settingsSave : null;
+    if (settingsSave && !settingsAcknowledgment) setSettingsSave(null);
+    const acknowledgeSettings = useCallback((metadata: OwnedCourseWrite) => {
+        if (identity === null) return;
+        const reconcileAfter = reloadCourse();
+        setSettingsSave({
+            identity,
+            metadata: { title: metadata.title, description: metadata.description, prerequisiteDescription: metadata.prerequisiteDescription },
+            reconcileAfter,
+        });
+    }, [identity, reloadCourse]);
     const courseStatus: 'loading' | 'ready' | 'error' = courseRead.error && !courseData
         ? 'error'
         : courseData
@@ -147,9 +174,11 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
         course,
         skillGraph,
         skills,
+        settingsAcknowledgment,
+        acknowledgeSettings,
         notifySkillsChanged,
         refreshSkillsIfStale,
         setTabDirty,
         isTabDirty,
-    }), [courseId, course, skillGraph, skills, notifySkillsChanged, refreshSkillsIfStale, setTabDirty, isTabDirty]);
+    }), [courseId, course, skillGraph, skills, settingsAcknowledgment, acknowledgeSettings, notifySkillsChanged, refreshSkillsIfStale, setTabDirty, isTabDirty]);
 }

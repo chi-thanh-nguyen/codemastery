@@ -6988,3 +6988,94 @@ technical approval, CODEOWNER/Infrastructure review, G7/N7 disposition and prote
 remain separate. The Leader expressly authorized committing and pushing without waiting for CI;
 required CI remains an integration gate. No merge, Issue/Project/PR metadata write, release,
 deployment or real infrastructure provisioning is part of this correction.
+
+
+## PR #273 D1-R2 Settings tab lifecycle correction — 25 November 2026
+
+The Project Leader explicitly authorized focused D1-R2 implementation, verification, commit and
+push in the existing third independent delta-review session, starting from `77b3128`:
+"PR #273 — Focused D1-R2 Remediation in the Current Review Session". This record preserves the
+preceding review and remediation records as history. The third independent review verified the
+original D1 and D1-R1 causal reconciliation cases and retained independent D2 evidence, but found
+D1-R2 (P2, high confidence). D1-R2 also reproduces at `00f8084`: it is a pre-existing lifecycle
+issue, not a regression caused by the read sequence counter.
+
+**Reproduction and cause.** The Course provider survives tab changes; the Settings form does not.
+With shared metadata X, a successful metadata PUT acknowledges A. While its post-acknowledgment
+GET remains pending or fails (503, network or protocol), the old form holds A and its reconciliation
+bound only locally. Settings → Content → Settings loses that local state, initializes from retained
+X and loses the qualified save status. Editing only description then sends a full replacement with
+title X, silently undoing A. The failed branch still has the generic stale-course alert; the pending
+branch has no warning after remount. Preserving just a `Saved` label would not correct the payload.
+
+**Correction and ownership.** `useSharedCourseState`, owned by the existing Course provider, retains
+only the three acknowledged metadata fields (`title`, `description`, `prerequisiteDescription`) and
+the existing minimum read-initiation bound. This state is separate from `course.data` and
+`successfulRead`: a PUT never becomes successful GET evidence or a replacement shared Course tree.
+The existing GET sequence and reload mechanism are unchanged. The provider resolves the
+acknowledgment when an accepted successful read reaches the bound, even while Settings is absent.
+An eligible read that returns another writer's values, including the original X, takes precedence;
+no object equality or response-order heuristic establishes commit order or permanent freshness.
+
+A remounted Settings form uses unresolved acknowledged metadata as its editing baseline and keeps
+`Settings saved. Refreshing course…` or `Settings saved, but the current values couldn't be loaded.`
+The existing `Try again` performs one shared read. Tab changes start no additional Course/skill
+reads. Later successful saves establish their own bounds. Unsaved drafts, dirty flags, validation,
+field errors and unknown-mutation-outcome warnings remain local to the form: an explicitly discarded
+draft never reappears as an acknowledgment. A rejected/unknown second mutation does not replace a
+previous confirmed acknowledgment with its draft. Acknowledgment alone does not trigger the leave
+confirmation. Unknown mutations retain the existing deliberate re-read and are never replayed.
+
+The retained state is scoped to authenticated session generation and Course identity. Identity
+replacement or logout discards it. A confirmed read refusal discards the shared body and clears
+acknowledgment before same-provider recovery; a later successful recovery cannot resurrect it.
+Provider unmount discards the state and existing request cancellation rejects late work. The
+existing `useOwnerRead` and `useAuthoringOperation` are unchanged. No new provider, store, client,
+repository file, public API, dependency, backend/schema/grant change or navigation guard is added.
+
+**Executed author-side verification** (isolated implementation clone; cwd `frontend/` unless noted):
+
+| Command / environment | Observed result |
+| --- | --- |
+| `npm test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx -t D1-R2 --reporter=verbose` using the final new component tests with defective `77b3128` production files | 9 failed, 5 passed, 73 existing cases excluded; exit 1. The five existing-behavior passes cover eligible read completion outside Settings and logout/authentication replacement. |
+| `npm test -- src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/routes/index.test.tsx` | 3 files, 211 tests passed; exit 0. Includes 14 new component cases and 13 new hook cases. |
+| Reused third-review scratch `independentReconciliation.test.tsx` and `independentScheduling.test.tsx` against corrected production files | 14 cases passed; exit 0. Both previously failing remount probes now pass; older-read-before-cleanup and coalescing probes remain intact. These probes are external verification artifacts, not repository additions. |
+| `npm run build` | Typecheck and production build passed; exit 0; existing chunk-size advisory. |
+| Targeted `playwright-cli`, Chrome `157.0.8103.39`, local Vite app with synthetic intercepted HTTP | Pending and 503 remount branches preserve title A and their qualified status. Actual second PUT contains title A with the description-only edit; two deliberate PUTs, no replay. Strict Mode produces two initial Course GETs (one superseded); each save adds one GET, tab remount adds none. |
+| `git diff --check` | Passed; exit 0. |
+
+The durable component cases check all three metadata fields, pending/503/network/protocol remount,
+actual second PUT payload, superseded first-save responses, eligible second-save reconciliation,
+explicit retry without PUT replay, success while Settings is absent (A, another writer, restored X),
+repeated Content/Skills/Assessments/quiz/Assignment routes, draft Stay/Leave/discard, rejected and
+unknown later writes, logout and authentication replacement. Provider hook cases check separate
+PUT/GET provenance, resolution with no Settings form, pending/failed acknowledgment across
+403/404 refusal and failed/successful same-provider recovery, Course/session/logout replacement,
+late reads, Strict Mode, unmount and remount. Existing D1/D1-R1 tests retain their causal oracle,
+including delayed mutations, consecutive saves, clean navigation, supersession and coalescing.
+Mocks establish deterministic frontend behavior; the browser exercises the real app, router,
+transport and decoders with synthetic HTTP, not real backend commit ordering or deployment.
+
+**Selective omissions and retained evidence.** D2/backend production and tests, PostgreSQL mapping,
+configuration/schema, CT17-P6 r12 grants, infrastructure, contracts and dependency/image baselines
+are unchanged from `77b3128` and `00f8084`. No backend/calendar/runtime-role/upgrade suite was rerun.
+Retain the prior independent `00f8084` results: 42 Assignment unit, 29 persistence and 3 HTTP cases,
+14-date exact SQL-epoch/text/binary/non-UTC probes, and restricted-runtime-role consumer/upgrade
+verification. The historical-row compatibility/repair decision remains separate. Standalone
+containment retains independent `3f7c184` exact-grants, denial, drift, upgrade and failure-containment
+evidence because those implementations are unchanged. These are historical independent results,
+not newly executed checks at the remediation commit.
+
+Full frontend/backend, full browser/E2E, HTTPS, MinIO, containerd, security and release qualification
+were omitted: the delta affects only Course-owned acknowledgment and Settings lifecycle, directly
+covered above; no relevant backend, infrastructure, image or dependency change invalidates their
+bounded prior evidence. Unaffected U1–U4/U6 dispositions are retained; U7/U8 remain deferred with
+the preceding provenance limitations. No omitted suite is claimed to pass at the new HEAD.
+
+This correction and its self-review are remediation-author verification, not new independent
+acceptance. A focused independent D1-R2 delta check, applicable CODEOWNER/owning-module and
+Infrastructure reviews, G7 owner confirmation, N7 disposition, required CI and protected integration
+remain separate. The Leader authorized commit/push without waiting for CI. No approval, merge,
+Issue/Project/PR metadata write, release, deployment, real-host provisioning or production-data
+access is part of this remediation; no protection against every concurrent external write is
+promised beyond CT21's unchanged full-replacement/last-serialized-successful-commit semantics.
