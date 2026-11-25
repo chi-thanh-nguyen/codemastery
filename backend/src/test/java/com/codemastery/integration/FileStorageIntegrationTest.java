@@ -2,7 +2,9 @@ package com.codemastery.integration;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.AppenderBase;
 import ch.qos.logback.core.read.ListAppender;
 import com.codemastery.infrastructure.storage.FileStorage;
 import com.codemastery.infrastructure.storage.FileStorage.FileStorageException;
@@ -11,9 +13,11 @@ import com.codemastery.infrastructure.storage.FileStorage.StoredObject;
 import com.codemastery.infrastructure.storage.s3.S3FileStorage;
 import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintWriter;
+import java.io.PrintStream;
 import java.io.StringWriter;
 import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
@@ -24,6 +28,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
@@ -40,6 +45,8 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.logging.LoggingInitializationContext;
+import org.springframework.boot.logging.LoggingSystem;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.core.env.Environment;
 import org.springframework.mock.env.MockEnvironment;
@@ -459,6 +466,242 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
             root.detachAppender(logs);
             logs.stop();
             server.stop(0);
+        }
+    }
+
+    @Test
+    void diagnosticConfidentialitySurvivesLoggingLifecycleInIsolatedJvm() throws Exception {
+        Path output = Files.createTempFile("sh05-logging-lifecycle-", ".log");
+        Process child = null;
+        try {
+            child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                    "-cp", System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")),
+                    LoggingLifecycleProbe.class.getName()).redirectErrorStream(true).redirectOutput(output.toFile()).start();
+            assertTrue(child.waitFor(60, TimeUnit.SECONDS), "Isolated logging lifecycle must terminate");
+            assertEquals(0, child.exitValue(), "Isolated logging lifecycle assertions failed");
+            assertTrue(Files.readString(output).contains("SH05 logging lifecycle PASS"));
+        } finally {
+            try {
+                if (child != null && child.isAlive()) {
+                    child.destroyForcibly();
+                    assertTrue(child.waitFor(5, TimeUnit.SECONDS), "Isolated logging child cleanup failed");
+                }
+            } finally { Files.deleteIfExists(output); }
+        }
+    }
+
+    /** No access to outer static fixtures: this child owns only synthetic loopback resources. */
+    public static final class LoggingLifecycleProbe {
+        public static void main(String[] args) throws Exception {
+            String access = UUID.randomUUID().toString();
+            String secret = UUID.randomUUID().toString();
+            String objectKey = "materials/" + UUID.randomUUID();
+            ByteArrayOutputStream console = new ByteArrayOutputStream();
+            PrintStream previousOut = System.out;
+            PrintStream previousErr = System.err;
+            CountDownLatch bodyRelease = new CountDownLatch(1);
+            CountDownLatch deleteAdmitted = new CountDownLatch(1);
+            CountDownLatch deleteRelease = new CountDownLatch(1);
+            var download = new java.util.concurrent.atomic.AtomicBoolean();
+            var pauseDelete = new java.util.concurrent.atomic.AtomicBoolean();
+            AtomicInteger requests = new AtomicInteger();
+            HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+            try (var workers = Executors.newVirtualThreadPerTaskExecutor();
+                 PrintStream capture = new PrintStream(console, true, StandardCharsets.UTF_8)) {
+                System.setOut(capture);
+                System.setErr(capture);
+                server.setExecutor(workers);
+                server.createContext("/", exchange -> {
+                    requests.incrementAndGet();
+                    try {
+                        exchange.getRequestBody().readAllBytes();
+                        if ("DELETE".equals(exchange.getRequestMethod()) && pauseDelete.compareAndSet(true, false)) {
+                            deleteAdmitted.countDown();
+                            if (!deleteRelease.await(20, TimeUnit.SECONDS)) { throw new IOException("Test DELETE stalled"); }
+                        }
+                        if (download.get() && "GET".equals(exchange.getRequestMethod())) {
+                            exchange.getResponseHeaders().add("Content-Type", "application/pdf");
+                            exchange.sendResponseHeaders(200, 4096);
+                            exchange.getResponseBody().write(1);
+                            exchange.getResponseBody().flush();
+                            if (!bodyRelease.await(20, TimeUnit.SECONDS)) { throw new IOException("Test body stalled"); }
+                            exchange.getResponseBody().write(new byte[4095]);
+                        } else {
+                            byte[] body = ("<Error><Code>AccessDenied</Code><Message>" + secret + "</Message></Error>")
+                                    .getBytes(StandardCharsets.UTF_8);
+                            exchange.getResponseHeaders().add("Content-Type", "application/xml");
+                            exchange.sendResponseHeaders(403, body.length);
+                            exchange.getResponseBody().write(body);
+                        }
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    } finally { exchange.close(); }
+                });
+                server.start();
+                MockEnvironment environment = new MockEnvironment()
+                        .withProperty("codemastery.storage.endpoint", "http://127.0.0.1:" + server.getAddress().getPort())
+                        .withProperty("codemastery.storage.region", "us-east-1")
+                        .withProperty("codemastery.storage.bucket", "sh05-lifecycle")
+                        .withProperty("codemastery.storage.access-key", access)
+                        .withProperty("codemastery.storage.secret-key", secret)
+                        .withProperty("codemastery.storage.path-style-access", "true");
+                LoggerContext loggingContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+                List<ILoggingEvent> events = Collections.synchronizedList(new ArrayList<>());
+                try (var first = context(environment); var second = context(environment)) {
+                    FileStorage firstAdapter = first.getBean(FileStorage.class);
+                    FileStorage retained = second.getBean(FileStorage.class);
+                    captureEvents(loggingContext, events);
+                    operations(firstAdapter, objectKey);
+                    assertConfidential(events, console, access, secret, objectKey);
+
+                    LoggingSystem logging = LoggingSystem.get(LoggingLifecycleProbe.class.getClassLoader());
+                    for (int iteration = 0; iteration < 3; iteration++) {
+                        logging.cleanUp();
+                        logging.beforeInitialize();
+                        MockEnvironment loggingEnvironment = new MockEnvironment();
+                        if (iteration == 1) {
+                            loggingEnvironment.withProperty("logging.structured.format.console", "ecs");
+                        }
+                        logging.initialize(new LoggingInitializationContext(loggingEnvironment), null, null);
+                        captureEvents(loggingContext, events);
+                        operations(retained, objectKey); // Same instance created before Boot initialization.
+                        assertConfidential(events, console, access, secret, objectKey);
+                    }
+
+                    var configurator = new ch.qos.logback.classic.joran.JoranConfigurator();
+                    configurator.setContext(loggingContext);
+                    var configurationLock = loggingContext.getConfigurationLock();
+                    configurationLock.lock();
+                    try {
+                        loggingContext.reset();
+                        configurator.doConfigure(new ByteArrayInputStream("""
+                                <configuration>
+                                  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+                                    <encoder><pattern>%logger %msg%n</pattern></encoder>
+                                  </appender>
+                                  <root level="TRACE"><appender-ref ref="CONSOLE"/></root>
+                                </configuration>
+                                """.getBytes(StandardCharsets.UTF_8)));
+                    } finally { configurationLock.unlock(); }
+                    captureEvents(loggingContext, events);
+                    operations(retained, objectKey);
+                    assertConfidential(events, console, access, secret, objectKey);
+
+                    // A response/operation admitted before reconfiguration stays protected afterwards.
+                    download.set(true);
+                    try (StoredObject opened = retained.open(objectKey)) {
+                        assertEquals(1, opened.content().read());
+                        var reading = workers.submit(() -> opened.content().readAllBytes());
+                        pauseDelete.set(true);
+                        var deleting = workers.submit(() -> {
+                            for (int i = 0; i < 20; i++) {
+                                assertThrowsExactly(FileStorageException.class, () -> retained.delete(objectKey));
+                            }
+                        });
+                        assertTrue(deleteAdmitted.await(5, TimeUnit.SECONDS), "DELETE entered provider before reset");
+                        logging.cleanUp();
+                        logging.beforeInitialize();
+                        logging.initialize(new LoggingInitializationContext(new MockEnvironment()
+                                .withProperty("logging.structured.format.console", "ecs")), null, null);
+                        captureEvents(loggingContext, events);
+                        for (int iteration = 0; iteration < 20; iteration++) {
+                            var lock = loggingContext.getConfigurationLock();
+                            lock.lock();
+                            try {
+                                loggingContext.reset();
+                                captureEvents(loggingContext, events);
+                            } finally { lock.unlock(); }
+                            // Exercise provider/background logger paths independently of operation entry.
+                            LoggerFactory.getLogger("software.amazon.awssdk.request").trace("{} {}", objectKey, access);
+                            LoggerFactory.getLogger("org.apache.http.wire").trace("{}", secret);
+                        }
+                        first.close(); // Does not own the shared logging guard or the second adapter.
+                        bodyRelease.countDown();
+                        deleteRelease.countDown();
+                        assertEquals(4095, reading.get(10, TimeUnit.SECONDS).length);
+                        deleting.get(10, TimeUnit.SECONDS);
+                    } finally { bodyRelease.countDown(); deleteRelease.countDown(); }
+                    download.set(false);
+                    operations(retained, objectKey);
+
+                    try (var invalid = context(new MockEnvironment())) {
+                        var failure = assertThrows(org.springframework.beans.factory.BeanCreationException.class,
+                                () -> invalid.getBean(FileStorage.class));
+                        assertFalse(failure.toString().contains(secret));
+                    }
+                    operations(retained, objectKey);
+                    assertEquals(1, loggingContext.getTurboFilterList().stream()
+                            .filter(filter -> "SH05-provider-confidentiality".equals(filter.getName())).count());
+                    assertEquals(1, loggingContext.getCopyOfListenerList().stream()
+                            .filter(listener -> listener.getClass().getName().endsWith("$ProviderDiagnostics")).count());
+                    assertConfidential(events, console, access, secret, objectKey);
+                    assertTrue(requests.get() >= 42, "Actual SDK requests must have reached the provider");
+                }
+                LoggerFactory.getLogger("org.apache.http.wire").trace("{}", secret);
+                assertConfidential(events, console, access, secret, objectKey);
+                previousOut.println("SH05 logging lifecycle PASS: provider events=0; no key/access/secret disclosure; "
+                        + "application positive controls present; Boot resets=4 (including ECS/in-flight IO); Joran=1; "
+                        + "Logback resets=20; contexts=2; "
+                        + "active stream and concurrent requests passed; one filter/listener");
+            } finally {
+                bodyRelease.countDown();
+                deleteRelease.countDown();
+                server.stop(0);
+                System.setOut(previousOut);
+                System.setErr(previousErr);
+            }
+        }
+
+        private static AnnotationConfigApplicationContext context(MockEnvironment environment) {
+            var context = new AnnotationConfigApplicationContext();
+            context.setEnvironment(environment);
+            context.register(S3FileStorage.class);
+            context.refresh();
+            return context;
+        }
+
+        private static void operations(FileStorage adapter, String key) {
+            assertThrowsExactly(FileStorageException.class, () -> adapter.open(key));
+            assertThrowsExactly(FileStorageException.class, () -> adapter.delete(key));
+            assertThrowsExactly(FileStorageException.class,
+                    () -> adapter.store(key, new ByteArrayInputStream(new byte[]{1}), 1, "application/pdf"));
+        }
+
+        private static void captureEvents(LoggerContext context, List<ILoggingEvent> events) {
+            Logger root = context.getLogger(Logger.ROOT_LOGGER_NAME);
+            // The synthetic server also logs its request URI through JUL after Boot
+            // installs the bridge. It is the fixture, not the production transport.
+            context.getLogger("com.sun.net.httpserver").setLevel(Level.OFF);
+            root.setLevel(Level.TRACE);
+            for (String name : List.of("software.amazon.awssdk", "software.amazon.awssdk.request",
+                    "software.amazon.awssdk.auth.signer.internal.AbstractAws4Signer", "org.apache.http", "org.apache.http.wire")) {
+                context.getLogger(name).setLevel(Level.TRACE);
+            }
+            AppenderBase<ILoggingEvent> appender = new AppenderBase<>() {
+                @Override protected void append(ILoggingEvent event) {
+                    event.prepareForDeferredProcessing();
+                    events.add(event);
+                }
+            };
+            appender.setContext(context);
+            appender.start();
+            root.addAppender(appender);
+        }
+
+        private static void assertConfidential(List<ILoggingEvent> events, ByteArrayOutputStream console,
+                                               String access, String secret, String key) {
+            int previous = events.size();
+            LoggerFactory.getLogger("com.codemastery.sh05-lifecycle-control").warn("SH05 ordinary application control");
+            List<ILoggingEvent> snapshot;
+            synchronized (events) { snapshot = List.copyOf(events); }
+            assertTrue(snapshot.size() > previous, "Application logging/capture remains functional");
+            assertTrue(snapshot.stream().noneMatch(event -> event.getLoggerName().startsWith("software.amazon.awssdk")
+                    || event.getLoggerName().startsWith("org.apache.http")), "Provider diagnostics escaped");
+            String captured = snapshot.stream().map(ILoggingEvent::getFormattedMessage)
+                    .collect(java.util.stream.Collectors.joining("\n")) + console.toString(StandardCharsets.UTF_8);
+            for (String sensitive : List.of(access, secret, key, "AWS4-HMAC-SHA256 Credential=")) {
+                assertFalse(captured.contains(sensitive), "Sensitive diagnostics escaped");
+            }
         }
     }
 

@@ -84,6 +84,66 @@ Those need CO09/AS09 and QA10. Authorization, filename/signature checks and uplo
 limits remain consumer responsibilities. Independent review, required remote CI,
 runtime provisioning, exposure-risk acceptance and release/deployment are separate.
 
+### SH05-R01 diagnostic lifecycle remediation — 25 November 2026
+
+An independent full-PR review of `bba812e` confirmed P2 SH05-R01: Boot logging
+initialization removed the constructor-installed filter, and a retained adapter
+then emitted SDK/Apache diagnostics containing the synthetic object key and access
+identity. Raw secret-key disclosure was not established. That head's passing CI
+did not cover logging reinitialization.
+
+The remediation keeps one context-owned filter/reset listener. Logback 1.5.38
+detaches appenders, stops and clears turbo filters, then fires reset callbacks.
+Boot 4.1.1 additionally stops the context first, which removes even reset-resistant
+context listeners. The filter's stop hook re-registers its listener before the next
+reset callback restores source denial, before new output is attached. No per-call
+repair, background thread, new namespace suppression or changed storage behavior
+is introduced. The guard is not removed when an individual adapter/context closes.
+
+`diagnosticConfidentialitySurvivesLoggingLifecycleInIsolatedJvm` runs its nested
+`LoggingLifecycleProbe` in a child JVM. It retains the same real adapters through
+four actual Boot initializations (including ECS), Joran XML reconfiguration and
+twenty Logback resets, with explicit SDK/Apache TRACE child levels. Two Spring
+contexts, closing one while the other remains usable, invalid consumed config,
+concurrent DELETE failures and an active returned download are exercised against
+an ephemeral loopback HTTP fixture. A barrier admits a DELETE and pauses its response
+before Boot initialization while the returned download is also active; neither
+requires operation-entry repair. Captured provider events are zero; generated
+key/access/secret strings and signed Authorization diagnostics are absent, while
+application-log positive controls remain present. The fixture's own JDK HTTP-server
+JUL request logging is disabled only in this child; production SDK/Apache TRACE
+remains enabled. One filter/listener remains after repeated initialization.
+
+The child owns and closes its server, workers, contexts and streams. The parent
+bounds/terminates it and deletes its temporary output. Process-wide logging resets,
+levels, appenders, console capture and listeners cannot contaminate another suite.
+The final regression was also executed with the original `bba812e` adapter compiled
+into isolated classes: it failed on observable provider diagnostic emission after
+Boot initialization. It therefore detects the original defect rather than merely
+checking for a named filter.
+
+Executed after remediation from `backend/`:
+
+```bash
+./mvnw -o -DskipTests test-compile
+./mvnw -o '-Dit.test=FileStorageIntegrationTest#diagnosticConfidentialitySurvivesLoggingLifecycleInIsolatedJvm+syntheticHttpFailuresAreNotRetriedOrLoggedEvenAtTrace+contextShutdownClosesClientAndTransportEvenWhenClientCloseFails+simulatedTransportAndUnclassified404FailuresAreSafeAndNeverMissingObjects+simulatedReadAndCloseFailuresKeepCheckedSemanticsWithoutProviderDiagnostics+unusedAdapterDoesNotResolveOptionalConfigurationAndConsumptionFailsClosed+consumptionRejectsMissingPlaceholderAndUnresolvableConfiguration' test-compile failsafe:integration-test failsafe:verify
+```
+
+Compilation and all 18 selected cases passed, with zero failures/errors/skips.
+The lifecycle case was rerun alone and passed after tightening child cleanup and
+adding the final in-flight Boot barriers. The nested probe also passed directly.
+Development candidates that used
+only a reset listener, or restored a listener from status callbacks, failed this
+regression and were replaced before commit; they are not passing evidence.
+This is remediation-author verification and a delta-focused self-audit, not fresh
+independent acceptance. No new JaCoCo percentage or complete local verify is claimed.
+The earlier 1,104-unit/572-integration CI pass belongs to the pre-remediation tree.
+Interface, streaming, metadata/error mapping, timeout/retry, upload/download close
+and SH05-A01 pool code are byte-identical outside the diagnostic guard. Unaffected
+storage matrices and unrelated backend/frontend/E2E/VM suites were not repeated.
+Fresh independent delta review and required new-head CI remain integration gates;
+remote CI is not awaited or manually rerun.
+
 ## Purpose
 
 This document describes CodeMastery's current testing contract, based on

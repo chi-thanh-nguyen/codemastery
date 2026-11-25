@@ -2109,6 +2109,14 @@ settings, not an upload limit or a production capacity qualification. The existi
 AWS SDK Apache transport is configured through its public SPI; no dependency changes.
 SDK and Apache HTTP diagnostics are suppressed at their Logback source, including
 DEBUG/TRACE wire and signing output; application logging remains available.
+The guard is shared by the Logback context, not owned by an individual Spring
+context or adapter. Its reset-resistant listener restores the filter during
+reconfiguration. The filter's stop callback re-registers that listener when Boot's
+stop/reset sequence removes context listeners. This uses the existing Boot 4.1.1 /
+Logback 1.5.38 lifecycle; it adds no logger namespace, environment input, thread or
+adapter operation. Closing one adapter does not remove another adapter's protection,
+including an already returned download stream. Arbitrary replacement of the logging
+backend or deliberate removal of its confidentiality hooks is outside this guarantee.
 
 Upload input streams belong to the caller. `open` returns a caller-owned
 `StoredObject`; use try-with-resources across header preparation and body copying.

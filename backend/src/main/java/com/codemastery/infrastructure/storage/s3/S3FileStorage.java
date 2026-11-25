@@ -3,6 +3,7 @@ package com.codemastery.infrastructure.storage.s3;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.spi.LoggerContextListener;
 import ch.qos.logback.classic.turbo.TurboFilter;
 import ch.qos.logback.core.spi.FilterReply;
 import com.codemastery.infrastructure.storage.FileStorage;
@@ -228,26 +229,83 @@ public final class S3FileStorage implements FileStorage {
     }
 
     private static void silenceProviderDiagnostics() {
-        // Provider DEBUG/TRACE includes keys, canonical signed requests and wire headers.
-        // A source filter also denies child loggers explicitly set to TRACE; application
-        // diagnostics remain available. The project uses Boot's Logback backend.
         LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
-        synchronized (context) {
-            if (context.getTurboFilterList().stream().noneMatch(filter -> DIAGNOSTIC_FILTER.equals(filter.getName()))) {
-                TurboFilter filter = new TurboFilter() {
-                    @Override
-                    public FilterReply decide(Marker marker, Logger logger, Level level,
-                                              String format, Object[] arguments, Throwable failure) {
-                        String name = logger.getName();
-                        return name.equals("software.amazon.awssdk") || name.startsWith("software.amazon.awssdk.")
-                                || name.equals("org.apache.http") || name.startsWith("org.apache.http.")
-                                ? FilterReply.DENY : FilterReply.NEUTRAL;
-                    }
-                };
-                filter.setName(DIAGNOSTIC_FILTER);
-                filter.start();
-                context.addTurboFilter(filter);
+        // Share Logback's configuration lock with Boot/Joran reconfiguration. The guard
+        // belongs to the logging context, not an adapter: another context or an already
+        // returned download can still use the SDK after this adapter is destroyed.
+        var lock = context.getConfigurationLock();
+        lock.lock();
+        try {
+            ProviderDiagnostics guard = context.getTurboFilterList().stream()
+                    .filter(ProviderDiagnostics.class::isInstance).map(ProviderDiagnostics.class::cast)
+                    .findFirst().orElseGet(() -> context.getCopyOfListenerList().stream()
+                            .filter(ProviderDiagnostics.class::isInstance).map(ProviderDiagnostics.class::cast)
+                            .findFirst().orElse(null));
+            if (guard == null) {
+                guard = new ProviderDiagnostics(context);
+                guard.setName(DIAGNOSTIC_FILTER);
             }
+            guard.install(context);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private static final class ProviderDiagnostics extends TurboFilter implements LoggerContextListener {
+        private final LoggerContext loggingContext;
+
+        private ProviderDiagnostics(LoggerContext context) { loggingContext = context; }
+
+        private void install(LoggerContext context) {
+            if (!context.getCopyOfListenerList().contains(this)) {
+                context.addListener(this);
+            }
+            start();
+            if (!context.getTurboFilterList().contains(this)) {
+                context.addTurboFilter(this);
+            }
+        }
+
+        @Override
+        public boolean isResetResistant() { return true; }
+
+        @Override
+        public void stop() {
+            // Boot's stop/reset sequence removes even reset-resistant context listeners
+            // after stop. Logback calls each turbo filter's stop BEFORE clearing the
+            // filter list and firing onReset; re-register here for the next reset.
+            // Do not mutate the listener list from onStart/onLevelChange callbacks.
+            super.stop();
+            if (!loggingContext.getCopyOfListenerList().contains(this)) {
+                loggingContext.addListener(this);
+            }
+        }
+
+        @Override
+        public void onReset(LoggerContext context) {
+            // Logback 1.5 resets/detaches every appender before clearing turbo filters,
+            // then calls reset-resistant listeners synchronously, before Boot/Joran
+            // attaches the new appenders. Restore source denial in that lifecycle,
+            // including operations/background IO already in progress on other threads.
+            install(context);
+        }
+
+        @Override
+        public void onStart(LoggerContext context) { install(context); }
+
+        @Override
+        public void onStop(LoggerContext context) { /* The logging context owns the guard. */ }
+
+        @Override
+        public void onLevelChange(Logger logger, Level level) { /* TRACE must remain denied. */ }
+
+        @Override
+        public FilterReply decide(Marker marker, Logger logger, Level level,
+                                  String format, Object[] arguments, Throwable failure) {
+            String name = logger.getName();
+            return name.equals("software.amazon.awssdk") || name.startsWith("software.amazon.awssdk.")
+                    || name.equals("org.apache.http") || name.startsWith("org.apache.http.")
+                    ? FilterReply.DENY : FilterReply.NEUTRAL;
         }
     }
 
