@@ -1,5 +1,7 @@
 import { createContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { roleStartPath } from '../../routes/routePaths';
+import type { RoleStartPath } from '../../routes/routePaths';
 import { bindAuthSession } from '../../shared/api/httpClient';
 import { ApiError, cancelled } from '../../shared/types/apiTypes';
 import { endSession, login as apiLogin, refreshSession, registerLearner } from '../../features/auth/api/authApi';
@@ -27,7 +29,9 @@ export interface AuthContextValue {
      * otherwise the role's start page — `/home` for a Learner, `/teach` for an Instructor (CT16.routes),
      * `/courses` for an Administrator until `/admin` is routed.
      */
-    consumeReturn(): '/profile' | '/home' | '/teach' | '/courses';
+    consumeReturn(): '/profile' | RoleStartPath;
+    /** Current approved start target, including a pending one-use Profile return; reading never consumes it. */
+    readonly startPath: '/profile' | RoleStartPath;
 }
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
@@ -323,13 +327,14 @@ export function AuthProvider({ children, refreshSessions = false, restoreOnLoad 
         get isAuthenticated() { return !!eligible(); },
         get generation() { return generation.current; },
         restoring,
+        get startPath() { return returnPath.current ?? roleStartPath(eligible()?.user.role); },
         login, register, logout, isCurrent,
         rememberProfile: (leavingSession = false) => { if (!leavingSession || !explicitLogout.current) returnPath.current = '/profile'; },
         consumeReturn: () => {
             const path = returnPath.current;
             returnPath.current = null;
             const role = eligible()?.user.role;
-            return path ?? (role === 'Learner' ? '/home' : role === 'Instructor' ? '/teach' : '/courses');
+            return path ?? roleStartPath(role);
         },
     }), [snapshot, restoring, eligible, login, register, logout, isCurrent]);
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

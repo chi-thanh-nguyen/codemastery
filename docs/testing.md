@@ -23,6 +23,217 @@ checks and protected integration. This records design, not newly executed tests.
 CT17's two Batch 4 operational checkpoints remain pending Leader inputs.
 Earlier dated records below retain their approval scope and history.
 
+## SH05 storage adapter qualification — 25 November 2026
+
+`FileStorageIntegrationTest` implements the SH05 portion of ADR012 §19.3 at its
+approved path. It extends `AbstractIntegrationTest`, starts the exact Compose
+MinIO digest in an isolated Testcontainers network, provisions a random bucket
+and a separate ephemeral application identity using the pinned Compose `mc`, and
+executes production store/open/delete through that bucket-scoped identity. Root
+credentials are used only by the test's bootstrap client. No shared environment
+or persistent container reuse is used. Its Spring datasource pool is private to
+this suite's context (maximum two, zero minimum idle, 10-second idle timeout),
+so the adapter tests do not retain a default ten-connection pool in the shared JVM.
+
+The first `./mvnw -o verify` execution after test compilation passed **1,104 unit
+tests** and **74 SH05 integration cases**. The full integration phase failed in
+`SampleDataSeedIntegrationTest` with PostgreSQL `too many clients already`
+(573 cases, one failure and 44 errors); it is not a passing full verification.
+The first pool adjustment used a maximum of one and failed during Flyway
+initialization (74 SH05 context errors); Flyway needs a second connection while
+holding its migration lock. Self-audit finding SH05-A01 corrects the suite's
+maximum to two, with zero minimum idle and a 10-second idle timeout. The complete
+integration phase then passed **572 cases, zero failures/errors/skips**, including
+all **74 SH05 cases** and **47 seed cases**, using:
+
+```bash
+./mvnw -o test-compile failsafe:integration-test failsafe:verify jacoco:report
+```
+
+This reran the materially affected integration phase; the already passed 1,104
+unit tests and production source were unchanged. It is separate execution evidence,
+not a claim that the earlier `./mvnw -o verify` invocation passed. The passing
+MinIO container was `e032f3db685bb99130fffd9a78f5d4b0b4fa5b938f8e2a12037abb4e933d25d6`,
+with image/config identity
+`sha256:8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40`.
+PostgreSQL 17.11 was built by the shared DP01 foundation; Java was Temurin 25.0.4.1
+and Docker Engine 29.8.1 on the local ARM64 host. No deployment was performed.
+
+The PR-wide author self-audit inspected the exact interface and exception hierarchy,
+key/type rules, upload truncation/underflow and non-repeatable streams, provider
+code/status classification, safe logging and IO errors, metadata-abort ownership,
+configuration validation/lazy startup, transport/client cleanup, and architecture,
+placement and scope. SH05-A01 was the confirmed actionable finding; no production
+contract defect was confirmed. Its final delta review includes the corrected pool
+and this evidence update. This is not independent review or acceptance.
+
+Real-provider cases cover three PDF/ZIP prefix combinations with over 2 MiB of
+exact streamed bytes, metadata, missing keys, repeated deletion, no cross-bucket
+access, and short/overlong streams including lengths above the SDK's 128 KiB
+reset buffer. Upload ownership is checked with a non-repeatable stream. Controlled
+HTTP cases qualify one request per operation at 301/307/403/404/429/500/503,
+finite timeouts and suppressed provider DEBUG/TRACE diagnostics with an application
+logging positive control. Mockito cases separately cover provider code/status
+classification, TLS/connection/timeout failures, malformed metadata with response
+abort, checked read/close errors and shutdown cleanup. These doubles are not
+MinIO interoperability evidence.
+
+This does not implement the downstream B5-O05 transaction fault matrix,
+B5-O10 REST admission/replacement re-read or B5-O14 download/database-pool case.
+Those need CO09/AS09 and QA10. Authorization, filename/signature checks and upload
+limits remain consumer responsibilities. Independent review, required remote CI,
+runtime provisioning, exposure-risk acceptance and release/deployment are separate.
+
+### SH05-R01 first lifecycle remediation — 25 November 2026 (historical)
+
+**Superseded by round 2 below.** The following records the first author-side
+remediation and its executed evidence; the subsequent independent concurrency
+review found its continuous-confidentiality claim incomplete.
+
+An independent full-PR review of `bba812e` confirmed P2 SH05-R01: Boot logging
+initialization removed the constructor-installed filter, and a retained adapter
+then emitted SDK/Apache diagnostics containing the synthetic object key and access
+identity. Raw secret-key disclosure was not established. That head's passing CI
+did not cover logging reinitialization.
+
+The remediation keeps one context-owned filter/reset listener. Logback 1.5.38
+detaches appenders, stops and clears turbo filters, then fires reset callbacks.
+Boot 4.1.1 additionally stops the context first, which removes even reset-resistant
+context listeners. The filter's stop hook re-registers its listener before the next
+reset callback restores source denial, before new output is attached. No per-call
+repair, background thread, new namespace suppression or changed storage behavior
+is introduced. The guard is not removed when an individual adapter/context closes.
+
+`diagnosticConfidentialitySurvivesLoggingLifecycleInIsolatedJvm` runs its nested
+`LoggingLifecycleProbe` in a child JVM. It retains the same real adapters through
+four actual Boot initializations (including ECS), Joran XML reconfiguration and
+twenty Logback resets, with explicit SDK/Apache TRACE child levels. Two Spring
+contexts, closing one while the other remains usable, invalid consumed config,
+concurrent DELETE failures and an active returned download are exercised against
+an ephemeral loopback HTTP fixture. A barrier admits a DELETE and pauses its response
+before Boot initialization while the returned download is also active; neither
+requires operation-entry repair. Captured provider events are zero; generated
+key/access/secret strings and signed Authorization diagnostics are absent, while
+application-log positive controls remain present. The fixture's own JDK HTTP-server
+JUL request logging is disabled only in this child; production SDK/Apache TRACE
+remains enabled. One filter/listener remains after repeated initialization.
+
+The child owns and closes its server, workers, contexts and streams. The parent
+bounds/terminates it and deletes its temporary output. Process-wide logging resets,
+levels, appenders, console capture and listeners cannot contaminate another suite.
+The final regression was also executed with the original `bba812e` adapter compiled
+into isolated classes: it failed on observable provider diagnostic emission after
+Boot initialization. It therefore detects the original defect rather than merely
+checking for a named filter.
+
+Executed after remediation from `backend/`:
+
+```bash
+./mvnw -o -DskipTests test-compile
+./mvnw -o '-Dit.test=FileStorageIntegrationTest#diagnosticConfidentialitySurvivesLoggingLifecycleInIsolatedJvm+syntheticHttpFailuresAreNotRetriedOrLoggedEvenAtTrace+contextShutdownClosesClientAndTransportEvenWhenClientCloseFails+simulatedTransportAndUnclassified404FailuresAreSafeAndNeverMissingObjects+simulatedReadAndCloseFailuresKeepCheckedSemanticsWithoutProviderDiagnostics+unusedAdapterDoesNotResolveOptionalConfigurationAndConsumptionFailsClosed+consumptionRejectsMissingPlaceholderAndUnresolvableConfiguration' test-compile failsafe:integration-test failsafe:verify
+```
+
+Compilation and all 18 selected cases passed, with zero failures/errors/skips.
+The lifecycle case was rerun alone and passed after tightening child cleanup and
+adding the final in-flight Boot barriers. The nested probe also passed directly.
+Development candidates that used
+only a reset listener, or restored a listener from status callbacks, failed this
+regression and were replaced before commit; they are not passing evidence.
+This is remediation-author verification and a delta-focused self-audit, not fresh
+independent acceptance. No new JaCoCo percentage or complete local verify is claimed.
+The earlier 1,104-unit/572-integration CI pass belongs to the pre-remediation tree.
+Interface, streaming, metadata/error mapping, timeout/retry, upload/download close
+and SH05-A01 pool code are byte-identical outside the diagnostic guard. Unaffected
+storage matrices and unrelated backend/frontend/E2E/VM suites were not repeated.
+Fresh independent delta review and required new-head CI remain integration gates;
+remote CI is not awaited or manually rerun.
+
+
+### SH05-R01 round 2: output-boundary confidentiality — 25 November 2026
+
+The independent delta review of `1ba256d3504b8879ce4d26b805585be3a022460e`
+classified SH05-R01 as **PARTIALLY_FIXED**, P2. Source restoration after reset was
+correct but did not prevent a logging call admitted while turbo filters were
+absent from reaching a newly attached appender. Its network-free synthetic
+check recorded 999 provider events during 10,000 resets, with initial denial,
+application controls and one final filter/listener. This established provider
+event escape, not disclosure of actual credentials or protected data.
+
+The Leader authorized the bounded round-2 correction and explicitly added
+`backend/src/main/resources/logback-spring.xml` plus its single repository-tree
+entry to the allowed file scope. The supplied console configuration installs
+`S3FileStorage.ProviderDiagnosticsFilter` before starting/attaching output, using
+the existing Boot defaults and `logging.structured.format.console` setting.
+Pattern output and ECS remain available. The filter denies exactly the previously
+suppressed SDK/Apache namespaces and returns NEUTRAL for application logging.
+No dependency, environment variable, destination or storage-interface change is
+introduced. Constructor-time TurboFilter/listener registration is removed.
+
+Correctness depends on delivery, not eventual filter registration: Logback 1.5.38
+`AppenderBase`/`UnsynchronizedAppenderBase.doAppend` checks each appender's filter
+chain before output. Every live old/new sink has its own stateless deny filter;
+stopping/detaching an old sink does not remove its chain, and Joran constructs
+and configures a replacement before starting/attaching it. A provider event
+admitted before/during reset is therefore denied even when delivered afterwards.
+There is no adapter-owned hook, shared listener list, callback lock or repair
+thread. Alternative Joran/programmatic outputs must retain this boundary first in every filter chain;
+arbitrary unfiltered output or deliberate hook removal remains outside scope.
+
+`diagnosticConfidentialityDuringConcurrentLoggingInIsolatedJvm` launches the
+network-free `LoggingConcurrencyProbe`. Its principal check pauses an ordinary
+synthetic provider log using Logback's public sequence-number hook, which runs
+inside event construction after source admission and before appender lookup.
+It completes actual Boot reconfiguration, then releases delivery to the new
+output. Both default and ECS output deny the pending diagnostic and emit the
+application positive control; the encoder type is also checked. This uses
+barriers rather than relying on repetition to hit the scheduling gap.
+
+The same child checks an already-admitted event against unfiltered (must capture)
+and guarded (must deny) sinks, exact provider namespace boundaries, and application
+output. Four ordinary provider-logging workers then overlap 1,000 lock-protected
+resets with fresh guarded sinks: zero provider output, application controls present
+and one confidentiality filter per active appender. The parent enforces its
+60-second bound, forced termination and temporary-output deletion. The child
+releases barriers before closing its executor and stops its logging context.
+No parent-JVM logging state or outer container fixture is initialized by the child.
+
+The existing lifecycle child retains real SDK requests against a synthetic loopback
+server, default/ECS Boot initialization, Joran, twenty resets, retained adapters,
+two Spring contexts, context closure, invalid consumed settings, an active returned
+stream and a barrier-admitted DELETE. As in supported application startup, initial
+output is configured before consuming the adapter; the same adapters then survive
+all four reinitializations. Its test sinks carry the same output filter as production.
+The original sensitive-string assertions and application positive controls remain.
+The shared PostgreSQL foundation and SH05-A01 pool configuration are unchanged.
+
+Executed from `backend/` during round 2:
+
+```bash
+./mvnw -o -DskipTests test-compile
+./mvnw -o '-Dit.test=FileStorageIntegrationTest#diagnosticConfidentialityDuringConcurrentLoggingInIsolatedJvm+diagnosticConfidentialitySurvivesLoggingLifecycleInIsolatedJvm+syntheticHttpFailuresAreNotRetriedOrLoggedEvenAtTrace+contextShutdownClosesClientAndTransportEvenWhenClientCloseFails+simulatedTransportAndUnclassified404FailuresAreSafeAndNeverMissingObjects+simulatedReadAndCloseFailuresKeepCheckedSemanticsWithoutProviderDiagnostics+unusedAdapterDoesNotResolveOptionalConfigurationAndConsumptionFailsClosed+consumptionRejectsMissingPlaceholderAndUnresolvableConfiguration' test-compile failsafe:integration-test failsafe:verify
+```
+
+Compilation and 19 selected cases passed, zero failures/errors/skips. The final
+two lifecycle/concurrency cases were rerun through Failsafe after tightening the
+observable-output assertion ordering; both passed. Both children also passed directly. A scratch-only mutation removed the output filters from a
+classpath copy of the XML: the final concurrency child failed on observable
+**Deferred provider event reached new output**, before registration-count checks.
+This supplements the historical first-remediation failure; it is an output-boundary
+omission control, not a claim to rerun the entire earlier revision. No tracked file
+or PR history was changed for the negative control.
+
+Non-logging adapter text (normalizing only logging imports/guard/call) and the exact
+interface remain byte-identical to `1ba256d`; the POM, configuration bindings,
+timeouts/retry, IO/stream ownership and test pool are unchanged. Unaffected full
+backend, streaming/MinIO, frontend/E2E and VM matrices were not repeated. No complete
+local verify or new JaCoCo percentage is claimed. The 16 successful checks at
+`1ba256d` are historical baseline evidence, not checks of this correction.
+
+Author-side obligation assessment after the focused audit: interface 6/6, adapter
+20/20, overall 26/26. This is remediation-author verification, not fresh independent
+acceptance. Independent delta review, eligible protected approval, final-head CI,
+current-main requirements and downstream/operational qualification remain separate.
+
 ## Purpose
 
 This document describes CodeMastery's current testing contract, based on
@@ -62,6 +273,7 @@ verification is separate work.
 
 | Suite | Added by | What it exercises |
 | --- | --- | --- |
+| `FileStorageIntegrationTest` | SH05, 25 November 2026 | Real pinned Compose MinIO store/open/delete with an ephemeral bucket-scoped application identity; exact stream lengths and metadata; safe configuration, lifecycle and exceptions; simulated provider faults and controlled HTTP retry/timeout/logging cases. Extends `AbstractIntegrationTest` under ADR012 §19.3. CO09/AS09 transactions, authorization and QA10 acceptance remain downstream. See [SH05 qualification](#sh05-storage-adapter-qualification--25-november-2026). |
 | `AuthorizationIntegrationTest` | QA01 tests, PR #117 | Registration persists a canonical-email Learner with a verifiable `$2b$` cost-14 BCrypt hash; invalid input, caller-supplied role/status and duplicate or concurrent registrations are rejected without changing stored accounts; invalid credentials get a generic 401. DP01 additions: anonymous nondetailed `/actuator/health` UP/503 DOWN, default-deny for the other Actuator and API-documentation paths, invalid/locked-account JWT 401 and Learner-only 403 ([record](#dp01-private-health-probe-verification--1-november-2026)). AU07 additions (PR #239): digest-only issuance and single-use confirmation; identical 202s for unknown/locked/repeated requests, with only eligible accounts issued; delivery after commit without a held User lock; two concurrent confirmations yield exactly one success; rollback when consumption fails; re-check after the User-lock wait; generic 400 for expired, future, locked and reused capabilities; unchanged CT01 bearer validity; a nested context with unconfigured delivery, where health, registration and login work and nothing is issued; and the production 415 for both recovery operations plus the deny-by-default 403 in the full application context (test-only controllers are `@TestComponent`s and are not component-scanned). `AuthServiceTest` adds real SMTP exchanges with an isolated loopback STARTTLS server: delivery only after STARTTLS and successful AUTH, and no message for a server that does not offer AUTH, rejected credentials, missing STARTTLS, or an untrusted or wrongly named certificate. Uses an ephemeral JWT secret. |
 | `repository/CourseRepositoryIntegrationTest` | QA02 tests, PR #119; CO03/CO14, PR #262; CO06 | Course → Chapter → Lesson → LearningMaterial round trip after flush/clear, published-only catalogue filtering, and database constraint and referential-integrity violations; CO03.content owner rows, scoped reads, appends, reorders and materials, and CO14 adaptive-field storage ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `AdaptiveLearningFlowIntegrationTest` | CO14, PR #262 | The Course part of B1-O14/B1-O15: the configuration guard's real transactions, root lock lifetime, outer joining, incompatible contexts, stale managed state, contention with enrollment and NOWAIT, plus the Course storage handoff. Adaptive (AD08) cases are not implemented ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
@@ -785,8 +997,10 @@ test-count or coverage-percentage claim is made for them.
 - **Deployment.** No test reaches the real VM or checks outside-network access
   (DP01 #71, DP03 #72). The private `/actuator/health` probe is verified only
   locally and in CI ([record](#dp01-private-health-probe-verification--1-november-2026)).
-- **Object storage.** No backend storage adapter exists, so no test covers file
-  upload or delivery (CT09).
+- **Object storage.** SH05 qualifies the backend storage adapter as described in
+  [its scoped record](#sh05-storage-adapter-qualification--25-november-2026).
+  CO09/AS09 file upload/download REST, authorization and transaction lifecycle
+  verification remain downstream QA10 work.
 - **Assistive technology.** No test establishes actual screen-reader output; no
   manual VoiceOver, NVDA or TalkBack session has been recorded.
 - **DESIGN r12 behavior.** FE34 (#255, PR #261) adds unit, component and browser-harness
@@ -7079,3 +7293,231 @@ remain separate. The Leader authorized commit/push without waiting for CI. No ap
 Issue/Project/PR metadata write, release, deployment, real-host provisioning or production-data
 access is part of this remediation; no protection against every concurrent external write is
 promised beyond CT21's unchanged full-replacement/last-serialized-successful-commit semantics.
+
+
+## FE32 role navigation self-audit — 25 November 2026
+
+Author-side evidence for FE32 #224 in repurposed [PR #272](https://github.com/chi-thanh-nguyen/codemastery/pull/272),
+based on `main` `d8c6588a02bbfbc09cfd2f2fe0d4323f1be9a018` (merged PR #273).
+Codex performed the implementation, regression work and self-audit. Graphify's
+5 November graph was used only for orientation and checked against current source;
+Impeccable context/source audit did not amend DESIGN or governance.
+
+### Acceptance coverage
+
+| Checkpoint / acceptance clause | Baseline and resulting evidence |
+| --- | --- |
+| FE32.nav: role sets, order, icons and live filtering | Partly present on main; full approved sets now share actual native route registration. Test fixtures activate every future destination without production registration. |
+| Active mapping | Replaced broad prefix/regex logic; all CT16 paths, nested precedence, segment boundaries, uppercase/trailing slash, encoded parameters, query/fragment, wrong role, inactive and unknown paths tested. |
+| FE32.start | Teaching was live through #273. Shared role-start rule now covers Instructor/Admin activation and fallback, all-role sign-in/restored landing/logo, one-use Profile priority and explicit logout. |
+| FE32.guards | Native reusable role groups and Outlet preserve registered anonymous/wrong-role/restore outcomes; all delivered Instructor screens deny both other roles without feature API calls. A test-only Administrator route exercises its guard and replacement-session behavior. Inactive production paths remain Not found for all roles and anonymous visitors. |
+| Existing routing/Auth/presentation regressions | All three complete affected files pass, with new model, start and role-composition coverage. |
+| Responsive navigation, focus, names and active reach | Existing components preserved. Component fixtures cover six Administrator items at 900/1200/1440 and the 360 mobile drawer. These are jsdom structural checks, not rendered geometry or keyboard/browser acceptance. |
+| Theme placements and no duplication | Existing FE34 tests and new maximum-menu fixtures pass; desktop Theme before account, mobile Theme first in footer, no account-menu Theme group. r13 supersedes the older Issue's first-utility wording. |
+| Restore shell, hidden sign-in actions, available Theme | Existing tests retained; restored landing checked for all three roles; registered guard waits without mounting personal content. |
+| Semantic Light/Dark/System | Theme source unchanged; relevant shared presentation tests pass. New rendered scheme comparison is unverified. |
+| Definition of Done | Documentation synchronized; independent CODEOWNER, independent QA, successful required CI, protected integration and rendered verification remain separate gates. Refs #224, not a closing reference. |
+
+### Executed automated verification
+
+From `frontend/` on the resulting code:
+
+```text
+npm ci
+npm run typecheck
+npm run build
+npm test -- src/routes/index.test.tsx src/app/providers/AuthProvider.test.tsx src/shared/components/presentation.test.tsx
+npm test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/learning/pages/MyCoursesPage.test.tsx
+```
+
+Results: install and typecheck **PASS**; final build (including typecheck) **PASS**;
+routing/Auth/presentation **450 tests PASS**; Instructor authoring/hooks/My courses
+**141 tests PASS**; total **591 tests PASS** across six complete affected files.
+The authoring file includes unsaved shell navigation, shared Course/skill reads,
+Settings acknowledgment/remount and session/unknown-outcome regressions from #273.
+The build retains the large-chunk advisory; it is not a failing check. Vitest/jsdom
+also reports native document-navigation warnings from modified-click cases; the
+assertions pass, but these are not evidence that a real new tab opened.
+
+`git diff --check` passed. Impeccable `detect --json` on changed production
+routing/guard/provider files returned `[]`; it does not certify runtime UX or
+contrast. Production Course/assessment/skill-graph feature files, App/theme,
+backend, API contracts, dependencies, infrastructure and CI definitions are
+unchanged from the base.
+
+### Browser execution limitation
+
+Vite started this checkout at `http://127.0.0.1:5174/` (5173 was occupied). The
+named Playwright CLI Chrome session `fe32-check` could not launch: after granting
+the narrowly requested daemon-cache permission, Chrome still exited with
+`SIGABRT`/`TargetClosedError`. The installed Chromium headless shell also exited,
+and installed WebKit returned `Abort trap: 6`. No application assertion or
+screenshot ran. A managed browser attempt failed with an expired tool continuation.
+No existing personal browser session was used.
+
+Consequently rendered layout/overflow at **360, 900, 1200 and 1440 px**, the full
+six-item Administrator menu's capacity, actual keyboard/focus/drawer behavior,
+canvas-reach geometry, real-browser restore and theme comparison are
+**UNVERIFIED** in this run. Structural tests do not replace those checks. No
+unsupported presentation adjustment was introduced to compensate for an
+unmeasured result; rendered verification remains necessary before acceptance.
+
+### Self-audit and completed remediation
+
+| Severity | Confirmed finding / evidence | Correction and regression evidence |
+| --- | --- | --- |
+| P2 | Baseline `currentSection` accepted `/teach/courses-extra`, mismatched router case/trailing/encoded behavior, and broadly assigned unknown descendants. | `routePaths.ts` uses `matchRoutes`, exact approved section patterns and delivered/role filtering; boundary and full-map fixtures pass. |
+| P2 | Router `startFor` and AuthProvider `consumeReturn` duplicated start rules and had no reusable Admin activation branch. | Shared `roleStartPath`; both activation/fallback branches and all-role flow tests pass. |
+| P2 | Baseline root/logo start decisions bypassed a pending authorized Profile return; equivalent Profile spellings failed literal pathname capture. | Read-only `startPath`, committed one-use consumption and router-equivalent capture; StrictMode root, logo, all-role Profile and logout tests pass. |
+| P2, introduced and corrected during implementation | The initial exact-section table omitted public Course detail, detected by the existing routing test. | Added the exact Course-detail pattern; complete affected routing suite and full future mapping now pass. |
+
+No confirmed in-scope code defect remains after the final delta-focused
+reinspection. Browser-dependent findings are not declared absent. This is an
+implementer's self-audit, not independent review or QA acceptance.
+
+### Skipped suites and retained evidence
+
+- Backend/Maven/PostgreSQL/infrastructure/release: no code, contract, schema,
+  authorization, image or workflow change. The dated #273 runtime records above
+  remain historical evidence, not newly executed exact-head results. Current
+  frontend guard, API-effect isolation and Instructor regression tests ran instead.
+- Full lifecycle-managed E2E and the broad optional presentation browser harness:
+  no backend journey or harness implementation change; targeted routing/Auth/
+  authoring/presentation tests ran. Local browser engines failed even to launch,
+  so no passing browser/E2E result is claimed. Required remote CI remains separate.
+- Unaffected feature-client/decoder/math suites: production source unchanged;
+  full typecheck/build and the six shared-composition consumer suites ran. Existing
+  API tests are retained unchanged, without reusing historical results as new ones.
+
+CI is recorded in the PR from its actual post-push snapshot without waiting.
+No merge, protected-main write, deployment, release dispatch, Issue closure or
+Project update is performed by this task.
+
+
+## FE32 R1/B1 targeted remediation — 25 November 2026
+
+This is **remediation-author verification**, following the Project Leader's
+explicit task “CodeMastery — PR #272: Targeted Remediation of R1/B1 Findings”.
+Codex produced the remediation, tests and focused self-audit. It does not establish
+independent closure of its own changes, human review, QA acceptance, protected
+integration or deployment. Refs #224; do not close FE32 from this record.
+
+### Baseline, authorization and preserved history
+
+Original R1/B1 reviewed HEAD: `10d3198fb681efb1f2ddce156cc89a274e6ebc86`.
+Original merge-base: `d8c6588a02bbfbc09cfd2f2fe0d4323f1be9a018` (#273).
+Latest main incorporated: `c5b9ac0ac04b057cef7ee7f62fdcb8143202bc9a` (#289), by
+normal merge `739b6dc` before remediation. The existing FE32 commit and merged
+Instructor/storage source and documentation are retained; no obsolete FE15 commit,
+force push, protected-main write or replacement PR is introduced.
+
+The task explicitly authorizes the three existing feature-test compatibility
+changes (`assessmentHooks.test.tsx`, `assessmentAuthoring.test.tsx`,
+`MyCoursesPage.test.tsx`) and directly relevant regressions only. It also authorizes
+bounded additions to the existing `presentation.browser.cjs`. No new tracked file,
+dependency, production feature, route, provider, store or contract is authorized.
+The previous additional-file authorization evidence gap is resolved by this record
+and the corresponding setup/PR record; 0 absorbed upstream production scope never
+meant 0 additional test-file scope.
+
+### Findings and remediation
+
+| Finding | Original independent evidence | Remediation and author-side result |
+| --- | --- | --- |
+| B1-F01 P2: maximum menu overlap | Instructor + bell at 900; Admin at 900/1200; at Admin 1200 Overview overlapped brand 67.43px, Catalogue overlapped Theme 44px and account 15.43px; center hit reached Theme. Firefox 155 and WebKit 26.6 reproduced. | Reserve intrinsic navigation width; allow account name to shrink with ellipsis, preserving the role and full accessible name; full role sets use existing compact spacing. Labels, brand sizing, labelled-pill padding, controls and breakpoints retained. New measured overlaps are empty; center and boundary hits reach each anchor. |
+| B1-F02 P2: delayed Course heading unfocused | Same actual Teaching→Course probe failed on reviewed HEAD and base; heading appeared after the pathname effect, focus stayed BODY. | One navigation-scoped intent, temporary main-subtree observation, consumed by the first ready heading. User events, query-only navigation, route/session replacement, blur and unmount cancel it and clean up. Initial restore is handled; ordinary updates do not re-arm. Actual held owned-Course GET and negative cases pass in Firefox. |
+| B1-F03 P3: compact target 40×44 | Actual rectangles 40×44, no pseudo extension; hit 1 px outside missed the anchor. Project 44×44 standard, not an alleged WCAG AA 24 px failure. | Icon-only anchor itself is 44×44, with no invisible overlapping extensions. All five center/edge samples pass; no neighboring target overlap. |
+
+### Newly executed automated verification
+
+From `frontend/` in the isolated remediation checkout:
+
+```text
+npm test -- src/routes/index.test.tsx
+# 198 tests PASS, including 10 new delayed-focus cases
+npm test -- src/routes/index.test.tsx src/app/providers/AuthProvider.test.tsx src/shared/components/presentation.test.tsx src/shared/components/presentation.browser.test.ts
+# 468 tests PASS: 460 in the three directly affected suites + 8 browser-harness lifecycle tests
+npm test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/learning/pages/MyCoursesPage.test.tsx
+# 141 tests PASS
+VITE_API_BASE_URL=/api npm run build -- --outDir <isolated-production-dist>
+# typecheck and production build PASS; existing large-chunk advisory
+```
+
+The 10 new routing cases cover delayed actual owned-Course GET, delayed
+focus under StrictMode, ordinary later updates, focus/input/pointer/key intent
+cancellation, query-only navigation, navigation away and authentication replacement.
+Existing Instructor suites retain Settings acknowledgment/reconciliation,
+unknown-outcome/no-replay, shared Course/skill and unsaved navigation regressions.
+The isolated `routes` run is a focused precursor, not added again to the 468 total.
+
+### Newly executed rendered verification
+
+Actual Linux browser environment: pinned Playwright 1.63.0 container, Firefox 155.0;
+WebKit 26.6 for cross-engine capacity. The container uses `pwuser`, default isolation,
+no published port and `--network none`; application servers bind loopback inside
+it. No personal profile, real account or host-security override. Host browser
+launch failures from the old review were not repeatedly retried.
+
+The existing optional harness now has focused `--fe32` mode. Its exported
+`createFE32Fixture(dist)` builds the actual production shell/theme/icons and
+`roleNavigation` with synthetic full-route descriptors in a temporary directory.
+The focused runner accepts `--url` and `--fixture-url` for caller-owned servers;
+it never registers these fixture routes in production. Controlled API responses
+conform to the runtime decoders; this is frontend verification, not real-backend
+integration evidence. Build/source hashes identify the tested corrected snapshot.
+
+| Executed browser group | Result |
+| --- | --- |
+| Original 126-cell responsive matrix: production Anonymous/Learner/Instructor/Administrator; full-capacity Learner+bell/Instructor+bell/Admin; 360/899/900/1199/1200/1440; Light/Dark/System | 126 PASS, 0 FAIL; original final criterion matrix had 93 PASS / 33 FAIL |
+| Every active full-menu item at 900/1200 with short and long names, Firefox | 40 PASS; full labels remain at 1200, inactive icons retain names at 900 |
+| Held actual owned-Course GET: delayed heading, user focus, user key input, navigation away, replacement server session, actual post-save background GET with ongoing description input | 6 PASS |
+| Durable focused Firefox total | 172 PASS, 0 FAIL |
+| Firefox/WebKit capacity with Instructor/Admin,900/1200,short/long names | 16 PASS, 0 FAIL; no overlap, no target/hit failures |
+
+Measurements retain the original tolerances: overlap 0.5px, document overflow 1 px,
+pill-height 0.5px and reach-center 1 px; minimum target 44×44 has no reduced threshold.
+No horizontal shell overflow or clipped navigation label was observed. Account role
+fits; full accessible names remain. Maximum Firefox reach-center error across the
+matrix and active-item capacity probes is 0.475px. Admin 1200 long-name account width
+is 173.13px in Firefox and 172.97px in WebKit; the 225.62px brand is preserved, and
+Catalogue's center and boundaries hit Catalogue. Actual compact targets are44×44.
+Mobile matrix cases retain drawer access, current row and reachable Theme controls.
+
+The first focused-harness attempt had an ambiguous `header` selector (page header
+and shell header). It was corrected to select the shell header; interrupted/error
+logs are retained as harness diagnostics, not product failures or passes. Original
+pre-remediation R1/B1 evidence remains unchanged. New screenshots, JSON matrices,
+source hashes and probe logs are stored separately in the remediation evidence.
+
+### Focused self-audit and remaining gates
+
+The complete remediation delta was inspected for F01/F03 interaction, role-caption
+capacity, font/active-item remeasurement, native anchors, r13 utility order, observer
+scope/cleanup, user-interaction cancellation, generation replacement and StrictMode.
+No additional confirmed in-scope production defect remained after that inspection.
+The reviewed navigation/start/guard mechanism and future activation boundary were
+not redesigned. Source and tests owning #273 functionality and #289 storage are
+preserved. No omitted backend or storage suite is claimed to have rerun here.
+
+Backend/PostgreSQL/storage/infrastructure/release and the unrelated broad E2E suite
+were not rerun locally: this delta changes shared frontend layout/focus and its
+verification/docs only. Prior exact-head CI and R1 evidence remain dated, not CI
+for the new remediation HEAD. The final PR records the actual post-push CI snapshot
+without waiting or dispatching a workflow.
+
+Next gates: new-chat delta-focused independent review, targeted independent
+rendered verification, eligible formal review of the corrected HEAD, required green
+CI, independent QA and protected integration. The prior approval at 10d3198 is not
+approval of the remediation. No merge, deployment, release or Project acceptance
+is performed by this task.
+
+
+Post-push harness follow-up: SonarCloud on `0582fd6` flagged the local polling
+condition `pendingRead` as unchanged within its loop (new-code reliability gate).
+The bounded loop was updated by an asynchronous request callback, but the probe
+now uses an explicit request-start receipt and a bounded 7-second deadline with
+cleanup instead. Held reads are released together, including superseded requests.
+This changes test synchronization only, with no production implementation change;
+no rule suppression, tolerance change or removed assertion. Focused browser verification passes 6 cases in each of Firefox 155 and WebKit 26.6,
+and the 8 harness lifecycle tests pass for this follow-up; the earlier full
+matrix and runtime-source evidence remain applicable to the identical application.

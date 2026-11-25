@@ -678,18 +678,20 @@ in `src/routes/index.tsx`, listed in
 [Implemented capabilities on `main`](#implemented-capabilities-on-main). `/` is
 the public landing page (S25) for visitors without a session; its example Mastery
 Map is a fixed illustration loaded in its own chunk, and a signed-in visitor is
-sent to their start page instead (`/home` for Learners, `/courses` for other
-roles; the logo links there too). Navigation shows Catalogue for everyone, plus
-Home (`/home`) and My courses for Learners; Profile and Sign out are in the
-account menu. `/home` lists the Learner's active courses from `GET /api/me/courses`
+sent to their start page instead (`/home` for Learners, `/teach` for Instructors,
+`/courses` for Administrators until Platform overview is delivered; the logo uses
+the same rule). Navigation shows Catalogue for everyone, Home (`/home`) and My
+courses for Learners, and Teaching for Instructors. Profile and Sign out are in
+the account menu. `/home` lists the Learner's active courses from `GET /api/me/courses`
 only. After a session ends without signing out (a refused renewal or restore, a
 current-session 401 or a sign-out in another tab; see
 [ADR014 hybrid authentication session](#adr014-hybrid-authentication-session--16-november-2026)),
 the sign-in page says “Your session ended. Sign in again to continue.” once.
-After sign-in a Learner lands on `/home` and other roles on `/courses`; the one-use
-`/profile` return (CT16-PROFILE P1) still takes precedence and is consumed once. This
-changes only the Learner's fallback destination, at the Leader's instruction of
-7 November 2026; P1's capture, consumption and open-redirect rules are unchanged. `/preview` lazily loads the design
+After sign-in a Learner lands on `/home`, an Instructor on `/teach`, and an
+Administrator on `/courses` until `/admin` is delivered. The one-use `/profile`
+return (CT16-PROFILE P1) takes precedence and is consumed once. These are the
+7 November 2026 Learner fallback and conditional CT16.routes start rules; P1's
+return target, transient memory and explicit-logout rules are unchanged. `/preview` lazily loads the design
 preview from `src/app/preview/` in its own chunk: every designed screen for the
 Learner, Instructor and Administrator workspaces and the proposed public screens,
 with synthetic sample data. Since 7 November 2026 it shows no preview notice or
@@ -2085,6 +2087,63 @@ implement r2; do not infer concurrent-output protection or full interrupted-run
 recovery from them. New lifecycle behavior requires separate implementation and
 qualification; no environment variable or runnable command is added here.
 
+## SH05 storage adapter configuration — 25 November 2026
+
+SH05 implements `FileStorage` and its lazy `S3FileStorage` component under ADR010
+§§4–7, including the §16–18 corrections. This implements the storage boundary;
+CO09/AS09 file admission, REST delivery and transaction lifecycles remain downstream.
+The earlier dated implementation snapshots below retain their historical meaning.
+
+The adapter consumes only the existing `codemastery.storage.*` properties and
+`STORAGE_ENDPOINT`, `STORAGE_REGION`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`,
+`STORAGE_SECRET_KEY`, `STORAGE_PATH_STYLE_ACCESS` bindings. It validates them when
+a consumer creates the bean; unrelated features do not require storage credentials.
+Invalid consumed settings stop bean creation with the input name and no value.
+Existing localhost/region/bucket/path-style fallbacks remain local convenience,
+not approved deployment values. Supply an application identity provisioned by the
+initializer; the adapter neither reads `MINIO_ROOT_*` nor provisions resources.
+
+The Project Leader explicitly approved internal timeouts in the SH05 implementation
+task on 25 November 2026: connection 5 seconds, socket read 30 seconds, attempt and
+complete API call 60 seconds each, with no retry and no new environment variable.
+Pool acquisition is bounded by the same connection timeout. These are adapter
+settings, not an upload limit or a production capacity qualification. The existing
+AWS SDK Apache transport is configured through its public SPI; no dependency changes.
+SDK and Apache HTTP diagnostics are denied at the output boundary, including
+DEBUG/TRACE wire and signing output; application logging remains available.
+`backend/src/main/resources/logback-spring.xml` configures the existing console
+output with `S3FileStorage.ProviderDiagnosticsFilter` before the appender starts
+or is attached. It reuses Boot's patterns, charset and threshold and the existing
+`logging.structured.format.console` setting (including the deployed ECS format).
+The Project Leader authorized this additional configuration file and its structure
+entry for SH05-R01 round 2 on 25 November 2026. No dependency, environment input,
+output destination or storage contract is added.
+
+A source TurboFilter can admit an event while its list is being reset; that event
+can reach a newly attached appender after source denial is restored. The output
+filter instead checks each event immediately before output, including an event
+admitted before or during reconfiguration. Old appenders retain their filter
+until stopped; replacement appenders start with their own filter. The stateless
+filter owns no adapter, listener, thread or transport resource. Closing a Spring
+context does not remove another adapter or active download's protection. There is
+no constructor-time logging registration or lifecycle repair callback.
+
+Application logging is configured before Spring consumes the adapter. Alternative
+Joran configurations and programmatic test sinks must install the same filter
+first in the chain before starting/attaching every output; a custom unfiltered appender or deliberate
+replacement/removal of the confidentiality boundary is outside this guarantee.
+Ordinary reset/stop/start and reinitialization with the supplied configuration
+remain supported on the existing Boot 4.1.1 / Logback 1.5.38 versions.
+
+Upload input streams belong to the caller. `open` returns a caller-owned
+`StoredObject`; use try-with-resources across header preparation and body copying.
+Read/close failures remain checked `IOException` with safe diagnostics. Input
+length must be positive and exact, and the key/media type must match CT09. Upload
+filename/signature/size-limit checks and authorization belong to the consumers.
+The adapter does not buffer the full upload or perform compensating deletion:
+the CT09 consumer owns the single best-effort cleanup of its fresh, unreferenced
+key on failed store. No new retention, overwrite or orphan policy is introduced.
+
 ## Batch 5 storage configuration, file transport and widget — 12 November 2026
 
 [ADR010](decisions/010-batch-05-contract-approvals.md) approves CT09.config,
@@ -2176,3 +2235,127 @@ configured origin: a frontend served from another origin can sign in only if tha
 origin is listed. `VITE_API_BASE_URL` is unchanged. Applying V008 to a local database
 happens automatically when the backend starts; doing so on any shared or production
 database is Leader-reserved.
+
+
+## FE32 role navigation and start-page implementation — 25 November 2026
+
+Implementation in [PR #272](https://github.com/chi-thanh-nguyen/codemastery/pull/272),
+rebuilt from `main` `d8c6588a02bbfbc09cfd2f2fe0d4323f1be9a018` under the Project
+Leader's explicit FE32 (#224) instruction. The former FE15 API/hook commits on that
+branch were superseded by merged PR #273; rebuilding preserves that merged code.
+This record adds no contract approval or activation authorization.
+
+- `routes/routePaths.ts` contains the existing workspace's native React Router
+  route tree (`WORKSPACE_ROUTES`), approved constants and complete per-role
+  navigation model. `AppRouter` binds its IDs to delivered screens using the same
+  declarative `Routes`/`Route` composition. Start pages and navigation availability
+  inspect that exact tree with `matchRoutes`; constants or preview components do
+  not activate a screen. There is no new router, provider, store or dependency.
+- `currentSection` uses router ranking and segment decoding, including case,
+  trailing slashes and query/fragment independence. It requires a delivered route,
+  the current role's eligibility and a live parent item. Learner course-workspace
+  routes map to My courses; public detail maps to Catalogue; course-scoped
+  Instructor insight maps to Teaching; Grading and Administrator destinations keep
+  their own mapping. Unknown, inactive and wrong-role destinations have no current
+  primary item. FE28's notification utility has its separate activation/current
+  handoff, with no bell mounted before its screen is delivered.
+- `roleStartPath` is shared with AuthProvider. Learner starts at `/home`, Instructor
+  at `/teach` when delivered and Administrator at `/admin` when delivered; the last
+  two otherwise use `/courses`. The provider exposes the approved pending start
+  target without consuming it, and consumes Profile once on successful sign-in,
+  authenticated landing redirect or following the workspace logo. Rendering and a
+  cancelled editor navigation do not consume the return. Only canonical `/profile`
+  is retained in memory, including equivalent router spellings; no supplied URL,
+  query, fragment or persistent return value is trusted. Explicit logout clears it.
+- Pathless native role groups compose `ProtectedRoute`/`Outlet`. Only matched,
+  registered screens enter the guard: anonymous replaces to Sign in, wrong role
+  sees Access denied without mounting the feature, and unresolved restoration
+  waits. There is no `/teach/*` or `/admin/*` wildcard guard. Backend authorization
+  remains authoritative and roles never inherit.
+- Existing FE34 tokens, header/drawer controls, r13 utility order and shell
+  navigation interception remain in place. PR #273's Course/skill context,
+  acknowledged Settings state, session isolation and unknown-outcome recovery are
+  unchanged. Three existing feature-test Auth doubles add the new `startPath`
+  projection; this is test compatibility, with no upstream functional slice.
+
+Current production integration remains Home/Catalogue/My courses for Learners,
+Teaching/Catalogue for Instructors and Catalogue for Administrators. `/admin`, its
+four child destinations, Grading, Learners, course-scoped insights, notification
+page and undelivered Learner course-workspace screens remain inactive. Their
+complete navigation and start rules are covered with test-only route fixtures.
+No missing upstream code is needed to complete the FE32-owned mechanism: the
+additional functional scope is **0%** for each of FE03 #56, FE34 #255, FE14 #199,
+FE23 #208, FE17 #202, FE19 #204, FE20 #205, FE21 #206, FE22 #207 and FE28 #210.
+The FE23 reporting/backend chain is not absorbed.
+
+Authority: `CT16-ROUTES-2026-11-08-r1`, CT16.shell/final-state, CT16-PROFILE P1,
+ADR014 §7 and its lifecycle corrections, and `DESIGN-2026-11-21-r13` (S1, S6,
+S17, S23, F1, F2, F14, D12-5 and D13-1–D13-5). Some historical Issue/DESIGN
+delivery descriptions predate PR #261/#273; actual production registration above
+is the implementation evidence. The requested `CLAUDE_CONTEXT_SESSION_GUIDE.md`
+was unavailable; the existing local `CLAUDE_SESSION_CONTEXT_GUIDE.md` was read as
+a supplemental retrieval map, with repository governance authoritative.
+
+[Verification and remaining gates](testing.md#fe32-role-navigation-self-audit--25-november-2026)
+are implementer evidence, not independent CODEOWNER review, QA acceptance,
+protected integration, release or deployment authorization.
+
+
+## FE32 R1/B1 targeted remediation — 25 November 2026
+
+The Project Leader's explicit instruction **“CodeMastery — PR #272: Targeted
+Remediation of R1/B1 Findings”** transitions the completed review into bounded
+remediation in PR #272 (Refs #224). It authorizes fixing inherited B1-F01/F02/F03,
+normal commit/push, updating the PR description, and synchronizing these records;
+it does not authorize merge, deployment, Issue closure or Project acceptance.
+
+The same instruction explicitly authorizes retaining the existing AuthProvider
+test-double compatibility changes, and directly relevant regressions only, in
+`assessmentHooks.test.tsx`, `assessmentAuthoring.test.tsx` and
+`MyCoursesPage.test.tsx`. No production feature work is authorized there. It also
+authorizes narrowly scoped durable regressions in the existing
+`shared/components/presentation.browser.cjs`; no new tracked file or dependency.
+This resolves the additional-file authorization evidence gap identified in R1.
+
+The starting reviewed HEAD is `10d3198fb681efb1f2ddce156cc89a274e6ebc86`.
+`main` `c5b9ac0ac04b057cef7ee7f62fdcb8143202bc9a` (SH05 #289) is incorporated by a
+normal merge, preserving the original FE32 commit, #273 and #289. Storage source,
+its documentation and the FE32 historical records are retained; obsolete FE15
+commits are not reintroduced and no force push is used.
+
+- **B1-F01/F03:** the navigation slot reserves its intrinsic content width; the
+  account slot may shrink through the existing display-name ellipsis while the
+  visible role and full accessible name remain. Full role sets use existing
+  compact spacing values. Brand sizing, labelled-pill padding, utilities, r13
+  ordering and breakpoints stay in place. Icon-only anchors have actual 44×44 px
+  rectangles, rather than theoretical or overlapping invisible extensions.
+- **B1-F02:** route focus holds one intent for a pathname navigation. If the
+  heading is delayed, a temporary observer watches only that route's main subtree.
+  The first meaningful heading consumes the intent. Subsequent user interaction,
+  query-only navigation, another route, session replacement, blur or unmount
+  cancels it and removes the observer/listeners. An unfinished initial session
+  restore may provide that navigation's first session; ordinary data updates do
+  not create another intent. No timer repeatedly focuses content.
+- Production registration, activation, role starts, Profile return memory,
+  backend authorization, #273 Course/skill ownership, Settings reconciliation and
+  mutation replay rules are unchanged. Future screens remain inactive. No upstream
+  production capability, API, provider, store, route or dependency is absorbed.
+
+The focused browser harness mode `--fe32` uses a caller-owned production URL and
+`--fixture-url`. Its exported `createFE32Fixture` builds a temporary fixture from
+actual reviewed shell/theme/icon components and `roleNavigation`, with synthetic
+future route descriptors. It never registers those screens in production. Use
+only URLs printed by the isolated servers; the normal broad harness mode remains
+available. [Dated verification](testing.md#fe32-r1b1-targeted-remediation--25-november-2026)
+separates remediation-author evidence from independent closure and acceptance.
+
+
+Post-push harness follow-up: SonarCloud on `0582fd6` flagged the local polling
+condition `pendingRead` as unchanged within its loop (new-code reliability gate).
+The bounded loop was updated by an asynchronous request callback, but the probe
+now uses an explicit request-start receipt and a bounded 7-second deadline with
+cleanup instead. Held reads are released together, including superseded requests.
+This changes test synchronization only, with no production implementation change;
+no rule suppression, tolerance change or removed assertion. Focused browser verification passes 6 cases in each of Firefox 155 and WebKit 26.6,
+and the 8 harness lifecycle tests pass for this follow-up; the earlier full
+matrix and runtime-source evidence remain applicable to the identical application.

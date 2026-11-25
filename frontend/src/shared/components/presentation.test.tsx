@@ -7,6 +7,9 @@ import { Button, ThemeProvider } from '@mui/material';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 import { appTheme, applyThemeScheme, brandFontStack, codeFontStack, color, control, fontStack, isThemePreference, pathLine, presentationTokens, readStoredThemePreference, readSystemScheme, resolveThemeScheme, shadow, themeAnnouncement, themeButtonLabel, themeRoles, ThemePreferenceContext, writeStoredThemePreference } from '../../app/theme/theme';
 import type { ThemePreference } from '../../app/theme/theme';
+import { roleNavigation } from '../../routes/routePaths';
+import type { RouteObject } from 'react-router';
+import { PresentationIcon } from './PresentationIcon';
 import { SidebarNav, isPlainClick } from './SidebarNav';
 import { LoadingView, EmptyView, ErrorView } from './StatusViews';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -1148,5 +1151,41 @@ describe('Menu item states (D13-4) as rendered by the shared MuiMenuItem overrid
         // The arrow keys still move focus among the items.
         await key(document.activeElement!, 'ArrowDown');
         expect(document.activeElement).toBe(light);
+    });
+});
+
+
+describe('FE32 maximum approved role navigation uses the existing responsive shell', () => {
+    const adminRoutes: RouteObject[] = ['/admin', '/admin/users', '/admin/courses', '/admin/reports', '/admin/audit', '/courses'].map((path) => ({ path }));
+    it.each([900, 1200, 1440])('keeps all six names and exactly one current item and Theme control at %s px', async (width) => {
+        vi.stubGlobal('matchMedia', (media: string) => ({ matches: media.includes('min-width:900px') || width >= 1200 && media.includes('min-width:1200px'), media,
+            addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
+        try {
+            const items = roleNavigation('Administrator', adminRoutes).map((item) => ({ ...item, icon: <PresentationIcon name={item.icon} /> }));
+            await render(<DashboardLayout navItems={items} selectedNavId="/admin/reports" onNavSelect={vi.fn()}
+                headerActions={<AccountMenu displayName="Administrator fixture" role="Administrator" renderItems={() => null} />}><h1>Fixture</h1></DashboardLayout>);
+            const nav = host.querySelector('header nav')!;
+            expect([...nav.querySelectorAll('a')].map((node) => node.textContent)).toEqual(['Overview', 'Users', 'Courses', 'Reports', 'Audit log', 'Catalogue']);
+            expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+            expect(nav.querySelector('[aria-current="page"]')?.textContent).toBe('Reports');
+            expect(host.querySelectorAll('[data-theme-control="button"]')).toHaveLength(1);
+            expect(document.querySelector('[data-theme-control="drawer"]')).toBeNull();
+            expect(nav.querySelectorAll('.cm-visually-hidden')).toHaveLength(width < 1200 ? 5 : 0);
+        } finally { vi.unstubAllGlobals(); }
+    });
+    it('keeps all six drawer destinations, the same active item and the one footer Theme control at 360 px', async () => {
+        vi.stubGlobal('matchMedia', (media: string) => ({ matches: false, media, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
+        try {
+            const items = roleNavigation('Administrator', adminRoutes).map((item) => ({ ...item, icon: <PresentationIcon name={item.icon} /> }));
+            await render(<DashboardLayout navItems={items} selectedNavId="/admin/audit" onNavSelect={vi.fn()}><h1>Fixture</h1></DashboardLayout>);
+            await click(host.querySelector('[aria-label="Toggle navigation"]'));
+            const drawer = document.querySelector('.MuiDrawer-paper')!;
+            expect([...drawer.querySelectorAll('a')].map((node) => node.textContent)).toEqual(['Overview', 'Users', 'Courses', 'Reports', 'Audit log', 'Catalogue']);
+            expect(drawer.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+            expect(drawer.querySelector('[aria-current="page"]')?.textContent).toBe('Audit log');
+            expect(drawer.querySelectorAll('[data-theme-control="drawer"]')).toHaveLength(1);
+            expect(host.querySelector('[data-theme-control="button"]')).toBeNull();
+            expect([...drawer.querySelectorAll('[role="radio"]')].map((n) => n.textContent)).toEqual(['System', 'Light', 'Dark']);
+        } finally { vi.unstubAllGlobals(); }
     });
 });
