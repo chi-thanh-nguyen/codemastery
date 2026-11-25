@@ -32,7 +32,7 @@ beforeEach(() => {
     generation = 1;
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
     auth = { user: { id: userId, displayName: 'Instructor', role: 'Instructor' }, get generation() { return generation; }, isAuthenticated: true, restoring: false,
-        isCurrent: (value) => value === generation, login: vi.fn(), register: vi.fn(), logout: vi.fn(), rememberProfile: vi.fn(), consumeReturn: () => '/courses' };
+        isCurrent: (value) => value === generation, login: vi.fn(), register: vi.fn(), logout: vi.fn(), rememberProfile: vi.fn(), startPath: '/courses', consumeReturn: () => '/courses' };
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.resetAllMocks(); });
 const deferred = <T,>() => { let resolve!: (value: T) => void, reject!: (error: unknown) => void; const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; };

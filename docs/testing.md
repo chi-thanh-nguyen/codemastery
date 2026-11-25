@@ -7079,3 +7079,102 @@ remain separate. The Leader authorized commit/push without waiting for CI. No ap
 Issue/Project/PR metadata write, release, deployment, real-host provisioning or production-data
 access is part of this remediation; no protection against every concurrent external write is
 promised beyond CT21's unchanged full-replacement/last-serialized-successful-commit semantics.
+
+
+## FE32 role navigation self-audit — 25 November 2026
+
+Author-side evidence for FE32 #224 in repurposed [PR #272](https://github.com/chi-thanh-nguyen/codemastery/pull/272),
+based on `main` `d8c6588a02bbfbc09cfd2f2fe0d4323f1be9a018` (merged PR #273).
+Codex performed the implementation, regression work and self-audit. Graphify's
+5 November graph was used only for orientation and checked against current source;
+Impeccable context/source audit did not amend DESIGN or governance.
+
+### Acceptance coverage
+
+| Checkpoint / acceptance clause | Baseline and resulting evidence |
+| --- | --- |
+| FE32.nav: role sets, order, icons and live filtering | Partly present on main; full approved sets now share actual native route registration. Test fixtures activate every future destination without production registration. |
+| Active mapping | Replaced broad prefix/regex logic; all CT16 paths, nested precedence, segment boundaries, uppercase/trailing slash, encoded parameters, query/fragment, wrong role, inactive and unknown paths tested. |
+| FE32.start | Teaching was live through #273. Shared role-start rule now covers Instructor/Admin activation and fallback, all-role sign-in/restored landing/logo, one-use Profile priority and explicit logout. |
+| FE32.guards | Native reusable role groups and Outlet preserve registered anonymous/wrong-role/restore outcomes; all delivered Instructor screens deny both other roles without feature API calls. A test-only Administrator route exercises its guard and replacement-session behavior. Inactive production paths remain Not found for all roles and anonymous visitors. |
+| Existing routing/Auth/presentation regressions | All three complete affected files pass, with new model, start and role-composition coverage. |
+| Responsive navigation, focus, names and active reach | Existing components preserved. Component fixtures cover six Administrator items at 900/1200/1440 and the 360 mobile drawer. These are jsdom structural checks, not rendered geometry or keyboard/browser acceptance. |
+| Theme placements and no duplication | Existing FE34 tests and new maximum-menu fixtures pass; desktop Theme before account, mobile Theme first in footer, no account-menu Theme group. r13 supersedes the older Issue's first-utility wording. |
+| Restore shell, hidden sign-in actions, available Theme | Existing tests retained; restored landing checked for all three roles; registered guard waits without mounting personal content. |
+| Semantic Light/Dark/System | Theme source unchanged; relevant shared presentation tests pass. New rendered scheme comparison is unverified. |
+| Definition of Done | Documentation synchronized; independent CODEOWNER, independent QA, successful required CI, protected integration and rendered verification remain separate gates. Refs #224, not a closing reference. |
+
+### Executed automated verification
+
+From `frontend/` on the resulting code:
+
+```text
+npm ci
+npm run typecheck
+npm run build
+npm test -- src/routes/index.test.tsx src/app/providers/AuthProvider.test.tsx src/shared/components/presentation.test.tsx
+npm test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/learning/pages/MyCoursesPage.test.tsx
+```
+
+Results: install and typecheck **PASS**; final build (including typecheck) **PASS**;
+routing/Auth/presentation **450 tests PASS**; Instructor authoring/hooks/My courses
+**141 tests PASS**; total **591 tests PASS** across six complete affected files.
+The authoring file includes unsaved shell navigation, shared Course/skill reads,
+Settings acknowledgment/remount and session/unknown-outcome regressions from #273.
+The build retains the large-chunk advisory; it is not a failing check. Vitest/jsdom
+also reports native document-navigation warnings from modified-click cases; the
+assertions pass, but these are not evidence that a real new tab opened.
+
+`git diff --check` passed. Impeccable `detect --json` on changed production
+routing/guard/provider files returned `[]`; it does not certify runtime UX or
+contrast. Production Course/assessment/skill-graph feature files, App/theme,
+backend, API contracts, dependencies, infrastructure and CI definitions are
+unchanged from the base.
+
+### Browser execution limitation
+
+Vite started this checkout at `http://127.0.0.1:5174/` (5173 was occupied). The
+named Playwright CLI Chrome session `fe32-check` could not launch: after granting
+the narrowly requested daemon-cache permission, Chrome still exited with
+`SIGABRT`/`TargetClosedError`. The installed Chromium headless shell also exited,
+and installed WebKit returned `Abort trap: 6`. No application assertion or
+screenshot ran. A managed browser attempt failed with an expired tool continuation.
+No existing personal browser session was used.
+
+Consequently rendered layout/overflow at **360, 900, 1200 and 1440 px**, the full
+six-item Administrator menu's capacity, actual keyboard/focus/drawer behavior,
+canvas-reach geometry, real-browser restore and theme comparison are
+**UNVERIFIED** in this run. Structural tests do not replace those checks. No
+unsupported presentation adjustment was introduced to compensate for an
+unmeasured result; rendered verification remains necessary before acceptance.
+
+### Self-audit and completed remediation
+
+| Severity | Confirmed finding / evidence | Correction and regression evidence |
+| --- | --- | --- |
+| P2 | Baseline `currentSection` accepted `/teach/courses-extra`, mismatched router case/trailing/encoded behavior, and broadly assigned unknown descendants. | `routePaths.ts` uses `matchRoutes`, exact approved section patterns and delivered/role filtering; boundary and full-map fixtures pass. |
+| P2 | Router `startFor` and AuthProvider `consumeReturn` duplicated start rules and had no reusable Admin activation branch. | Shared `roleStartPath`; both activation/fallback branches and all-role flow tests pass. |
+| P2 | Baseline root/logo start decisions bypassed a pending authorized Profile return; equivalent Profile spellings failed literal pathname capture. | Read-only `startPath`, committed one-use consumption and router-equivalent capture; StrictMode root, logo, all-role Profile and logout tests pass. |
+| P2, introduced and corrected during implementation | The initial exact-section table omitted public Course detail, detected by the existing routing test. | Added the exact Course-detail pattern; complete affected routing suite and full future mapping now pass. |
+
+No confirmed in-scope code defect remains after the final delta-focused
+reinspection. Browser-dependent findings are not declared absent. This is an
+implementer's self-audit, not independent review or QA acceptance.
+
+### Skipped suites and retained evidence
+
+- Backend/Maven/PostgreSQL/infrastructure/release: no code, contract, schema,
+  authorization, image or workflow change. The dated #273 runtime records above
+  remain historical evidence, not newly executed exact-head results. Current
+  frontend guard, API-effect isolation and Instructor regression tests ran instead.
+- Full lifecycle-managed E2E and the broad optional presentation browser harness:
+  no backend journey or harness implementation change; targeted routing/Auth/
+  authoring/presentation tests ran. Local browser engines failed even to launch,
+  so no passing browser/E2E result is claimed. Required remote CI remains separate.
+- Unaffected feature-client/decoder/math suites: production source unchanged;
+  full typecheck/build and the six shared-composition consumer suites ran. Existing
+  API tests are retained unchanged, without reusing historical results as new ones.
+
+CI is recorded in the PR from its actual post-push snapshot without waiting.
+No merge, protected-main write, deployment, release dispatch, Issue closure or
+Project update is performed by this task.

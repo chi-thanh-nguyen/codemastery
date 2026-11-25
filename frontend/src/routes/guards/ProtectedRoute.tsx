@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { Link, Navigate, useLocation } from 'react-router';
+import { Link, matchRoutes, Navigate, Outlet, useLocation } from 'react-router';
 import { Button } from '@mui/material';
+import { ROUTE_PATHS } from '../routePaths';
 import { useAuth } from '../../features/auth/hooks/useAuth';
 import type { UserRole } from '../../features/auth/types/authTypes';
 import { Page } from '../../layouts/DashboardLayout';
@@ -11,22 +12,23 @@ const audience: Record<UserRole, string> = { Learner: 'learners', Instructor: 'i
 const article = (role: UserRole) => role === 'Learner' ? 'a Learner' : role === 'Instructor' ? 'an Instructor' : 'an Administrator';
 
 /** Frontend guard only; the backend independently authorizes every effect. */
-export function ProtectedRoute({ children, roles }: { children: ReactNode; roles?: readonly UserRole[] }) {
+export function ProtectedRoute({ children, roles }: { children?: ReactNode; roles?: readonly UserRole[] }) {
     const auth = useAuth(), location = useLocation();
     // Eligibility is read before the protected subtree can mount, including throttled timers.
     const eligible = auth.isAuthenticated;
     const previouslyEligible = useRef(eligible);
     // While the refresh cookie is being checked (reload, wake-up or another tab's sign-in), wait.
     const waiting = !eligible && auth.restoring;
+    const profile = matchRoutes([{ path: ROUTE_PATHS.PROFILE }], location) !== null;
     useLayoutEffect(() => {
         if (waiting) return;
-        if (!eligible && location.pathname === '/profile') auth.rememberProfile(previouslyEligible.current);
+        if (!eligible && profile) auth.rememberProfile(previouslyEligible.current);
         previouslyEligible.current = eligible;
-    }, [eligible, waiting, location.pathname, auth]);
+    }, [eligible, waiting, profile, auth]);
     if (waiting) return <Page><LoadingView message="Restoring your session…" variant="block" /></Page>;
     if (!eligible) return <Navigate to="/login" replace />;
     if (roles && !roles.includes(auth.user!.role)) return <Page><SystemStateView icon="shield" title="You don't have access to this page"
         message={`You're signed in as ${article(auth.user!.role)}. This page is for ${roles.map((role) => audience[role]).join(' and ')}.`}
         actions={<><Button component={Link} to="/courses" variant="contained">Go to catalogue</Button><Button component={Link} to="/profile" variant="outlined">Profile</Button></>} /></Page>;
-    return children;
+    return children ?? <Outlet />;
 }
