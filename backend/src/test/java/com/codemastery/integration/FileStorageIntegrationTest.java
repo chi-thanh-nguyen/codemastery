@@ -113,7 +113,8 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
         registry.add("JWT_SECRET", () -> JWT);
         // This adapter suite needs PostgreSQL only for the approved application foundation.
         // Do not retain ten idle connections in the shared JVM's cached Spring context.
-        registry.add("spring.datasource.hikari.maximum-pool-size", () -> "1");
+        // Flyway holds its migration lock connection while acquiring another connection.
+        registry.add("spring.datasource.hikari.maximum-pool-size", () -> "2");
         registry.add("spring.datasource.hikari.minimum-idle", () -> "0");
         registry.add("spring.datasource.hikari.idle-timeout", () -> "10000");
         registry.add("codemastery.storage.endpoint", FileStorageIntegrationTest::endpoint);

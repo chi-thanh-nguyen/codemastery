@@ -32,16 +32,40 @@ and a separate ephemeral application identity using the pinned Compose `mc`, and
 executes production store/open/delete through that bucket-scoped identity. Root
 credentials are used only by the test's bootstrap client. No shared environment
 or persistent container reuse is used. Its Spring datasource pool is private to
-this suite's context (maximum one, zero minimum idle, 10-second idle timeout),
+this suite's context (maximum two, zero minimum idle, 10-second idle timeout),
 so the adapter tests do not retain a default ten-connection pool in the shared JVM.
 
 The first `./mvnw -o verify` execution after test compilation passed **1,104 unit
 tests** and **74 SH05 integration cases**. The full integration phase failed in
 `SampleDataSeedIntegrationTest` with PostgreSQL `too many clients already`
 (573 cases, one failure and 44 errors); it is not a passing full verification.
-The new suite's idle-pool adjustment is being checked by rerunning the complete
-integration phase without repeating the passed unit tests. Final results are
-recorded in the SH05 pull request.
+The first pool adjustment used a maximum of one and failed during Flyway
+initialization (74 SH05 context errors); Flyway needs a second connection while
+holding its migration lock. Self-audit finding SH05-A01 corrects the suite's
+maximum to two, with zero minimum idle and a 10-second idle timeout. The complete
+integration phase then passed **572 cases, zero failures/errors/skips**, including
+all **74 SH05 cases** and **47 seed cases**, using:
+
+```bash
+./mvnw -o test-compile failsafe:integration-test failsafe:verify jacoco:report
+```
+
+This reran the materially affected integration phase; the already passed 1,104
+unit tests and production source were unchanged. It is separate execution evidence,
+not a claim that the earlier `./mvnw -o verify` invocation passed. The passing
+MinIO container was `e032f3db685bb99130fffd9a78f5d4b0b4fa5b938f8e2a12037abb4e933d25d6`,
+with image/config identity
+`sha256:8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40`.
+PostgreSQL 17.11 was built by the shared DP01 foundation; Java was Temurin 25.0.4.1
+and Docker Engine 29.8.1 on the local ARM64 host. No deployment was performed.
+
+The PR-wide author self-audit inspected the exact interface and exception hierarchy,
+key/type rules, upload truncation/underflow and non-repeatable streams, provider
+code/status classification, safe logging and IO errors, metadata-abort ownership,
+configuration validation/lazy startup, transport/client cleanup, and architecture,
+placement and scope. SH05-A01 was the confirmed actionable finding; no production
+contract defect was confirmed. Its final delta review includes the corrected pool
+and this evidence update. This is not independent review or acceptance.
 
 Real-provider cases cover three PDF/ZIP prefix combinations with over 2 MiB of
 exact streamed bytes, metadata, missing keys, repeated deletion, no cross-bucket
