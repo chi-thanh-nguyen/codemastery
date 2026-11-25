@@ -7584,3 +7584,41 @@ or risk acceptance is asserted for the unchanged backend residual findings.
 
 AI-assisted work: Codex investigated logs and upstream metadata, implemented the
 pin/assertion, and executed the listed local checks under the Leader's task.
+
+## Maven bootstrap reliability qualification — 25 November 2026
+
+[The recurrence and design record](deployment.md#maven-bootstrap-reliability--25-november-2026)
+documents the scope, source provenance and consumer matrix. This follow-up used
+the existing isolated PR #293 branch on `main` 1e4c54b, with the frontend
+libexpat pin and its installed-version assertion preserved.
+
+| Command or evidence | Result |
+| --- | --- |
+| `bash infrastructure/vm/tests/test-maven-bootstrap.sh`, then `MAVEN_TEST_PLATFORM=linux/arm64` with the same command | Ten cases pass on each platform, amd64 emulated and arm64 native in Docker Desktop. Correct and CRLF properties work offline. A changed executable, removed JAR, added file, wrong executable mode, different requested version, alternate source and duplicate URLs fail before Maven runs. |
+| `docker build --no-cache --platform linux/amd64 --progress plain -t codemastery-ci-investigation/backend:combined backend` | Pass. Verified Maven 3.9.16, zero direct distribution requests, one package invocation. BuildKit can reuse the input image blobs even when `RUN` caching is disabled. |
+| `docker build --platform linux/arm64 --network none --target maven-bootstrap --output type=cacheonly backend` followed by the same command | Pass. The repeat used the verified stage from the local builder. The full arm64 backend build also passed before the CRLF guard refinement. The refined guard passed the native arm64 fixture matrix. |
+| Disposable source-only edit, `docker build --platform linux/amd64 --network none --target build ...` | Verified Maven stage cached. The single packaging command failed with nonzero exit at unresolved project dependency. This establishes both source-only reuse and an observable dependency failure. |
+| `docker build --no-cache --platform linux/amd64 --network none --target truststore-verifier --output type=cacheonly backend` | Pass. `javac` ran without a Maven stage or project dependency downloads. |
+| Host `cd backend && ./mvnw -B verify`, macOS arm64 Temurin 25.0.4.1 and disposable Testcontainers | 1,146 unit and 594 integration tests pass, no failures or skips. Uses the existing host Wrapper path. |
+| Combined build/origin regression, public CA chain, stub and real backend ingress, and Ubuntu amd64 DP01 preflight | Pass. Includes 13 Java trust-store cases, eight invalid-origin refusals, three CA controls, 168 stub assertions and 83 real-backend assertions. The re-exported backend from the real ingress build has the same scanned config and application layer. |
+| `python3 -m unittest discover -s infrastructure/release/tests` | 95 pass, with release tooling operating on test fixtures. The release backend build uses the same Dockerfile and amd64 target. |
+| Exact exported frontend and backend archives, pinned Trivy 0.76.2, precise and comprehensive | Both frontend targets 0/0. Backend 34/34, including 29 MEDIUM and 5 LOW with no listed fixes, matching the prior finding set. Vulnerability DB updated 25 November 13:07:24 UTC. |
+
+The backend scan archive contains config
+`sha256:03a9e488bd0edd92d58fbd1ddcfa0a658ed5e2230e1b1b3ada7985107b9564c5`.
+The frontend archive configs match the two previously qualified frontend
+identities above. The root inspection of the new backend verifies no Maven
+directory, Maven cache, Maven command, compiler or setuid/setgid files. The
+runtime user and root-owned `0444` JAR are preserved. The prior backend JAR
+and this scanned JAR have the same 754 archive entries. The only entry with a
+byte difference is `META-INF/build-info.properties`, whose build time changed.
+
+This is author-side qualification. The original rollout's host Wrapper remains
+unchanged and its installed distribution cache is not reverified on every
+invocation. The Docker bootstrap deliberately removes the outbound distribution
+request, so HTTP 429/503, timeout and reset retries for that request do not apply.
+Docker Hub and repository dependency retrieval can still fail. Do not interpret
+local layer reuse as cross-run GitHub cache availability.
+
+AI-assisted work: Codex inspected the Actions logs and upstream artifacts,
+implemented the Docker bootstrap change, and executed the local qualification.

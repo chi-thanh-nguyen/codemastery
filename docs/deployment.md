@@ -5304,7 +5304,9 @@ Re-pinning a whole base or adding snapshot infrastructure would expand the
 change without addressing an additional verified defect. Explicitly downloading
 the old APK would retain 2.10.0's now-fixed security issues and is rejected.
 
-**Maven: CONFIRMED_TRANSIENT_EXTERNAL_FAILURE_NO_CODE_CHANGE.** The main VM
+**Maven, initial disposition: CONFIRMED_TRANSIENT_EXTERNAL_FAILURE_NO_CODE_CHANGE.**
+The [continuation below](#maven-bootstrap-reliability--25-november-2026) supersedes
+that decision after PR #293 exposed another recurrence. The main VM
 runtime job and E2E job, and PR #290's first ingress attempt, each record four
 HTTP 429 responses from Maven Central for the 3.9.16 tarball, with existing
 5/15/30-second pauses. The pinned JDK image has no curl/wget/unzip; the wrapper
@@ -5375,3 +5377,92 @@ No feature branch, shared environment, deployment, release or merge was modified
 Independent review, protected CI and any later release admission remain required.
 After protected integration, affected PRs should update from main and rerun CI;
 this investigation performs none of those integration actions.
+
+## Maven bootstrap reliability — 25 November 2026
+
+**CONFIRMED_RECURRING_EXTERNAL_FAILURE_RELIABILITY_HARDENING_REQUIRED.**
+[PR #293's first ingress run](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45638610536/job/139290718324)
+built both frontend targets and then failed on `codemastery-ci/backend:ingress-test`.
+Maven Central returned HTTP 429 at 0.777, 6.511, 22.25 and 52.96 seconds. The
+ingress checks after the image builds were skipped. Independent E2E and runtime
+jobs also exhausted the same bootstrap retries on 24 and 25 November, as did
+[one release rehearsal](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45302491334/job/138140130489).
+The rerun of main E2E succeeded. That measured recovery did not stop the next
+fresh runner from repeating the separate distribution request. GitHub logs do
+not identify the service's throttling key or runner egress policy.
+
+| Consumer | Distribution and cache behavior |
+| --- | --- |
+| Host development and `CI Backend` | Unix or Windows Wrapper 3.3.4; Apache Maven 3.9.16 ZIP, with Unix TAR.GZ fallback when unzip is absent. The wrapper can reuse an extracted installation. `setup-java` restores a host Maven cache scoped to the workflow's branch and dependency key. |
+| VM runtime privileges and HTTPS ingress | Separate runners and local Docker builders. Each image build uses the same offline Maven bootstrap stage. The ingress job builds the frontend targets first. |
+| Java trust-store verification | Targets the pinned JDK stage directly. It compiles the verifier with networking disabled and consumes no Maven files. |
+| Playwright E2E | Browser job uses the backend Dockerfile unless an existing backend image is supplied. Its checkout-local Docker cache and npm cache are separate from host Maven and release. |
+| Release candidate and rehearsal | Use the same Dockerfile via `release.sh` with `--platform linux/amd64`. Source checks, image export/reload, scanning, manifest and attestation gates still apply. |
+| Local Compose or standalone Docker build | Uses the same offline bootstrap, with content-addressed OCI layers and ordinary local BuildKit reuse. Deployment consumes its previously qualified release archive. |
+
+The Maven source is the [Docker Official Image](https://hub.docker.com/_/maven)
+`docker.io/library/maven:3.9.16-eclipse-temurin-25@sha256:93b8a14ea2f412782e4e842651273b4d903e35cc496284f178fbbe2d67d00976`.
+The amd64 and arm64 Maven distribution trees matched. The Dockerfile copies the
+Maven directory into the existing pinned JDK and removes the image's `ref`
+directory. It checks the URL, checks the full remaining tree against an independently
+derived SHA-512 with `RUN --network=none`, then prints the verified Maven version.
+Compilation runs once. The JRE stage receives the application JAR and the existing
+trust-store verification bind. Maven and the donor image's entrypoint, JDK, packages
+and configuration outside the verified tree do not enter the runtime image.
+
+The tree checksum is derived by downloading the TAR.GZ and separately checking
+SHA-512 against the [Apache release catalog](https://releases.apache.org/catalog/maven)
+and [Apache archive](https://archive.apache.org/dist/maven/maven-3/3.9.16/binaries/).
+Extract the verified archive into a clean directory with `tar -xzf ARCHIVE
+--strip-components=1 -C DIRECTORY`. Use GNU tar in the pinned JDK image and run
+`tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner --format=gnu
+-C DIRECTORY -cf /tmp/maven-tree.tar .`, then `sha512sum /tmp/maven-tree.tar`.
+The digest covers names, bytes, types and modes, with normalized ownership and
+timestamps. When updating Maven, verify both platform images against the new
+Apache tree, then update the Wrapper URL, OCI index, expected tree digest and
+regression expectations together. The ZIP archive has a different published checksum. Host wrapper
+checksums and extracted host cache verification require separate cross-platform
+work. Neither release nor Docker builds use that cache.
+
+Cold builders pull the pinned registry layers. A warm local builder can reuse the
+verified stage across application-source changes. A missing registry layer fails
+the build if it cannot be fetched. A changed Maven URL invalidates the verification
+step and a stale or mismatched pin fails before execution. A corrupt distribution
+fails its digest check. CI does not share exported cache entries or executable
+artifacts across pull requests and release. An untrusted pull request can change its
+own Dockerfile and checksums, so protected source review and release provenance
+remain the controls for trusted builds. No new workflow credentials are needed.
+
+Keeping or increasing bootstrap retries would leave fresh runners requesting the
+same Maven Central tarball. A checksum-verified CDN fallback reduces dependence
+on one endpoint but still transfers the archive and introduces retry and source
+selection code. Host or BuildKit cache export requires additional consumer wiring,
+cache scope and cold-start handling. The pinned distribution removes this download
+from every Docker consumer with zero direct distribution requests, including cold
+builds, at the cost of Docker Hub layer pulls and reviewing the pinned OCI image on
+Maven upgrades. Maven project dependencies, registry pulls, npm and package
+repositories remain external dependencies.
+
+The hosted [cache scope rules](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache)
+permit a pull request to restore eligible base-branch caches and scope its new
+entries to its merge ref. Restore prefixes can select older entries. A key match
+does not verify the bytes. These rules are not used as artifact trust guarantees.
+The pinned amd64 donor manifest describes nine compressed layers totaling about
+168 MiB, compared with an 8.8 MiB Maven TAR.GZ. Actual registry transfer depends
+on the builder's existing blobs. The reliability gain is zero Maven Central
+distribution calls and fewer independent Maven bootstrap outcomes, with cold
+transfer cost moved to the registry.
+
+The bounded CI review also found a separate registry HTTP 500 on a Chainguard
+manifest lookup and deterministic Java compilation errors after successful
+bootstrap. PR #291's release rehearsal stopped on the old libexpat pin. The
+sample did not establish recurring 503, unexpected 404, connection timeout,
+reset, npm, Nginx or other APK retrieval failures that justify additional
+repository changes. Future exact-pin retirement still requires a reviewed pin
+change. An immutable Alpine snapshot is outside this remediation.
+
+The Maven change is a separate commit in PR #293. At the decision point, its
+required ingress job was failing on Maven and main still had the retired
+libexpat pin. A separate main-based PR would fail on that pin. The combined PR
+lets reviewers assess both changes on the same CI merge checkout. After protected
+integration, PRs #290 and #291 can update from main and run their own checks.

@@ -786,20 +786,22 @@ docker build -t codemastery-frontend:batch6 ./frontend
 ```
 
 These are local validation tags, not a registry or deployment policy. Docker
-must be running, and the base images, Maven distribution/dependencies, and npm
+must be running, and the base images, Maven project dependencies, and npm
 packages must be available or downloadable. Host Java, Maven, Node, and npm are
 not required for these image builds.
 
 ### Backend Image
 
-The build context is `backend/`. The builder uses
-`eclipse-temurin:25.0.5_8-jdk-noble` and the checked-in Maven Wrapper to run
-`./mvnw package -DskipTests`. Tests are not executed, but their sources are still
-compiled. The wrapper first fetches the pinned Maven distribution in a layer of its
-own. That one download is retried at most three times, after 5, 15 and 30 s, because
-Maven Central can answer HTTP 429 when it rate-limits and the image has no `curl` or
-`wget`. Maven's dependency downloads have their own retry, and the build runs once. The image does not consume a host-built `target/` directory; normal
-CI continues to run `./mvnw verify` separately.
+The build context is `backend/`. The builder uses the pinned
+`eclipse-temurin:25.0.5_8-jdk-noble` with Apache Maven 3.9.16 copied from a
+digest-pinned Docker Official Image. Before executing Maven, Docker checks the
+distribution tree against a SHA-512 derived from Apache's verified archive and
+checks that the configured Wrapper URL identifies the same version. The bootstrap
+layer has no network access. A fresh builder needs the pinned OCI layers from
+Docker Hub, and Maven still contacts Maven Central for project dependencies and
+plugins. `mvn package -DskipTests` runs once, compiling the test sources without
+executing them. Host-side development and the Backend CI job use `./mvnw verify`.
+See [distribution provenance and pin updates](deployment.md#maven-bootstrap-reliability--25-november-2026).
 
 The runtime uses `eclipse-temurin:25.0.5_8-jre-noble` and contains only the
 application artifact copied from the builder:
