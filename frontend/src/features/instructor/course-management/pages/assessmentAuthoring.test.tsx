@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
-import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthContext } from '../../../../app/providers/AuthProvider';
 import type { AuthContextValue } from '../../../../app/providers/AuthProvider';
@@ -883,6 +883,150 @@ describe('U4: deleting the only question on the last page moves to the last page
 });
 
 describe('U5: Course Settings keeps "Saved" and drafts across re-reads', () => {
+    it.each(['course', 'session'] as const)('D1: discards a delayed save after a %s change', async (boundary) => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        let generation = 1;
+        auth = { ...auth, isCurrent: (value) => value === generation };
+        const nextId = boundary === 'course' ? '00000000-0000-4000-8000-0000000000c2' : courseId;
+        const next = ownedCourseFixture({ id: nextId, title: 'New context' });
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockResolvedValue(next);
+        let resolveSave!: (value: OwnedCourse) => void;
+        vi.mocked(updateOwnedCourse).mockReturnValue(new Promise<OwnedCourse>((resolve) => { resolveSave = resolve; }));
+        function SwitchCourse() {
+            const navigate = useNavigate();
+            return <button onClick={() => navigate(`/teach/courses/${nextId}/settings`)}>Switch course probe</button>;
+        }
+        const tree = () => <MemoryRouter initialEntries={[`/teach/courses/${courseId}/settings`]}>
+            <AuthContext.Provider value={auth}><SwitchCourse /><Where /><AppRouter catalogue={<p>Catalogue stub</p>} /></AuthContext.Provider>
+        </MemoryRouter>;
+        await act(async () => root.render(tree()));
+        await type('Course title', 'Old draft'); await click('Save changes');
+        if (boundary === 'course') await click('Switch course probe');
+        else {
+            generation = 2;
+            auth = { ...auth, generation, user: { ...auth.user!, id: arrays.id } };
+            await act(async () => root.render(tree()));
+        }
+        await settle();
+        expect(field('Course title').value).toBe('New context');
+        expect(vi.mocked(updateOwnedCourse).mock.calls[0][2]?.signal?.aborted).toBe(true);
+        await act(async () => resolveSave(ownedCourseFixture({ title: 'Old reply' })));
+        expect(field('Course title').value).toBe('New context');
+        expect(text()).not.toContain('Saved');
+        expect(getOwnedCourse).toHaveBeenCalledTimes(2);
+    });
+
+    it('D1: reconciles a newer shared read that precedes a delayed save reply, without another request', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        let resolveSave!: (value: OwnedCourse) => void;
+        const pendingSave = new Promise<OwnedCourse>((resolve) => { resolveSave = resolve; });
+        const saved = ownedCourseFixture({ title: 'My saved version' });
+        const newer = ownedCourseFixture({ title: 'Newer external commit', publicationStatus: 'published' });
+        vi.mocked(updateOwnedCourse).mockReturnValue(pendingSave);
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockResolvedValue(newer);
+        vi.mocked(setOwnedCoursePublication).mockResolvedValue(newer);
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        const input = field('Course title');
+        await type('Course title', 'My saved version');
+        await click('Save changes');
+        expect(input.disabled).toBe(true);
+        // A committed first; its reply is delayed. A later writer commits B, which this shared read sees.
+        await click('Publish course');
+        await click('Publish course', confirmDialog('Publish course?'));
+        await settle();
+        expect(document.querySelector('main h1')?.textContent).toBe('Newer external commit');
+        await act(async () => resolveSave(saved));
+        await settle();
+        expect(field('Course title')).toBe(input);
+        expect(input.value).toBe('Newer external commit');
+        expect(text()).toContain('Saved');
+        expect(getOwnedCourse).toHaveBeenCalledTimes(3);
+        expect(updateOwnedCourse).toHaveBeenCalledTimes(1);
+        await act(async () => navLink('Teaching').click()); await flush();
+        expect(location).toBe('/teach');
+        expect(confirmDialog('Leave without saving?')).toBeUndefined();
+    });
+
+    it('D1: keeps the acknowledged fields while the ordinary post-save read is pending or fails', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        let rejectRead!: (error: unknown) => void;
+        const pendingRead = new Promise<OwnedCourse>((_resolve, reject) => { rejectRead = reject; });
+        const saved = ownedCourseFixture({ title: 'Acknowledged title' });
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockReturnValueOnce(pendingRead)
+            .mockResolvedValueOnce({ ...saved });
+        vi.mocked(updateOwnedCourse).mockResolvedValue(saved);
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        const input = field('Course title');
+        await type('Course title', 'Acknowledged title');
+        await click('Save changes');
+        expect(input.value).toBe('Acknowledged title');
+        expect(text()).toContain('Saved');
+        expect(document.querySelector('main h1')?.textContent).toBe('Python Foundations');
+        await act(async () => rejectRead(new ApiError('http', 'unavailable', 503)));
+        expect(input.value).toBe('Acknowledged title');
+        expect(text()).toContain('The last loaded version is shown.');
+        await click('Try again'); await settle();
+        expect(field('Course title')).toBe(input);
+        expect(input.value).toBe('Acknowledged title');
+        expect(text()).toContain('Saved');
+        expect(getOwnedCourse).toHaveBeenCalledTimes(3);
+    });
+
+    it('D1: does not revert to a newly read pre-save snapshot while the post-save read waits', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        let resolveSave!: (value: OwnedCourse) => void, resolveRead!: (value: OwnedCourse) => void;
+        vi.mocked(updateOwnedCourse).mockReturnValue(new Promise<OwnedCourse>((resolve) => { resolveSave = resolve; }));
+        const published = ownedCourseFixture({ publicationStatus: 'published' });
+        vi.mocked(setOwnedCoursePublication).mockResolvedValue(published);
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockResolvedValueOnce(published)
+            .mockReturnValueOnce(new Promise<OwnedCourse>((resolve) => { resolveRead = resolve; }));
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        await type('Course title', 'Acknowledged title'); await click('Save changes');
+        await click('Publish course'); await click('Publish course', confirmDialog('Publish course?'));
+        await act(async () => resolveSave(ownedCourseFixture({ title: 'Acknowledged title' })));
+        expect(field('Course title').value).toBe('Acknowledged title');
+        expect(text()).toContain('Saved');
+        await act(async () => resolveRead(ownedCourseFixture({ title: 'Acknowledged title', publicationStatus: 'published' })));
+        expect(field('Course title').value).toBe('Acknowledged title');
+        expect(getOwnedCourse).toHaveBeenCalledTimes(3);
+    });
+
+    it('D1: adopts a fresh post-save read even when another writer restores the pre-save values', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        const original = ownedCourseFixture();
+        let resolveRead!: (value: OwnedCourse) => void;
+        const pendingRead = new Promise<OwnedCourse>((resolve) => { resolveRead = resolve; });
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(original).mockReturnValueOnce(pendingRead);
+        vi.mocked(updateOwnedCourse).mockResolvedValue(ownedCourseFixture({ title: 'Acknowledged title' }));
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        await type('Course title', 'Acknowledged title');
+        await click('Save changes');
+        expect(field('Course title').value).toBe('Acknowledged title');
+        // A decoded GET is a new snapshot, even when its metadata equals an older read's metadata.
+        await act(async () => resolveRead({ ...original }));
+        expect(field('Course title').value).toBe(original.title);
+        expect(text()).toContain('Saved');
+    });
+
+    it('D1: preserves a new dirty draft when the post-save read finishes', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        let resolveRead!: (value: OwnedCourse) => void;
+        const pendingRead = new Promise<OwnedCourse>((resolve) => { resolveRead = resolve; });
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockReturnValueOnce(pendingRead);
+        vi.mocked(updateOwnedCourse).mockResolvedValue(ownedCourseFixture({ title: 'Saved title' }));
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        await type('Course title', 'Saved title'); await click('Save changes');
+        await type('Description', 'My next unsaved draft');
+        await act(async () => resolveRead(ownedCourseFixture({ title: 'Other writer', description: 'Other description' })));
+        expect(field('Course title').value).toBe('Saved title');
+        expect(field('Description').value).toBe('My next unsaved draft');
+        expect(text()).toContain('Unsaved changes');
+        await act(async () => navLink('Teaching').click()); await flush();
+        expect(confirmDialog('Leave without saving?')).toBeTruthy();
+        await click('Stay', confirmDialog('Leave without saving?'));
+        expect(field('Description').value).toBe('My next unsaved draft');
+    });
+
     it('keeps "Saved" and the mounted form after the post-save re-read returns the new metadata', async () => {
         vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
         const saved = ownedCourseFixture({ title: 'Python Basics', description: 'Variables, loops and functions.' });

@@ -374,15 +374,16 @@ function CourseSettingsForm({ course, ops, onSaved, setTabDirty }: {
     const [savedNotice, setSavedNotice] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [alert, setAlert] = useState<string | null>(null);
-    // The committed metadata the fields last took over. A newer committed copy (the re-read after a save, or another
-    // writer's change) replaces the fields only while they hold no unsaved edit; an edit in progress is never
-    // overwritten, and saving it later is a full replacement (the last serialized commit wins, CT21.authoring).
-    const committed = `${course.title}\u0000${course.description}\u0000${course.prerequisiteDescription ?? ''}`;
-    const [adopted, setAdopted] = useState(committed);
-    const committedRef = useRef(committed);
-    committedRef.current = committed;
-    if (adopted !== committed && !dirty && !ops.busy) {
-        setAdopted(committed);
+    // Track actual snapshots, not just metadata equality: a fresh GET can restore earlier values. A successful PUT
+    // supplies the displayed snapshot itself. Only the exact pre-save context still on screen may be ignored until
+    // the post-save GET replaces it; a newer context must not be marked adopted while the fields show the PUT body.
+    const [adopted, setAdopted] = useState(course);
+    const [awaitingReplacement, setAwaitingReplacement] = useState<OwnedCourse | null>(null);
+    const committedRef = useRef(course);
+    committedRef.current = course;
+    if (adopted !== course && awaitingReplacement !== course && !dirty && !ops.busy) {
+        setAdopted(course);
+        setAwaitingReplacement(null);
         setTitle(course.title);
         setDescription(course.description);
         setPrerequisites(course.prerequisiteDescription ?? '');
@@ -415,12 +416,16 @@ function CourseSettingsForm({ course, ops, onSaved, setTabDirty }: {
         };
         try {
             const saved = await ops.updateMetadata(write);
-            // Show what the server committed, and treat the copy on screen as already seen: only the re-read's
-            // newer copy is taken over, so the fields never flash back to the pre-save values.
+            // Keep the acknowledged values over the old context while its re-read is pending or failed (U2/U5).
+            // A context with changed metadata observed during the write is instead reconciled immediately (D1).
+            const latest = committedRef.current;
+            const stillPreSaveMetadata = latest.title === course.title && latest.description === course.description
+                && latest.prerequisiteDescription === course.prerequisiteDescription;
             setTitle(saved.title);
             setDescription(saved.description);
             setPrerequisites(saved.prerequisiteDescription ?? '');
-            setAdopted(committedRef.current);
+            setAdopted(saved);
+            setAwaitingReplacement(stillPreSaveMetadata ? latest : null);
             setDirty(false);
             setSavedNotice(true);
             onSaved();

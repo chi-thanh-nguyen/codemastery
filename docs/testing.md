@@ -6772,7 +6772,7 @@ An ultrareview of PR #273 at `49eaff6` reported findings U1–U8. The Project Le
 - **U2 (confirmed, fixed):** `useOwnerRead` and `useOwnedSkillGraph` set the body to `null` on any failed re-read, so a background re-read failure replaced the whole course editor with an error view and discarded open drafts. Now only an unknown outcome (network, invalid response, 5xx) of the same key and session keeps the last body, together with the error. 401, 403, 404 and every other refusal, a key change and a session change still discard it. The course editor shell and the assignment editor show "We couldn't load this course. The last loaded version is shown." with `Try again`. The Skills section shows the D12-3 alert "Skills couldn't be loaded." with `Try again`. Nothing is retried automatically. The shared context's skills-stale flag now clears only on a successful read.
 - **U3 (confirmed, fixed):** `CreateCoursePage` registers with the shell navigation guard. Back, Cancel, primary navigation, the home link and account-menu links share one `Leave without saving?` dialog. A successful creation clears the draft before it replaces the URL. Sign-out and session end are not intercepted.
 - **U4 (confirmed, fixed):** after a deletion empties the current page, the Questions view moves once to the last page the server reports. It acts only on a current, successful read of that page, and each step lowers the page. An empty answer at page 0 shows the empty state.
-- **U5 (confirmed, fixed):** the Settings form is keyed by course identity only. It takes over newly committed metadata only while it holds no unsaved edit, so the post-save re-read keeps `Saved`, and another writer's change never overwrites a draft. An unknown save outcome never shows `Saved`.
+- **U5 (initially reported fixed; D1 follow-up below):** the initial change keyed the Settings form by course identity and preserved `Saved` on the ordinary post-save re-read. The subsequent independent review at `3f7c184` found that a delayed PUT response could suppress metadata already observed by a shared GET (D1); the original completion claim did not cover that interleaving. An unknown save outcome was not reported as `Saved`.
 - **U6 (confirmed, fixed):** a deadline such as `9999-12-31T23:59:59-05:00` normalizes to year 10000 in UTC. `Instant.toString()` then renders `+10000-01-01T04:59:59Z`, which the frontend decoder (four-digit year) and RFC 3339 reject. Create and replace now answer 400 unless the UTC instant lies in years 0000–9999. The check runs in the request parser and again in `AssignmentService`. Microsecond precision and the API format are unchanged. OpenAPI states the rule.
 - **U7, U8 (deferred):** the duplicated read and mutation hooks and the duplicated API decoders are maintainability debt, not defects. U2 needed the same small change in both read hooks. Merging them would add a dependency from `skill-graph-editor` to `course-management`, whose hooks already import `skill-graph-editor`, for no correctness gain. No refactor was made.
 
@@ -6808,3 +6808,30 @@ Interactive `playwright-cli` checks in Chrome ran against a disposable PostgreSQ
   - N2: at 360 px, the only elements past the viewport on Assessments and Settings were segmented-control buttons inside their `overflow-x: auto` scroller.
 
 The stack was removed afterwards: containers, the network, images, the preview process and the browser session. The E2E suite was not rerun locally. Its evidence is CI on the pushed head. These are author-side checks, not independent QA, infrastructure or CODEOWNER review. No real database or VM was provisioned or changed.
+
+
+## PR #273 D1 Settings synchronization follow-up — 25 November 2026
+
+Under the Project Leader's explicit "PR #273 — Focused D1/D2 Remediation in the Current Review Session"
+authorization, D1 was reproduced on `3f7c184` and corrected in the existing Settings component.
+The form now tracks the snapshot actually displayed (a decoded GET or an acknowledged PUT), rather
+than marking the currently observed context metadata as adopted after every save. While the existing
+post-save GET is pending or failed, only the exact context snapshot still carrying the pre-save
+metadata is ignored. A changed context already observed during the write is reconciled when clean;
+a fresh read also reconciles when another writer restored the earlier metadata values. Dirty drafts
+remain protected. The course-identity key, session/cancellation boundaries, `Saved` indication and
+single post-save re-read are preserved; no context, provider, endpoint or automatic mutation replay
+was added.
+
+Executed from an isolated clone based on `3f7c184`, macOS arm64 / Node 24.21.0 / npm 11.19.0:
+
+| Command (cwd `frontend/`) | Observed result |
+| --- | --- |
+| `npm test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx -t 'D1:'` before the production fix | The four initial probes yielded 2 failures and 2 passes, reproducing the delayed PUT/newer GET race and missed synchronization when fresh metadata restored earlier values |
+| `npm test -- src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/routes/index.test.tsx` after the fix | 3 files, 162 tests passed, exit 0; includes 7 new D1 tests for the original race, ordinary save with pending/failed read, restored metadata, a new dirty draft, newly read pre-save metadata, and course/session replacement |
+| `npm run build` | Typecheck and production build passed, exit 0 |
+
+These are remediation-author executions and self-review, not a new independent acceptance or
+CODEOWNER approval. No new interactive browser or full E2E run is claimed. Earlier exact-tree CI and
+the preceding independent review's infrastructure/containment evidence remain historical; the D1
+change does not modify those implementations. Required CI and owner/governance gates remain open.
