@@ -7521,3 +7521,66 @@ This changes test synchronization only, with no production implementation change
 no rule suppression, tolerance change or removed assertion. Focused browser verification passes 6 cases in each of Firefox 155 and WebKit 26.6,
 and the 8 harness lifecycle tests pass for this follow-up; the earlier full
 matrix and runtime-source evidence remain applicable to the identical application.
+
+## CI package-index remediation qualification — 25 November 2026
+
+Leader-authorized investigation and narrowly scoped remediation on
+`fix/ci-libexpat-security-pin`, based on `main` 1e4c54b. See the complete
+[incident and security record](deployment.md#dp01-ci-package-index-remediation--25-november-2026).
+Only the release libexpat pin is raised, to signed Alpine v3.24/main 2.11.0-r0;
+an installed-version assertion is added to the existing build regression.
+
+Local environment: macOS arm64, Docker Desktop Linux/aarch64 daemon, amd64
+images executed under emulation. Clean builds passed `--platform linux/amd64
+--no-cache --progress plain`; FROM/COPY metadata reuse is not a cached RUN.
+The new installed-package assertion also rejects the inherited base (exit 1)
+and accepts the candidate (exit 0), without network access.
+Subsequent existing-script runs use `DOCKER_DEFAULT_PLATFORM=linux/amd64` and
+may reuse build layers. All images use task-specific local tags, with synthetic
+credentials/certificates and disposable networks/databases only.
+
+| Command / scenario | Result |
+| --- | --- |
+| Exact pinned release base, root, fresh official signed indexes: `apk add --no-cache libexpat=2.10.0-r0` | FAIL as expected, exit 4, exact CI world/fontconfig signature; 2.11.0-r0 is the current index candidate |
+| `docker build --platform linux/amd64 --no-cache --progress plain --target release --build-arg PUBLIC_ORIGIN=https://ingress.codemastery.test -t codemastery-ci-investigation/frontend:release frontend` | PASS; signed exact pins resolve, including 2.11.0-r0 |
+| Same clean build, default frontend target, tag `codemastery-ci-investigation/frontend:local` | PASS; bounded related-pin audit includes all local runtime pins |
+| `docker build --platform linux/amd64 --no-cache --progress plain -t codemastery-ci-investigation/backend:qualification backend` | PASS; current Maven bootstrap and compilation succeed; Maven tests intentionally skipped by the existing Dockerfile |
+| `bash infrastructure/vm/tests/test-ingress-release-image-build.sh` | PASS; new installed libexpat assertion, Nginx binary/modules 1.30.7, UID 101, root-owned non-writable config, no setuid/setgid files in all three images, eight invalid/missing origin refusals |
+| `test-java-truststore.sh` (invoked by the build regression) | PASS, 13 build cases, including prohibited-root mutations and verification failures |
+| `bash infrastructure/vm/tests/test-ingress-release-ca-store.sh` | PASS, three chain/hostname positive and negative controls, with installed Homebrew OpenSSL 3 first on PATH; macOS default OpenSSL lacks the required verify option and its initial run failed |
+| `bash infrastructure/vm/tests/test-ingress-stub-backend.sh` | PASS, 168 assertions, `INGRESS_STUB_TESTS_PASS` |
+| `bash infrastructure/vm/tests/test-ingress-real-backend.sh` | PASS, 83 assertions, `INGRESS_BACKEND_TESTS_PASS`; real disposable PostgreSQL/Flyway and backend |
+| `bash infrastructure/vm/tests/test-ingress-dp01-preflight.sh` | PASS, `INGRESS_PREFLIGHT_TESTS_PASS`, inside disposable Ubuntu 24.04 amd64 Docker-in-Docker, non-root operator with Docker/sudo and root-custody cases. Actual host platform/custody gates remain enforced |
+| Trivy 0.76.2 default and comprehensive on final rebuilt image archives | Frontend release 0/0, local 0/0; unchanged backend 34/34 (29 MEDIUM, 5 LOW; no listed fixed versions), no Java findings. Database updated 25 November 13:07:24 UTC; no ignored vulnerabilities |
+| Same database, default scan of the exact inherited release base | Four libexpat 2.9.0-r0 HIGH findings, each listing 2.10.0-r0 as fixed; none reintroduced on the candidate |
+| `bash -n infrastructure/vm/tests/test-ingress-release-image-build.sh`; `git diff --check` | PASS |
+
+The final scan archive configuration identities are recorded in deployment.md.
+The regression script rebuilds tags, so earlier scans were not reused as proof
+for those final artifacts. Nginx signing-key SHA-512 and ABI-compatible dynamic
+modules remain enforced by the build and regression. The installed fontconfig
+library resolves the new `libexpat.so.1` successfully; real Nginx startup/HTTPS
+tests pass. Both frontend final filesystems have no reported libexpat finding.
+Inherited base-layer bytes are not claimed erased by these merged-view scans.
+
+The complete VM runtime-privilege script was also attempted. macOS's shell/host
+run exited before assertions; a disposable Alpine amd64 harness completed the
+consumer phase (`RUNTIME_CONSUMER_TESTS_PASS`) but exited 2 before the upgrade
+phase. These are not full-suite passes. The final complete run on Ubuntu 24.04
+amd64 passed both `RUNTIME_CONSUMER_TESTS_PASS` and `RUNTIME_UPGRADE_TESTS_PASS`,
+including real Flyway V008/r3 -> V009/r4 provisioning, invalid-history refusals
+and CO08 writes after upgrade. No test or host-policy gate was weakened.
+
+Self-audit caught an initial assertion using `apk info -v libexpat`, which prints
+descriptive metadata with APK 3. The assertion now checks the installed inventory
+from `apk info -v` instead, and the complete build regression passed afterwards.
+No other confirmed in-scope implementation defect was found in the reviewed
+diff; this is author-side automated evidence, not independent human approval.
+Full local application unit/integration/E2E suites, release candidate creation,
+MinIO/PostgreSQL image requalification and production deployment were not run
+for this isolated frontend package change. The existing workflows remain the
+protected CI gates; pending or skipped executions are not passes. No full release
+or risk acceptance is asserted for the unchanged backend residual findings.
+
+AI-assisted work: Codex investigated logs and upstream metadata, implemented the
+pin/assertion, and executed the listed local checks under the Leader's task.
