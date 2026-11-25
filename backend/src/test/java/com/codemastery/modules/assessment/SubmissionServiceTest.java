@@ -174,6 +174,99 @@ class SubmissionServiceTest {
         }
     }
 
+    /**
+     * U6: the deadline range is checked on the UTC instant after the offset is applied, because
+     * responses render that instant and the approved consumers decode a four-digit RFC 3339 year.
+     */
+    @Nested
+    class RepresentableDeadlineRange {
+
+        /** The frontend CT10 decoder's shape (assessmentAuthoringApi.ts {@code rfc3339Micros}). */
+        private final java.util.regex.Pattern consumerShape = java.util.regex.Pattern.compile(
+                "^(\\d{4})-(\\d{2})-(\\d{2})[Tt](\\d{2}):(\\d{2}):(\\d{2})(?:\\.\\d{1,6})?([Zz]|[+-]\\d{2}:\\d{2})$");
+
+        @ParameterizedTest
+        @ValueSource(strings = {
+                "9999-12-31T23:59:59.999999Z|9999-12-31T23:59:59.999999Z",
+                "9999-12-31T23:59:59.999999+00:00|9999-12-31T23:59:59.999999Z",
+                "9999-12-31T23:59:59.999999000Z|9999-12-31T23:59:59.999999Z",
+                "9999-12-31T18:59:59.999999-05:00|9999-12-31T23:59:59.999999Z",
+                "10000-01-01T00:00:00+00:00|reject",
+                "9999-12-31T23:59:59-05:00|reject",
+                "9999-12-31T23:59:59.999999-00:01|reject",
+                "9999-12-31T19:00:00-05:00|reject",
+                "0000-01-01T00:00:00Z|0000-01-01T00:00:00Z",
+                "0000-01-01T00:00:00-05:00|0000-01-01T05:00:00Z",
+                "0001-01-01T03:00:00.000001+07:00|0000-12-31T20:00:00.000001Z",
+                "0000-01-01T00:00:00+00:01|reject",
+                "0000-01-01T04:59:59.999999+05:00|reject",
+                "2026-11-25T18:30:05.123456+07:00|2026-11-25T11:30:05.123456Z"
+        })
+        void checksTheNormalizedUtcInstantAndRendersOnlyDecodableDeadlines(String row) {
+            String input = row.substring(0, row.indexOf('|'));
+            String expected = row.substring(row.indexOf('|') + 1);
+            Optional<Instant> parsed = AssignmentRequests.parseMicrosecondInstant(input);
+            if ("reject".equals(expected)) {
+                assertTrue(parsed.isEmpty(), input);
+                assertTrue(AssignmentRequests.parseWrite(
+                        "{\"title\":\"A\",\"instructions\":\"B\",\"deadlineAt\":\"" + input + "\",\"lessonId\":null}")
+                        .isEmpty(), input);
+                return;
+            }
+            assertEquals(Optional.of(Instant.parse(expected)), parsed, input);
+            String rendered = OwnedAssignmentResponse.from(new OwnedAssignmentView(
+                    assignmentId, courseId, null, "T", "I", parsed.orElseThrow(), "hidden", 0, 0)).deadlineAt();
+            assertEquals(expected, rendered);
+            assertTrue(consumerShape.matcher(rendered).matches(), rendered);
+        }
+
+        @Test
+        void serviceRejectsUnrepresentableInstantsOnCreateAndReplaceWithoutWriting() {
+            // replace locks the row first (ADR010 §14 Stage 3), then validates the body.
+            when(repository.findInCourseForUpdate(assignmentId, courseId)).thenReturn(Optional.of(new Assignment(
+                    assignmentId, courseId, null, "T", "I", Instant.parse("2026-12-01T00:00:00Z"), "hidden")));
+            for (Instant outside : List.of(
+                    Instant.parse("9999-12-31T23:59:59.999999Z").plusNanos(1_000),
+                    Instant.parse("+10000-01-01T04:59:59Z"),
+                    Instant.parse("0000-01-01T00:00:00Z").minusNanos(1_000))) {
+                BusinessRuleException created = assertThrows(BusinessRuleException.class,
+                        () -> service.create(courseId, new AssignmentInput("T", "I", outside, null)));
+                assertEquals(HttpStatus.BAD_REQUEST, created.getStatus());
+                BusinessRuleException replaced = assertThrows(BusinessRuleException.class,
+                        () -> service.replace(courseId, assignmentId, new AssignmentInput("T", "I", outside, null)));
+                assertEquals(HttpStatus.BAD_REQUEST, replaced.getStatus());
+            }
+            verify(repository, never()).insert(any());
+            verify(repository, never()).updateDefinition(any(), any(), any(), any(), any(), any());
+            assertTrue(AssignmentService.isRepresentableDeadline(AssignmentService.EARLIEST_REPRESENTABLE_DEADLINE));
+            assertTrue(AssignmentService.isRepresentableDeadline(AssignmentService.LATEST_REPRESENTABLE_DEADLINE));
+            assertFalse(AssignmentService.isRepresentableDeadline(null));
+        }
+
+        @Test
+        void controllerAnswers400ForTheReproducedDeadlineOnCreateAndReplace() throws Exception {
+            MockMvc mvc = MockMvcBuilders.standaloneSetup(
+                            new AssignmentController(service),
+                            new AssignmentController.AssignmentCacheAdvice())
+                    .setControllerAdvice(new GlobalExceptionHandler())
+                    .build();
+            when(repository.existsInCourse(assignmentId, courseId)).thenReturn(true);
+            String body = "{\"title\":\"A\",\"instructions\":\"B\","
+                    + "\"deadlineAt\":\"9999-12-31T23:59:59-05:00\",\"lessonId\":null}";
+
+            mvc.perform(post("/api/courses/{c}/assignments", courseId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body.getBytes(StandardCharsets.UTF_8)))
+                    .andExpect(status().isBadRequest());
+            mvc.perform(put("/api/courses/{c}/owned-assignments/{a}", courseId, assignmentId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body.getBytes(StandardCharsets.UTF_8)))
+                    .andExpect(status().isBadRequest());
+            verify(repository, never()).insert(any());
+            verify(repository, never()).updateDefinition(any(), any(), any(), any(), any(), any());
+        }
+    }
+
     @Nested
     class ServiceBehavior {
 

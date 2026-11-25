@@ -216,6 +216,8 @@ export function CourseSkillsSection() {
                 options={[{ value: 'graph', label: 'Skill graph' }, { value: 'mapping', label: 'Lesson mapping' }]} />
         </Box>
         {notice && <Typography role="status" sx={{ color: 'text.secondary' }}>{notice}</Typography>}
+        {/* U2: a failed re-read with an unknown outcome keeps the last graph and the open skill draft (D12-3 page alert). */}
+        {skillGraph.error ? <Alert severity="error" action={<Button size="small" variant="text" onClick={skillGraph.reload}>Try again</Button>}>Skills couldn&apos;t be loaded.</Alert> : null}
         {tab === 'graph' && (editableSkills.length === 0 && !showForm
             ? <EmptyView icon="graph" headingLevel="h3" title="No skills yet"
                 message="Add the skills this course teaches, then link prerequisites."

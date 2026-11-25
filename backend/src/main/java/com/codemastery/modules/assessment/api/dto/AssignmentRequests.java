@@ -1,6 +1,7 @@
 package com.codemastery.modules.assessment.api.dto;
 
 import com.codemastery.common.exception.BusinessRuleException;
+import com.codemastery.modules.assessment.application.service.AssignmentService;
 import com.codemastery.modules.assessment.application.service.AssignmentService.AssignmentInput;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -115,7 +116,8 @@ public final class AssignmentRequests {
 
     /**
      * Parses an RFC 3339 date-time with at most microsecond precision; nonzero digits below
-     * the microsecond are rejected rather than rounded (ADR010 §§8–9).
+     * the microsecond are rejected rather than rounded (ADR010 §§8–9). An instant outside years
+     * 0000-9999 in UTC is rejected, because its response rendering would not be RFC 3339.
      */
     public static Optional<Instant> parseMicrosecondInstant(String value) {
         if (value == null) {
@@ -136,7 +138,11 @@ public final class AssignmentRequests {
         String normalized = (matcher.group(1) + normalizedFraction + matcher.group(3)).toUpperCase(Locale.ROOT);
         try {
             Instant instant = OffsetDateTime.parse(normalized).toInstant();
-            return instant.getNano() % 1_000 == 0 ? Optional.of(instant) : Optional.empty();
+            // The offset is applied first: the range is checked on the UTC instant that responses
+            // render, not on the year written in the input (ADR010 §8 "representable deadline").
+            return instant.getNano() % 1_000 == 0 && AssignmentService.isRepresentableDeadline(instant)
+                    ? Optional.of(instant)
+                    : Optional.empty();
         } catch (DateTimeParseException invalid) {
             return Optional.empty();
         }

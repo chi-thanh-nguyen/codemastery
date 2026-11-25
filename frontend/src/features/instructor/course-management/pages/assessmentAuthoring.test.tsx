@@ -13,7 +13,7 @@ import {
     setAssignmentPublication, setQuizPublication,
 } from '../api/assessmentAuthoringApi';
 import type { B3Question, B3QuestionPage, B3QuizOwned, B3QuizOwnedPage, B5OwnedAssignment, B5OwnedAssignmentPage } from '../api/assessmentAuthoringApi';
-import { getOwnedCourse, listOwnedCourses } from '../api/instructorCourseApi';
+import { createOwnedCourse, getOwnedCourse, listOwnedCourses, setOwnedCoursePublication, updateOwnedCourse } from '../api/instructorCourseApi';
 import type { OwnedCourse } from '../api/instructorCourseApi';
 import { AssessmentsPage, formatTimeLimit } from './QuestionBankPage';
 import { QuizEditor, difficultySummary, timeLimitSeconds } from './QuizEditorPage';
@@ -30,7 +30,8 @@ vi.mock('../api/assessmentAuthoringApi', async (original) => ({
     listOwnedAssignments: vi.fn(), createAssignment: vi.fn(), readOwnedAssignment: vi.fn(), replaceAssignment: vi.fn(), setAssignmentPublication: vi.fn(),
 }));
 vi.mock('../api/instructorCourseApi', async (original) => ({
-    ...await original<object>(), getOwnedCourse: vi.fn(), listOwnedCourses: vi.fn(),
+    ...await original<object>(), getOwnedCourse: vi.fn(), listOwnedCourses: vi.fn(), createOwnedCourse: vi.fn(), updateOwnedCourse: vi.fn(),
+    setOwnedCoursePublication: vi.fn(),
 }));
 vi.mock('../../skill-graph-editor/api/skillGraphApi', async (original) => ({
     ...await original<object>(), getOwnedSkillGraph: vi.fn(), createCourseSkill: vi.fn(), updateCourseSkill: vi.fn(), addCoursePrerequisite: vi.fn(),
@@ -718,5 +719,214 @@ describe('N10: assignment instants are compared to the microsecond', () => {
         expect(sameAssignment(draft, baseline, current)).toBe(true);
         expect(sameAssignment(draft, baseline, { ...current, deadlineAt: '2026-12-01T10:00:00.123999Z' })).toBe(false);
         expect(sameAssignment(draft, baseline, { ...current, deadlineAt: '2026-12-01T17:00:00.123456+07:00' })).toBe(true);
+    });
+});
+
+// --- PR #273 ultrareview remediation regressions (U2–U5) ---
+
+describe('U2: a failed background re-read keeps the course editor, its drafts and an explicit refresh failure', () => {
+    it('keeps the Settings draft through a 500 re-read, says the copy is not current, and recovers with "Try again"', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture())
+            .mockRejectedValueOnce(new ApiError('http', 'x', 500))
+            .mockResolvedValueOnce(ownedCourseFixture({ publicationStatus: 'published' }));
+        vi.mocked(setOwnedCoursePublication).mockResolvedValue(ownedCourseFixture({ publicationStatus: 'published' }));
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        await type('Description', 'An unsaved description');
+        const input = field('Description');
+
+        // The publication change succeeds; the shell's re-read of the course fails with an unknown outcome.
+        await click('Publish course');
+        await click('Publish course', confirmDialog('Publish course?'));
+        await settle();
+        expect(getOwnedCourse).toHaveBeenCalledTimes(2);
+        expect(text()).toContain("We couldn't load this course. The last loaded version is shown.");
+        expect(document.querySelector('main h1')?.textContent).toBe('Python Foundations');
+        expect(field('Description')).toBe(input);
+        expect(field('Description').value).toBe('An unsaved description');
+        expect(text()).toContain('Unsaved changes');
+        // Nothing is retried on its own.
+        await settle();
+        expect(getOwnedCourse).toHaveBeenCalledTimes(2);
+
+        await click('Try again');
+        await settle();
+        expect(getOwnedCourse).toHaveBeenCalledTimes(3);
+        expect(text()).not.toContain('The last loaded version is shown.');
+        expect(text()).toContain('Published');
+        expect(field('Description').value).toBe('An unsaved description');
+    });
+
+    it('keeps the copy through a network failure but discards it on a 404 re-read (F14 state, no stale editor)', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture())
+            .mockRejectedValueOnce(new ApiError('network', 'down'))
+            .mockRejectedValueOnce(http(404, 'The requested resource is unavailable.'));
+        vi.mocked(setOwnedCoursePublication).mockResolvedValue(ownedCourseFixture({ publicationStatus: 'published' }));
+        await mountApp(`/teach/courses/${courseId}`);
+        await click('Publish course');
+        await click('Publish course', confirmDialog('Publish course?'));
+        await settle();
+        expect(text()).toContain('The last loaded version is shown.');
+        expect(text()).toContain('Control Flow');
+
+        await click('Try again');
+        await settle();
+        expect(text()).toContain('Course not available');
+        expect(text()).not.toContain('Control Flow');
+        expect(text()).not.toContain('Python Foundations');
+    });
+
+    it('keeps the open skill draft when the graph re-read after an unknown skill save fails', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValueOnce(graphOf()).mockRejectedValue(new ApiError('network', 'down'));
+        vi.mocked(createCourseSkill).mockRejectedValue(new ApiError('network', 'down'));
+        await mountApp(`/teach/courses/${courseId}/skills`);
+        await click('Add skill');
+        await type('Skill name', 'Arrays');
+        await act(async () => find('Add skill', document.querySelector('form')!).click()); await settle();
+        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(2);
+        expect(text()).toContain("Skills couldn't be loaded.");
+        expect(field('Skill name').value).toBe('Arrays');
+        expect(text()).toContain('Variables');
+    });
+});
+
+describe('U3: Create course takes part in shell navigation', () => {
+    it('asks once on Teaching and the home link; Stay keeps the draft, Leave navigates exactly once', async () => {
+        await mountApp('/teach/courses/new');
+        await type('Course title', 'Draft course');
+        await act(async () => navLink('Teaching').click()); await flush();
+        expect(dialogs().filter((item) => item.textContent?.includes('Leave without saving?'))).toHaveLength(1);
+        await click('Stay', confirmDialog('Leave without saving?'));
+        expect(location).toBe('/teach/courses/new');
+        expect(field('Course title').value).toBe('Draft course');
+
+        await act(async () => navLink('CodeMastery home').click()); await flush();
+        expect(dialogs().filter((item) => item.textContent?.includes('Leave without saving?'))).toHaveLength(1);
+        await click('Leave', confirmDialog('Leave without saving?'));
+        expect(location).not.toBe('/teach/courses/new');
+        expect(dialogs().some((item) => item.textContent?.includes('Leave without saving?'))).toBe(false);
+    });
+
+    it('asks on Catalogue, never once nothing is unsaved, and never blocks a successful creation', async () => {
+        vi.mocked(createOwnedCourse).mockResolvedValue(ownedCourseFixture());
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        await mountApp('/teach/courses/new');
+        await act(async () => navLink('Catalogue').click()); await flush();
+        expect(location).toBe('/courses');
+
+        await act(async () => root.unmount()); root = createRoot(host);
+        await mountApp('/teach/courses/new');
+        await type('Course title', 'New course');
+        await act(async () => navLink('Catalogue').click()); await flush();
+        expect(confirmDialog('Leave without saving?')).toBeTruthy();
+        await click('Stay', confirmDialog('Leave without saving?'));
+        await type('Description', 'Basics');
+        await click('Create course');
+        await settle();
+        expect(location).toBe(`/teach/courses/${courseId}`);
+        expect(dialogs().some((item) => item.textContent?.includes('Leave without saving?'))).toBe(false);
+    });
+
+    it('keeps the draft after an unknown creation outcome and still asks before leaving', async () => {
+        vi.mocked(createOwnedCourse).mockRejectedValue(new ApiError('network', 'down'));
+        await mountApp('/teach/courses/new');
+        await type('Course title', 'Maybe created'); await type('Description', 'Basics');
+        await click('Create course');
+        expect(text()).toContain("We couldn't confirm whether the course was created.");
+        expect(field('Course title').value).toBe('Maybe created');
+        await act(async () => navLink('Teaching').click()); await flush();
+        expect(confirmDialog('Leave without saving?')).toBeTruthy();
+        await click('Leave', confirmDialog('Leave without saving?'));
+        expect(location).toBe('/teach');
+    });
+});
+
+describe('U4: deleting the only question on the last page moves to the last page the server reports', () => {
+    it('reads the last remaining page once, keeps the notice, and shows the real empty state only when the bank is empty', async () => {
+        const second = questionPage([q(21)], { page: 1, totalElements: 21, totalPages: 2 });
+        const first = questionPage(Array.from({ length: 20 }, (_, index) => q(index + 1)), { totalElements: 21, totalPages: 2 });
+        vi.mocked(listQuestions).mockImplementation(async (_course, page) => (page === 0 ? first : second));
+        vi.mocked(readQuestion).mockResolvedValue(q(21));
+        vi.mocked(deleteUnusedQuestion).mockResolvedValue(q(21));
+        await mount(`/teach/courses/${courseId}/assessments`);
+        await click('Go to page 2');
+        expect(text()).toContain('Question 21');
+
+        // After the deletion the server answers page 1 empty, with 20 questions on one page.
+        const afterDelete = questionPage(Array.from({ length: 20 }, (_, index) => q(index + 1)), { totalElements: 20, totalPages: 1 });
+        vi.mocked(listQuestions).mockImplementation(async (_course, page) => (page === 0 ? afterDelete
+            : questionPage([], { page, totalElements: 20, totalPages: 1 })));
+        await click('Edit question: Question 21'); await click('Delete question', dialog());
+        await click('Delete question', confirmDialog('Delete this question?'));
+        await settle();
+        expect(text()).toContain('Question deleted.');
+        expect(text()).not.toContain('No questions yet');
+        expect(text()).toContain('Question 20');
+        const pages = vi.mocked(listQuestions).mock.calls.map((call) => call[1]);
+        expect(pages.slice(-2)).toEqual([1, 0]);
+        await settle();
+        expect(vi.mocked(listQuestions).mock.calls.map((call) => call[1]).slice(-2)).toEqual([1, 0]);
+    });
+
+    it('shows "No questions yet" when the last question of the whole bank is deleted on page 0', async () => {
+        vi.mocked(listQuestions).mockResolvedValueOnce(questionPage([q(1)])).mockResolvedValue(questionPage([]));
+        vi.mocked(readQuestion).mockResolvedValue(q(1));
+        vi.mocked(deleteUnusedQuestion).mockResolvedValue(q(1));
+        await mount(`/teach/courses/${courseId}/assessments`);
+        await click('Edit question: Question 1'); await click('Delete question', dialog());
+        await click('Delete question', confirmDialog('Delete this question?'));
+        await settle();
+        expect(text()).toContain('No questions yet');
+        expect(vi.mocked(listQuestions).mock.calls.map((call) => call[1])).toEqual([0, 0]);
+    });
+});
+
+describe('U5: Course Settings keeps "Saved" and drafts across re-reads', () => {
+    it('keeps "Saved" and the mounted form after the post-save re-read returns the new metadata', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        const saved = ownedCourseFixture({ title: 'Python Basics', description: 'Variables, loops and functions.' });
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockResolvedValue(saved);
+        vi.mocked(updateOwnedCourse).mockResolvedValue(saved);
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        const input = field('Course title');
+        await type('Course title', '  Python Basics  ');
+        await click('Save changes');
+        await settle();
+        expect(getOwnedCourse).toHaveBeenCalledTimes(2);
+        expect(document.querySelector('main h1')?.textContent).toBe('Python Basics');
+        expect(field('Course title')).toBe(input);
+        expect(field('Course title').value).toBe('Python Basics');
+        expect(text()).toContain('Saved');
+        expect(text()).not.toContain('Unsaved changes');
+    });
+
+    it('never reports "Saved" for an unknown outcome and keeps the draft over a newer committed copy', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture())
+            .mockResolvedValue(ownedCourseFixture({ title: 'Renamed elsewhere' }));
+        vi.mocked(updateOwnedCourse).mockRejectedValue(new ApiError('network', 'down'));
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        await type('Course title', 'My draft title');
+        await click('Save changes');
+        await settle();
+        expect(text()).toContain("We couldn't confirm whether your changes were saved.");
+        expect(text()).not.toMatch(/(^|[^d ])Saved/);
+        expect(document.querySelector('main h1')?.textContent).toBe('Renamed elsewhere');
+        expect(field('Course title').value).toBe('My draft title');
+        expect(text()).toContain('Unsaved changes');
+    });
+
+    it('takes over another writer\'s committed metadata only while the form is clean', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture())
+            .mockResolvedValue(ownedCourseFixture({ publicationStatus: 'published', description: 'Changed by another tab.' }));
+        vi.mocked(setOwnedCoursePublication).mockResolvedValue(ownedCourseFixture({ publicationStatus: 'published' }));
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        await click('Publish course');
+        await click('Publish course', confirmDialog('Publish course?'));
+        await settle();
+        expect(field('Description').value).toBe('Changed by another tab.');
+        expect(text()).not.toContain('Unsaved changes');
     });
 });

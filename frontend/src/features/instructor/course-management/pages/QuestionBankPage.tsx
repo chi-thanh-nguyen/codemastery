@@ -215,6 +215,14 @@ function QuestionsView({ courseId, page, createRequest, onPage, skills, onNotice
     const { data, error } = bank, { ensure } = lookup;
     useEffect(() => { if (data) ensure(data.content.map((question) => question.skillId)); }, [data, ensure]);
     useEffect(() => { if (courseRefused(error)) onRefused(failureStatus(error)); }, [error, onRefused]);
+    // U4: a deletion can leave the current page past the last one (the server answers an empty page with the
+    // remaining total). Move to the last page the server reports, once per such answer; at page 0 an empty answer is
+    // the real empty state. Only a current, successful read of this page counts, so a stale copy, a failed re-read or
+    // a page the user has just left never moves the view, and each step strictly lowers the page.
+    useEffect(() => {
+        if (!data || error || data.page !== page || page === 0) return;
+        if (data.content.length === 0 && data.totalElements > 0 && data.page >= data.totalPages) onPage(Math.max(0, data.totalPages - 1));
+    }, [data, error, page, onPage]);
     const open = useCallback((question: B3Question | null) => {
         refreshSkillsIfStale?.();
         onNotice(null);

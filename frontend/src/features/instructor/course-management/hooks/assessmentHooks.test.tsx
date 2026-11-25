@@ -132,3 +132,66 @@ describe('owned skill graph read', () => {
         expect(getOwnedSkillGraph).toHaveBeenCalledTimes(2);
     });
 });
+
+describe('U2: a failed re-read keeps the last body only for an unknown outcome of the same key and session', () => {
+    it('keeps the body with the error after a 500 or network re-read, retries nothing, and recovers on reload', async () => {
+        vi.mocked(listQuestions).mockResolvedValueOnce(questionPage('first'))
+            .mockRejectedValueOnce(new ApiError('http', 'x', 500))
+            .mockRejectedValueOnce(new ApiError('network', 'down'))
+            .mockResolvedValueOnce(questionPage('fresh'));
+        const { out } = await render<OwnerRead<B3QuestionPage>>(() => useQuestionBank(courseId, 0));
+        expect(out.current!.data?.content[0].prompt).toBe('first');
+        await act(async () => out.current!.reload());
+        expect(failureStatus(out.current!.error)).toBe(500);
+        expect(out.current!.data?.content[0].prompt).toBe('first');
+        expect(out.current!.loading).toBe(false);
+        await act(async () => out.current!.reload());
+        expect(outcomeUnknown(out.current!.error)).toBe(true);
+        expect(out.current!.data?.content[0].prompt).toBe('first');
+        expect(listQuestions).toHaveBeenCalledTimes(3);
+        await act(async () => out.current!.reload());
+        expect(out.current!.error).toBeNull();
+        expect(out.current!.data?.content[0].prompt).toBe('fresh');
+    });
+
+    it.each([401, 403, 404, 409])('discards the body when the re-read is refused with %i', async (status) => {
+        vi.mocked(listQuestions).mockResolvedValueOnce(questionPage('first')).mockRejectedValueOnce(new ApiError('http', 'refused', status));
+        const { out } = await render<OwnerRead<B3QuestionPage>>(() => useQuestionBank(courseId, 0));
+        await act(async () => out.current!.reload());
+        expect(failureStatus(out.current!.error)).toBe(status);
+        expect(out.current!.data).toBeNull();
+    });
+
+    it('never carries a kept body into another key or session', async () => {
+        vi.mocked(listQuestions).mockResolvedValueOnce(questionPage('page zero'))
+            .mockRejectedValueOnce(new ApiError('http', 'x', 503))
+            .mockRejectedValueOnce(new ApiError('http', 'x', 503))
+            .mockReturnValueOnce(deferred<B3QuestionPage>().promise);
+        const { out, rerender } = await render<OwnerRead<B3QuestionPage>>(() => useQuestionBank(courseId, 0));
+        await act(async () => out.current!.reload());
+        expect(out.current!.data?.content[0].prompt).toBe('page zero');
+        await rerender(() => useQuestionBank(courseId, 1));
+        expect(out.current!.data).toBeNull();
+        expect(failureStatus(out.current!.error)).toBe(503);
+        expect(out.current!.data).toBeNull();
+        generation = 2;
+        await rerender(() => useQuestionBank(courseId, 0));
+        expect(out.current!.data).toBeNull();
+        expect(out.current!.loading).toBe(true);
+    });
+
+    it('applies the same rule to the owned skill graph', async () => {
+        const graph = { courseId, skills: [{ id: userId, name: 'Loops', description: null }], prerequisites: [], mappings: [] };
+        vi.mocked(getOwnedSkillGraph).mockResolvedValueOnce(graph)
+            .mockRejectedValueOnce(new ApiError('protocol', 'bad body'))
+            .mockRejectedValueOnce(new ApiError('http', 'gone', 404));
+        const { out } = await render<OwnedSkillGraphRead>(() => useOwnedSkillGraph(courseId));
+        await act(async () => out.current!.reload());
+        expect(outcomeUnknown(out.current!.error)).toBe(true);
+        expect(out.current!.graph?.skills[0].name).toBe('Loops');
+        await act(async () => out.current!.reload());
+        expect(failureStatus(out.current!.error)).toBe(404);
+        expect(out.current!.graph).toBeNull();
+        expect(getOwnedSkillGraph).toHaveBeenCalledTimes(3);
+    });
+});

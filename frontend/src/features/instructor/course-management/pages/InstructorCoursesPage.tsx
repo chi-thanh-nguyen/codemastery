@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Box, Button, Skeleton, TextField } from '@mui/material';
 import { Link, useNavigate } from 'react-router';
-import { Page } from '../../../../layouts/DashboardLayout';
+import { Page, useNavigationGuard } from '../../../../layouts/DashboardLayout';
 import { PageHeader } from '../../../../shared/components/PageHeader';
 import { GuidanceStack } from '../../../../shared/components/GuidanceStack';
 import type { GuidanceEntryData } from '../../../../shared/components/GuidanceStack';
@@ -73,9 +73,17 @@ export function CreateCoursePage() {
     const [dirty, setDirty] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [alert, setAlert] = useState<{ kind: 'unknown' | 'error'; message?: string } | null>(null);
-    const [confirmLeave, setConfirmLeave] = useState(false);
+    // The pending navigation that "Leave" completes. Back, Cancel and the shell's own destinations (primary
+    // navigation, the home link and account-menu links, U3) share this one confirmation; sign-out and session end
+    // never ask, and a successful creation clears the draft before it replaces the URL.
+    const [leaveTarget, setLeaveTarget] = useState<{ go: () => void } | null>(null);
     const dirtyRef = useRef(dirty);
     dirtyRef.current = dirty;
+    useNavigationGuard((proceed) => {
+        if (!dirtyRef.current) return false;
+        setLeaveTarget({ go: proceed });
+        return true;
+    });
 
     useEffect(() => {
         if (!dirty) return;
@@ -85,7 +93,7 @@ export function CreateCoursePage() {
     }, [dirty]);
 
     const goBack = () => {
-        if (dirtyRef.current) setConfirmLeave(true);
+        if (dirtyRef.current) setLeaveTarget({ go: () => navigate('/teach') });
         else navigate('/teach');
     };
 
@@ -149,9 +157,9 @@ export function CreateCoursePage() {
                 </Box>
             </Box>
         </Tile>
-        <ConfirmDialog open={confirmLeave} isDestructive title="Leave without saving?" message="Your changes will be lost."
-            cancelLabel="Stay" confirmLabel="Leave" onCancel={() => setConfirmLeave(false)}
-            onConfirm={() => { setConfirmLeave(false); setDirty(false); dirtyRef.current = false; navigate('/teach'); }} />
+        <ConfirmDialog open={leaveTarget !== null} isDestructive title="Leave without saving?" message="Your changes will be lost."
+            cancelLabel="Stay" confirmLabel="Leave" onCancel={() => setLeaveTarget(null)}
+            onConfirm={() => { const next = leaveTarget; setLeaveTarget(null); setDirty(false); dirtyRef.current = false; next?.go(); }} />
     </Page>;
 }
 

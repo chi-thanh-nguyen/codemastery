@@ -75,7 +75,7 @@ export function useCourseEditorContext(): SharedCourseContextState | null {
 export function useSharedCourseState(courseId: string): SharedCourseContextState {
     const courseRead = useOwnerRead(`owned-course|${courseId}`, (options) => getOwnedCourse(courseId, options));
     const skillGraph = useOwnedSkillGraph(courseId);
-    const { reload: reloadGraph, graph, loading: graphLoading } = skillGraph;
+    const { reload: reloadGraph, graph, loading: graphLoading, error: graphError } = skillGraph;
     // True from an S20 skill change until a later graph read succeeds (D12-3). A failed read keeps it set,
     // so the next deliberate opening of the Questions view or the question form reads once more. It is
     // never cleared during render and never triggers a read on its own: a failed read is retried only by
@@ -86,8 +86,10 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
     const graphLoadingRef = useRef(graphLoading);
     useEffect(() => {
         graphLoadingRef.current = graphLoading;
-        if (graph && !graphLoading) skillsStaleRef.current = false;
-    }, [graph, graphLoading]);
+        // Only a successful read answers the staleness: after a failed re-read the last graph stays on screen
+        // with an error (U2), and it is still the stale copy.
+        if (graph && !graphLoading && !graphError) skillsStaleRef.current = false;
+    }, [graph, graphLoading, graphError]);
 
     const notifySkillsChanged = useCallback(() => {
         skillsStaleRef.current = true;

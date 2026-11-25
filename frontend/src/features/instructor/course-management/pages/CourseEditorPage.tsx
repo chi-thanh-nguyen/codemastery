@@ -30,6 +30,19 @@ import { CourseUnavailable, courseRefused, errorMessage } from './QuestionBankPa
 
 export type DeliveredCourseTab = 'content' | 'skills' | 'assessments' | 'settings';
 
+/**
+ * A re-read of the course tree failed with an unknown outcome while an earlier copy is on screen (U2). The copy and
+ * every open draft stay; this alert says the copy may be out of date and offers one deliberate re-read. Refusals
+ * (400, 403, 404) never reach it: the read discards the copy and the shell shows the F14 state instead.
+ */
+export function CourseRefreshAlert({ course }: { course: { data: OwnedCourse | null; error: unknown; reload: () => void } | undefined }) {
+    if (!course?.data || !course.error || courseRefused(course.error)) return null;
+    return <Alert severity="warning" sx={{ mb: 2.5 }}
+        action={<Button size="small" variant="text" onClick={course.reload}>Try again</Button>}>
+        We couldn&apos;t load this course. The last loaded version is shown.
+    </Alert>;
+}
+
 function activeTabFrom(pathname: string): DeliveredCourseTab {
     if (pathname.endsWith('/skills')) return 'skills';
     if (pathname.endsWith('/assessments')) return 'assessments';
@@ -137,6 +150,7 @@ export function CourseEditorFrame() {
                 : <Button variant="contained" onClick={() => setConfirmPub('published')} disabled={ops.busy} startIcon={<PresentationIcon name="eye" />}>Publish course</Button>} />
         {notice && <Typography role="status" sx={{ color: 'text.secondary', mb: 2 }}>{notice}</Typography>}
         {alert && <Alert severity="warning" sx={{ mb: 2.5 }}>{alert}</Alert>}
+        <CourseRefreshAlert course={course} />
         <Box sx={{ mb: 4 }}>
             <SegmentedControl
                 label="Course editor sections"
@@ -341,7 +355,9 @@ export function CourseSettingsTab() {
     const { courseId, course, setTabDirty } = useCourseEditorContext()!;
     const ops = useCourseOperations(courseId);
     const data = course.data!;
-    return <CourseSettingsForm key={`${data.id}:${data.title}:${data.description}:${data.prerequisiteDescription ?? ''}`}
+    // Keyed by the course identity only (U5): a re-read after a save, or another writer's change, must not remount the
+    // form, which would drop the "Saved" status or an unsaved draft. The form adopts new committed values itself.
+    return <CourseSettingsForm key={data.id}
         course={data} ops={ops} onSaved={() => course.reload()} setTabDirty={setTabDirty} />;
 }
 
@@ -358,6 +374,19 @@ function CourseSettingsForm({ course, ops, onSaved, setTabDirty }: {
     const [savedNotice, setSavedNotice] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [alert, setAlert] = useState<string | null>(null);
+    // The committed metadata the fields last took over. A newer committed copy (the re-read after a save, or another
+    // writer's change) replaces the fields only while they hold no unsaved edit; an edit in progress is never
+    // overwritten, and saving it later is a full replacement (the last serialized commit wins, CT21.authoring).
+    const committed = `${course.title}\u0000${course.description}\u0000${course.prerequisiteDescription ?? ''}`;
+    const [adopted, setAdopted] = useState(committed);
+    const committedRef = useRef(committed);
+    committedRef.current = committed;
+    if (adopted !== committed && !dirty && !ops.busy) {
+        setAdopted(committed);
+        setTitle(course.title);
+        setDescription(course.description);
+        setPrerequisites(course.prerequisiteDescription ?? '');
+    }
 
     useEffect(() => {
         setTabDirty(dirty);
@@ -379,12 +408,19 @@ function CourseSettingsForm({ course, ops, onSaved, setTabDirty }: {
         if (Object.keys(next).length) return;
         setAlert(null);
         setSavedNotice(false);
+        const write = {
+            title: title.trim(),
+            description: description.trim(),
+            prerequisiteDescription: /\S/.test(prerequisites) ? prerequisites.trim() : null,
+        };
         try {
-            await ops.updateMetadata({
-                title: title.trim(),
-                description: description.trim(),
-                prerequisiteDescription: /\S/.test(prerequisites) ? prerequisites.trim() : null,
-            });
+            const saved = await ops.updateMetadata(write);
+            // Show what the server committed, and treat the copy on screen as already seen: only the re-read's
+            // newer copy is taken over, so the fields never flash back to the pre-save values.
+            setTitle(saved.title);
+            setDescription(saved.description);
+            setPrerequisites(saved.prerequisiteDescription ?? '');
+            setAdopted(committedRef.current);
             setDirty(false);
             setSavedNotice(true);
             onSaved();

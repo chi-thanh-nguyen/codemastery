@@ -37,8 +37,21 @@ export function fieldErrorsFrom(error: unknown, mapping: Readonly<Record<string,
     return out;
 }
 
+/**
+ * Whether a failed re-read of the same key keeps the last body it decoded. Only an unconfirmed outcome
+ * (network failure, invalid response or 5xx) does: the resource and the caller's access may well be
+ * unchanged, and discarding the body would unmount editors and their unsaved drafts. A refusal (401,
+ * 403, 404 or any other confirmed status) discards it, so nothing is shown that access no longer covers.
+ * A key or session change never keeps it.
+ */
+export const keepsLastBody = (error: unknown) => outcomeUnknown(error);
+
 export interface OwnerRead<T> {
-    /** The decoded body for the current key and session, or null. */
+    /**
+     * The decoded body for the current key and session, or null. After a failed re-read whose outcome
+     * is unknown it is the last body read for the same key, and `error` is set: callers must show
+     * that the copy could not be refreshed rather than present it as current.
+     */
     data: T | null;
     loading: boolean;
     error: unknown;
@@ -65,7 +78,16 @@ export function useOwnerRead<T>(key: string | null, load: (options: AuthoringReq
         setState((previous) => ({ identity, data: previous.identity === identity ? previous.data : null, error: null, loading: true }));
         loader.current({ signal: controller.signal, isCurrent: current }).then(
             (data) => { if (current()) setState({ identity, data, error: null, loading: false }); },
-            (error: unknown) => { if (current() && !isCancelled(error)) setState({ identity, data: null, error, loading: false }); });
+            (error: unknown) => {
+                if (current() && !isCancelled(error)) {
+                    setState((previous) => ({
+                        identity,
+                        data: keepsLastBody(error) && previous.identity === identity ? previous.data : null,
+                        error,
+                        loading: false,
+                    }));
+                }
+            });
         return () => { live = false; controller.abort(); };
     }, [identity, generation, isCurrent, revision]);
     const reload = useCallback(() => setRevision((value) => value + 1), []);

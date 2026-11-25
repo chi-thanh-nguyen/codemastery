@@ -721,6 +721,49 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
         }
     }
 
+    /** U6: the representable deadline boundaries survive PostgreSQL timestamptz unchanged. */
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void assignmentDeadlineBoundariesRoundTripThroughPostgresqlAtMicrosecondPrecision() {
+        UUID instructor = user("instructor");
+        UUID courseId = UUID.randomUUID();
+        UUID latest = UUID.randomUUID();
+        UUID earliest = UUID.randomUUID();
+        UUID micro = UUID.randomUUID();
+        Instant latestDeadline = com.codemastery.modules.assessment.application.service.AssignmentService
+                .LATEST_REPRESENTABLE_DEADLINE;
+        Instant earliestDeadline = com.codemastery.modules.assessment.application.service.AssignmentService
+                .EARLIEST_REPRESENTABLE_DEADLINE;
+        Instant microDeadline = Instant.parse("1582-10-15T00:00:00.000001Z");
+        jdbc.update("INSERT INTO courses (id, instructor_id, title, description, publication_status, adaptive_enabled) "
+                + "VALUES (?, ?, 'U6 course', 'U6 fixture', 'hidden', false)", courseId, instructor);
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        try {
+            tx.executeWithoutResult(status -> {
+                assignmentRepository.insert(new Assignment(latest, courseId, null, "Latest", "I", latestDeadline, "hidden"));
+                assignmentRepository.insert(new Assignment(earliest, courseId, null, "Earliest", "I", earliestDeadline, "hidden"));
+                assignmentRepository.insert(new Assignment(micro, courseId, null, "Micro", "I", microDeadline, "hidden"));
+            });
+            tx.executeWithoutResult(status -> {
+                assertEquals(latestDeadline, assignmentRepository.findInCourse(latest, courseId).orElseThrow().deadline_at());
+                assertEquals(earliestDeadline, assignmentRepository.findInCourse(earliest, courseId).orElseThrow().deadline_at());
+                assertEquals(microDeadline, assignmentRepository.findInCourse(micro, courseId).orElseThrow().deadline_at());
+            });
+            assertEquals("9999-12-31 23:59:59.999999+00", jdbc.queryForObject(
+                    "SELECT to_char(deadline_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US') || '+00' FROM assignments WHERE id = ?",
+                    String.class, latest));
+            // The JDBC timestamp binding uses the hybrid Julian/Gregorian calendar, so instants before
+            // 1582-10-15 are stored a few days apart from their ISO value. Every value still round-trips
+            // exactly through the application (above) and SQL order stays monotonic (below).
+            assertEquals(List.of(earliest, micro, latest), jdbc.queryForList(
+                    "SELECT id FROM assignments WHERE course_id = ? ORDER BY deadline_at", UUID.class, courseId));
+        } finally {
+            jdbc.update("DELETE FROM assignments WHERE course_id = ?", courseId);
+            jdbc.update("DELETE FROM courses WHERE id = ?", courseId);
+            jdbc.update("DELETE FROM users WHERE id = ?", instructor);
+        }
+    }
+
     @Test
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     void assignmentAdapterOrdersByCollateCCountsSubmissionsLocksForUpdateAndRespectsColumnPrivileges() throws Exception {

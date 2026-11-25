@@ -6,9 +6,13 @@ import {
     mapCourseLessonSkill, removeCoursePrerequisite, unmapCourseLessonSkill, updateCourseSkill,
 } from '../api/skillGraphApi';
 import type { OwnedSkillGraph, SkillGraphRequestOptions, SkillWritePayload } from '../api/skillGraphApi';
+import { keepsLastBody } from '../../course-management/hooks/useAssessmentEditor';
 
 export interface OwnedSkillGraphRead {
-    /** The decoded graph of the current course and session, or null. */
+    /**
+     * The decoded graph of the current course and session, or null. After a failed re-read whose
+     * outcome is unknown it is the last graph read for the same course and session, with `error` set.
+     */
     graph: OwnedSkillGraph | null;
     loading: boolean;
     error: unknown;
@@ -35,7 +39,17 @@ export function useOwnedSkillGraph(courseId: string): OwnedSkillGraphRead {
         setState((previous) => ({ identity, graph: previous.identity === identity ? previous.graph : null, error: null, loading: true }));
         getOwnedSkillGraph(courseId, { signal: controller.signal, isCurrent: current }).then(
             (graph) => { if (current()) setState({ identity, graph, error: null, loading: false }); },
-            (error: unknown) => { if (current() && !(error instanceof ApiError && error.kind === 'cancelled')) setState({ identity, graph: null, error, loading: false }); });
+            (error: unknown) => {
+                if (current() && !(error instanceof ApiError && error.kind === 'cancelled')) {
+                    // Same rule as useOwnerRead: only an unknown outcome keeps the last graph of this identity.
+                    setState((previous) => ({
+                        identity,
+                        graph: keepsLastBody(error) && previous.identity === identity ? previous.graph : null,
+                        error,
+                        loading: false,
+                    }));
+                }
+            });
         return () => { live = false; controller.abort(); };
     }, [identity, courseId, generation, isCurrent, revision]);
     const reload = useCallback(() => setRevision((value) => value + 1), []);

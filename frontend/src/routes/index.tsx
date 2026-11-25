@@ -22,7 +22,7 @@ import { LandingPage, LandingRestoringView } from '../features/catalogue/pages/L
 import { LearnerHome } from '../features/learning/pages/LearnerHomePage';
 import type { UserRole } from '../features/auth/types/authTypes';
 import { CreateCoursePage, TeachingHomePage } from '../features/instructor/course-management/pages/InstructorCoursesPage';
-import { CourseContentTab, CourseEditorFrame, CourseEditorShell, CourseSettingsTab } from '../features/instructor/course-management/pages/CourseEditorPage';
+import { CourseContentTab, CourseEditorFrame, CourseEditorShell, CourseRefreshAlert, CourseSettingsTab } from '../features/instructor/course-management/pages/CourseEditorPage';
 import { AssessmentsPage } from '../features/instructor/course-management/pages/QuestionBankPage';
 import { QuizEditor } from '../features/instructor/course-management/pages/QuizEditorPage';
 import { AssignmentEditor } from '../features/instructor/course-management/pages/AssignmentEditorPage';
@@ -174,7 +174,7 @@ function CourseQuizEditor() {
 function CourseAssignmentEditor() {
     const { assignmentId } = useParams();
     const { courseId, course } = useCourseEditorContext()!;
-    return <Page width="reading"><AssignmentEditor key={`${courseId}:${assignmentId}`} courseId={courseId} assignmentId={assignmentId!} courseContext={course} /></Page>;
+    return <Page width="reading"><CourseRefreshAlert course={course} /><AssignmentEditor key={`${courseId}:${assignmentId}`} courseId={courseId} assignmentId={assignmentId!} courseContext={course} /></Page>;
 }
 
 /** The isolated design preview's route (CT14, CT16). */

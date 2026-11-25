@@ -33,6 +33,15 @@ public class AssignmentService {
     static final String PUBLISHED = "published";
     private static final Set<String> STATUSES = Set.of(HIDDEN, PUBLISHED);
 
+    /**
+     * Earliest and latest deadlines the CT10 REST representation can carry. Responses render
+     * {@code deadlineAt} as a UTC RFC 3339 instant, whose {@code date-fullyear} has exactly four
+     * digits, so a representable deadline lies in years 0000-9999 after normalization to UTC. An
+     * input such as {@code 9999-12-31T23:59:59-05:00} names year 10000 in UTC and is rejected.
+     */
+    public static final Instant EARLIEST_REPRESENTABLE_DEADLINE = Instant.parse("0000-01-01T00:00:00Z");
+    public static final Instant LATEST_REPRESENTABLE_DEADLINE = Instant.parse("9999-12-31T23:59:59.999999Z");
+
     public record AssignmentInput(String title, String instructions, Instant deadlineAt, UUID lessonId) {
     }
 
@@ -225,7 +234,17 @@ public class AssignmentService {
         if (deadlineAt == null || deadlineAt.getNano() % 1_000 != 0) {
             throw invalid("Assignment deadline must have at most microsecond precision");
         }
+        if (!isRepresentableDeadline(deadlineAt)) {
+            throw invalid("Assignment deadline must be a UTC instant in years 0000-9999");
+        }
         return new AssignmentInput(trimmedTitle, verbatimInstructions, deadlineAt, input.lessonId());
+    }
+
+    /** Whether {@code deadline}, normalized to UTC, renders as a four-digit-year RFC 3339 instant. */
+    public static boolean isRepresentableDeadline(Instant deadline) {
+        return deadline != null
+                && !deadline.isBefore(EARLIEST_REPRESENTABLE_DEADLINE)
+                && !deadline.isAfter(LATEST_REPRESENTABLE_DEADLINE);
     }
 
     private static String requiredTrimmedText(String value) {
