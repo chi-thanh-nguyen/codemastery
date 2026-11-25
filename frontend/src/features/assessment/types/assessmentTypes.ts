@@ -24,3 +24,105 @@ export interface AssignmentView { id: string; title: string; instructions: strin
 export interface SubmissionView { fileName: string; submittedAtLabel: string; graded?: { grade: number; feedback: string; gradedAtLabel: string } }
 
 export const quizKindLabel: Record<QuizKind, string> = { diagnostic: 'Placement diagnostic', practice: 'Practice quiz', test: 'Test' };
+
+export interface B3QuizSummary {
+    id: string;
+    courseId: string;
+    title: string;
+    kind: QuizKind;
+    timeLimitSeconds: number;
+    published: boolean;
+    questionCount: number;
+}
+
+export interface B3QuizSummaryPage {
+    content: B3QuizSummary[];
+    page: number;
+    size: number;
+    totalElements: number;
+    totalPages: number;
+}
+
+export interface B3AttemptQuestion {
+    questionId: string;
+    position: number;
+    prompt: string;
+    kind: QuestionKind;
+    options: string[];
+    selectedOptions: boolean[];
+}
+
+export interface B3Attempt {
+    attemptId: string;
+    quizId: string;
+    courseId: string;
+    attemptNumber: number;
+    startedAt: string;
+    expiresAt: string;
+    status: 'active' | 'overdue';
+    questions: B3AttemptQuestion[];
+}
+
+export interface B3AttemptSummary {
+    attemptId: string;
+    quizId: string;
+    courseId: string;
+    attemptNumber: number;
+    startedAt: string;
+    expiresAt: string;
+    status: 'active' | 'overdue' | 'submitted';
+    submittedAt: string | null;
+    scorePercentage: number | null;
+}
+
+export interface B3AttemptHistory {
+    content: B3AttemptSummary[];
+    page: number;
+    size: number;
+    totalElements: number;
+    totalPages: number;
+}
+
+export interface B3AttemptResultAnswer {
+    questionId: string;
+    position: number;
+    prompt: string;
+    kind: QuestionKind;
+    options: string[];
+    selectedOptions: boolean[];
+    correct: boolean;
+}
+
+export interface B3AttemptResult {
+    attemptId: string;
+    quizId: string;
+    courseId: string;
+    attemptNumber: number;
+    startedAt: string;
+    expiresAt: string;
+    status: 'submitted';
+    submittedAt: string;
+    scorePercentage: number;
+    answers: B3AttemptResultAnswer[];
+}
+
+export type B3AttemptRead = B3Attempt | B3AttemptResult;
+
+export interface B3AnswerEntry {
+    questionId: string;
+    selectedOptions: boolean[];
+}
+
+export interface B3AnswersWrite {
+    answers: B3AnswerEntry[];
+}
+
+export type SaveMachineState =
+    | 'Saved'
+    | 'Pending'
+    | 'Saving'
+    | 'Checking'
+    | 'Check failed'
+    | 'Reconcile'
+    | 'Time is up'
+    | 'No access';
