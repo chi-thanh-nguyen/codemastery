@@ -93,8 +93,9 @@ for f in "$MIGRATIONS"/V*.sql; do
 done
 echo "  applied $n migrations"
 # The violation report is sorted and capped at 25 lines; assert an early, stable entry
-# (r4 adds lesson_progress INSERT columns, which push users.email beyond the cap).
-expect_failure "migrated tables before hardening (no runtime grants yet)" "column privilege INSERT on public.enrollments.course_id: expected true" verify_runtime_privileges complete
+# (r4 adds lesson_progress INSERT columns, which push users.email beyond the cap; r12 adds
+# assignments, chapters, courses and lessons INSERT columns, which push enrollments beyond it).
+expect_failure "migrated tables before hardening (no runtime grants yet)" "column privilege INSERT on public.assignments.course_id: expected true" verify_runtime_privileges complete
 harden_after_migration
 verify_role_separation >/dev/null
 echo "  verify_role_separation: PASS (exact matrix)"
@@ -164,6 +165,48 @@ probe "path_recommendations: reusing a history id (PK)"        23505 "INSERT INT
 probe "audit_logs: IN10 r10 record and filtered read" ok "INSERT INTO public.audit_logs (action, actor_id, occurred_at, target_reference, target_type, id) VALUES ('user_locked','00000000-0000-0000-0000-0000000000a1','2026-11-24T01:00:00.123456Z','00000000-0000-0000-0000-0000000000c1','user','00000000-0000-0000-0000-00000000a0a1'); SELECT a.id, a.action, a.actor_id, a.occurred_at, a.target_reference, a.target_type FROM public.audit_logs a WHERE a.actor_id='00000000-0000-0000-0000-0000000000a1' AND a.action='user_locked' AND a.target_type='user' AND a.target_reference='00000000-0000-0000-0000-0000000000c1' AND a.occurred_at>='2026-11-24T00:00:00Z' AND a.occurred_at<'2026-11-25T00:00:00Z' ORDER BY a.occurred_at DESC, a.id DESC OFFSET 0 ROWS FETCH FIRST 20 ROWS ONLY; SELECT count(a.id) FROM public.audit_logs a WHERE a.actor_id='00000000-0000-0000-0000-0000000000a1';"
 probe "audit_logs: reusing an audit id (PK)"                 23505 "INSERT INTO public.audit_logs (action, actor_id, occurred_at, target_reference, target_type, id) VALUES ('user_locked','00000000-0000-0000-0000-0000000000a1',now(),'r','user','00000000-0000-0000-0000-00000000a0a2'); INSERT INTO public.audit_logs (action, actor_id, occurred_at, target_reference, target_type, id) VALUES ('course_hidden','00000000-0000-0000-0000-0000000000a1',now(),'r','course','00000000-0000-0000-0000-00000000a0a2');"
 probe "audit_logs: an actor without an account (FK)"        23503 "INSERT INTO public.audit_logs (action, actor_id, occurred_at, target_reference, target_type, id) VALUES ('user_locked',gen_random_uuid(),now(),'r','user',gen_random_uuid());"
+# r12: the CO06 authoring SQL (CourseRepositoryImpl, CourseContentRepositoryImpl), every statement as issued.
+probe "courses/chapters/lessons: CO06 r12 authoring" ok "INSERT INTO public.courses (id, instructor_id, title, description, prerequisite_description, publication_status, adaptive_enabled, adaptive_settings) VALUES ('00000000-0000-0000-0000-0000000012c1','00000000-0000-0000-0000-0000000000a1','New','D',NULL,'hidden',false,CAST(NULL AS jsonb));
+SELECT id FROM public.courses WHERE id = '00000000-0000-0000-0000-0000000012c1' FOR UPDATE;
+SELECT id FROM public.courses WHERE id = '00000000-0000-0000-0000-0000000012c1' FOR UPDATE NOWAIT;
+UPDATE public.courses SET title = 'T', description = 'D2', prerequisite_description = 'P' WHERE id = '00000000-0000-0000-0000-0000000012c1';
+INSERT INTO public.chapters (id, course_id, title, position) SELECT '00000000-0000-0000-0000-0000000012d1', '00000000-0000-0000-0000-0000000012c1', 'A', next_position FROM (SELECT COALESCE(max(position), 0)::bigint + 1 AS next_position FROM public.chapters WHERE course_id = '00000000-0000-0000-0000-0000000012c1') next WHERE next_position <= 2147483647 RETURNING position;
+INSERT INTO public.chapters (id, course_id, title, position) SELECT '00000000-0000-0000-0000-0000000012d2', '00000000-0000-0000-0000-0000000012c1', 'B', next_position FROM (SELECT COALESCE(max(position), 0)::bigint + 1 AS next_position FROM public.chapters WHERE course_id = '00000000-0000-0000-0000-0000000012c1') next WHERE next_position <= 2147483647 RETURNING position;
+UPDATE public.chapters SET title = 'A2' WHERE id = '00000000-0000-0000-0000-0000000012d1' AND course_id = '00000000-0000-0000-0000-0000000012c1';
+SELECT id FROM public.chapters WHERE course_id = '00000000-0000-0000-0000-0000000012c1';
+SET CONSTRAINTS public.uq_chapters_course_position DEFERRED;
+UPDATE public.chapters SET position = 1 WHERE id = '00000000-0000-0000-0000-0000000012d2' AND course_id = '00000000-0000-0000-0000-0000000012c1';
+UPDATE public.chapters SET position = 2 WHERE id = '00000000-0000-0000-0000-0000000012d1' AND course_id = '00000000-0000-0000-0000-0000000012c1';
+SET CONSTRAINTS public.uq_chapters_course_position IMMEDIATE;
+INSERT INTO public.lessons (id, chapter_id, title, content_markdown, position, publication_status) SELECT '00000000-0000-0000-0000-0000000012e1', '00000000-0000-0000-0000-0000000012d1', 'L1', 'Body', next_position, 'hidden' FROM (SELECT COALESCE(max(position), 0)::bigint + 1 AS next_position FROM public.lessons WHERE chapter_id = '00000000-0000-0000-0000-0000000012d1') next WHERE next_position <= 2147483647 RETURNING position;
+INSERT INTO public.lessons (id, chapter_id, title, content_markdown, position, publication_status) SELECT '00000000-0000-0000-0000-0000000012e2', '00000000-0000-0000-0000-0000000012d1', 'L2', NULL, next_position, 'hidden' FROM (SELECT COALESCE(max(position), 0)::bigint + 1 AS next_position FROM public.lessons WHERE chapter_id = '00000000-0000-0000-0000-0000000012d1') next WHERE next_position <= 2147483647 RETURNING position;
+UPDATE public.lessons SET title = 'L1b', content_markdown = 'Body 2' WHERE id = '00000000-0000-0000-0000-0000000012e1' AND chapter_id = '00000000-0000-0000-0000-0000000012d1';
+SELECT id FROM public.lessons WHERE chapter_id = '00000000-0000-0000-0000-0000000012d1';
+SET CONSTRAINTS public.uq_lessons_chapter_position DEFERRED;
+UPDATE public.lessons SET position = 1 WHERE id = '00000000-0000-0000-0000-0000000012e2' AND chapter_id = '00000000-0000-0000-0000-0000000012d1';
+UPDATE public.lessons SET position = 2 WHERE id = '00000000-0000-0000-0000-0000000012e1' AND chapter_id = '00000000-0000-0000-0000-0000000012d1';
+SET CONSTRAINTS public.uq_lessons_chapter_position IMMEDIATE;
+UPDATE public.lessons SET publication_status = 'published' WHERE id = '00000000-0000-0000-0000-0000000012e1' AND chapter_id = '00000000-0000-0000-0000-0000000012d1';
+UPDATE public.courses SET publication_status = 'published' WHERE id = '00000000-0000-0000-0000-0000000012c1';
+DO \$\$ BEGIN IF (SELECT string_agg(l.title || '@' || ch.title || '.' || ch.position || '.' || l.position, ',' ORDER BY ch.position, l.position) FROM public.lessons l JOIN public.chapters ch ON ch.id = l.chapter_id WHERE ch.course_id = '00000000-0000-0000-0000-0000000012c1') IS DISTINCT FROM 'L2@A2.2.1,L1b@A2.2.2' THEN RAISE EXCEPTION 'CO06 reorder failed'; END IF; END \$\$;"
+probe "chapters: a duplicate sibling position (deferred unique)" 23505 "INSERT INTO public.chapters VALUES ('00000000-0000-0000-0000-0000000012d3','00000000-0000-0000-0000-0000000000c1','X',1);"
+admin <<'SQL'
+INSERT INTO public.users VALUES ('00000000-0000-0000-0000-0000000012b1','l1@example.test','x','L1','learner','active'), ('00000000-0000-0000-0000-0000000012b2','l2@example.test','x','L2','learner','active');
+INSERT INTO public.assignments VALUES ('00000000-0000-0000-0000-0000000012a2','00000000-0000-0000-0000-0000000000c1',NULL,'Fixture','I',now(),'published');
+INSERT INTO public.submissions VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000012a2','00000000-0000-0000-0000-0000000012b1','submissions/a','a.pdf',now(),NULL,NULL,NULL),
+                                      (gen_random_uuid(),'00000000-0000-0000-0000-0000000012a2','00000000-0000-0000-0000-0000000012b2','submissions/b','b.zip',now(),90,'ok',now());
+SQL
+# r12: the AS09 owner SQL (AssignmentJpaRepository, AssignmentRepositoryImpl, SubmissionJpaRepository).
+probe "assignments/submissions: AS09 r12 owner authoring and counts" ok "insert into assignments (course_id, deadline_at, instructions, lesson_id, publication_status, title, id) values ('00000000-0000-0000-0000-0000000000c1', '9999-12-31 23:59:59.999999+00', 'I', '00000000-0000-0000-0000-0000000000e1', 'hidden', 'A', '00000000-0000-0000-0000-0000000012a1');
+select count(a1_0.id) > 0 from assignments a1_0 where a1_0.id = '00000000-0000-0000-0000-0000000012a1' and a1_0.course_id = '00000000-0000-0000-0000-0000000000c1';
+SELECT * FROM public.assignments WHERE id = '00000000-0000-0000-0000-0000000012a1' AND course_id = '00000000-0000-0000-0000-0000000000c1' FOR UPDATE;
+update assignments set lesson_id = NULL, title = 'B', instructions = 'I2', deadline_at = now() where id = '00000000-0000-0000-0000-0000000012a1' and course_id = '00000000-0000-0000-0000-0000000000c1';
+update assignments set publication_status = 'published' where id = '00000000-0000-0000-0000-0000000012a1' and course_id = '00000000-0000-0000-0000-0000000000c1';
+select count(a1_0.id) from assignments a1_0 where a1_0.course_id = '00000000-0000-0000-0000-0000000000c1';
+SELECT * FROM public.assignments WHERE course_id = '00000000-0000-0000-0000-0000000000c1' ORDER BY title COLLATE \"C\", id LIMIT 20 OFFSET 0;
+select s1_0.assignment_id, count(s1_0.id), count(s1_0.graded_at) from submissions s1_0 where s1_0.assignment_id in ('00000000-0000-0000-0000-0000000012a1', '00000000-0000-0000-0000-0000000012a2') group by s1_0.assignment_id;
+DO \$\$ BEGIN IF (SELECT count(s.id) || '/' || count(s.graded_at) FROM public.submissions s WHERE s.assignment_id = '00000000-0000-0000-0000-0000000012a2') IS DISTINCT FROM '2/1' THEN RAISE EXCEPTION 'AS09 submission counts failed'; END IF; END \$\$;"
+probe "assignments: a Lesson that does not exist (FK)"          23503 "insert into assignments (course_id, deadline_at, instructions, lesson_id, publication_status, title, id) values ('00000000-0000-0000-0000-0000000000c1', now(), 'I', gen_random_uuid(), 'hidden', 'A', gen_random_uuid());"
 echo "== everything else is denied"
 probe "users: change role"                                   42501 "UPDATE public.users SET role='admin';"
 probe "users: change email"                                  42501 "UPDATE public.users SET email='x@example.test';"
@@ -177,13 +220,18 @@ probe "refresh_sessions: rewrite the creation time"           42501 "UPDATE publ
 probe "refresh_tokens: rewrite digest, expiry or session"     42501 "UPDATE public.refresh_tokens SET token_digest=token_digest, expires_at=expires_at, session_id=session_id;"
 probe "refresh_sessions/tokens: TRUNCATE"                     42501 "TRUNCATE public.refresh_tokens, public.refresh_sessions;"
 probe "users: delete"                                        42501 "DELETE FROM public.users;"
-probe "courses: change publication"                          42501 "UPDATE public.courses SET publication_status='hidden';"
+probe "courses: rewrite adaptive configuration (no consumer)"  42501 "UPDATE public.courses SET adaptive_enabled=true, adaptive_settings=NULL;"
+probe "courses: delete"                                       42501 "DELETE FROM public.courses;"
 probe "courses: change instructor ownership"                 42501 "UPDATE public.courses SET instructor_id=instructor_id;"
-probe "courses: insert"                                      42501 "INSERT INTO public.courses SELECT * FROM public.courses WHERE false;"
 probe "courses: re-key a referenced Course (FK NO ACTION)"   23503 "UPDATE public.courses SET id=gen_random_uuid() WHERE id='00000000-0000-0000-0000-0000000000c1';"
-probe "chapters/lessons: modify structure"                   42501 "UPDATE public.lessons SET publication_status='published';"
-probe "learning_materials: read payload/object keys"         42501 "SELECT object_key, text_content FROM public.learning_materials;"
-probe "learning_materials: SELECT *"                         42501 "SELECT * FROM public.learning_materials;"
+probe "chapters: move to another Course or re-key"            42501 "UPDATE public.chapters SET course_id=course_id, id=id;"
+probe "lessons: move to another Chapter or re-key"            42501 "UPDATE public.lessons SET chapter_id=chapter_id, id=id;"
+probe "chapters/lessons: delete"                              42501 "DELETE FROM public.lessons;"
+probe "chapters/lessons/courses: TRUNCATE"                    42501 "TRUNCATE public.lessons, public.chapters, public.courses CASCADE;"
+probe "learning_materials: CO06 owner tree and CO03 lesson read (r12)" ok "SELECT m.id, m.lesson_id, m.title, m.material_type, m.publication_status, m.text_content, m.object_key, m.original_filename, m.external_video_url FROM public.learning_materials m JOIN public.lessons l ON l.id = m.lesson_id JOIN public.chapters ch ON ch.id = l.chapter_id WHERE ch.course_id = '00000000-0000-0000-0000-0000000000c1' ORDER BY ch.position ASC, l.position ASC, m.id ASC;"
+probe "learning_materials: write (CT09 not implemented)"       42501 "UPDATE public.learning_materials SET title=title, object_key=object_key;"
+probe "learning_materials: create"                            42501 "INSERT INTO public.learning_materials SELECT * FROM public.learning_materials WHERE false;"
+probe "learning_materials: delete or TRUNCATE"                42501 "DELETE FROM public.learning_materials;"
 probe "enrollments: reassign learner/Course"                 42501 "UPDATE public.enrollments SET user_id=user_id;"
 probe "enrollments: reassign Course or re-key"                42501 "UPDATE public.enrollments SET course_id=course_id, id=id;"
 probe "enrollments: delete history"                          42501 "DELETE FROM public.enrollments;"
@@ -206,6 +254,11 @@ probe "attempt_answers: read captured selections"             42501 "SELECT sele
 probe "attempts: rewrite scores"                             42501 "UPDATE public.attempts SET score_percentage=100;"
 probe "attempt_answers: delete"                              42501 "DELETE FROM public.attempt_answers;"
 probe "submissions: self-grade"                              42501 "UPDATE public.submissions SET grade_percentage=100;"
+probe "submissions: read files, learners or feedback"         42501 "SELECT object_key, user_id, feedback FROM public.submissions;"
+probe "submissions: create (learner submission not implemented)" 42501 "INSERT INTO public.submissions SELECT * FROM public.submissions WHERE false;"
+probe "assignments: move to another Course or re-key"         42501 "UPDATE public.assignments SET course_id=course_id, id=id;"
+probe "assignments/submissions: delete"                       42501 "DELETE FROM public.assignments;"
+probe "assignments/submissions: TRUNCATE"                     42501 "TRUNCATE public.submissions, public.assignments;"
 probe "learner_skill_masteries: re-key or re-target a row"     42501 "UPDATE public.learner_skill_masteries SET id=id, user_id=user_id, skill_id=skill_id;"
 probe "learner_skill_masteries: read row identifiers"          42501 "SELECT id FROM public.learner_skill_masteries;"
 probe "learner_skill_masteries: delete"                        42501 "DELETE FROM public.learner_skill_masteries;"
@@ -228,10 +281,10 @@ provision_db_roles >/dev/null; harden_after_migration; verify_role_separation >/
 echo "  ACLs identical after a second provision + harden + verify"
 
 echo "== drift and escalation fail closed"
-admin <<<"GRANT UPDATE, DELETE ON public.users TO $APP; GRANT UPDATE (title) ON public.courses TO $APP; GRANT SELECT ON public.submissions TO $APP;"
+admin <<<"GRANT UPDATE, DELETE ON public.users TO $APP; GRANT UPDATE (instructor_id) ON public.courses TO $APP; GRANT SELECT ON public.submissions TO $APP;"
 expect_failure "owner-granted excess before reconciliation" "table privilege UPDATE on public.users: expected false" verify_runtime_privileges complete
 drift="$(harden_after_migration)"
-[[ "$drift" == *"excess: column privilege UPDATE on public.courses.title: expected false"* && "$drift" == *"excess: table privilege DELETE on public.users: expected false"* ]] \
+[[ "$drift" == *"excess: column privilege UPDATE on public.courses.instructor_id: expected false"* && "$drift" == *"excess: table privilege DELETE on public.users: expected false"* ]] \
   || { echo "drift was not reported: $drift" >&2; exit 1; }
 verify_runtime_privileges complete >/dev/null
 echo "  owner-granted excess (table and column level) reported, revoked and re-verified"

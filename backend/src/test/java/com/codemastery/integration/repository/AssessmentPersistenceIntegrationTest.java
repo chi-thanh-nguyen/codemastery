@@ -789,10 +789,12 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
             jdbc.execute("GRANT USAGE ON SCHEMA public TO " + restrictedRole);
             // ADR012 §19.2 ceiling: SELECT, INSERT, UPDATE (lesson_id, title, instructions, deadline_at,
             // publication_status) on assignments (never course_id or DELETE), plus FK/SELECT references.
-            jdbc.execute("GRANT SELECT, REFERENCES ON public.courses, public.lessons TO " + restrictedRole);
+            // CT17-P6 r12 rows: no REFERENCES (PostgreSQL checks foreign keys with the owner's rights)
+            // and only the submission columns the owner counts read.
+            jdbc.execute("GRANT SELECT ON public.courses, public.lessons TO " + restrictedRole);
             jdbc.execute("GRANT SELECT, INSERT, UPDATE (lesson_id, title, instructions, deadline_at, publication_status) "
                     + "ON public.assignments TO " + restrictedRole);
-            jdbc.execute("GRANT SELECT ON public.submissions TO " + restrictedRole);
+            jdbc.execute("GRANT SELECT (id, assignment_id, graded_at) ON public.submissions TO " + restrictedRole);
 
             tx.executeWithoutResult(status -> {
                 jdbc.execute("SET LOCAL ROLE " + restrictedRole);
@@ -819,9 +821,19 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                 assertEquals(List.of(low, high, third), page.stream().map(Assignment::id).toList());
                 assertEquals("Updated Inst L", page.get(0).instructions());
                 assertEquals("published", page.get(0).publication_status());
-                assertEquals(
-                        new SubmissionCounts(2, 1),
-                        assignmentRepository.countSubmissions(List.of(low, high)).get(low));
+                List<String> countSql = new java.util.ArrayList<>();
+                STATEMENTS.set(countSql);
+                try {
+                    assertEquals(
+                            new SubmissionCounts(2, 1),
+                            assignmentRepository.countSubmissions(List.of(low, high)).get(low));
+                } finally {
+                    STATEMENTS.remove();
+                }
+                assertEquals(1, countSql.size(), countSql::toString);
+                assertTrue(countSql.get(0).contains("from submissions"), countSql::toString);
+                assertFalse(countSql.get(0).matches("(?s).*\\b(object_key|original_filename|user_id|feedback|grade_percentage|submitted_at)\\b.*"),
+                        countSql::toString);
 
                 assertTrue(assignmentRepository.findInCourseForUpdate(high, courseId).isPresent());
                 assertEquals("55P03", referenceFailure(other, tx,

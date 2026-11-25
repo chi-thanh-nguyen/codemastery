@@ -5407,7 +5407,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor (Lesson ownership when lessonId is set); creates a hidden Assignment. Deadline is an RFC 3339 instant with at most microsecond precision whose UTC instant lies in years 0000-9999 (the response renders it in UTC); anything else is 400. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 415/path 400 precede Stage 3 CT03 ownership 403/404, which precedes strict JSON body 400, and the insert runs in a READ COMMITTED transaction without the Course-root guard (ADR010 §10: assignments do not affect adaptive invariants). Runtime database grants for assignments/submissions are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR010 is normative.",
+        "description": "Owning Instructor (Lesson ownership when lessonId is set); creates a hidden Assignment. Deadline is an RFC 3339 instant with at most microsecond precision whose UTC instant lies in years 0000-9999 (the response renders it in UTC); anything else is 400. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 415/path 400 precede Stage 3 CT03 ownership 403/404, which precedes strict JSON body 400, and the insert runs in a READ COMMITTED transaction without the Course-root guard (ADR010 §10: assignments do not affect adaptive invariants). Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -5803,7 +5803,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; hidden and published, ordered by title COLLATE C then UUID, with submission and graded counts. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 path/query 400 precedes Stage 3 CT03 ownership 403/404, and the snapshot runs in a read-only REPEATABLE READ transaction. Runtime database grants for assignments/submissions are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR010 is normative.",
+        "description": "Owning Instructor; hidden and published, ordered by title COLLATE C then UUID, with submission and graded counts. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 path/query 400 precedes Stage 3 CT03 ownership 403/404, and the snapshot runs in a read-only REPEATABLE READ transaction. Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -5880,7 +5880,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; hidden or published Assignment. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 path 400 precedes Stage 3 CT03 ownership 403/404 and same-Course Assignment lookup in a read-only REPEATABLE READ snapshot. Runtime database grants for assignments/submissions are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR010 is normative.",
+        "description": "Owning Instructor; hidden or published Assignment. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 path 400 precedes Stage 3 CT03 ownership 403/404 and same-Course Assignment lookup in a read-only REPEATABLE READ snapshot. Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -5945,7 +5945,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; full replacement of title, instructions, deadlineAt and lessonId. deadlineAt follows the create rule (at most microsecond precision; UTC instant in years 0000-9999, else 400). Locks the Assignment row; affects only later admissions. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 415/path 400 precede Stage 3 CT03 ownership 403/404 and the same-Course Assignment row lock (FOR UPDATE) in a READ COMMITTED transaction without the Course-root guard (ADR010 §10) before strict JSON body 400 and targeted column updates within ADR012 §19.2. Runtime database grants for assignments/submissions are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR010 is normative.",
+        "description": "Owning Instructor; full replacement of title, instructions, deadlineAt and lessonId. deadlineAt follows the create rule (at most microsecond precision; UTC instant in years 0000-9999, else 400). Locks the Assignment row; affects only later admissions. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 415/path 400 precede Stage 3 CT03 ownership 403/404 and the same-Course Assignment row lock (FOR UPDATE) in a READ COMMITTED transaction without the Course-root guard (ADR010 §10) before strict JSON body 400 and targeted column updates within ADR012 §19.2. Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -6025,7 +6025,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; explicit hidden or published. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 415/path 400 precede Stage 3 CT03 ownership 403/404 and the same-Course Assignment row lock (FOR UPDATE) in a READ COMMITTED transaction without the Course-root guard (ADR010 §10) before strict JSON body 400 and targeted publicationStatus update within ADR012 §19.2. Runtime database grants for assignments/submissions are not yet in the CT17-P6 matrix (docs/deployment.md), so deployment remains gated; independent review, CI and protected integration remain gated. ADR010 is normative.",
+        "description": "Owning Instructor; explicit hidden or published. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 415/path 400 precede Stage 3 CT03 ownership 403/404 and the same-Course Assignment row lock (FOR UPDATE) in a READ COMMITTED transaction without the Course-root guard (ADR010 §10) before strict JSON body 400 and targeted publicationStatus update within ADR012 §19.2. Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
