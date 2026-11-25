@@ -2381,3 +2381,19 @@ the existing Admin test rule (@tihh647-ui, @chi-thanh-nguyen) covers the four un
 the other `integration/repository/` suites, the repository suite matches no rule. No production
 file, dependency, directory or other test path is approved. The canonical tree above is unchanged;
 this is an explicit addition.
+
+### IN07 test placement — 25 November 2026
+
+`CT14-IN07-PLACEMENT-2026-11-25-r1` is
+**[LEADER_APPROVED](decisions/README.md#approval-status-labels)** under the
+Project Leader's bounded placement instruction for PR #292. It covers exactly
+the two IN07 files introduced in that PR:
+
+| File | Responsibility |
+| --- | --- |
+| `backend/src/test/java/com/codemastery/modules/interaction/NotificationServiceTest.java` | CT11 unit contracts for identifiers, ordering, time, transaction guard and owner-scoped operations |
+| `backend/src/test/java/com/codemastery/integration/repository/NotificationRepositoryIntegrationTest.java` | Disposable PostgreSQL verification of IN07 creation, atomicity, concurrency, paging and mark-read, including creation under the r13 notification privileges |
+
+The HTTP authorization and error cases extend the existing
+`AuthorizationIntegrationTest.java`. The canonical tree and CODEOWNERS stay
+unchanged. This record approves no other paths.

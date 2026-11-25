@@ -442,9 +442,51 @@ call GET "/api/admin/audit-logs" "$token_a"; check "a learner is refused the aud
 call GET "/api/admin/audit-logs?size=0" "$token_a"; check "a malformed query is 400 before the role check" "$STATUS" 400
 check "the audit read wrote nothing" "$(psql_admin <<<"SELECT count(*) FROM public.audit_logs;")" 2
 
+echo "== IN07 notifications (r13 SELECT, INSERT, UPDATE(is_read))"
+notification_path=/api/me/notifications
+notice_older=00000000-0000-0000-0000-0000000013a1
+notice_newer=00000000-0000-0000-0000-0000000013a2
+notice_foreign=00000000-0000-0000-0000-0000000013a3
+psql_as "$(env_get DB_USER)" "$(env_get DB_PASSWORD)" >/dev/null <<SQL
+INSERT INTO public.notifications (id,user_id,message,is_read,created_at)
+SELECT v.id::uuid, u.id, v.message, false, '2026-11-25T01:00:00.123456Z'
+FROM (VALUES
+  ('$notice_older', 'learner.a@example.test', 'First notice'),
+  ('$notice_newer', 'learner.a@example.test', 'Second notice'),
+  ('$notice_foreign', 'learner.b@example.test', 'Foreign notice')
+) AS v(id,email,message) JOIN public.users u ON u.email=v.email
+ON CONFLICT (id) DO NOTHING;
+SQL
+call GET "$notification_path?size=0" ""
+check "notifications authenticate before validation" "$STATUS" 401
+call GET "$notification_path?size=1" "$token_a"
+check "list only own notifications, newest by id on tied timestamps" "$STATUS/$(field totalElements)/$(field content.0.id)" "200/2/$notice_newer"
+call GET "$notification_path?unreadOnly=true&page=2147483647&size=100" "$token_a"
+check "large out-of-range page has the exact total" "$STATUS/$(field content)/$(field totalElements)" '200/[]/2'
+call PUT "$notification_path/$notice_foreign/read" "$token_a"
+check "foreign notification is concealed" "$STATUS" 404
+call PUT "$notification_path/$notice_newer/read" "$token_a" '{ignored'
+check "mark-read ignores the body and returns the persisted row" "$STATUS/$(field id)/$(field read)" "200/$notice_newer/True"
+call PUT "$notification_path/$notice_newer/read" "$token_a"
+check "mark-read is idempotent" "$STATUS/$(field read)" "200/True"
+call GET "$notification_path/unread-count" "$token_a"
+check "unread count is own only" "$STATUS/$(field unreadCount)" 200/1
+call PUT "$notification_path/read-all" "$token_a"
+check "mark-all changes only remaining own unread rows" "$STATUS/$(field markedCount)" 200/1
+call PUT "$notification_path/read-all" "$token_a"
+check "mark-all is idempotent" "$STATUS/$(field markedCount)" 200/0
+call GET "$notification_path/unread-count" "$token_b"
+check "foreign row remains unread" "$STATUS/$(field unreadCount)" 200/1
+call GET "$notification_path" "$token_i"
+check "Instructor can list own notifications" "$STATUS/$(field totalElements)" 200/0
+call GET "$notification_path" "$token_adm"
+check "Administrator can list own notifications" "$STATUS/$(field totalElements)" 200/0
+check "mark-read and mark-all committed under the runtime role" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE is_read) || '/' || count(*) FROM public.notifications;")" 2/3
+
 echo "== current account state is enforced (users SELECT on every protected request)"
 psql_admin >/dev/null <<<"UPDATE public.users SET account_status='locked' WHERE email='learner.c@example.test';"
 call GET "/api/me/courses" "$token_c"; check "locked account's existing token is rejected" "$STATUS" 401
+call GET "$notification_path" "$token_c"; check "locked account cannot read notifications" "$STATUS" 401
 call POST /api/auth/login "" "{\"email\":\"learner.c@example.test\",\"password\":\"$password\"}"; check "locked account cannot log in" "$STATUS" 401
 
 echo "== AU07 recovery under the runtime role (users UPDATE(password_hash) + row lock; tokens SELECT/INSERT/DELETE)"
@@ -506,10 +548,10 @@ check "backend log never contains a recipient address" "$(docker logs "$backend"
 echo "== no permission failure anywhere, and the matrix is unchanged"
 check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank, AS06 quiz composition, CO06 Instructor authoring, AS09 owner assignments and the IN10 audit read under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank, AS06 quiz composition, CO06 Instructor authoring, AS09 owner assignments, the IN10 audit read, and IN07 notifications under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
-  BACKEND_IMAGE=codemastery-backend:privilege-test \
+  BACKEND_IMAGE="${BACKEND_IMAGE:-codemastery-backend:privilege-test}" \
   bash "$work/exercise-runtime.sh" "$script" "$work/env/.env" "$work/http"
 
 # CT17-P6 r4 upgrade with the real backend and real Flyway on a fresh cluster: Flyway
@@ -653,5 +695,5 @@ BASH
 docker rm -f "${container}-backend" >/dev/null 2>&1 || true
 start_postgres
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
-  BACKEND_IMAGE=codemastery-backend:privilege-test \
+  BACKEND_IMAGE="${BACKEND_IMAGE:-codemastery-backend:privilege-test}" \
   bash "$work/exercise-upgrade.sh" "$script" "$work/env/.env" "$work/http"

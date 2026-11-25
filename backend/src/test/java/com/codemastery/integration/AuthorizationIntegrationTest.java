@@ -67,6 +67,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -2321,6 +2322,135 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
         JsonNode health = JSON.readTree(body);
         assertEquals(Set.of("status", "groups"), Set.copyOf(health.propertyNames()));
         assertEquals("[\"liveness\",\"readiness\"]", health.get("groups").toString());
+    }
+
+    @Nested
+    class NotificationEndpoints {
+
+        private static final String PATH = "/api/me/notifications";
+        private final List<UUID> notices = new ArrayList<>();
+
+        @AfterEach
+        void removeNotices() {
+            for (UUID notice : notices) {
+                jdbc.update("DELETE FROM public.notifications WHERE id = ?", notice);
+            }
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"learner", "instructor", "admin"})
+        void allFourOperationsAreAvailableToEachActiveRole(String role) throws Exception {
+            UUID user = insertUser(role, "active");
+            UUID mine = notice(user);
+            UUID second = notice(user);
+            UUID foreignOwner = insertUser("learner", "active");
+            UUID foreign = notice(foreignOwner);
+            String bearer = "Bearer " + sessionToken(user);
+
+            String body = mvc.perform(get(PATH).header("Authorization", bearer).param("userId", foreignOwner.toString()))
+                    .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.size").value(20)).andExpect(jsonPath("$.totalElements").value(2))
+                    .andReturn().getResponse().getContentAsString();
+            var page = JSON.readTree(body);
+            assertEquals(Set.of("content", "page", "size", "totalElements", "totalPages"), Set.copyOf(page.propertyNames()));
+            var firstRow = page.get("content").get(0);
+            assertEquals(Set.of("id", "message", "read", "createdAt"), Set.copyOf(firstRow.propertyNames()));
+            assertEquals(List.of(mine, second).stream().map(UUID::toString).max(String::compareTo).orElseThrow(),
+                    firstRow.get("id").asString());
+
+            for (int attempt = 0; attempt < 2; attempt++) {
+                mvc.perform(put(PATH + "/" + mine + "/read").header("Authorization", bearer)
+                                .contentType(MediaType.TEXT_PLAIN).content("{ignored"))
+                        .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(jsonPath("$.id").value(mine.toString())).andExpect(jsonPath("$.read").value(true));
+            }
+            mvc.perform(get(PATH + "/unread-count").header("Authorization", bearer))
+                    .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(content().json("{\"unreadCount\":1}",
+                            org.springframework.test.json.JsonCompareMode.STRICT));
+            mvc.perform(get(PATH).param("unreadOnly", "true").param("size", "1").header("Authorization", bearer))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.content[0].id").value(second.toString()));
+            for (int pageNumber : List.of(2, Integer.MAX_VALUE)) {
+                mvc.perform(get(PATH).param("page", Integer.toString(pageNumber)).param("size", "100")
+                                .header("Authorization", bearer))
+                        .andExpect(status().isOk()).andExpect(jsonPath("$.content").isEmpty())
+                        .andExpect(jsonPath("$.totalElements").value(2)).andExpect(jsonPath("$.totalPages").value(1));
+            }
+            for (int marked : List.of(1, 0)) {
+                mvc.perform(put(PATH + "/read-all").header("Authorization", bearer)
+                                .contentType(MediaType.APPLICATION_JSON).content("{ignored"))
+                        .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().json("{\"markedCount\":" + marked + "}",
+                                org.springframework.test.json.JsonCompareMode.STRICT));
+            }
+            assertEquals(Boolean.TRUE, jdbc.queryForObject(
+                    "SELECT is_read FROM public.notifications WHERE id = ?", Boolean.class, second));
+            assertEquals(Boolean.FALSE, jdbc.queryForObject(
+                    "SELECT is_read FROM public.notifications WHERE id = ?", Boolean.class, foreign));
+        }
+
+        @Test
+        void authenticationPrecedesValidationAndUsesCurrentAccountAndSession() throws Exception {
+            UUID user = insertUser("learner", "active");
+            String bearer = "Bearer " + sessionToken(user);
+            UUID revokedUser = insertUser("learner", "active");
+            String revoked = "Bearer " + sessionToken(revokedUser);
+            jdbc.update("UPDATE public.users SET account_status='locked' WHERE id=?", user);
+            jdbc.update("UPDATE public.refresh_sessions SET revoked_at=now() WHERE user_id=?", revokedUser);
+            for (String auth : List.of("", "Bearer invalid", bearer, revoked)) {
+                for (var operation : List.of(get(PATH).param("page", "invalid"), get(PATH + "/unread-count"),
+                        put(PATH + "/invalid/read"), put(PATH + "/read-all"))) {
+                    mvc.perform(operation.header("Authorization", auth))
+                            .andExpect(status().isUnauthorized()).andExpect(header().string("Cache-Control", "no-store"))
+                            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                            .andExpect(jsonPath("$.detail").value("Authentication failed."));
+                }
+            }
+        }
+
+        @Test
+        void malformedInputsReturnSafe400AndUnapprovedRoutesStayDenied() throws Exception {
+            String bearer = "Bearer " + sessionToken(insertUser("admin", "active"));
+            for (var operation : List.of(get(PATH).param("unreadOnly", "on"), get(PATH).param("unreadOnly", ""),
+                    get(PATH).param("unreadOnly", "true", "false"), get(PATH).param("page", "0x10"),
+                    get(PATH).param("page", "-1"), get(PATH).param("page", "2147483648"),
+                    get(PATH).param("size", "0"), get(PATH).param("size", "101"), put(PATH + "/1-2-3-4-5/read"))) {
+                mvc.perform(operation.header("Authorization", bearer)).andExpect(status().isBadRequest())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                        .andExpect(jsonPath("$.type").value("about:blank"));
+            }
+            for (var operation : List.of(post(PATH), put(PATH), get(PATH + "/read-all"),
+                    request(HttpMethod.DELETE, PATH + "/" + UUID.randomUUID()), get(PATH + "/unknown"))) {
+                mvc.perform(operation.header("Authorization", bearer)).andExpect(status().isForbidden());
+            }
+        }
+
+        @Test
+        void missingAndForeignIdsHaveIdenticalProblemDetailsApartFromTheRequestPath() throws Exception {
+            UUID foreign = notice(insertUser("learner", "active"));
+            String bearer = "Bearer " + sessionToken(insertUser("instructor", "active"));
+            UUID missing = UUID.randomUUID();
+            var responses = new ArrayList<String>();
+            for (UUID id : List.of(foreign, missing)) {
+                String path = PATH + "/" + id + "/read";
+                responses.add(mvc.perform(put(path).header("Authorization", bearer))
+                        .andExpect(status().isNotFound()).andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                        .andExpect(jsonPath("$.instance").value(path)).andReturn().getResponse().getContentAsString()
+                        .replace(path, PATH));
+            }
+            assertEquals(JSON.readTree(responses.getFirst()), JSON.readTree(responses.getLast()));
+        }
+
+        private UUID notice(UUID user) {
+            UUID id = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.notifications (id,user_id,message,is_read,created_at) "
+                    + "VALUES (?,?,'Plain text <a>',false,'2026-11-25T01:00:00.123456Z')", id, user);
+            notices.add(id);
+            return id;
+        }
     }
 
     /**

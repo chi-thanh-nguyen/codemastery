@@ -1345,7 +1345,8 @@ SQL
 # CT17-P6-PRIVILEGES-2026-11-23-r8 AD06 mastery/history-write rows and the
 # CT17-P6-PRIVILEGES-2026-11-24-r10 IN10 audit-log rows and the
 # CT17-P6-PRIVILEGES-2026-11-24-r11 CO15 mastery-skip row and the
-# CT17-P6-PRIVILEGES-2026-11-25-r12 CO06 authoring and AS09 owner-assignment rows
+# CT17-P6-PRIVILEGES-2026-11-25-r12 CO06 authoring and AS09 owner-assignment rows and the
+# CT17-P6-PRIVILEGES-2026-11-25-r13 IN07 notifications row
 # (all within the ADR012 §19.2 ceiling):
 # the complete runtime privilege matrix for the reviewed V001-V009 schema. Every relation in schema
 # public must be listed, and its reviewed columns are pinned, so a later migration
@@ -1374,7 +1375,7 @@ submissions              -              SELECT(id,assignment_id,graded_at)      
 learner_skill_masteries  INSERT         SELECT(user_id,skill_id,state)+UPDATE(state) id,user_id,skill_id,state
 path_recommendations     INSERT         -                                        id,enrollment_id,lesson_id,recommendation_type,reason,recommended_at
 discussion_posts         -              -                                        id,lesson_id,author_id,parent_post_id,content,created_at,is_hidden
-notifications            -              -                                        id,user_id,message,is_read,created_at
+notifications            SELECT,INSERT  UPDATE(is_read)                          id,user_id,message,is_read,created_at
 content_reports          -              -                                        id,reporter_id,discussion_post_id,lesson_id,reason,status,created_at,resolved_at
 audit_logs               SELECT,INSERT  -                                        id,actor_id,action,target_type,target_reference,occurred_at
 password_reset_tokens    SELECT,INSERT,DELETE -                                  id,user_id,token_digest,issued_at,expires_at
@@ -1595,10 +1596,10 @@ verify_runtime_privileges() {  # present (before migration) | complete (after mi
     || fail "Could not verify runtime privileges against the approved matrix; ingress remains closed."
   if [[ -n "${violations}" ]]; then
     printf '%s\n' "${violations}" | head -n 25 | sed 's/^/  violation: /' >&2
-    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write, r10 audit-log, r11 mastery-skip and r12 authoring rows); reconcile explicitly. Ingress remains closed."
+    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write, r10 audit-log, r11 mastery-skip, r12 authoring and r13 notifications rows); reconcile explicitly. Ingress remains closed."
   fi
   if [[ "${mode}" == "complete" ]]; then
-    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write, r10 audit-log, r11 mastery-skip and r12 authoring rows) verified (every public relation reviewed)"
+    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write, r10 audit-log, r11 mastery-skip, r12 authoring and r13 notifications rows) verified (every public relation reviewed)"
   fi
   log "  ok: runtime privileges equal the approved matrix (${mode} schema)"
 }
@@ -1659,6 +1660,11 @@ SQL
   expect_denied  "runtime role reading captured answer selections" 42501 "${app}" "${app_pw}" <<<'SELECT selected_options FROM public.attempt_answers WHERE false;'
   expect_denied  "runtime role writing learning materials" 42501 "${app}" "${app_pw}" <<<'UPDATE public.learning_materials SET object_key = object_key, text_content = text_content WHERE false;'
   expect_denied  "runtime role creating or deleting learning materials" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.learning_materials WHERE false;'
+  expect_allowed "runtime role reading notifications" "${app}" "${app_pw}" <<<'SELECT id, user_id, message, is_read, created_at FROM public.notifications WHERE false;'
+  expect_allowed "runtime role marking notifications read" "${app}" "${app_pw}" <<<'UPDATE public.notifications SET is_read = true WHERE false;'
+  expect_denied  "runtime role rewriting immutable notification columns" 42501 "${app}" "${app_pw}" <<<'UPDATE public.notifications SET id = id, user_id = user_id, message = message, created_at = created_at WHERE false;'
+  expect_denied  "runtime role erasing notifications" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.notifications WHERE false;'
+  expect_denied  "runtime role truncating notifications" 42501 "${app}" "${app_pw}" <<<'TRUNCATE public.notifications;'
   expect_denied  "runtime role rewriting audit records" 42501 "${app}" "${app_pw}" <<<'UPDATE public.audit_logs SET action = action, occurred_at = occurred_at WHERE false;'
   expect_denied  "runtime role erasing audit records" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.audit_logs WHERE false;'
   expect_allowed "runtime role locking a published Course root (CT22 membership)" "${app}" "${app_pw}" <<'SQL'

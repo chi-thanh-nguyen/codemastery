@@ -109,6 +109,18 @@ INSERT INTO public.chapters VALUES ('00000000-0000-0000-0000-0000000000d1','0000
 INSERT INTO public.lessons VALUES ('00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-0000000000d1','L',NULL,1,'published');
 INSERT INTO public.learning_materials VALUES ('00000000-0000-0000-0000-0000000000f1','00000000-0000-0000-0000-0000000000e1','M','file','published',NULL,'k','f.pdf',NULL);
 SQL
+probe "notifications: r13 ordered read, idempotent INSERT and is_read-only UPDATE" ok "
+BEGIN;
+INSERT INTO public.notifications (id, user_id, message, is_read, created_at)
+VALUES ('00000000-0000-0000-0000-0000000013a1', '00000000-0000-0000-0000-0000000000a1', 'Notice', false, now())
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.notifications (id, user_id, message, is_read, created_at)
+VALUES ('00000000-0000-0000-0000-0000000013a1', '00000000-0000-0000-0000-0000000000a1', 'Duplicate', false, now())
+ON CONFLICT (id) DO NOTHING;
+SELECT id, user_id, message, is_read, created_at FROM public.notifications
+WHERE user_id='00000000-0000-0000-0000-0000000000a1' ORDER BY created_at DESC, id DESC LIMIT 20 OFFSET 0;
+UPDATE public.notifications SET is_read=true WHERE user_id='00000000-0000-0000-0000-0000000000a1' AND is_read=false;
+ROLLBACK;"
 probe "users: SELECT (login, JWT account check, names)"      ok "SELECT * FROM public.users;"
 probe "users: INSERT (registration)"                         ok "INSERT INTO public.users VALUES (gen_random_uuid(),'l@example.test','h','L','learner','active');"
 probe "courses/chapters/lessons: catalogue and syllabus"     ok "SELECT * FROM public.courses c JOIN public.chapters ch ON ch.course_id=c.id JOIN public.lessons l ON l.chapter_id=ch.id;"
@@ -266,7 +278,12 @@ probe "path_recommendations: read (r8 grants INSERT only)"    42501 "SELECT 1 FR
 probe "path_recommendations: rewrite history"                 42501 "UPDATE public.path_recommendations SET reason=reason, recommended_at=recommended_at;"
 probe "path_recommendations: erase history"                   42501 "DELETE FROM public.path_recommendations;"
 probe "learner_skill_masteries/path_recommendations: TRUNCATE" 42501 "TRUNCATE public.path_recommendations, public.learner_skill_masteries;"
-probe "notifications: read"                                  42501 "SELECT 1 FROM public.notifications;"
+probe "notifications: re-key"                                42501 "UPDATE public.notifications SET id=id WHERE false;"
+probe "notifications: change recipient"                      42501 "UPDATE public.notifications SET user_id=user_id WHERE false;"
+probe "notifications: rewrite message"                       42501 "UPDATE public.notifications SET message=message WHERE false;"
+probe "notifications: rewrite creation time"                 42501 "UPDATE public.notifications SET created_at=created_at WHERE false;"
+probe "notifications: erase"                                 42501 "DELETE FROM public.notifications WHERE false;"
+probe "notifications: TRUNCATE"                              42501 "TRUNCATE public.notifications;"
 probe "audit_logs: rewrite (r10 grants SELECT, INSERT only)"  42501 "UPDATE public.audit_logs SET action=action, occurred_at=occurred_at;"
 probe "audit_logs: erase"                                    42501 "DELETE FROM public.audit_logs;"
 probe "audit_logs: TRUNCATE"                                 42501 "TRUNCATE public.audit_logs;"

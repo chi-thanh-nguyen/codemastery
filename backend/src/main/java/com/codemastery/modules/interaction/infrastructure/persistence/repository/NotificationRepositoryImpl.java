@@ -6,6 +6,7 @@ import com.codemastery.modules.interaction.infrastructure.persistence.entity.Not
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.support.PageableExecutionUtils;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,12 +50,12 @@ public class NotificationRepositoryImpl implements NotificationRepository {
     public Page<Notification> findOwned(UUID userId, boolean unreadOnly, Pageable pageable) {
         Objects.requireNonNull(userId, "userId");
         Objects.requireNonNull(pageable, "pageable");
-        // The order is part of the derived query name; drop any caller sort so it cannot change it.
+        // SQL owns the fixed ordering. The service keeps the results and count in one snapshot.
         Pageable unsorted = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize());
-        Page<NotificationEntity> page = unreadOnly
-                ? jpa.findByUserIdAndReadFalseOrderByCreatedAtDescIdDesc(userId, unsorted)
-                : jpa.findByUserIdOrderByCreatedAtDescIdDesc(userId, unsorted);
-        return page.map(NotificationRepositoryImpl::toDomain);
+        List<Notification> rows = jpa.findOwned(userId, unreadOnly, unsorted.getPageSize(), unsorted.getOffset())
+                .stream().map(NotificationRepositoryImpl::toDomain).toList();
+        return PageableExecutionUtils.getPage(rows, unsorted,
+                () -> unreadOnly ? jpa.countByUserIdAndReadFalse(userId) : jpa.countByUserId(userId));
     }
 
     @Override

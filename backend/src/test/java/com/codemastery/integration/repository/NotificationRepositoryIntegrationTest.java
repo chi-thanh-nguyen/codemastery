@@ -22,6 +22,9 @@ import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -29,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * IN07 real-PostgreSQL suite for the notification repository and service (V006; ADR012 §4).
- * Every test runs in one transaction that is always rolled back.
+ * Fixtures are rolled back or explicitly cleaned up for committed concurrent transactions.
  */
 @DirtiesContext
 class NotificationRepositoryIntegrationTest extends AbstractIntegrationTest {
@@ -95,9 +98,96 @@ class NotificationRepositoryIntegrationTest extends AbstractIntegrationTest {
     }
 
     @Test
-    void missingRecipientFailsTheCall() {
-        inRolledBackTransaction(() -> assertThrows(DataIntegrityViolationException.class,
-                () -> service.create(List.of(new NewNotification(UUID.randomUUID(), UUID.randomUUID(), "Orphan")))));
+    void aMissingRecipientRollsBackAnEarlierSuccessfulInsert() {
+        UUID recipient = user();
+        UUID nonexistentRecipient = UUID.randomUUID();
+        UUID id1 = NotificationService.derivedId("test", recipient.toString(), "1");
+        UUID id2 = NotificationService.derivedId("test", recipient.toString(), "2");
+        List<UUID> ordered = java.util.stream.Stream.of(id1, id2)
+                .sorted(java.util.Comparator.comparing(UUID::toString)).toList();
+        try {
+            var tx = new TransactionTemplate(transactionManager);
+            assertThrows(DataIntegrityViolationException.class, () -> tx.executeWithoutResult(status ->
+                    service.create(List.of(new NewNotification(ordered.getFirst(), recipient, "Valid recipient"),
+                            new NewNotification(ordered.getLast(), nonexistentRecipient, "Missing recipient")))));
+            assertEquals(0L, jdbc.queryForObject(
+                    "SELECT count(*) FROM public.notifications WHERE id IN (?, ?)", Long.class, id1, id2));
+        } finally {
+            jdbc.update("DELETE FROM public.notifications WHERE id IN (?, ?)", id1, id2);
+            jdbc.update("DELETE FROM public.users WHERE id = ?", recipient);
+        }
+    }
+
+    @Test
+    void concurrentCallsWithOppositeInputOrderCommitEachOverlappingIdOnce() throws Exception {
+        UUID recipient = user();
+        UUID first = NotificationService.derivedId("test", recipient.toString(), "first");
+        UUID second = NotificationService.derivedId("test", recipient.toString(), "second");
+        var a = new NewNotification(first, recipient, "First notice");
+        var b = new NewNotification(second, recipient, "Second notice");
+        var ready = new CountDownLatch(2);
+        var start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var forward = executor.submit(() -> concurrentCreate(List.of(a, b), ready, start));
+            var reverse = executor.submit(() -> concurrentCreate(List.of(b, a), ready, start));
+            try {
+                assertTrue(ready.await(10, TimeUnit.SECONDS), "both transactions started");
+                start.countDown();
+                int firstCount = forward.get(15, TimeUnit.SECONDS);
+                int secondCount = reverse.get(15, TimeUnit.SECONDS);
+                assertEquals(List.of(0, 2), java.util.stream.Stream.of(firstCount, secondCount).sorted().toList());
+                assertEquals(2L, jdbc.queryForObject(
+                        "SELECT count(*) FROM public.notifications WHERE id IN (?, ?)", Long.class, first, second));
+            } finally {
+                start.countDown();
+            }
+        } finally {
+            jdbc.update("DELETE FROM public.notifications WHERE id IN (?, ?)", first, second);
+            jdbc.update("DELETE FROM public.users WHERE id = ?", recipient);
+        }
+    }
+
+    private int concurrentCreate(List<NewNotification> rows, CountDownLatch ready, CountDownLatch start) {
+        return new TransactionTemplate(transactionManager).execute(status -> {
+            jdbc.execute("SET LOCAL statement_timeout = '5s'");
+            ready.countDown();
+            try {
+                assertTrue(start.await(10, TimeUnit.SECONDS), "concurrent creators released");
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while waiting for concurrent creators", ex);
+            }
+            return service.create(rows);
+        });
+    }
+
+    @Test
+    void createsAndUpdatesUnderExactlyTheR13NotificationPrivileges() {
+        inRolledBackTransaction(() -> {
+            UUID recipient = user();
+            UUID locked = user();
+            jdbc.update("UPDATE public.users SET account_status = 'locked' WHERE id = ?", locked);
+            String role = "in07_ceiling_" + UUID.randomUUID().toString().replace("-", "");
+            jdbc.execute("CREATE ROLE " + role + " NOLOGIN");
+            jdbc.execute("GRANT USAGE ON SCHEMA public TO " + role);
+            jdbc.execute("GRANT SELECT, INSERT, UPDATE (is_read) ON public.notifications TO " + role);
+            jdbc.execute("SET LOCAL ROLE " + role);
+
+            UUID id = NotificationService.derivedId("test", recipient.toString());
+            UUID lockedId = NotificationService.derivedId("test", locked.toString());
+            var batch = List.of(new NewNotification(id, recipient, "Notice"),
+                    new NewNotification(lockedId, locked, "Locked recipient notice"));
+            assertEquals(2, service.create(batch));
+            assertEquals(0, service.create(batch));
+            assertEquals(List.of(id), notifications.findOwned(recipient, true, PageRequest.of(0, 1))
+                    .getContent().stream().map(Notification::getId).toList());
+            assertEquals(1, notifications.countUnread(recipient));
+            assertTrue(service.markRead(recipient, id).isRead());
+            assertTrue(service.markRead(recipient, id).isRead());
+            assertEquals(0, service.markAllRead(recipient));
+            assertEquals(1, notifications.countUnread(locked));
+            assertEquals(1, service.markAllRead(locked));
+        });
     }
 
     @Test
