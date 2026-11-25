@@ -7392,3 +7392,121 @@ implementer's self-audit, not independent review or QA acceptance.
 CI is recorded in the PR from its actual post-push snapshot without waiting.
 No merge, protected-main write, deployment, release dispatch, Issue closure or
 Project update is performed by this task.
+
+
+## FE32 R1/B1 targeted remediation — 25 November 2026
+
+This is **remediation-author verification**, following the Project Leader's
+explicit task “CodeMastery — PR #272: Targeted Remediation of R1/B1 Findings”.
+Codex produced the remediation, tests and focused self-audit. It does not establish
+independent closure of its own changes, human review, QA acceptance, protected
+integration or deployment. Refs #224; do not close FE32 from this record.
+
+### Baseline, authorization and preserved history
+
+Original R1/B1 reviewed HEAD: `10d3198fb681efb1f2ddce156cc89a274e6ebc86`.
+Original merge-base: `d8c6588a02bbfbc09cfd2f2fe0d4323f1be9a018` (#273).
+Latest main incorporated: `c5b9ac0ac04b057cef7ee7f62fdcb8143202bc9a` (#289), by
+normal merge `739b6dc` before remediation. The existing FE32 commit and merged
+Instructor/storage source and documentation are retained; no obsolete FE15 commit,
+force push, protected-main write or replacement PR is introduced.
+
+The task explicitly authorizes the three existing feature-test compatibility
+changes (`assessmentHooks.test.tsx`, `assessmentAuthoring.test.tsx`,
+`MyCoursesPage.test.tsx`) and directly relevant regressions only. It also authorizes
+bounded additions to the existing `presentation.browser.cjs`. No new tracked file,
+dependency, production feature, route, provider, store or contract is authorized.
+The previous additional-file authorization evidence gap is resolved by this record
+and the corresponding setup/PR record; 0 absorbed upstream production scope never
+meant 0 additional test-file scope.
+
+### Findings and remediation
+
+| Finding | Original independent evidence | Remediation and author-side result |
+| --- | --- | --- |
+| B1-F01 P2: maximum menu overlap | Instructor + bell at 900; Admin at 900/1200; at Admin 1200 Overview overlapped brand 67.43px, Catalogue overlapped Theme 44px and account 15.43px; center hit reached Theme. Firefox 155 and WebKit 26.6 reproduced. | Reserve intrinsic navigation width; allow account name to shrink with ellipsis, preserving the role and full accessible name; full role sets use existing compact spacing. Labels, brand sizing, labelled-pill padding, controls and breakpoints retained. New measured overlaps are empty; center and boundary hits reach each anchor. |
+| B1-F02 P2: delayed Course heading unfocused | Same actual Teaching→Course probe failed on reviewed HEAD and base; heading appeared after the pathname effect, focus stayed BODY. | One navigation-scoped intent, temporary main-subtree observation, consumed by the first ready heading. User events, query-only navigation, route/session replacement, blur and unmount cancel it and clean up. Initial restore is handled; ordinary updates do not re-arm. Actual held owned-Course GET and negative cases pass in Firefox. |
+| B1-F03 P3: compact target 40×44 | Actual rectangles 40×44, no pseudo extension; hit 1 px outside missed the anchor. Project 44×44 standard, not an alleged WCAG AA 24 px failure. | Icon-only anchor itself is 44×44, with no invisible overlapping extensions. All five center/edge samples pass; no neighboring target overlap. |
+
+### Newly executed automated verification
+
+From `frontend/` in the isolated remediation checkout:
+
+```text
+npm test -- src/routes/index.test.tsx
+# 198 tests PASS, including 10 new delayed-focus cases
+npm test -- src/routes/index.test.tsx src/app/providers/AuthProvider.test.tsx src/shared/components/presentation.test.tsx src/shared/components/presentation.browser.test.ts
+# 468 tests PASS: 460 in the three directly affected suites + 8 browser-harness lifecycle tests
+npm test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/learning/pages/MyCoursesPage.test.tsx
+# 141 tests PASS
+VITE_API_BASE_URL=/api npm run build -- --outDir <isolated-production-dist>
+# typecheck and production build PASS; existing large-chunk advisory
+```
+
+The 10 new routing cases cover delayed actual owned-Course GET, delayed
+focus under StrictMode, ordinary later updates, focus/input/pointer/key intent
+cancellation, query-only navigation, navigation away and authentication replacement.
+Existing Instructor suites retain Settings acknowledgment/reconciliation,
+unknown-outcome/no-replay, shared Course/skill and unsaved navigation regressions.
+The isolated `routes` run is a focused precursor, not added again to the 468 total.
+
+### Newly executed rendered verification
+
+Actual Linux browser environment: pinned Playwright 1.63.0 container, Firefox 155.0;
+WebKit 26.6 for cross-engine capacity. The container uses `pwuser`, default isolation,
+no published port and `--network none`; application servers bind loopback inside
+it. No personal profile, real account or host-security override. Host browser
+launch failures from the old review were not repeatedly retried.
+
+The existing optional harness now has focused `--fe32` mode. Its exported
+`createFE32Fixture(dist)` builds the actual production shell/theme/icons and
+`roleNavigation` with synthetic full-route descriptors in a temporary directory.
+The focused runner accepts `--url` and `--fixture-url` for caller-owned servers;
+it never registers these fixture routes in production. Controlled API responses
+conform to the runtime decoders; this is frontend verification, not real-backend
+integration evidence. Build/source hashes identify the tested corrected snapshot.
+
+| Executed browser group | Result |
+| --- | --- |
+| Original 126-cell responsive matrix: production Anonymous/Learner/Instructor/Administrator; full-capacity Learner+bell/Instructor+bell/Admin; 360/899/900/1199/1200/1440; Light/Dark/System | 126 PASS, 0 FAIL; original final criterion matrix had 93 PASS / 33 FAIL |
+| Every active full-menu item at 900/1200 with short and long names, Firefox | 40 PASS; full labels remain at 1200, inactive icons retain names at 900 |
+| Held actual owned-Course GET: delayed heading, user focus, user key input, navigation away, replacement server session, actual post-save background GET with ongoing description input | 6 PASS |
+| Durable focused Firefox total | 172 PASS, 0 FAIL |
+| Firefox/WebKit capacity with Instructor/Admin,900/1200,short/long names | 16 PASS, 0 FAIL; no overlap, no target/hit failures |
+
+Measurements retain the original tolerances: overlap 0.5px, document overflow 1 px,
+pill-height 0.5px and reach-center 1 px; minimum target 44×44 has no reduced threshold.
+No horizontal shell overflow or clipped navigation label was observed. Account role
+fits; full accessible names remain. Maximum Firefox reach-center error across the
+matrix and active-item capacity probes is 0.475px. Admin 1200 long-name account width
+is 173.13px in Firefox and 172.97px in WebKit; the 225.62px brand is preserved, and
+Catalogue's center and boundaries hit Catalogue. Actual compact targets are44×44.
+Mobile matrix cases retain drawer access, current row and reachable Theme controls.
+
+The first focused-harness attempt had an ambiguous `header` selector (page header
+and shell header). It was corrected to select the shell header; interrupted/error
+logs are retained as harness diagnostics, not product failures or passes. Original
+pre-remediation R1/B1 evidence remains unchanged. New screenshots, JSON matrices,
+source hashes and probe logs are stored separately in the remediation evidence.
+
+### Focused self-audit and remaining gates
+
+The complete remediation delta was inspected for F01/F03 interaction, role-caption
+capacity, font/active-item remeasurement, native anchors, r13 utility order, observer
+scope/cleanup, user-interaction cancellation, generation replacement and StrictMode.
+No additional confirmed in-scope production defect remained after that inspection.
+The reviewed navigation/start/guard mechanism and future activation boundary were
+not redesigned. Source and tests owning #273 functionality and #289 storage are
+preserved. No omitted backend or storage suite is claimed to have rerun here.
+
+Backend/PostgreSQL/storage/infrastructure/release and the unrelated broad E2E suite
+were not rerun locally: this delta changes shared frontend layout/focus and its
+verification/docs only. Prior exact-head CI and R1 evidence remain dated, not CI
+for the new remediation HEAD. The final PR records the actual post-push CI snapshot
+without waiting or dispatching a workflow.
+
+Next gates: new-chat delta-focused independent review, targeted independent
+rendered verification, eligible formal review of the corrected HEAD, required green
+CI, independent QA and protected integration. The prior approval at 10d3198 is not
+approval of the remediation. No merge, deployment, release or Project acceptance
+is performed by this task.

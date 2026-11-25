@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, StrictMode, useEffect } from 'react';
+import { act, StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { BrowserRouter, matchRoutes, Route, Routes, useNavigate } from 'react-router';
@@ -1036,4 +1036,74 @@ it('a cancelled editor logo navigation and a modified click never consume the pe
     expect(location.pathname).toBe('/courses'); expect(auth.startPath).toBe('/profile'); expect(proceed).toBeTypeOf('function');
     await act(async () => proceed!());
     expect(location.pathname).toBe('/profile'); expect(auth.startPath).toBe('/teach');
+});
+
+
+describe('B1-F02 navigation-scoped delayed heading focus', () => {
+    const deferredHeading = () => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((done) => { resolve = done; });
+        function Fixture() {
+            const [ready, setReady] = useState(false);
+            useEffect(() => { let alive = true; void promise.then(() => { if (alive) setReady(true); }); return () => { alive = false; }; }, []);
+            return <><input aria-label="Work in progress" />{ready && <h1>Delayed route heading</h1>}</>;
+        }
+        return { Fixture, resolve };
+    };
+    async function mountDeferred(strict = false) {
+        const state = deferredHeading();
+        window.history.replaceState(null, '', '/courses');
+        const app = <ThemeProvider theme={appTheme}><BrowserRouter><AuthProvider><Probe /><AppRouter catalogue={<state.Fixture />} /></AuthProvider></BrowserRouter></ThemeProvider>;
+        await act(async () => root.render(strict ? <StrictMode>{app}</StrictMode> : app));
+        return state;
+    }
+    it.each([false, true])('focuses the first delayed heading once, StrictMode=%s', async (strict) => {
+        const state = await mountDeferred(strict);
+        await act(async () => state.resolve());
+        const heading = host.querySelector('main h1')!;
+        expect(document.activeElement).toBe(heading);
+        const input = host.querySelector<HTMLInputElement>('input[aria-label="Work in progress"]')!;
+        input.focus();
+        await act(async () => { heading.append(document.createTextNode(' refreshed')); });
+        expect(document.activeElement).toBe(input);
+    });
+    it.each(['focusin', 'pointerdown', 'keydown', 'input'] as const)('respects user %s before the response', async (event) => {
+        const state = await mountDeferred();
+        const input = host.querySelector<HTMLInputElement>('input[aria-label="Work in progress"]')!;
+        if (event === 'focusin') input.focus();
+        else input.dispatchEvent(new Event(event, { bubbles: true }));
+        await act(async () => state.resolve());
+        expect(document.activeElement).not.toBe(host.querySelector('main h1'));
+        if (event === 'focusin') expect(document.activeElement).toBe(input);
+    });
+    it('cancels the intent on query-only navigation', async () => {
+        const state = await mountDeferred(); await go('/courses?q=next');
+        await act(async () => state.resolve());
+        expect(document.activeElement).not.toBe(host.querySelector('main h1'));
+    });
+    it('cannot focus a superseded route after navigation away', async () => {
+        const state = await mountDeferred(); await go('/missing');
+        const heading = host.querySelector('main h1'); expect(document.activeElement).toBe(heading);
+        await act(async () => state.resolve());
+        expect(host.textContent).not.toContain('Delayed route heading'); expect(document.activeElement).toBe(heading);
+    });
+    it('cancels a pending intent when an installed session is replaced', async () => {
+        const state = await mountDeferred(); await login('First session', 'Instructor');
+        await act(async () => state.resolve());
+        expect(document.activeElement).not.toBe(host.querySelector('main h1'));
+    });
+    it('focuses the actual owned Course heading when its GET completes', async () => {
+        let resolve!: (value: Response) => void;
+        fetcher.mockImplementation((url: string) => {
+            const path = new URL(url).pathname;
+            if (path === `/api/instructor/courses/${id}`) return new Promise<Response>((done) => { resolve = done; });
+            if (path.endsWith('/skill-graph')) return Promise.resolve(json({ courseId: id, skills: [], prerequisites: [], mappings: [] }));
+            return Promise.resolve(json(page));
+        });
+        await mount('/courses'); await login('Instructor', 'Instructor'); await go(`/teach/courses/${id}`);
+        expect(host.querySelector('main h1')).toBeNull();
+        await act(async () => resolve(json({ id, title: 'Delayed owned Course', description: 'Synthetic course', publicationStatus: 'hidden', prerequisiteDescription: null, chapters: [] })));
+        expect(host.querySelector('main h1')?.textContent).toBe('Delayed owned Course');
+        expect(document.activeElement).toBe(host.querySelector('main h1'));
+    });
 });

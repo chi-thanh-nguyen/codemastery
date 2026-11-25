@@ -104,11 +104,59 @@ function Workspace() {
     </DashboardLayout></ShellNavigationContext.Provider>;
 }
 function RouteFocus() {
-    const { pathname } = useLocation();
+    const { pathname, key } = useLocation(), auth = useAuth();
+    const latest = useRef(auth);
+    latest.current = auth;
+    const pending = useRef<{ cancel: () => void; ready: () => void } | null>(null);
+    // A same-path/query-only navigation cancels an old intent without creating a new one.
+    useLayoutEffect(() => { pending.current?.cancel(); }, [key]);
     useLayoutEffect(() => {
-        const heading = document.querySelector<HTMLElement>('main h1');
-        if (heading) { heading.tabIndex = -1; heading.focus(); }
+        const main = document.querySelector('main');
+        if (!main) return;
+        let generation = latest.current.generation;
+        let awaitingRestore = !latest.current.isAuthenticated && latest.current.restoring;
+        let active = true;
+        let observer: MutationObserver | undefined;
+        const cancel = () => {
+            if (!active) return;
+            active = false;
+            observer?.disconnect();
+            for (const event of ['pointerdown', 'keydown', 'input', 'focusin'] as const) document.removeEventListener(event, cancel, true);
+            window.removeEventListener('blur', cancel);
+            document.removeEventListener('visibilitychange', cancel);
+            if (pending.current?.cancel === cancel) pending.current = null;
+        };
+        const ready = () => {
+            if (!active) return;
+            const current = latest.current;
+            // A load-time restore may supply this navigation's first session. A replacement of an
+            // installed session cancels its intent; it must never focus a discarded session's view.
+            if (awaitingRestore) {
+                if (current.restoring) return;
+                awaitingRestore = false;
+                generation = current.generation;
+            } else if (current.generation !== generation) { cancel(); return; }
+            const heading = main.querySelector<HTMLElement>('h1');
+            if (!heading || !main.isConnected || document.visibilityState === 'hidden') return;
+            cancel();
+            heading.tabIndex = -1;
+            heading.focus();
+        };
+        pending.current = { cancel, ready };
+        // Listeners begin after the navigation's initiating event. Any subsequent interaction,
+        // including a dialog taking focus, wins over a delayed heading.
+        for (const event of ['pointerdown', 'keydown', 'input', 'focusin'] as const) document.addEventListener(event, cancel, true);
+        window.addEventListener('blur', cancel);
+        document.addEventListener('visibilitychange', cancel);
+        ready();
+        if (active) {
+            // Only the pending route's main subtree, only until its first heading or cancellation.
+            observer = new MutationObserver(ready);
+            observer.observe(main, { childList: true, subtree: true });
+        }
+        return cancel;
     }, [pathname]);
+    useLayoutEffect(() => { pending.current?.ready(); }, [auth.generation, auth.restoring]);
     return null;
 }
 function Catalogue() {

@@ -2299,3 +2299,52 @@ a supplemental retrieval map, with repository governance authoritative.
 [Verification and remaining gates](testing.md#fe32-role-navigation-self-audit--25-november-2026)
 are implementer evidence, not independent CODEOWNER review, QA acceptance,
 protected integration, release or deployment authorization.
+
+
+## FE32 R1/B1 targeted remediation — 25 November 2026
+
+The Project Leader's explicit instruction **“CodeMastery — PR #272: Targeted
+Remediation of R1/B1 Findings”** transitions the completed review into bounded
+remediation in PR #272 (Refs #224). It authorizes fixing inherited B1-F01/F02/F03,
+normal commit/push, updating the PR description, and synchronizing these records;
+it does not authorize merge, deployment, Issue closure or Project acceptance.
+
+The same instruction explicitly authorizes retaining the existing AuthProvider
+test-double compatibility changes, and directly relevant regressions only, in
+`assessmentHooks.test.tsx`, `assessmentAuthoring.test.tsx` and
+`MyCoursesPage.test.tsx`. No production feature work is authorized there. It also
+authorizes narrowly scoped durable regressions in the existing
+`shared/components/presentation.browser.cjs`; no new tracked file or dependency.
+This resolves the additional-file authorization evidence gap identified in R1.
+
+The starting reviewed HEAD is `10d3198fb681efb1f2ddce156cc89a274e6ebc86`.
+`main` `c5b9ac0ac04b057cef7ee7f62fdcb8143202bc9a` (SH05 #289) is incorporated by a
+normal merge, preserving the original FE32 commit, #273 and #289. Storage source,
+its documentation and the FE32 historical records are retained; obsolete FE15
+commits are not reintroduced and no force push is used.
+
+- **B1-F01/F03:** the navigation slot reserves its intrinsic content width; the
+  account slot may shrink through the existing display-name ellipsis while the
+  visible role and full accessible name remain. Full role sets use existing
+  compact spacing values. Brand sizing, labelled-pill padding, utilities, r13
+  ordering and breakpoints stay in place. Icon-only anchors have actual 44×44 px
+  rectangles, rather than theoretical or overlapping invisible extensions.
+- **B1-F02:** route focus holds one intent for a pathname navigation. If the
+  heading is delayed, a temporary observer watches only that route's main subtree.
+  The first meaningful heading consumes the intent. Subsequent user interaction,
+  query-only navigation, another route, session replacement, blur or unmount
+  cancels it and removes the observer/listeners. An unfinished initial session
+  restore may provide that navigation's first session; ordinary data updates do
+  not create another intent. No timer repeatedly focuses content.
+- Production registration, activation, role starts, Profile return memory,
+  backend authorization, #273 Course/skill ownership, Settings reconciliation and
+  mutation replay rules are unchanged. Future screens remain inactive. No upstream
+  production capability, API, provider, store, route or dependency is absorbed.
+
+The focused browser harness mode `--fe32` uses a caller-owned production URL and
+`--fixture-url`. Its exported `createFE32Fixture` builds a temporary fixture from
+actual reviewed shell/theme/icon components and `roleNavigation`, with synthetic
+future route descriptors. It never registers those screens in production. Use
+only URLs printed by the isolated servers; the normal broad harness mode remains
+available. [Dated verification](testing.md#fe32-r1b1-targeted-remediation--25-november-2026)
+separates remediation-author evidence from independent closure and acceptance.

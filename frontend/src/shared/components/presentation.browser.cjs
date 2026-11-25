@@ -10,6 +10,7 @@
 // It does not prove backend integration (see e2e/), screen-reader output or WCAG conformance.
 //
 // Usage (from frontend/):
+//   npm run test:browser -- --fe32 --fixture-url <isolated-fixture-url> --url <owned-production-url> --engine firefox
 //   npm run test:browser                          # builds, serves on a free 127.0.0.1 port, Chromium
 //   npm run test:browser -- --engine all          # chromium, webkit and firefox in turn
 //   npm run test:browser -- --url http://127.0.0.1:4173/ --out /tmp/evidence --engine webkit
@@ -84,16 +85,16 @@ const courses = [
 ].sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : 0));
 const summary = ({ prerequisiteDescription, ...rest }) => rest;
 const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
-function loginBody(role = 'Learner') {
+function loginBody(role = 'Learner', displayName = 'Harness Learner', sessionId = instructorId) {
     const iat = Math.floor(Date.now() / 1000);
-    return { accessToken: `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: instructorId, iss: 'codemastery', aud: 'codemastery-api', iat, exp: iat + 900 })}.${'A'.repeat(43)}`,
-        tokenType: 'Bearer', expiresIn: 900, user: { id: instructorId, displayName: 'Harness Learner', role } };
+    return { accessToken: `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: instructorId, sid: sessionId, iss: 'codemastery', aud: 'codemastery-api', iat, exp: iat + 900 })}.${'A'.repeat(43)}`,
+        tokenType: 'Bearer', expiresIn: 900, user: { id: instructorId, displayName, role } };
 }
 const problem = (status, detail, instance) => ({ status, contentType: 'application/problem+json', body: JSON.stringify({ type: 'about:blank', title: { 400: 'Bad Request', 401: 'Unauthorized', 404: 'Not Found', 500: 'Internal Server Error' }[status], status, detail, instance }) });
 const ok = (value) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(value) });
 
 function createApi() {
-    const state = { requests: [], hold: null, fail: new Map(), memberships: new Map([[primaryId, 'active'], [courses[3].id, 'left']]) };
+    const state = { role: 'Learner', displayName: 'Harness Learner', sessionId: instructorId, restore: false, requests: [], hold: null, fail: new Map(), memberships: new Map([[primaryId, 'active'], [courses[3].id, 'left']]) };
     async function handle(route) {
         const request = route.request(), url = new URL(request.url()), p = url.pathname.replace(/^\/api/, '');
         state.requests.push(`${request.method()} ${url.pathname}${url.search}`);
@@ -101,10 +102,10 @@ function createApi() {
         if (state.fail.has(p)) return route.fulfill(problem(state.fail.get(p), 'The request could not be completed.', url.pathname));
         if (p === '/auth/login' && request.method() === 'POST') {
             const body = request.postDataJSON();
-            return body.password === 'wrong-password-123' ? route.fulfill(problem(401, 'Invalid email or password.', url.pathname)) : route.fulfill(ok(loginBody()));
+            return body.password === 'wrong-password-123' ? route.fulfill(problem(401, 'Invalid email or password.', url.pathname)) : route.fulfill(ok(loginBody(state.role, state.displayName, state.sessionId)));
         }
         // ADR014: the harness browser holds no refresh cookie, so the load-time session check is refused.
-        if (p === '/auth/refresh' && request.method() === 'POST') return route.fulfill(problem(401, 'Authentication failed.', url.pathname));
+        if (p === '/auth/refresh' && request.method() === 'POST') return state.restore ? route.fulfill(ok(loginBody(state.role, state.displayName, state.sessionId))) : route.fulfill(problem(401, 'Authentication failed.', url.pathname));
         if (p === '/courses' && request.method() === 'GET') {
             const q = (url.searchParams.get('q') || '').toLowerCase(), pre = url.searchParams.get('prerequisites') || 'any';
             const page = Number(url.searchParams.get('page') || 0), size = Number(url.searchParams.get('size') || 20);
@@ -196,7 +197,9 @@ async function main() {
             dirty: (() => { try { return execFileSync('git', ['status', '--porcelain'], { cwd: frontendRoot, encoding: 'utf8' }).trim().length > 0; } catch { return null; } })(),
             baseUrl, api: 'Controlled page.route responses only; no backend', engines: [] };
         for (const engine of engines) {
-            const result = await runEngine(playwright, engine, baseUrl);
+            const fixtureUrl = flag('fixture-url');
+            if (args.includes('--fe32') && !fixtureUrl) throw new Error('--fe32 requires --fixture-url serving createFE32Fixture output; never activate production routes.');
+            const result = args.includes('--fe32') ? await runFE32Engine(playwright, engine, baseUrl, fixtureUrl) : await runEngine(playwright, engine, baseUrl);
             report.engines.push(result); failed += result.failed.length;
         }
     } finally {
@@ -1488,6 +1491,237 @@ async function runEngine(playwright, engine, baseUrl) {
     return result;
 }
 
+
+/** Build the actual shell with synthetic route descriptors outside tracked source. */
+function createFE32Fixture(dist) {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'codemastery-fe32-fixture-'));
+    try {
+        fs.symlinkSync(path.join(frontendRoot, 'node_modules'), path.join(temp, 'node_modules'), 'dir');
+        const source = String.raw`import React, { useState, useEffect, useLayoutEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+import { ThemeProvider, CssBaseline, Button, MenuItem } from '@mui/material';
+import { BrowserRouter, useLocation, useNavigate } from 'react-router';
+import { DashboardLayout, Page } from '__FRONTEND__/src/layouts/DashboardLayout';
+import { AccountMenu, HeaderIconButton } from '__FRONTEND__/src/shared/components/AppHeader';
+import { PresentationIcon } from '__FRONTEND__/src/shared/components/PresentationIcon';
+import { roleNavigation, currentSection, notificationsAvailable } from '__FRONTEND__/src/routes/routePaths';
+import { appTheme, ThemePreferenceContext, readStoredThemePreference, readSystemScheme, applyThemeScheme, resolveThemeScheme, writeStoredThemePreference } from '__FRONTEND__/src/app/theme/theme';
+const paths:any = {
+ Learner:['/home','/my-courses','/courses/:courseId/learn'],
+ Instructor:['/teach','/teach/grading','/teach/grading/:submissionId','/teach/learners','/teach/courses/:courseId/learners'],
+ Administrator:['/admin','/admin/users','/admin/courses','/admin/reports','/admin/audit']
+};
+const routes:any = [{path:'/courses'},{path:'/courses/:courseId'},...Object.entries(paths).map(([role,ps]:any)=>({handle:{roles:[role]},children:ps.map((path:string)=>({path}))})),{path:'/notifications',handle:{roles:['Learner','Instructor']}}];
+function Shell(){
+ const location=useLocation(),navigate=useNavigate();const query=new URLSearchParams(location.search);const role:any=query.get('role')||'Administrator';
+ const long=query.get('name')!=='short';const name=long?'Alexandria Nguyễn Montgomery':'Alex Nguyen';
+ const selected=currentSection(location.pathname,role,routes);
+ const navItems=roleNavigation(role,routes).map(item=>({...item,icon:<PresentationIcon name={item.icon}/>}));
+ const go=(path:string)=>navigate(path+location.search);
+ return <DashboardLayout navItems={navItems} selectedNavId={selected} onNavSelect={go} brandHref={'/courses'+location.search} onBrandSelect={()=>go('/courses')}
+  headerUtilities={notificationsAvailable(role,routes)?<HeaderIconButton label="Notifications" icon="bell" href={'/notifications'+location.search} current={selected==='/notifications'} onClick={(e:any)=>{e?.preventDefault();go('/notifications')}}/>:undefined}
+  headerActions={<AccountMenu displayName={name} role={role} renderItems={close=><><MenuItem onClick={close}>Profile</MenuItem><MenuItem onClick={close}>Sign out</MenuItem></>}/>}
+ ><Page><h1>Future-capacity fixture: {role}</h1><p>Actual reviewed shell; synthetic delivered-route descriptors and content. No production activation.</p><Button onClick={()=>go('/unmatched')}>Unmatched fixture route</Button></Page></DashboardLayout>
+}
+function Fixture(){
+ const [preference,setPref]=useState(readStoredThemePreference),[systemScheme,setSystem]=useState(readSystemScheme);
+ const scheme=resolveThemeScheme(preference,systemScheme);
+ useLayoutEffect(()=>applyThemeScheme(scheme),[scheme]);
+ useEffect(()=>{let m=matchMedia('(prefers-color-scheme: dark)');let h=()=>setSystem(readSystemScheme());m.addEventListener('change',h);return()=>m.removeEventListener('change',h)},[]);
+ return <ThemePreferenceContext.Provider value={{preference,systemScheme,setPreference:(v:any)=>{setPref(v);writeStoredThemePreference(v)},previewPreference:null,setPreviewPreference:()=>{}}}><ThemeProvider theme={appTheme} defaultMode="light" storageManager={null} colorSchemeNode={null}><CssBaseline/><BrowserRouter><Shell/></BrowserRouter></ThemeProvider></ThemePreferenceContext.Provider>
+}
+createRoot(document.getElementById('root')!).render(<Fixture/>);
+`.replaceAll('__FRONTEND__', frontendRoot);
+        fs.writeFileSync(path.join(temp, 'fixture.tsx'), source);
+        fs.writeFileSync(path.join(temp, 'index.html'), fs.readFileSync(path.join(frontendRoot, 'index.html'), 'utf8').replace('/src/main.tsx', '/fixture.tsx'));
+        const config = `import { defineConfig } from ${JSON.stringify(path.join(frontendRoot, 'node_modules/vite/dist/node/index.js'))};
+import react from ${JSON.stringify(path.join(frontendRoot, 'node_modules/@vitejs/plugin-react/dist/index.js'))};
+export default defineConfig({root:${JSON.stringify(temp)},plugins:[react()],publicDir:${JSON.stringify(path.join(frontendRoot, 'public'))},build:{outDir:${JSON.stringify(dist)},emptyOutDir:true}});`;
+        fs.writeFileSync(path.join(temp, 'vite.config.mjs'), config);
+        execFileSync(process.execPath, [path.join(frontendRoot, 'node_modules/vite/bin/vite.js'), 'build', '--config', path.join(temp, 'vite.config.mjs')], { cwd: frontendRoot, stdio: 'inherit' });
+    } finally { fs.rmSync(temp, { recursive: true, force: true }); }
+}
+
+/** B1-F01/F03: assert real rectangles and hit regions, not only document overflow. */
+async function workspaceGeometry(page) {
+    return page.evaluate(() => {
+        const visible = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden'; };
+        const box = (e) => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom }; };
+        const header = document.querySelector('header');
+        const items = [...header.querySelectorAll('[data-nav-item]')].filter(visible);
+        const brand = header.querySelector('[aria-label="CodeMastery home"]');
+        const utilities = [...header.querySelectorAll('[aria-label^="Notifications"], [data-theme-control="button"], [data-account-menu]')].filter(visible);
+        const controls = [brand, ...items, ...utilities].filter((e) => e && visible(e));
+        const overlaps = [];
+        for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
+            const a = box(controls[i]), b = box(controls[j]);
+            const width = Math.min(a.right, b.right) - Math.max(a.x, b.x), height = Math.min(a.bottom, b.bottom) - Math.max(a.y, b.y);
+            if (width > .5 && height > .5) overlaps.push({ first: controls[i].getAttribute('aria-label') || controls[i].textContent, second: controls[j].getAttribute('aria-label') || controls[j].textContent, width, height });
+        }
+        const active = items.find((e) => e.getAttribute('aria-current') === 'page');
+        const reach = header.dataset.reachX === undefined ? null : Number(header.dataset.reachX);
+        const account = header.querySelector('[data-account-menu]');
+        return {
+            scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth,
+            effectiveScheme: document.documentElement.dataset.colorScheme,
+            frame: getComputedStyle(header).backgroundColor, fontsLoaded: document.fonts.check('16px "Google Sans Flex"'),
+            overlaps, reachError: active && reach !== null ? reach + 44 - (box(active).x - box(header).x + box(active).width / 2) : null,
+            reach, brand: brand && box(brand), utilities: utilities.map((e) => ({ name: e.getAttribute('aria-label'), box: box(e) })),
+            account: account && { box: box(account), role: account.children[1]?.lastElementChild?.textContent,
+                roleFits: account.children[1]?.lastElementChild?.scrollWidth <= account.children[1]?.lastElementChild?.clientWidth + 1 },
+            items: items.map((e) => {
+                const r = box(e);
+                const points = [[r.x + 1, r.y + r.height / 2], [r.x + r.width / 2, r.y + r.height / 2], [r.right - 1, r.y + r.height / 2], [r.x + r.width / 2, r.y + 1], [r.x + r.width / 2, r.bottom - 1]];
+                return { label: e.textContent.trim(), box: r, current: e.getAttribute('aria-current'), iconOnly: !!e.querySelector('.cm-visually-hidden'),
+                    clipped: e.scrollWidth > e.clientWidth + 1, hits: points.map(([x, y]) => { const hit = document.elementFromPoint(x, y); return hit === e || e.contains(hit); }) };
+            }),
+        };
+    });
+}
+function assertWorkspaceGeometry(measured, width) {
+    assert(measured.scrollWidth <= measured.clientWidth + 1, 'horizontal document overflow');
+    assert.equal(measured.frame, 'rgb(10, 11, 15)');
+    assert(measured.fontsLoaded, 'font not loaded');
+    assert.deepEqual(measured.overlaps, [], 'overlapping shell controls');
+    if (width < 900) { assert.equal(measured.items.length, 0); assert.equal(measured.reach, null); return; }
+    for (const item of measured.items) {
+        assert(item.box.width >= 44 && item.box.height >= 44, `${item.label}: target below44x44`);
+        assert(Math.abs(item.box.height - 44) <= .5, `${item.label}: pill height`);
+        assert(item.hits.every(Boolean), `${item.label}: obstructed center/edge hit`);
+        assert(!item.clipped, `${item.label}: clipped`);
+        assert.equal(item.iconOnly, width < 1200 && item.current !== 'page', `${item.label}: responsive label`);
+    }
+    assert.equal(measured.items.filter((item) => item.current === 'page').length, 1);
+    assert(measured.reachError !== null && Math.abs(measured.reachError) <= 1, 'reach alignment');
+    if (measured.account) assert(measured.account.roleFits, 'account role clipped');
+}
+
+/** Focused FE32 regression mode; controlled APIs, actual production shell and a temporary full-capacity fixture. */
+async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl) {
+    const result = { engine, version: null, passed: [], failed: [], notExercised: [], measurements: [] };
+    const dir = path.join(out, engine); fs.mkdirSync(dir, { recursive: true });
+    let browser;
+    try { browser = await playwright[engine].launch({ headless: true }); }
+    catch (error) { result.launchError = String(error); return result; }
+    result.version = browser.version();
+    const check = async (name, run) => {
+        try { await run(); result.passed.push(name); console.log(`PASS [${engine}] ${name}`); }
+        catch (error) { result.failed.push({ name, error: String(error) }); console.log(`FAIL [${engine}] ${name}: ${String(error).split('\n')[0]}`); }
+    };
+    const ready = async (page) => { await page.locator('header').first().waitFor(); await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(300); };
+    const longName = 'Alexandria Nguyễn Montgomery';
+    try {
+        for (const track of ['production', 'future-fixture']) for (const role of track === 'production' ? ['Anonymous', 'Learner', 'Instructor', 'Administrator'] : ['Learner', 'Instructor', 'Administrator']) {
+            for (const width of [360, 899, 900, 1199, 1200, 1440]) for (const preference of ['light', 'dark', 'system']) {
+                const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: preference === 'system' ? 'dark' : 'light' });
+                await context.addInitScript((value) => localStorage.setItem('codemastery.theme', value), preference);
+                const api = createApi(); Object.assign(api.state, { role, displayName: longName, restore: role !== 'Anonymous' });
+                await context.route('**/api/**', api.handle);
+                const page = await context.newPage();
+                const route = track === 'production' ? '/courses' : (role === 'Learner' ? '/home' : role === 'Instructor' ? '/teach' : '/admin');
+                const name = `FE32 ${track} ${role} ${width} ${preference}`;
+                await check(name, async () => {
+                    await page.goto(new URL(route + (track === 'future-fixture' ? `?role=${role}` : ''), track === 'production' ? baseUrl : fixtureUrl).href);
+                    await ready(page);
+                    const measured = await workspaceGeometry(page);
+                    result.measurements.push({ name, track, role, width, height: 900, preference, route, measured });
+                    fs.writeFileSync(path.join(dir, `${track}-${role}-${width}-${preference}.json`), JSON.stringify(measured, null, 2));
+                    if ([360, 900, 1200, 1440].includes(width) && preference === 'light') await page.screenshot({ path: path.join(dir, `${track}-${role}-${width}.png`) });
+                    assertWorkspaceGeometry(measured, width);
+                    assert.equal(measured.effectiveScheme, preference === 'light' ? 'light' : 'dark');
+                    if (width < 900) {
+                        await page.getByRole('button', { name: 'Toggle navigation' }).click();
+                        await page.getByRole('radio', { name: 'Dark', exact: true }).scrollIntoViewIfNeeded();
+                        assert(await page.getByRole('radio', { name: 'Dark', exact: true }).isVisible());
+                        assert.equal(await page.locator('.MuiDrawer-paper [aria-current="page"]').count(), 1);
+                        await page.keyboard.press('Escape');
+                    }
+                });
+                await context.close();
+            }
+        }
+        // Every possible active full-menu item, with both short and long names, at the capacity boundaries.
+        for (const role of ['Instructor', 'Administrator']) for (const width of [900, 1200]) for (const displayName of ['short', 'long']) {
+            const context = await browser.newContext({ viewport: { width, height: 900 } }), page = await context.newPage();
+            try {
+                await page.goto(new URL(`${role === 'Instructor' ? '/teach' : '/admin'}?role=${role}&name=${displayName}`, fixtureUrl).href); await ready(page);
+                const labels = await page.locator('header nav a').allTextContents();
+                for (const label of labels) await check(`FE32 active capacity ${role} ${width} ${displayName} ${label}`, async () => {
+                    const link = page.locator('header nav').getByRole('link', { name: label, exact: true });
+                    await link.focus(); await page.keyboard.press('Enter'); await page.waitForTimeout(300);
+                    const measured = await workspaceGeometry(page); assertWorkspaceGeometry(measured, width);
+                    result.measurements.push({ name: `active ${role} ${width} ${displayName} ${label}`, track: 'future-fixture', role, width, displayName, measured });
+                });
+            } finally { await context.close(); }
+        }
+        // The actual owned-Course route, with a held GET; a fixture heading cannot satisfy these checks.
+        for (const scenario of ['delayed', 'user-focus', 'user-input', 'navigation-away', 'session-replacement', 'background-refresh']) {
+            await check(`FE32 route focus ${scenario}`, async () => {
+                const context = await browser.newContext({ viewport: { width: 1200, height: 900 } });
+                const api = createApi(); Object.assign(api.state, { role: 'Instructor', displayName: longName, restore: true });
+                await context.route('**/api/**', api.handle);
+                let release, pendingRead = false, hold = true;
+                let course = { id: primaryId, title: 'Delayed owned Course', description: 'Synthetic Course for focus regression.', publicationStatus: 'hidden', prerequisiteDescription: null, chapters: [] };
+                await context.route('**/api/instructor/courses**', async (route) => {
+                    const p = new URL(route.request().url()).pathname;
+                    if (p === '/api/instructor/courses') return route.fulfill(ok({ content: [{ id: primaryId, title: course.title, description: course.description, publicationStatus: 'hidden' }], page: 0, size: 20, totalElements: 1, totalPages: 1 }));
+                    if (p.endsWith('/skill-graph')) return route.fulfill(ok({ courseId: primaryId, skills: [], prerequisites: [], mappings: [] }));
+                    if (p === `/api/instructor/courses/${primaryId}`) {
+                        if (route.request().method() === 'PUT') { course = { ...course, ...route.request().postDataJSON() }; return route.fulfill(ok(course)); }
+                        if (hold) { pendingRead = true; await new Promise((done) => { release = done; }); }
+                        return route.fulfill(ok(course)).catch(() => undefined);
+                    }
+                    return route.fallback();
+                });
+                const page = await context.newPage(); page.setDefaultTimeout(7000);
+                try {
+                    await page.goto(new URL('/teach', baseUrl).href); await page.getByRole('link', { name: new RegExp(course.title) }).click();
+                    // Wait for the controlled request, without releasing its response.
+                    for (let attempt = 0; !pendingRead && attempt < 100; attempt++) await page.waitForTimeout(10);
+                    assert(pendingRead, 'owned Course GET did not start');
+                    const account = page.getByRole('button', { name: /^Account menu/ });
+                    if (scenario === 'user-focus' || scenario === 'user-input') {
+                        await account.focus();
+                        if (scenario === 'user-input') await page.keyboard.press('ArrowDown');
+                    }
+                    if (scenario === 'navigation-away') { await page.locator('header nav').getByRole('link', { name: 'Catalogue', exact: true }).click(); await ready(page); }
+                    if (scenario === 'session-replacement') {
+                        api.state.role = 'Learner'; api.state.sessionId = '00000000-0000-4000-8000-000000000099';
+                        // BroadcastChannel does not deliver to its sender, so send from a second document.
+                        const peer = await context.newPage(); await peer.goto(new URL('/preview', baseUrl).href);
+                        await peer.evaluate(() => { const channel = new BroadcastChannel('codemastery-auth'); channel.postMessage({ type: 'signed-in' }); channel.close(); }); await peer.close();
+                        await page.getByRole('heading', { name: "You don't have access to this page" }).waitFor();
+                    }
+                    hold = false; release();
+                    if (scenario === 'navigation-away' || scenario === 'session-replacement') {
+                        await page.waitForTimeout(100); assert.equal(await page.getByRole('heading', { name: course.title, exact: true }).count(), 0);
+                    } else {
+                        const heading = page.getByRole('heading', { name: course.title, exact: true }); await heading.waitFor();
+                        const focused = await heading.evaluate((e) => e === document.activeElement);
+                        assert.equal(focused, scenario === 'delayed' || scenario === 'background-refresh');
+                        if (scenario === 'background-refresh') {
+                            await page.getByRole('button', { name: 'Settings', exact: true }).click();
+                            const description = page.getByLabel('Description');
+                            await description.fill('Acknowledged description');
+                            hold = true; pendingRead = false;
+                            await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+                            await page.getByText('Settings saved. Refreshing course…', { exact: true }).waitFor();
+                            assert(pendingRead, 'post-save Course GET did not start');
+                            await description.fill('Ongoing unsaved input');
+                            hold = false; release();
+                            await page.waitForTimeout(150);
+                            assert(await description.evaluate((e) => e === document.activeElement), 'background GET stole input focus');
+                            assert.equal(await description.inputValue(), 'Ongoing unsaved input');
+                        }
+                    }
+                    await page.screenshot({ path: path.join(dir, `focus-${scenario}.png`) });
+                } finally { hold = false; release?.(); await context.close(); }
+            });
+        }
+    } finally { await browser.close(); }
+    return result;
+}
+
 // Lifecycle helpers are exported for presentation.browser.test.ts; the harness runs only when executed directly.
-module.exports = { buildMarker, markBuild, waitForUrl };
+module.exports = { buildMarker, markBuild, waitForUrl, createFE32Fixture, workspaceGeometry, assertWorkspaceGeometry, runFE32Engine };
 if (require.main === module) main().catch((error) => { console.error(error); process.exitCode = 1; });
