@@ -863,6 +863,40 @@ class CourseServiceTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"create", "update", "publication", "file-title", "file-publication"})
+    void co09JsonAdmissionNeverReadsARejectedBody(String operation) throws Exception {
+        var access = mock(CourseAccessService.class);
+        var materials = mock(LearningMaterialService.class);
+        var controller = new com.codemastery.modules.course.api.controller.CourseStructureController(
+                mock(CourseStructureService.class), access, materials);
+        var request = mock(jakarta.servlet.http.HttpServletRequest.class);
+        when(request.getContentType()).thenReturn("application/json");
+        var denied = new ResourceNotFoundException("Resource not available");
+        switch (operation) {
+            case "create" -> doThrow(denied).when(access).requireLessonOwnership(COURSE, LESSON);
+            case "update", "publication" -> doThrow(denied).when(materials).requireOwnedRelational(COURSE, LESSON, MATERIAL);
+            default -> doThrow(denied).when(materials).requireOwnedFile(COURSE, LESSON, MATERIAL);
+        }
+        assertSame(denied, assertThrows(ResourceNotFoundException.class, () -> {
+            switch (operation) {
+                case "create" -> controller.createRelationalMaterial(COURSE.toString(), LESSON.toString(), request);
+                case "update" -> controller.updateRelationalMaterial(COURSE.toString(), LESSON.toString(), MATERIAL.toString(), request);
+                case "publication" -> controller.setRelationalMaterialPublication(COURSE.toString(), LESSON.toString(), MATERIAL.toString(), request);
+                case "file-title" -> controller.updateFileMaterialTitle(COURSE.toString(), LESSON.toString(), MATERIAL.toString(), request);
+                default -> controller.setFileMaterialPublication(COURSE.toString(), LESSON.toString(), MATERIAL.toString(), request);
+            }
+        }));
+        verify(request, never()).getInputStream();
+        verify(request, never()).getReader();
+        if (operation.equals("update") || operation.equals("publication")) {
+            verify(materials).requireOwnedRelational(COURSE, LESSON, MATERIAL);
+        } else if (operation.startsWith("file-")) {
+            verify(materials).requireOwnedFile(COURSE, LESSON, MATERIAL);
+        }
+        verifyNoMoreInteractions(materials);
+    }
+
     @Test void co09TitleCloseFailureNeverAcquiresFileStream() throws Exception {
         var request = mock(org.springframework.web.multipart.MultipartHttpServletRequest.class);
         var title = mock(jakarta.servlet.http.Part.class); var file = mock(jakarta.servlet.http.Part.class);

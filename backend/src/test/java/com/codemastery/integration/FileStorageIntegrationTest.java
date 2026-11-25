@@ -1060,6 +1060,7 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
     @jakarta.persistence.PersistenceContext jakarta.persistence.EntityManager materialPersistence;
     @org.springframework.beans.factory.annotation.Value("${local.server.port}") int materialPort;
     @Autowired com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider materialTokens;
+    @Autowired org.springframework.boot.servlet.filter.OrderedFormContentFilter materialFormFilter;
     static final byte[] PDF_A={'%','P','D','F','-',0,(byte)255,10,1}, PDF_B={'%','P','D','F','-',0,(byte)128,10,2};
 
     final class MaterialFixture implements AutoCloseable {
@@ -1244,6 +1245,238 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
         }
     }
 
+
+    @ParameterizedTest
+    @ValueSource(strings = {"file-materials", "%66ile-materials", "file%2Dmaterials", "%66ile%2dmaterials"})
+    void co09Ir01EquivalentUploadRoutesKeepAdmissionBeforeFormParsing(String segment) throws Exception {
+        try (var f = new MaterialFixture()) {
+            String owner = f.token(f.owner), learner = f.token(f.learner);
+            String path = f.path().replace("file-materials", segment);
+            byte[] badForm = "x=%ZZ".getBytes(StandardCharsets.US_ASCII);
+            for (String target : List.of(path + "/" + UUID.randomUUID() + "/file", path)) {
+                String method = target.equals(path) ? "POST" : "PUT";
+                for (String token : List.of(owner, learner, "invalid")) {
+                    var response = materialHttp(method, target, token, "application/x-www-form-urlencoded", badForm);
+                    assertEquals(token.equals("invalid") ? 401 : 415, response.statusCode(), target);
+                    assertEquals("close", response.headers().firstValue("Connection").orElse(""), target);
+                }
+                assertEquals(401, materialHttp(method, target, null, "application/x-www-form-urlencoded", badForm).statusCode());
+                assertEquals(403, materialHttp(method, target, learner, "multipart/form-data; boundary=x", badForm).statusCode());
+                assertEquals(target.equals(path) ? 400 : 404,
+                        materialHttp(method, target, owner, "multipart/form-data; boundary=x", badForm).statusCode());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "/publication"})
+    void co09Ir02RelationalScopePrecedesInvalidBodyOnRealHttp(String suffix) throws Exception {
+        try (var f = new MaterialFixture(); var foreign = new MaterialFixture()) {
+            String owner = f.token(f.owner), learner = f.token(f.learner), other = foreign.token(foreign.owner);
+            signIn(f.owner, com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR);
+            var text = materials.createRelationalMaterial(f.course, f.lesson,
+                    new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite(
+                            "Original", com.codemastery.modules.course.domain.model.MaterialType.TEXT, "  code\n", null));
+            var file = createPdf(f);
+            signIn(foreign.owner, com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR);
+            var foreignText = materials.createRelationalMaterial(foreign.course, foreign.lesson,
+                    new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite(
+                            "Foreign", com.codemastery.modules.course.domain.model.MaterialType.TEXT, "foreign", null));
+            String path = f.path().replace("file-materials", "materials") + "/";
+            List<String> invalid = List.of("{}", "", "{", "null", "{\"title\":\"Only\"}",
+                    "{\"publicationStatus\":\"invalid\"}", "{\"publicationStatus\":true}",
+                    "{\"title\":\"x\",\"title\":\"y\"}");
+            for (String body : invalid) {
+                byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+                for (UUID absent : List.of(UUID.randomUUID(), foreignText.id())) {
+                    assertEquals(404, materialHttp("PUT", path + absent + suffix, owner, "application/json", bytes).statusCode(), body);
+                }
+                assertEquals(400, materialHttp("PUT", path + text.id() + suffix, owner, "application/json", bytes).statusCode());
+                assertEquals(400, materialHttp("PUT", path + file.id() + suffix, owner, "application/json", bytes).statusCode());
+                assertEquals(403, materialHttp("PUT", path + text.id() + suffix, learner, "application/json", bytes).statusCode());
+                assertEquals(403, materialHttp("PUT", path + text.id() + suffix, other, "application/json", bytes).statusCode());
+            }
+            assertEquals("Original", materialRows.findMaterial(f.lesson, text.id()).orElseThrow().title());
+            assertEquals("hidden", materialRows.findMaterial(f.lesson, text.id()).orElseThrow().publicationStatus().getStatus());
+            assertEquals("  code\n", materialRows.findMaterial(f.lesson, text.id()).orElseThrow().textContent());
+            // Same-Course but different Lesson is also a descendant mismatch.
+            materialJdbc.update("UPDATE lessons SET chapter_id=?, position=2 WHERE id=?", f.chapter, foreign.lesson);
+            try {
+                assertEquals(404, materialHttp("PUT", path + foreignText.id() + suffix, owner, "application/json", "{}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            } finally {
+                materialJdbc.update("UPDATE lessons SET chapter_id=?, position=1 WHERE id=?", foreign.chapter, foreign.lesson);
+            }
+            materialJdbc.update("UPDATE courses SET publication_status='hidden' WHERE id=?", f.course);
+            assertEquals(404, materialHttp("PUT", path + text.id() + suffix, other, "application/json", "{}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            String valid = suffix.isEmpty() ? "{\"title\":\"Edited\",\"materialType\":\"text\",\"textContent\":\" body \"}"
+                    : "{\"publicationStatus\":\"published\"}";
+            assertEquals(200, materialHttp("PUT", path + text.id() + suffix, owner, "application/json", valid.getBytes(StandardCharsets.UTF_8)).statusCode());
+        }
+    }
+
+    private static byte[] materialMultipart(boolean title) throws IOException {
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        if (title) body.write("--x\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nSlides\r\n".getBytes(StandardCharsets.UTF_8));
+        body.write("--x\r\nContent-Disposition: form-data; name=\"file\"; filename=\"Bài.pdf\"\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+        body.write(PDF_A);
+        body.write("\r\n--x--\r\n".getBytes(StandardCharsets.US_ASCII));
+        return body.toByteArray();
+    }
+
+    @Test void co09Ir01AllEncodedBindingsAndUnreadBodyTransport() throws Exception {
+        try (var f = new MaterialFixture()) {
+            String owner = f.token(f.owner), learner = f.token(f.learner);
+            String root = f.path().replace("/api/instructor/courses/", "/%61pi/%69nstructor/%63ourses/")
+                    .replace("/lessons/", "/%6cessons/").replace("file-materials", "%66ile%2Dmaterials");
+            var created = materialHttp("POST", root, owner, "multipart/form-data; boundary=x", materialMultipart(true));
+            assertEquals(201, created.statusCode());
+            var json = new tools.jackson.databind.json.JsonMapper();
+            UUID id = UUID.fromString(json.readTree(created.body()).get("id").asString());
+            String selected = root + "/" + id;
+            assertEquals(200, materialHttp("PUT", selected, owner, "application/json", "{\"title\":\"Bài học\"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            assertEquals(200, materialHttp("PUT", selected + "/%66ile", owner, "multipart/form-data; boundary=x", materialMultipart(false)).statusCode());
+            assertEquals(200, materialHttp("PUT", selected + "/%70ublication", owner, "application/json", "{\"publicationStatus\":\"published\"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            String download = f.download(id).replace("/api/courses/", "/%61pi/%63ourses/")
+                    .replace("/lessons/", "/%6cessons/").replace("/materials/", "/%6daterials/").replace("/file", "/%66ile");
+            var downloaded = materialHttp("GET", download, learner, null, new byte[0]);
+            assertEquals(200, downloaded.statusCode());
+            assertArrayEquals(PDF_A, downloaded.body());
+            String relational = root.replace("%66ile%2Dmaterials", "%6daterials");
+            byte[] text = "{\"title\":\"Text\",\"materialType\":\"text\",\"textContent\":\"  code\\n\"}".getBytes(StandardCharsets.UTF_8);
+            var textCreated = materialHttp("POST", relational, owner, "application/json", text);
+            assertEquals(201, textCreated.statusCode());
+            UUID textId = UUID.fromString(json.readTree(textCreated.body()).get("id").asString());
+            String textPath = relational + "/" + textId;
+            assertEquals(200, materialHttp("PUT", textPath, owner, "application/json", text).statusCode());
+            assertEquals(200, materialHttp("PUT", textPath + "/%70ublication", owner, "application/json", "{\"publicationStatus\":\"published\"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            // Every JSON material route, including encoded static ancestors/suffixes, rejects media before role/body.
+            for (String target : List.of(relational, textPath, textPath + "/%70ublication", selected, selected + "/%70ublication")) {
+                assertEquals(415, materialHttp(target.equals(relational) ? "POST" : "PUT", target, learner,
+                        "application/x-www-form-urlencoded", "x=%ZZ".getBytes(StandardCharsets.US_ASCII)).statusCode(), target);
+            }
+            // Deliberately send NO body: an attempted form/part read would block instead of replying.
+            for (String target : List.of(root, selected + "/%66ile")) {
+                try (var socket = new java.net.Socket("127.0.0.1", materialPort)) {
+                    socket.setSoTimeout(5000);
+                    String request = (target.equals(root) ? "POST " : "PUT ") + target
+                            + " HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer " + learner
+                            + "\r\nContent-Type: multipart/form-data; boundary=x\r\nContent-Length: 100000\r\n\r\n";
+                    socket.getOutputStream().write(request.getBytes(StandardCharsets.US_ASCII));
+                    socket.getOutputStream().flush();
+                    var reader = new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+                    assertTrue(reader.readLine().startsWith("HTTP/1.1 403"));
+                    List<String> headers = new ArrayList<>();
+                    String line;
+                    while ((line = reader.readLine()) != null && !line.isEmpty()) headers.add(line.toLowerCase(java.util.Locale.ROOT));
+                    assertTrue(headers.contains("connection: close"));
+                }
+            }
+            assertTrue(recordedMaterialEvents.stream().noneMatch(event -> event.getClass().getName().endsWith("ContentPublishedEvent")));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"%2566ile-materials,401", "file%2fmaterials,400", "file-materials;extra=x,401", "file%5cmaterials,400"})
+    void co09Ir01FirewallRejectionIsPreserved(String segment, int expected) throws Exception {
+        try (var f = new MaterialFixture()) {
+            String path = f.path().replace("file-materials", segment) + "/" + UUID.randomUUID() + "/file";
+            assertEquals(expected, materialHttp("PUT", path, f.token(f.owner), "application/json",
+                    "{}".getBytes(StandardCharsets.UTF_8)).statusCode(), segment);
+        }
+    }
+
+    @Test void co09Ir01UnrelatedFormProcessingAndDefaultDenyArePreserved() throws Exception {
+        try (var f = new MaterialFixture()) {
+            String owner = f.token(f.owner);
+            for (String target : List.of(f.path() + "/" + UUID.randomUUID() + "/unknown", f.path() + "/" + UUID.randomUUID() + "/file/extra")) {
+                assertEquals(403, materialHttp("PUT", target, owner, "application/json", "{}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            }
+            assertEquals(403, materialHttp("DELETE", f.path(), owner, "application/json", "{}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            // Exercise the actual configured filter on an unrelated form; the chain receives parsed parameters.
+            var request = new org.springframework.mock.web.MockHttpServletRequest("PUT", "/unrelated-form");
+            request.setContentType("application/x-www-form-urlencoded");
+            request.setContent("note=one%2Btwo&space=a+b".getBytes(StandardCharsets.US_ASCII));
+            var called = new java.util.concurrent.atomic.AtomicBoolean();
+            materialFormFilter.doFilter(request, new org.springframework.mock.web.MockHttpServletResponse(), (parsed, response) -> {
+                called.set(true);
+                assertEquals("one+two", parsed.getParameter("note"));
+                assertEquals("a b", parsed.getParameter("space"));
+            });
+            assertTrue(called.get());
+        }
+    }
+
+    @Test void co09Ir02GuardRechecksAdmissionAfterPreliminaryRead() {
+        try (var f = new MaterialFixture()) {
+            var text = materials.createRelationalMaterial(f.course, f.lesson,
+                    new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite(
+                            "Original", com.codemastery.modules.course.domain.model.MaterialType.TEXT, "old", null));
+            materials.requireOwnedRelational(f.course, f.lesson, text.id());
+            materialJdbc.update("DELETE FROM learning_materials WHERE id=?", text.id());
+            var command = new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite(
+                    "Edited", com.codemastery.modules.course.domain.model.MaterialType.TEXT, "new", null);
+            assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,
+                    () -> materials.updateRelationalMaterial(f.course, f.lesson, text.id(), command));
+            assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,
+                    () -> materials.setRelationalMaterialPublication(f.course, f.lesson, text.id(), com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED));
+            assertTrue(materialRows.findMaterial(f.lesson, text.id()).isEmpty());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"create", "update", "publication", "file-title", "file-publication"})
+    void co09Ir03StrictUtf8BytesAndUnicodeOnRealHttp(String operation) throws Exception {
+        try (var f = new MaterialFixture()) {
+            String owner = f.token(f.owner), learner = f.token(f.learner);
+            var file = createPdf(f);
+            var text = materials.createRelationalMaterial(f.course, f.lesson,
+                    new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite(
+                            "Original", com.codemastery.modules.course.domain.model.MaterialType.TEXT, "  code\n", null));
+            String relational = f.path().replace("file-materials", "materials");
+            String path = switch (operation) {
+                case "create" -> relational;
+                case "update" -> relational + "/" + text.id();
+                case "publication" -> relational + "/" + text.id() + "/publication";
+                case "file-title" -> f.path() + "/" + file.id();
+                default -> f.path() + "/" + file.id() + "/publication";
+            };
+            String method = operation.equals("create") ? "POST" : "PUT";
+            String template = operation.endsWith("publication") ? "{\"publicationStatus\":\"%s\"}"
+                    : operation.equals("file-title") ? "{\"title\":\"%s\"}"
+                    : "{\"title\":\"%s\",\"materialType\":\"text\",\"textContent\":\"  code\\n\"}";
+            var before = materialJdbc.queryForList("SELECT * FROM learning_materials WHERE lesson_id=? ORDER BY id", f.lesson);
+            for (byte[] malformed : List.of(new byte[]{(byte) 0xff}, new byte[]{(byte) 0xc3},
+                    new byte[]{(byte) 0xc0, (byte) 0xaf}, new byte[]{(byte) 0xed, (byte) 0xa0, (byte) 0x80})) {
+                ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+                String marked = template.formatted("MARK");
+                bytes.write(marked.substring(0, marked.indexOf("MARK")).getBytes(StandardCharsets.UTF_8));
+                bytes.write(malformed);
+                bytes.write(marked.substring(marked.indexOf("MARK") + 4).getBytes(StandardCharsets.UTF_8));
+                assertEquals(400, materialHttp(method, path, owner, "application/json", bytes.toByteArray()).statusCode(), operation);
+                assertEquals(before, materialJdbc.queryForList("SELECT * FROM learning_materials WHERE lesson_id=? ORDER BY id", f.lesson));
+                assertEquals(403, materialHttp(method, path, learner, "application/json", bytes.toByteArray()).statusCode());
+                if (!operation.equals("create")) {
+                    UUID selected = operation.startsWith("file-") ? file.id() : text.id();
+                    assertEquals(404, materialHttp(method, path.replace(selected.toString(), UUID.randomUUID().toString()), owner,
+                            "application/json", bytes.toByteArray()).statusCode());
+                }
+            }
+            for (String invalid : List.of("", "{}", "{", "null", "[]")) {
+                assertEquals(400, materialHttp(method, path, owner, "application/json", invalid.getBytes(StandardCharsets.UTF_8)).statusCode());
+                assertEquals(before, materialJdbc.queryForList("SELECT * FROM learning_materials WHERE lesson_id=? ORDER BY id", f.lesson));
+            }
+            for (String unicode : List.of("Bài học tiếng Việt", "学习 😀", "\uFFFD")) {
+                String value = operation.endsWith("publication") ? "published" : unicode;
+                var response = materialHttp(method, path, owner, "application/json", template.formatted(value).getBytes(StandardCharsets.UTF_8));
+                assertEquals(operation.equals("create") ? 201 : 200, response.statusCode());
+                var json = new tools.jackson.databind.json.JsonMapper().readTree(response.body());
+                UUID id = UUID.fromString(json.get("id").asString());
+                var persisted = materialRows.findMaterial(f.lesson, id).orElseThrow();
+                if (!operation.endsWith("publication")) assertEquals(unicode, persisted.title());
+                if (!operation.startsWith("file-")) assertEquals("  code\n", persisted.textContent());
+            }
+        }
+    }
 
     @Test void co09InvalidPartValidationClosesInputsBeforeAnyStorage() {
         try(var f=new MaterialFixture()) {

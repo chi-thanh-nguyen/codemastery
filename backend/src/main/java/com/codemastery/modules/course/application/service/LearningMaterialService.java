@@ -92,6 +92,11 @@ public class LearningMaterialService {
         return publication(courseId, lessonId, materialId, status, false);
     }
 
+    /** Preliminary JSON admission only; every mutation rechecks scope under the Course-root guard. */
+    public void requireOwnedRelational(UUID courseId, UUID lessonId, UUID materialId) {
+        read.executeWithoutResult(status -> owned(courseId, lessonId, materialId, false));
+    }
+
     /** Controller admission for B5 JSON bodies, before the body is accessed. Rechecked by each writer. */
     public void requireOwnedFile(UUID courseId, UUID lessonId, UUID materialId) {
         read.executeWithoutResult(status -> owned(courseId, lessonId, materialId, true));

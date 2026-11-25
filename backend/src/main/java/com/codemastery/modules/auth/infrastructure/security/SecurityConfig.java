@@ -30,6 +30,22 @@ import java.util.function.Supplier;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    private static final String MATERIAL_ROOT = "/api/instructor/courses/{courseId}/lessons/{lessonId}";
+    private static final RequestMatcher MATERIAL_UPLOADS = new OrRequestMatcher(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, MATERIAL_ROOT + "/file-materials"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/file-materials/{materialId}/file"));
+    // Share Security/MVC's segment-aware decoding, including before Security's filter chain.
+    // Exact methods and paths keep unrelated form processing and default-deny unchanged.
+    private static final RequestMatcher MATERIAL_OPERATIONS = new OrRequestMatcher(
+            MATERIAL_UPLOADS,
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, MATERIAL_ROOT + "/materials"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/materials/{materialId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/materials/{materialId}/publication"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/file-materials/{materialId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/file-materials/{materialId}/publication"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET,
+                    "/api/courses/{courseId}/lessons/{lessonId}/materials/{materialId}/file"));
+
     static final RequestMatcher PUBLIC_OPERATIONS = new OrRequestMatcher(
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/register"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/login"),
@@ -155,14 +171,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/owned-assignments/{assignmentId}",
                                 "/api/courses/{courseId}/owned-assignments/{assignmentId}/publication").authenticated()
                         // CT09/CT21 material operations: exact paths only; stage 2 precedes application role checks.
-                        .requestMatchers(HttpMethod.POST, "/api/instructor/courses/{courseId}/lessons/{lessonId}/materials",
-                                "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials").authenticated()
-                        .requestMatchers(HttpMethod.PUT, "/api/instructor/courses/{courseId}/lessons/{lessonId}/materials/{materialId}",
-                                "/api/instructor/courses/{courseId}/lessons/{lessonId}/materials/{materialId}/publication",
-                                "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials/{materialId}",
-                                "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials/{materialId}/file",
-                                "/api/instructor/courses/{courseId}/lessons/{lessonId}/file-materials/{materialId}/publication").authenticated()
-                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/lessons/{lessonId}/materials/{materialId}/file").authenticated()
+                        .requestMatchers(MATERIAL_OPERATIONS).authenticated()
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),
@@ -200,8 +209,7 @@ public class SecurityConfig {
     org.springframework.boot.servlet.filter.OrderedFormContentFilter formContentFilter() {
         return new org.springframework.boot.servlet.filter.OrderedFormContentFilter() {
             @Override protected boolean shouldNotFilter(jakarta.servlet.http.HttpServletRequest request) {
-                String path = request.getRequestURI().substring(request.getContextPath().length());
-                return path.matches("/api/instructor/courses/[^/]+/lessons/[^/]+/(?:file-materials|materials)(?:/[^/]+(?:/(?:file|publication))?)?");
+                return MATERIAL_OPERATIONS.matches(request);
             }
         };
     }
@@ -211,10 +219,7 @@ public class SecurityConfig {
         @Override protected void doFilterInternal(jakarta.servlet.http.HttpServletRequest request,
                 jakarta.servlet.http.HttpServletResponse response, jakarta.servlet.FilterChain chain)
                 throws java.io.IOException, jakarta.servlet.ServletException {
-            String path = request.getRequestURI().substring(request.getContextPath().length());
-            boolean upload = "POST".equals(request.getMethod()) && path.matches("/api/instructor/courses/[^/]+/lessons/[^/]+/file-materials")
-                    || "PUT".equals(request.getMethod()) && path.matches("/api/instructor/courses/[^/]+/lessons/[^/]+/file-materials/[^/]+/file");
-            if (upload) response.setHeader(HttpHeaders.CONNECTION, "close");
+            if (MATERIAL_UPLOADS.matches(request)) response.setHeader(HttpHeaders.CONNECTION, "close");
             chain.doFilter(request, response);
         }
     }

@@ -186,57 +186,42 @@ public class CourseStructureController {
 
     @PostMapping(path = COURSE + "/lessons/{lessonId}/materials", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Material> createRelationalMaterial(@PathVariable String courseId, @PathVariable String lessonId,
-                                                             @RequestParam MultiValueMap<String, String> params,
-                                                             @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
-                                                             @RequestBody(required = false) String body) throws HttpMediaTypeNotSupportedException {
-        CourseRequest.requireJson(contentType);
-        CourseSearchRequest.noQuery(params);
+                                                             HttpServletRequest request) throws HttpMediaTypeNotSupportedException, IOException {
+        CourseRequest.requireJson(request.getContentType());
+        noMaterialQuery(request);
         UUID course = parseCourseId(courseId);
         UUID lesson = parseCourseId(lessonId);
-        var write = CourseStructureRequests.relationalMaterialWrite(body);
-        if (write.isEmpty()) {
-            access.requireLessonOwnership(course, lesson);
-            throw CourseRequest.invalidBody();
-        }
-        return created(materials.createRelationalMaterial(course, lesson, write.get()));
+        access.requireLessonOwnership(course, lesson);
+        var write = CourseStructureRequests.relationalMaterialWrite(materialJson(request)).orElseThrow(CourseRequest::invalidBody);
+        return created(materials.createRelationalMaterial(course, lesson, write));
     }
 
     @PutMapping(path = COURSE + "/lessons/{lessonId}/materials/{materialId}", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Material> updateRelationalMaterial(@PathVariable String courseId, @PathVariable String lessonId,
                                                              @PathVariable String materialId,
-                                                             @RequestParam MultiValueMap<String, String> params,
-                                                             @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
-                                                             @RequestBody(required = false) String body) throws HttpMediaTypeNotSupportedException {
-        CourseRequest.requireJson(contentType);
-        CourseSearchRequest.noQuery(params);
+                                                             HttpServletRequest request) throws HttpMediaTypeNotSupportedException, IOException {
+        CourseRequest.requireJson(request.getContentType());
+        noMaterialQuery(request);
         UUID course = parseCourseId(courseId);
         UUID lesson = parseCourseId(lessonId);
         UUID material = parseCourseId(materialId);
-        var write = CourseStructureRequests.relationalMaterialWrite(body);
-        if (write.isEmpty()) {
-            access.requireLessonOwnership(course, lesson);
-            throw CourseRequest.invalidBody();
-        }
-        return ok(materials.updateRelationalMaterial(course, lesson, material, write.get()));
+        materials.requireOwnedRelational(course, lesson, material);
+        var write = CourseStructureRequests.relationalMaterialWrite(materialJson(request)).orElseThrow(CourseRequest::invalidBody);
+        return ok(materials.updateRelationalMaterial(course, lesson, material, write));
     }
 
     @PutMapping(path = COURSE + "/lessons/{lessonId}/materials/{materialId}/publication", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Material> setRelationalMaterialPublication(@PathVariable String courseId, @PathVariable String lessonId,
                                                                      @PathVariable String materialId,
-                                                                     @RequestParam MultiValueMap<String, String> params,
-                                                                     @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
-                                                                     @RequestBody(required = false) String body) throws HttpMediaTypeNotSupportedException {
-        CourseRequest.requireJson(contentType);
-        CourseSearchRequest.noQuery(params);
+                                                                     HttpServletRequest request) throws HttpMediaTypeNotSupportedException, IOException {
+        CourseRequest.requireJson(request.getContentType());
+        noMaterialQuery(request);
         UUID course = parseCourseId(courseId);
         UUID lesson = parseCourseId(lessonId);
         UUID material = parseCourseId(materialId);
-        var status = CourseRequest.publication(body);
-        if (status.isEmpty()) {
-            access.requireLessonOwnership(course, lesson);
-            throw CourseRequest.invalidBody();
-        }
-        return ok(materials.setRelationalMaterialPublication(course, lesson, material, status.get()));
+        materials.requireOwnedRelational(course, lesson, material);
+        var status = CourseRequest.publication(materialJson(request)).orElseThrow(CourseRequest::invalidBody);
+        return ok(materials.setRelationalMaterialPublication(course, lesson, material, status));
     }
 
     // CO09 file materials (CT09.rest, ADR010 §11). Multipart operations take the lazily resolved request and never
@@ -258,7 +243,7 @@ public class CourseStructureController {
         noMaterialQuery(request);
         UUID course = parseCourseId(courseId), lesson = parseCourseId(lessonId), material = parseCourseId(materialId);
         materials.requireOwnedFile(course, lesson, material);
-        String title = CourseStructureRequests.fileMaterialTitle(new String(request.getInputStream().readAllBytes(), StandardCharsets.UTF_8))
+        String title = CourseStructureRequests.fileMaterialTitle(materialJson(request))
                 .orElseThrow(CourseRequest::invalidBody);
         return ok(materials.updateFileMaterialTitle(course, lesson, material, title));
     }
@@ -281,7 +266,7 @@ public class CourseStructureController {
         noMaterialQuery(request);
         UUID course = parseCourseId(courseId), lesson = parseCourseId(lessonId), material = parseCourseId(materialId);
         materials.requireOwnedFile(course, lesson, material);
-        var status = CourseRequest.publication(new String(request.getInputStream().readAllBytes(), StandardCharsets.UTF_8))
+        var status = CourseRequest.publication(materialJson(request))
                 .orElseThrow(CourseRequest::invalidBody);
         return ok(materials.setFileMaterialPublication(course, lesson, material, status));
     }
@@ -323,6 +308,19 @@ public class CourseStructureController {
 
     private static void noMaterialQuery(HttpServletRequest request) {
         if (request.getQueryString() != null && !request.getQueryString().isEmpty()) throw CourseRequest.invalidBody();
+    }
+
+    /** Decode only after resource admission; malformed bytes are a body error, never replacement text. */
+    private static String materialJson(HttpServletRequest request) throws IOException {
+        byte[] bytes = request.getInputStream().readAllBytes();
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+        } catch (java.nio.charset.CharacterCodingException malformed) {
+            throw CourseRequest.invalidBody();
+        }
     }
 
     /** Servlet Parts retain raw filenames and multiplicity; no Spring filename normalization. */
