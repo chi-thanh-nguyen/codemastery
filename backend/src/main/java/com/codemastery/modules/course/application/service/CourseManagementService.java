@@ -221,6 +221,17 @@ public class CourseManagementService {
         });
     }
 
+    /**
+     * CO12 / CT26.event (ADR012 §9.1): publishes {@link com.codemastery.modules.course.application.event.ContentPublishedEvent}
+     * from inside the held guard of {@code courseId}, after an actual {@code hidden → published} Lesson change and its
+     * completion reconciliation are flushed, only while the Course is published; {@code publishedAt} comes from the
+     * operation's injected UTC {@code Clock} (microseconds, not persisted) and no event is published when no learner is
+     * joined. Course publication, material, Chapter, reorder, content edits and Administrator hiding never call it.
+     */
+    void publishLessonPublished(UUID courseId, UUID lessonId) {
+        throw new UnsupportedOperationException();
+    }
+
     /** The owner view: every Chapter, Lesson and material in canonical order, hidden ones included. */
     OwnedCourse ownedCourse(UUID courseId) {
         Course course = courses.findById(courseId).orElseThrow(CourseManagementService::unavailable);
