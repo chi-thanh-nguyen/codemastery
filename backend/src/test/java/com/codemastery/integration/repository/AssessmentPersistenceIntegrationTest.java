@@ -3,10 +3,13 @@ package com.codemastery.integration.repository;
 import com.codemastery.integration.AbstractIntegrationTest;
 import com.codemastery.modules.assessment.application.service.QuizService;
 import com.codemastery.modules.assessment.application.service.QuizService.PracticeQuizProfile;
+import com.codemastery.modules.assessment.domain.model.Assignment;
 import com.codemastery.modules.assessment.domain.model.Attempt;
 import com.codemastery.modules.assessment.domain.model.DifficultyLevel;
 import com.codemastery.modules.assessment.domain.model.Question;
 import com.codemastery.modules.assessment.domain.model.Quiz;
+import com.codemastery.modules.assessment.domain.repository.AssignmentRepository;
+import com.codemastery.modules.assessment.domain.repository.AssignmentRepository.SubmissionCounts;
 import com.codemastery.modules.assessment.domain.repository.AttemptRepository;
 import com.codemastery.modules.assessment.domain.repository.QuestionRepository;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository;
@@ -109,6 +112,9 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
 
     @Autowired
     private AttemptRepository attemptRepository;
+
+    @Autowired
+    private AssignmentRepository assignmentRepository;
 
     @Autowired
     private QuizService quizService;
@@ -712,6 +718,85 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                     List.of(skillA, disallowedSkill),
                     List.of(courseId),
                     instructor);
+        }
+    }
+
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void assignmentAdapterOrdersByCollateCCountsSubmissionsLocksForUpdateAndRespectsColumnPrivileges() throws Exception {
+        UUID instructor = user("instructor");
+        UUID learnerA = user("learner");
+        UUID learnerB = user("learner");
+        UUID courseId = UUID.randomUUID();
+        UUID chapterId = UUID.randomUUID();
+        UUID lessonId = UUID.randomUUID();
+        UUID low = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        UUID high = UUID.fromString("ffffffff-ffff-ffff-ffff-fffffffffffe");
+        UUID third = UUID.randomUUID();
+        String restrictedRole = "as09_runtime_" + UUID.randomUUID().toString().replace("-", "");
+        jdbc.update("INSERT INTO courses (id, instructor_id, title, description, publication_status, adaptive_enabled) "
+                + "VALUES (?, ?, 'AS09 course', 'AS09 fixture', 'published', false)", courseId, instructor);
+        jdbc.update("INSERT INTO chapters (id, course_id, title, position) VALUES (?, ?, 'Ch 1', 1)", chapterId, courseId);
+        jdbc.update("INSERT INTO lessons (id, chapter_id, title, content_markdown, position, publication_status) "
+                + "VALUES (?, ?, 'Lesson 1', 'Body', 1, 'published')", lessonId, chapterId);
+        TransactionTemplate tx = new TransactionTemplate(transactionManager);
+        ExecutorService other = Executors.newSingleThreadExecutor();
+        try {
+            jdbc.execute("CREATE ROLE " + restrictedRole + " NOLOGIN");
+            jdbc.execute("GRANT USAGE ON SCHEMA public TO " + restrictedRole);
+            // ADR012 §19.2 ceiling: SELECT, INSERT, UPDATE (lesson_id, title, instructions, deadline_at,
+            // publication_status) on assignments (never course_id or DELETE), plus FK/SELECT references.
+            jdbc.execute("GRANT SELECT, REFERENCES ON public.courses, public.lessons TO " + restrictedRole);
+            jdbc.execute("GRANT SELECT, INSERT, UPDATE (lesson_id, title, instructions, deadline_at, publication_status) "
+                    + "ON public.assignments TO " + restrictedRole);
+            jdbc.execute("GRANT SELECT ON public.submissions TO " + restrictedRole);
+
+            tx.executeWithoutResult(status -> {
+                jdbc.execute("SET LOCAL ROLE " + restrictedRole);
+                assignmentRepository.insert(new Assignment(high, courseId, null, "Same", "Inst H", START.plusSeconds(60), "hidden"));
+                assignmentRepository.insert(new Assignment(low, courseId, lessonId, "Same", "Inst L", START.plusSeconds(120), "hidden"));
+                assignmentRepository.insert(new Assignment(third, courseId, null, "apple", "Inst A", START.plusSeconds(180), "hidden"));
+                assignmentRepository.updateDefinition(low, courseId, null, "Same", "Updated Inst L", START.plusSeconds(240));
+                assignmentRepository.updatePublicationStatus(low, courseId, "published");
+            });
+
+            java.time.OffsetDateTime submittedAt = START.atOffset(java.time.ZoneOffset.UTC);
+            jdbc.update("INSERT INTO submissions (id, assignment_id, user_id, object_key, original_filename, submitted_at) "
+                    + "VALUES (?, ?, ?, 'submissions/00000000-0000-4000-8000-000000000001', 'one.pdf', ?)",
+                    UUID.randomUUID(), low, learnerA, submittedAt);
+            jdbc.update("INSERT INTO submissions (id, assignment_id, user_id, object_key, original_filename, submitted_at, "
+                            + "grade_percentage, feedback, graded_at) "
+                            + "VALUES (?, ?, ?, 'submissions/00000000-0000-4000-8000-000000000002', 'two.zip', ?, 95.50, 'Good', ?)",
+                    UUID.randomUUID(), low, learnerB, submittedAt, submittedAt.plusSeconds(10));
+
+            tx.executeWithoutResult(status -> {
+                jdbc.execute("SET LOCAL ROLE " + restrictedRole);
+                assertEquals(3, assignmentRepository.countInCourse(courseId));
+                List<Assignment> page = assignmentRepository.findPageInCourse(courseId, 0, 10);
+                assertEquals(List.of(low, high, third), page.stream().map(Assignment::id).toList());
+                assertEquals("Updated Inst L", page.get(0).instructions());
+                assertEquals("published", page.get(0).publication_status());
+                assertEquals(
+                        new SubmissionCounts(2, 1),
+                        assignmentRepository.countSubmissions(List.of(low, high)).get(low));
+
+                assertTrue(assignmentRepository.findInCourseForUpdate(high, courseId).isPresent());
+                assertEquals("55P03", referenceFailure(other, tx,
+                        "INSERT INTO submissions (id, assignment_id, user_id, object_key, original_filename, submitted_at) "
+                                + "VALUES (?, '" + high + "', '" + learnerA
+                                + "', 'submissions/00000000-0000-4000-8000-000000000003', 'blocked.pdf', now())"));
+            });
+        } finally {
+            other.shutdownNow();
+            jdbc.update("DELETE FROM submissions WHERE assignment_id IN (?, ?, ?)", low, high, third);
+            jdbc.update("DELETE FROM assignments WHERE course_id = ?", courseId);
+            jdbc.update("DELETE FROM lessons WHERE id = ?", lessonId);
+            jdbc.update("DELETE FROM chapters WHERE id = ?", chapterId);
+            jdbc.update("DELETE FROM courses WHERE id = ?", courseId);
+            jdbc.update("DELETE FROM users WHERE id IN (?, ?, ?)", instructor, learnerA, learnerB);
+            jdbc.execute("REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM " + restrictedRole);
+            jdbc.execute("REVOKE USAGE ON SCHEMA public FROM " + restrictedRole);
+            jdbc.execute("DROP ROLE IF EXISTS " + restrictedRole);
         }
     }
 
