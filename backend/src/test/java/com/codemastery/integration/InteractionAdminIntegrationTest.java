@@ -54,6 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * removed in FK-safe order after each test (ADR008 section 5).
  */
 @DirtiesContext
+@org.springframework.context.annotation.Import(InteractionAdminIntegrationTest.ContentProbe.class)
 class InteractionAdminIntegrationTest extends AbstractIntegrationTest {
 
     private static final String JWT_SECRET = ephemeralJwtSecret();
@@ -322,5 +323,63 @@ class InteractionAdminIntegrationTest extends AbstractIntegrationTest {
             }
         }
         return "none: " + thrown;
+    }
+
+    @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods=false)
+    static class ContentProbe {
+        final java.util.List<com.codemastery.modules.course.application.event.ContentPublishedEvent> events=new ArrayList<>();
+        boolean fail, committedRead;
+        @Autowired DataSource source;
+        @org.springframework.transaction.event.TransactionalEventListener
+        @org.springframework.transaction.annotation.Transactional(propagation=org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
+        public void delivered(com.codemastery.modules.course.application.event.ContentPublishedEvent event) {
+            try(var c=source.getConnection();var q=c.prepareStatement("SELECT publication_status FROM lessons WHERE id=?")) {
+                q.setObject(1,event.lessonId());try(var r=q.executeQuery()){committedRead=r.next()&&"published".equals(r.getString(1));}
+            }catch(SQLException error){throw new IllegalStateException("Synthetic committed read failure",error);}
+            events.add(event);if(fail)throw new IllegalStateException("Synthetic after-commit consumer failure");
+        }
+    }
+    @Autowired ContentProbe contentProbe;
+    @Autowired com.codemastery.modules.course.application.service.CourseStructureService contentStructure;
+    @Autowired com.codemastery.modules.course.application.service.CourseManagementService contentManagement;
+    final class ContentFixture implements AutoCloseable {
+        final UUID owner=user("instructor","CO12 owner"),learner=user("learner","CO12 learner"),course=UUID.randomUUID(),chapter=UUID.randomUUID(),lesson=UUID.randomUUID(),enrollment=UUID.randomUUID();
+        ContentFixture(){
+            jdbc.update("INSERT INTO courses(id,instructor_id,title,description,publication_status,adaptive_enabled)VALUES(?,?,'CO12','Test','published',false)",course,owner);
+            jdbc.update("INSERT INTO chapters(id,course_id,title,position)VALUES(?,?,'C',1)",chapter,course);
+            jdbc.update("INSERT INTO lessons(id,chapter_id,title,position,publication_status)VALUES(?,?,'L',1,'hidden')",lesson,chapter);
+            jdbc.update("INSERT INTO enrollments(id,user_id,course_id,status)VALUES(?,?,?,'completed')",enrollment,learner,course);
+            contentProbe=org.springframework.test.util.AopTestUtils.getUltimateTargetObject(contentProbe);contentProbe.events.clear();contentProbe.fail=false;contentProbe.committedRead=false;
+            signIn(owner,Role.INSTRUCTOR);
+        }
+        String lessonStatus(){return jdbc.queryForObject("SELECT publication_status FROM lessons WHERE id=?",String.class,lesson);}
+        public void close(){contentProbe.fail=false;contentProbe.events.clear();jdbc.update("DELETE FROM enrollments WHERE id=?",enrollment);jdbc.update("DELETE FROM lessons WHERE id=?",lesson);jdbc.update("DELETE FROM chapters WHERE id=?",chapter);jdbc.update("DELETE FROM courses WHERE id=?",course);SecurityContextHolder.clearContext();}
+    }
+    @Test void co12PublicationReconcilesThenDeliversOnlyAfterCommitAndConsumerFailureIsIsolated(){
+        try(var f=new ContentFixture()){
+            contentProbe.fail=true;
+            contentStructure.setCourseLessonPublication(f.course,f.lesson,com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED);
+            assertEquals("published",f.lessonStatus());assertTrue(contentProbe.committedRead);
+            assertEquals("active",jdbc.queryForObject("SELECT status FROM enrollments WHERE id=?",String.class,f.enrollment));
+            assertEquals(1,contentProbe.events.size());var event=contentProbe.events.getFirst();assertEquals(List.of(f.learner),event.recipientLearnerIds());
+            assertEquals(0,event.publishedAt().getNano()%1000);assertThrows(UnsupportedOperationException.class,()->event.recipientLearnerIds().add(admin));
+            contentStructure.setCourseLessonPublication(f.course,f.lesson,com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED);
+            contentStructure.setCourseLessonPublication(f.course,f.lesson,com.codemastery.modules.course.domain.model.PublishStatus.HIDDEN);
+            contentManagement.setOwnedCoursePublication(f.course,com.codemastery.modules.course.domain.model.PublishStatus.HIDDEN);
+            contentStructure.setCourseLessonPublication(f.course,f.lesson,com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED);
+            assertEquals(1,contentProbe.events.size());
+        }
+    }
+    @Test void co12ProducerRollbackAndEmptyRecipientsNeverDeliver(){
+        try(var f=new ContentFixture()){
+            assertThrows(IllegalStateException.class,()->writable().executeWithoutResult(tx->{
+                contentStructure.setCourseLessonPublication(f.course,f.lesson,com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED);
+                assertTrue(contentProbe.events.isEmpty());throw new IllegalStateException("Synthetic producer rollback");
+            }));
+            assertEquals("hidden",f.lessonStatus());assertTrue(contentProbe.events.isEmpty());
+            jdbc.update("UPDATE enrollments SET status='left' WHERE id=?",f.enrollment);
+            contentStructure.setCourseLessonPublication(f.course,f.lesson,com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED);
+            assertTrue(contentProbe.events.isEmpty());
+        }
     }
 }

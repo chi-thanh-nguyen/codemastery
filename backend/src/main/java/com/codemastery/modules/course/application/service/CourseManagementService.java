@@ -30,6 +30,13 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.temporal.ChronoUnit;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
+import com.codemastery.modules.course.application.event.ContentPublishedEvent;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -75,12 +82,25 @@ public class CourseManagementService {
     private final UserAccountService identities;
     private final CourseContentRepository content;
     private final EnrollmentRepository enrollments;
+    private final ApplicationEventPublisher events;
+    private final Clock publicationClock;
+    @PersistenceContext private EntityManager publicationPersistence;
     private final TransactionTemplate writeUnit;
     private final TransactionTemplate snapshotRead;
 
+    @Autowired
     public CourseManagementService(CourseRepository courses, CourseAccessService access, UserAccountService identities,
                                    CourseContentRepository content, EnrollmentRepository enrollments,
-                                   PlatformTransactionManager transactionManager) {
+                                   PlatformTransactionManager transactionManager, ApplicationEventPublisher events) {
+        this(courses, access, identities, content, enrollments, transactionManager, events, Clock.systemUTC());
+    }
+
+    // Operation-local clock seam: CT39 deliberately selects no global Clock bean.
+    CourseManagementService(CourseRepository courses, CourseAccessService access, UserAccountService identities,
+                            CourseContentRepository content, EnrollmentRepository enrollments,
+                            PlatformTransactionManager transactionManager, ApplicationEventPublisher events, Clock clock) {
+        this.events = Objects.requireNonNull(events);
+        this.publicationClock = Objects.requireNonNull(clock);
         this.courses = Objects.requireNonNull(courses);
         this.access = Objects.requireNonNull(access);
         this.identities = Objects.requireNonNull(identities);
@@ -229,7 +249,20 @@ public class CourseManagementService {
      * joined. Course publication, material, Chapter, reorder, content edits and Administrator hiding never call it.
      */
     void publishLessonPublished(UUID courseId, UUID lessonId) {
-        throw new UnsupportedOperationException();
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException("Publication requires the Course-root transaction");
+        }
+        requireRootStillHeld(courseId);
+        Course course = courses.findById(courseId).orElseThrow(CourseManagementService::unavailable);
+        if (course.publicationStatus() != PublishStatus.PUBLISHED) return;
+        publicationPersistence.flush();
+        List<UUID> recipients = enrollments.joinedLearnerIds(List.of(courseId))
+                .getOrDefault(courseId, java.util.Set.of()).stream()
+                .distinct().sorted(java.util.Comparator.comparing(UUID::toString)).toList();
+        if (!recipients.isEmpty()) {
+            events.publishEvent(new ContentPublishedEvent(courseId, lessonId,
+                    publicationClock.instant().truncatedTo(ChronoUnit.MICROS), recipients));
+        }
     }
 
     /** The owner view: every Chapter, Lesson and material in canonical order, hidden ones included. */
