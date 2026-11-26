@@ -190,7 +190,8 @@ export const BUILD_FAILURE_LINES = 80;
 export async function buildImage(dir: string, tag: string, work: string, secrets: readonly string[] = []) {
     const idFile = join(work, `image-${randomBytes(6).toString('hex')}.id`);
     try {
-        await run('docker', ['build', '--iidfile', idFile, '--label', STACK_LABEL, '-t', tag, dir],
+        await run('docker', ['build', ...(dir === join(repo, 'backend') && process.env.CODEMASTERY_MAVEN_LAYER_CACHE
+            ? ['--cache-from', `type=local,src=${process.env.CODEMASTERY_MAVEN_LAYER_CACHE}`] : []), '--iidfile', idFile, '--label', STACK_LABEL, '-t', tag, dir],
             { env: dockerEnv({ BUILDKIT_PROGRESS: 'plain' }), maxBuffer: 64 * 1024 * 1024 });
     } catch (error) {
         const failure = error as { stdout?: unknown; stderr?: unknown; code?: unknown; signal?: unknown };
@@ -214,6 +215,29 @@ export async function waitForBackend(apiUrl: string, container: string, secrets:
     } catch (error) {
         const diagnostics = await containerDiagnostics(container, secrets).catch((reason: unknown) => `--- diagnostics unavailable: ${String(reason)}`);
         throw new Error(`${(error as Error).message}\n${diagnostics}`, { cause: error });
+    }
+}
+
+/** Wait for the one-shot initializer itself, not just a reachable S3 port. */
+export async function waitForStorageInitializer(container: string, secrets: readonly string[],
+    { timeoutMs = 150_000, intervalMs = 1000 } = {}) {
+    const deadline = Date.now() + timeoutMs;
+    try {
+        for (;;) {
+            if (Date.now() >= deadline) throw new Error('Timed out waiting for storage initialization');
+            const result = await dockerQuery(['inspect', '--type', 'container', '--format', '{{json .State}}', container]);
+            if (!result.ok) throw new Error('Storage initializer state could not be inspected');
+            const state = JSON.parse(result.stdout);
+            if (state.Status === 'exited') {
+                if (state.ExitCode !== 0) throw new Error(`Storage initializer failed (exit ${state.ExitCode})`);
+                return;
+            }
+            if (!['created', 'running'].includes(state.Status)) throw new Error('Storage initializer entered an unexpected state');
+            if (Date.now() >= deadline) throw new Error('Timed out waiting for storage initialization');
+            await new Promise((next) => setTimeout(next, intervalMs));
+        }
+    } catch (error) {
+        throw new Error(`${(error as Error).message}\n${await containerDiagnostics(container, secrets)}`, { cause: error });
     }
 }
 
@@ -346,9 +370,15 @@ export default async function globalSetup() {
 
     let preview: ChildProcess | undefined;
     try {
+        // Shared by Compose rendering and backend launch: future CT38 consumers
+        // require all three even when the disposable scheduler is disabled.
+        const quizExpiryFixture = {
+            APP_QUIZ_AUTO_SUBMIT_ENABLED: 'false', APP_QUIZ_AUTO_SUBMIT_DELAY_MS: '1000', APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE: '2',
+        };
         const secrets = {
             POSTGRES_DB: 'codemastery_e2e', POSTGRES_USER: 'codemastery_e2e', POSTGRES_PASSWORD: randomBytes(24).toString('hex'),
             JWT_SECRET: randomBytes(32).toString('hex'),
+            MINIO_ROOT_USER: `e2e-root-${randomBytes(6).toString('hex')}`, MINIO_ROOT_PASSWORD: randomBytes(24).toString('hex'),
             STORAGE_ACCESS_KEY: `e2e-${randomBytes(6).toString('hex')}`, STORAGE_SECRET_KEY: randomBytes(24).toString('hex'),
         };
         // Containers run the exact image ID this run built (recorded by --iidfile); the tag is only a layer
@@ -381,6 +411,36 @@ export default async function globalSetup() {
             await docker(['exec', postgres, 'pg_isready', '-q', '-U', secrets.POSTGRES_USER, '-d', secrets.POSTGRES_DB]);
             return true;
         }, 90_000);
+
+        // Shared storage is part of every disposable stack. Reuse the reviewed local
+        // Compose pins and bucket-scoped initializer, without its host ports or volumes.
+        // Initialization runs once; its own `mc ready` is bounded at 120 seconds.
+        const { stdout } = await run('docker', ['compose', '--env-file', '/dev/null', '-f', join(repo, 'infrastructure/docker-compose.yml'), 'config', '--format', 'json'], {
+            env: dockerEnv({ ...quizExpiryFixture, ...secrets, DB_NAME: secrets.POSTGRES_DB, DB_USER: secrets.POSTGRES_USER, DB_PASSWORD: secrets.POSTGRES_PASSWORD }),
+            timeout: 15_000, maxBuffer: 1024 * 1024,
+        });
+        const config = JSON.parse(stdout), storage = config.services.minio, initializer = config.services['minio-init'];
+        for (const service of [storage, initializer]) {
+            if (!/@sha256:[0-9a-f]{64}$/.test(service.image)) throw new Error('E2E storage requires digest-pinned images');
+        }
+        if (initializer.command.length !== 1 || initializer.entrypoint.join(' ') !== '/bin/sh -ec') {
+            throw new Error('Unsupported storage initializer command');
+        }
+        const minio = `${runId}-minio`;
+        const minioIntent = intend({ kind: 'container', name: minio, image: storage.image, role: 'minio', volumes: 'pending' });
+        const minioId = await docker(['run', '-d', '--name', minio, ...runLabels(runId), '--network', network, '--network-alias', 'minio',
+            '-e', 'MINIO_ROOT_USER', '-e', 'MINIO_ROOT_PASSWORD', storage.image, ...storage.command], secrets);
+        created(minioIntent, minioId, 'run-owned private storage');
+        await recordAnonymousVolumes(inventoryFile, minioIntent, minioId, minio);
+        const init = `${runId}-minio-init`;
+        const initIntent = intend({ kind: 'container', name: init, image: initializer.image, role: 'minio-init', volumes: 'pending' });
+        const initId = await docker(['run', '-d', '--name', init, ...runLabels(runId), '--network', network,
+            '-e', 'MINIO_ROOT_USER', '-e', 'MINIO_ROOT_PASSWORD', '-e', 'STORAGE_ACCESS_KEY', '-e', 'STORAGE_SECRET_KEY',
+            '-e', 'STORAGE_BUCKET=codemastery', '-e', 'STORAGE_REGION=us-east-1', '--entrypoint', '/bin/sh', initializer.image,
+            '-ec', initializer.command[0].replaceAll('$$', '$')], secrets);
+        created(initIntent, initId, 'run-owned bucket and application identity initializer');
+        await recordAnonymousVolumes(inventoryFile, initIntent, initId, init);
+        await waitForStorageInitializer(init, runSecrets);
 
         const backendPort = await freePort(), apiUrl = `http://127.0.0.1:${backendPort}`;
         // Production build pointed at this backend, marked with a per-run token in the temporary copy only.
@@ -415,10 +475,13 @@ export default async function globalSetup() {
         const backend = `${runId}-backend`;
         const backendIntent = intend({ kind: 'container', name: backend, image: backendImage, role: 'backend', volumes: 'pending' });
         const backendId = await docker(['run', '-d', '--name', backend, ...runLabels(runId), '--network', network, '-p', `127.0.0.1:${backendPort}:8080`,
-            '-e', 'APP_QUIZ_AUTO_SUBMIT_ENABLED=false', '-e', 'APP_QUIZ_AUTO_SUBMIT_DELAY_MS=1000',
-            '-e', 'APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE=2', '-e', 'DB_HOST=postgres', '-e', 'DB_PORT=5432', '-e', 'DB_NAME', '-e', 'DB_USER', '-e', 'DB_PASSWORD', '-e', 'JWT_SECRET',
-            '-e', 'STORAGE_ACCESS_KEY', '-e', 'STORAGE_SECRET_KEY', '-e', `CORS_ALLOWED_ORIGINS=${baseUrl}`, '-e', 'SERVER_PORT=8080', backendImage],
-        { DB_NAME: secrets.POSTGRES_DB, DB_USER: secrets.POSTGRES_USER, DB_PASSWORD: secrets.POSTGRES_PASSWORD, JWT_SECRET: secrets.JWT_SECRET,
+            '-e', 'DB_HOST=postgres', '-e', 'DB_PORT=5432', '-e', 'DB_NAME', '-e', 'DB_USER', '-e', 'DB_PASSWORD', '-e', 'JWT_SECRET',
+            '-e', 'STORAGE_ACCESS_KEY', '-e', 'STORAGE_SECRET_KEY', '-e', 'STORAGE_ENDPOINT=http://minio:9000',
+            '-e', 'STORAGE_BUCKET=codemastery', '-e', 'STORAGE_REGION=us-east-1', '-e', 'STORAGE_PATH_STYLE_ACCESS=true',
+            // Explicit disposable test values for ADR007 CT38 quiz-expiry consumers (PR #296).
+            ...Object.keys(quizExpiryFixture).flatMap((name) => ['-e', name]),
+            '-e', `CORS_ALLOWED_ORIGINS=${baseUrl}`, '-e', 'SERVER_PORT=8080', backendImage],
+        { ...quizExpiryFixture, DB_NAME: secrets.POSTGRES_DB, DB_USER: secrets.POSTGRES_USER, DB_PASSWORD: secrets.POSTGRES_PASSWORD, JWT_SECRET: secrets.JWT_SECRET,
             STORAGE_ACCESS_KEY: secrets.STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY: secrets.STORAGE_SECRET_KEY });
         created(backendIntent, backendId, 'started by this run');
         await recordAnonymousVolumes(inventoryFile, backendIntent, backendId, backend);
@@ -439,6 +502,7 @@ export default async function globalSetup() {
         Object.assign(process.env, {
             E2E_STACK: 'disposable', E2E_BASE_URL: baseUrl, E2E_API_URL: apiUrl,
             E2E_USERNAME: instructor.email, E2E_PASSWORD: instructor.password, E2E_FIXTURE: 'catalogue-fixture.sql',
+            E2E_MATERIAL_FILES: '1',
         });
         updateInventory(inventoryFile, (record) => observe(record, 'disposable stack ready; fixtures applied'));
         return () => teardown('playwright teardown', preview);

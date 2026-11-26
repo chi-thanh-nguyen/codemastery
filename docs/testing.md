@@ -779,6 +779,44 @@ or progress decisions, adaptive behavior, Spring contexts or PostgreSQL. Later
 dataset-dependent, behavioral and integration consumers retain separate approval
 and execution checkpoints.
 
+### FT02 structural fixture verification — 26 November 2026
+
+[SkillGraphTest.StructuralFixtures](../backend/src/test/java/com/codemastery/modules/adaptive/skillgraph/SkillGraphTest.java)
+is the authorized FT02 structural consumer of
+[SkillGraphFixtures](../backend/src/test/java/com/codemastery/support/fixtures/SkillGraphFixtures.java).
+It consumes the AD01 `Skill`, `SkillPrerequisite` and `LessonSkill` records and,
+separately, AD07's immutable
+`SkillGraph(UUID, List<Skill>, List<SkillPrerequisite>, List<LessonSkill>)`
+under `CT05-REPRESENTATION-2026-11-08-r1` (ADR005 §4.1).
+
+The 14 cases check every caller field, course-qualified prerequisite direction,
+lesson mapping identity, factory/builder equivalence, nullable descriptions,
+reference-only construction without defaults or fixture validation, builder reuse,
+graph reference forwarding, defensive collection copying and immutability, valid
+empty drafts, and explicit null forwarding to production container validation.
+Local UUID sentinels are not seed identities or approved scenario datasets.
+The existing `Representation` group owns graph-invariant oracles; fixtures do not
+duplicate that validation or establish Course lesson ancestry.
+
+Executed by Codex in an isolated PR #295 checkout based on
+`677a6df15f257dd7162f1979f7ec77326ab4a201`, with the FT02 completion changes,
+host Java 25.0.4.1, Boot 4.1.1 and Surefire 3.5.6. From `backend/`:
+
+```sh
+./mvnw -B test -Dtest='SkillGraphTest$StructuralFixtures'
+./mvnw -B test -Dtest='SkillGraphTest$StructuralFixtures,SkillGraphTest$Representation'
+```
+
+**PASS:** the focused run executed 14 structural tests; the final run executed
+24 tests (14 structural and 10 existing representation cases), all with zero failures,
+errors or skips, confirmed in Surefire XML. Application and test compilation also
+passed. The additional representation run checks compatibility with the consumed
+container; it is not new FT02 behavioral coverage. No Docker, Spring context or database
+was used by these cases. This is implementation-author structural verification,
+not independent acceptance, CT05 behavioral/concurrency qualification, CT15 datasets,
+CT36 evaluation, QA03, or production Adaptive flow verification. Those gates and
+required CI/protected integration remain separate.
+
 ## Integration-Test Lifecycle
 
 [AbstractIntegrationTest](../backend/src/test/java/com/codemastery/integration/AbstractIntegrationTest.java)
@@ -1358,9 +1396,10 @@ test-count or coverage-percentage claim is made for them.
   evaluation, listener, settings, mastery-update and placement
   tests (the decision suites hold the AD11 oracles,
   [record](#ad11-adaptive-decision-rules-verification--25-november-2026));
-  `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`,
-  `SkillGraphFixtures` and the three adaptive scenario JSON files. They wait for
-  their features and approved contracts.
+  `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`
+  and the three adaptive scenario JSON files. `SkillGraphFixtures` has the bounded
+  [FT02 structural verification](#ft02-structural-fixture-verification--26-november-2026)
+  above; the remaining scaffolds wait for their features and approved contracts.
 - **E2E.** The Playwright suite runs locally with Docker and in the required `E2E`
   check of the `CI E2E` workflow ([CI](#ci)), on all five projects against a disposable
   stack. It covers the implemented learner flows and the Instructor course, skill-graph
@@ -9214,3 +9253,156 @@ Issue closure or deployment is authorized by author qualification.
 AI assistance: OpenAI Codex implemented, verified and audited this targeted
 remediation under the explicit Leader task; attribution uses the authenticated
 maintainer's GitHub noreply identity, preserving all seven existing commits.
+
+## Shared CI reliability remediation qualification — 26 November 2026
+
+Author-side implementation baseline: main
+`23402754743e0d35048e74cbabebfa133e5e6da3`. The user explicitly authorized one
+shared remediation PR and disposable integration revisions. No feature branch,
+protected requirement, normative contract, release admission or deployment is
+changed. See [design and limits](deployment.md#shared-ci-reliability-remediation--26-november-2026).
+
+Historical failure evidence was retrieved by individual run attempt:
+
+| Run / attempt | Verified failure boundary |
+| --- | --- |
+| [45845186528 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45845186528/attempts/1) | 31 Maven integrity controls passed, then release frontend APK resolution failed on libxml2 r3 |
+| [45845186528 / 2](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45845186528/attempts/2) | Actual verifier rejected the changed tree; harness rejected `sha512sum: /tmp/maven-tree.tar: FAILED` |
+| [45845186426 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45845186426/attempts/1) | lifecycle test `readRecord`/`awaitActive` threw ENOENT during record archival |
+| [45845186426 / 2](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45845186426/attempts/2) | lifecycle proceeded; PostgreSQL APK build then failed on libxml2 r3 |
+| [45844066644 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45844066644/attempts/1) | backend Docker package failed resolving Spring Boot parent POM with Central HTTP 429 after existing retries |
+| [45834577950 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45834577950/attempts/1) | five FE14 upload journeys returned 500 instead of 201 with no real initialized storage |
+| [45834577950 / 2, 3](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45834577950) | PostgreSQL APK build blocked the browser suite before upload assertions |
+| [45849479517 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45849479517) | Release rehearsal blocked by the same retired libxml2 constraint; no candidate produced |
+
+Regression commands remain the repository's existing entry points:
+
+- `node --test e2e/fixtures/*.test.mjs`: deterministic archive-before-open probe,
+  subsequent-generation observation, ENOENT-only handling, propagated EACCES/EIO/
+  ENOTDIR/JSON failures, initializer exit/timeout/inspection failures, default
+  storage isolation and partial-setup cleanup, plus existing lifecycle/recovery.
+- `MAVEN_TEST_PLATFORM=linux/arm64 bash infrastructure/vm/tests/test-maven-bootstrap.sh`
+  (also linux/amd64): actual offline verifier, status 0/1, independent execution
+  sentinel and malformed-Dockerfile controls. An added output-format control runs
+  the real digest rejection with the alternate prefix and preserves its status.
+- `bash infrastructure/vm/tests/test-maven-wrapper-pins.sh`: existing separate
+  host archive-pin/extraction-order controls.
+- `cd backend && ./mvnw verify`: units and real PostgreSQL/MinIO integration.
+- `cd frontend && npm test` and `npm run build`.
+- Default `cd e2e && E2E_WORKERS=1 npm test`, all five projects, followed by
+  `npm run stack:down`; no upload mocks, extra skips or reduced assertions.
+- Existing VM scripts and Release rehearsal retain exact-candidate/runtime,
+  ingress, containment, containerd and security qualification responsibilities.
+
+Execution results and integration limitations are recorded below as they finish;
+unexecuted checks must not be inferred from this command list. Author-side
+verification is separate from independent acceptance and protected integration.
+
+### Direct checks completed before the initial PR push
+
+- Signed APK index probes on x86_64/aarch64: r5 available; exact-base x86_64
+  install of r3 fails and r5 succeeds. Real hardened PostgreSQL image builds
+  pass on both architectures; local and release frontend images build on amd64.
+- Maven integrity suite: original 31 controls pass on amd64 and arm64; the
+  expanded 32-control suite (real digest rejection under the alternate output
+  prefix) passes on arm64. The unchanged host Wrapper suite passes 36 Unix cases
+  in a network-disabled Linux arm64 container; PowerShell was unavailable there.
+- E2E fixture suite: 159/159 pass in a network-disabled Linux arm64 container
+  with an init process, including ownership/fencing/recovery and new controls.
+  A fresh-registry regression case first exposed a test initialization omission;
+  it now asks the real coordinator to initialize its private registry before
+  simulating archival. macOS sandbox execution cannot obtain the kernel boot
+  identity and correctly refuses recovery; no production guard was relaxed.
+- Maven dependency resolution completes cold. Its standard local cache exports
+  from an isolated docker-container builder and imports into the normal Docker
+  builder. A second, fresh builder imports that cache and completes the actual
+  package lifecycle with `RUN --network=none`, with no dependency downloads.
+  Supplying a different global RUN network mode invalidates a BuildKit cache key;
+  that deliberately invalidated cold/no-network probe fails, as expected.
+- Native arm64 backend runtime image builds successfully. Release tooling unit
+  tests pass 95/95. Actionlint 1.7.12, shell syntax and `git diff --check` pass.
+- Frontend's initial full run reports 1052 passed/14 failed after the first
+  Settings test times out under concurrent qualification load; its unchanged
+  file passes all 87 cases in an isolated rerun. Hosted final-revision results
+  remain the required evidence; no application assertion or timeout is weakened.
+
+Backend full verification, active-PR integration journeys and hosted CI are still
+in progress at this initial-push checkpoint. The final PR report must supply
+those actual results and distinguish any residual scanner findings.
+
+### CT38 integration follow-up
+
+The disposable PR #296 integration exposed another consumer of its required
+configuration: rendering the entire local Compose model for the shared MinIO
+initializer also validates the backend's quiz-expiry variables. Backend launch
+arguments alone are insufficient. The fixture now supplies the same explicit
+case values to both Compose rendering and backend launch. The Docker double
+rejects their omission during Compose rendering, and initializer failure tests
+also observe redaction of administrative credentials and prohibit passing them
+to the backend. This changes no production default or feature branch.
+
+Initial PR #300 hosted ingress qualification independently reproduced the
+remaining *cold-cache* Central limit: job 140032235617 in run 45855378142 fails
+resolving the Boot parent after the bounded 90-second retry window, before it can
+export a dependency cache. Other jobs successfully export the same dependency
+stage. This is the documented first-build/service-availability boundary, not
+proof that cache persistence fixes a cold service outage. A later successful
+cached evaluation must be reported separately from that failed attempt.
+
+### Additional completed author checks
+
+- Full host Maven verification succeeds: 1,167 unit and 638 real PostgreSQL/MinIO
+  integration cases, zero failures/errors/skips. The backend runtime image retains
+  UID/GID 999, a root-owned mode-0444 JAR, no Maven/cache/observer directories and
+  no setuid/setgid files. This is author-side evidence, not release admission.
+- The expanded Maven bootstrap suite passes 32/32 on both amd64 and arm64.
+  CT38/redaction-enhanced local-stack controls pass 26/26 in Linux.
+- PR #294 `bec98bd0b740b746b4a069523d75175d05bf69fb` merges cleanly with the
+  remediation in a disposable worktree and passes frontend typecheck/build.
+- PR #295 `46fdc65e0e12826826ce24c570f0e143bddf33fa` merges cleanly and passes
+  all 70 SkillGraph unit cases. PR #297
+  `5af4f4b96ad56b57d5a3ad2c64e4479b54175ba1` merges cleanly and passes all
+  47 SubmissionService unit cases. These do not qualify all branch behavior.
+- PR #298 `69672e49eb528e45d633f345eeefc8d1035cefee` merges cleanly and its
+  lifecycle-managed Linux discovery lists 135 tests in two files and completes
+  recovery. Its adaptive journeys have not been executed in this integration.
+- PR #296 `4fa292386144d6ab5037058b81bef3065e7891af` focused verification
+  passes 98 unit and 62 real PostgreSQL integration cases. Its backend image
+  builds from the shared dependency cache without further Maven downloads.
+  After the Compose-input correction, its two-project Chromium E2E run passes
+  46 cases with two existing skips; all seven owned resources are removed and
+  coordinator finalization confirms recovery complete.
+- PR #279's real-storage integration: 14 passed, five existing project-specific
+  skips, one retained WebKit page-overflow failure (377 > 360) after successful
+  file operations. Direct WebKit upload returns 201. Its initial main merge
+  required only documentation conflict resolution; feature source was preserved.
+  No remote feature branch was modified. See the
+  [precise remaining boundary](deployment.md#executed-integration-and-residual-security-boundary).
+
+The scan findings described there are actual current-database results, not
+acceptance. Historical zero-finding scans do not replace this new scan.
+
+The final author-side self-audit checked the complete diff against main, unchanged
+required checks and runtime/security contracts, every backend Docker build
+consumer, cache input/ref boundaries, exact verifier status and sentinel controls,
+MinIO credentials/volume ownership and failure recovery, and integration with the
+recorded active revisions. It additionally reproduced and corrected the optional-cache empty-array failure
+under Bash 3.2 with nounset enabled. The committed shell consumer blocks now run
+without a cache, with an explicitly empty cache input and with a spaced cache
+path under the available native Bash versions; the regression failed four cold/
+empty cases before the fix and passes after it. This is an author
+audit, not independent approval.
+
+A final readback found newer PR #279 `b6763a36fb7ef7562a93bc6a19f2f6726cdf1eac`
+and PR #298 `b92606b7ff3f9dc41fdcb2bf6bd91b5330da6f5e`. Both were fetched and
+reintegrated in separate disposable worktrees. Latest #279 repeats 14 passes,
+five existing browser skips and the same WebKit 377/360 overflow after file
+operations, with complete teardown. Its new storage opt-in guards do not skip
+the PDF cases because successful owned setup publishes the capability. Latest
+#298 lifecycle-managed discovery again lists 135 cases and recovers completely;
+its changed adaptive UI journeys remain unexecuted in this qualification.
+
+The final release-tooling suite includes the cold/empty/warm optional-cache
+consumer regression (96 tests total). This follow-up preserves the existing
+Bash 3.2 command path without a cache and tests argument boundaries directly from
+the committed production shell, with Docker replaced only by an argument recorder.
