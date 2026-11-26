@@ -8720,3 +8720,127 @@ AI assistance: OpenAI Codex implemented, tested and audited this second-round
 remediation under the explicit Leader task. Commit attribution uses Nguyen Chi
 Thanh and the GitHub noreply address for the authenticated maintainer account
 `chi-thanh-nguyen` (account ID 212181152); no other contributor is impersonated.
+
+### Targeted IR296-D03 CT38 consumer synchronization — 26 November 2026
+
+**Baseline and provenance.** PR #296 was OPEN at
+`a7da23a10ff78fd1650e442ede394bd26c4642ff`, with main/merge-base
+`cc6cb54ddedf226966a51c9614fc5fc5756267bb` (seven retained commits,
+37 files, +3989/-101). The [VM MinIO failed job](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45826625255/job/139932322567)
+and [Release rehearsal failed job](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45826625121/job/139932543186)
+both identify that PR head and fail at mandatory backend CT38 Compose interpolation.
+The subsequent Python JSONDecodeError is secondary to the failed rendering.
+These failures are separate from historical GHCR TLS timeouts and Maven Central
+HTTP 429 failures. This is an author remediation, not an independent review.
+
+Commit `031dbffffd4d7f8c60570755354ec11e7eb056b5` made the three expiry
+inputs mandatory in the base Compose model. The MinIO qualification generator
+was byte-for-byte unchanged from main. Even a MinIO-only `up` renders the complete
+model, including backend configuration and the test backend placeholder. CI VM
+invokes the same suite for golithus, chainguard and minimal; release.sh `qualify()`
+invokes it for the archived candidate initializer/minimal server after Q00 reload.
+This is an AS08 configuration synchronization omission, not a MinIO implementation
+defect or a reopening of the resolved IR296-02 smoke-generator mechanism.
+
+**Correction and permanent regression.** The actual `${WORK}/compose.env`
+generator in `infrastructure/minio/test-minio-init.sh` now writes explicit
+`APP_QUIZ_AUTO_SUBMIT_ENABLED=false`, `APP_QUIZ_AUTO_SUBMIT_DELAY_MS=1000` and
+`APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE=2`. ADR007 §3.2 permits these disabled synthetic
+case values; application-test.yml and the existing release/VM/E2E fixtures use
+the same convention. These are not production defaults or operator selections.
+The suite unsets all three inherited variables before generating its fixture.
+Its permanent assertion requires exactly one definition per key in that file,
+the exact case values in the rendered backend (including the placeholder), and
+absence of those keys from the MinIO server and initializer environments. It
+checks Compose exit status before loading JSON. It exercises base, local override,
+committed VM override, VM plus generated release-image override, and every local
+credential-boundary override. Existing exact six-variable initializer assertions
+and server environment/capability/filesystem/privilege assertions remain unchanged.
+
+**Tracked-source consumer coverage ledger.** Searches covered all tracked sources
+for the three new inputs, prior backend inputs, Compose invocations/base-model
+references, environment generation and real-backend startup; indirect callers
+were traced through workflow scripts, release.sh, deploy.sh and host operations.
+The available Graphify graph was dated 5 November, so its navigation hints were
+verified against source rather than treated as current coverage evidence.
+`ALREADY_SYNCHRONIZED` denotes inspected source/configuration, not a rerun of every
+unchanged runtime suite. No other confirmed omission was found in this scope.
+
+| Consumer / source | Actual caller | Environment source | CT38 applicability | Disposition |
+| --- | --- | --- | --- | --- |
+| MinIO base/local/VM/release-image/credential models and cleanup | test-minio-init.sh; ci-vm.yml's three server steps; release.sh qualify Q01 via release.yml rehearsal/candidate | Actual generated WORK/compose.env, with existing storage credential exports | Whole base model renders backend even for MinIO-only operations and the sleeping placeholder | FIXED |
+| Base Compose backend and committed VM override | Local README/setup/sample-data commands; deploy.sh; all model consumers above | Explicit env file; VM inherits base CT38 bindings | Required interpolation; VM does not erase the three backend inputs | ALREADY_SYNCHRONIZED |
+| Release smoke generator and cleanup | release.yml rehearsal/promote -> release.sh smoke -> write_smoke_env -> deploy.sh | Private synthetic smoke env | Starts real backend through base plus VM override; all three explicit case inputs already present (IR296-02) | ALREADY_SYNCHRONIZED |
+| Rendered preflight regression | ci-vm.yml deployment-script -> test-deploy-preflight-rendered-compose.sh | Calls actual write_smoke_env; generated release override | Whole base model plus missing/invalid-input cases | ALREADY_SYNCHRONIZED |
+| Env custody and committed ingress preflight | ci-vm.yml -> test-deploy-env-file-custody.sh; test-ingress-dp01-preflight.sh | write_env / generated operator and root env files | validate_env_file and, for ingress, real base plus VM rendering | ALREADY_SYNCHRONIZED |
+| Real backend ingress | ci-vm.yml -> test-ingress-real-backend.sh | Generated backend.env passed to docker run | Real backend startup; explicit false/1000/2 | ALREADY_SYNCHRONIZED |
+| Runtime privilege fresh install and V008 upgrade | ci-vm.yml and release.sh qualify Q03 -> test-runtime-real-backend-privileges.sh | backend.env -> backend-recovery.env; upgrade.env -> upgrade-v008.env | Both generators and recovery/V008 variants start real backend; explicit false/1000/2 | ALREADY_SYNCHRONIZED |
+| E2E disposable stack | ci-e2e.yml -> npm test -> fixtures/local-stack.ts | Explicit docker run -e arguments | Starts real backend directly; explicit false/1000/2 | ALREADY_SYNCHRONIZED |
+| Backend host/container bootstrap | Maven host startup or backend/Dockerfile entrypoint -> application.yml -> AppConfig | Required environment placeholders; eager QuizExpirySettings validation | All three required even when disabled; no defaults | ALREADY_SYNCHRONIZED |
+| Backend integration/config tests | ci-backend.yml Maven verify; AbstractIntegrationTest and storage/security suites | application-test.yml via test profile; AppConfigTest explicit properties; focused overrides | Real Spring contexts use explicit test properties; negative cases deliberately omit/alter inputs | ALREADY_SYNCHRONIZED |
+| Deployment/plan/update and operational verification | deploy.yml -> cd/deploy-release.sh / vm-transport.sh -> host/ops.py -> deploy.sh preflight/all; release smoke | Operator env path forwarded unchanged, or synchronized synthetic smoke env | deploy.sh validates presence, boolean/integer bounds and effective backend binding; no synthetic operator generator | ALREADY_SYNCHRONIZED |
+| Actual operator/production runtime values | Manual local/VM startup and the same host operations | Untracked operator env file, documented by .env.example/setup | Inputs required; real choices and deployed acceptance were not accessed or executed | UNVERIFIED — outside this synthetic remediation; operator qualification remains required |
+| Recovery capture/restore and test-recovery-roundtrip.sh | ci-vm.yml recovery steps; host/ops.py -> host/recovery.py | Existing container identity/environment; test uses direct docker run and Alpine sleep writers | No base-model interpolation or real backend configuration in standalone recovery fixture; actual post-deploy verification follows deploy preflight above | NOT_APPLICABLE — no replacement backend env is generated |
+| Standalone archive/image/static guards | ci-vm.yml -> test-containerd-archive-roundtrip.sh; release.py/verify-release.sh; image-layer/truststore tests; FileStorageIntegrationTest pin checks | Image/archive metadata, scratch payloads or test-profile properties | Reads pins/source or inventories artifacts; does not render base model/start a configured backend in the archive/image-only paths | NOT_APPLICABLE — Compose file reference alone is not a consumer |
+| Isolated PostgreSQL/containment tests, ingress stub and deployment mocks/early authorization refusals | ci-vm.yml -> test-postgres-*.sh; test-ingress-stub-backend.sh; offline-compose-guards, frontend-stage-cleanup, syntax-and-authorization-gates | PostgreSQL-only fixtures (including runtime-privilege env/.env used only by pgcompose), Nginx stub, mocked COMPOSE arrays/JSON or deliberately unreadable /dev/null | No real backend startup/base interpolation; early refusal tests intentionally stop before env validation | NOT_APPLICABLE — adding feature inputs would not exercise the guarded boundary |
+
+**Executed verification.** All isolated render/mutation runs and runtime invocations
+clear the three inherited inputs. The render harness executes the actual generator
+and Compose section extracted from the qualification source, stopping before runtime
+startup; it does not substitute an independently populated environment fixture.
+
+| Check | Actual result |
+| --- | --- |
+| Original a7da23a generator and actual VM/release model | Exit 1 at mandatory CT38 interpolation, followed by secondary JSONDecodeError; all three omissions reproduced |
+| Corrected generated-env regression and security assertions | Exit 0; actual file unique/exact values, backend propagation, no MinIO propagation; existing six-variable initializer and server restrictions pass |
+| Compose render paths | Base; base plus actual local override; base plus committed VM; base plus VM/generated release-image override; actual local credential override all pass |
+| Controlled generator mutations | 10/10 rejected: each of three missing keys at Compose interpolation; each duplicate (even the same value) and invalid case value at the explicit fixture assertion; all keys absent with valid inherited values also fail |
+| Semantic boundary | Nonempty invalid values can render in Compose; exact synthetic-value assertion rejects them. AppConfig and deploy preflight own boolean/integer semantics, unchanged and not requalified by rendering |
+| Existing release smoke generator tests | 2/2 SmokeEnvironmentTests pass; full unchanged release-tooling suite not rerun |
+| golithus runtime | PASS; exit 0; 30/30 checks; final All 30 MinIO initializer checks passed sentinel reached |
+| chainguard runtime | PASS; exit 0; 29/29 checks; final All 29 MinIO initializer checks passed sentinel reached |
+| minimal runtime | PASS; exit 0; 29/29 checks; final All 29 MinIO initializer checks passed sentinel reached |
+| Exact archived-candidate release qualification | UNVERIFIED: no archive for the new source revision was built/reloaded; local minimal qualification is not Q00-Q05/exact release acceptance |
+| Modified shell syntax and whitespace | bash -n infrastructure/minio/test-minio-init.sh and git diff --check pass |
+
+Runtime commands, from the repository root (each prefixed with
+`env -u APP_QUIZ_AUTO_SUBMIT_ENABLED -u APP_QUIZ_AUTO_SUBMIT_DELAY_MS -u APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE`):
+
+```bash
+MINIO_INIT_TEST_SERVER=golithus bash infrastructure/minio/test-minio-init.sh
+MINIO_INIT_TEST_SERVER=chainguard bash infrastructure/minio/test-minio-init.sh codemastery-test/minio-init:qualification
+docker build --platform linux/amd64 -t codemastery-test/minio-server:qualification - < infrastructure/vm/Dockerfile.minio-server
+MINIO_INIT_TEST_SERVER=minimal bash infrastructure/minio/test-minio-init.sh codemastery-test/minio-init:qualification
+```
+
+The golithus invocation builds the initializer from the unchanged pinned Dockerfile
+and verifies its Corresponding Source; the two subsequent variants reuse that exact
+initializer and still verify its artifact, filesystem and binary hashes. The minimal
+server was locally rebuilt from the unchanged Chainguard pin and subjected to its
+existing exact filesystem/binary/identity checks. All are linux/amd64 on Docker
+Desktop's Linux VM (arm64 host with emulation), Docker 29.8.1 / Compose v5.5.1.
+The initializer image ID under test was `sha256:51a40f9eb15394408b6eba41223a2ac2ecc40e696c559c129c37fe0d3fd0389c`; the locally rebuilt minimal server was `sha256:17b7adbfb50540dcc617685444d469dbce4c71bd4e7655a6d3592ad57724e8e7`.
+No production provisioning, destructive release smoke or deployment was run. No
+backend, Adaptive, concurrency, containment or full release-tooling suite was rerun.
+No CI waiting, polling, manual rerun or workflow/gate change was performed.
+
+**Author verdict: REMEDIATED_WITH_VERIFICATION_LIMITATIONS.** All three local MinIO runtime variants passed; exact archived-candidate release qualification and actual operator configuration remain unverified.
+
+**Reconciliation and remaining review.** IR296-01 and IR296-02 remain independently
+VERIFIED_FIXED for their original mechanisms. IR296-03 was independently
+PARTIALLY_FIXED; its remaining obligations and D01/D02 remain FIXED_AUTHOR_VERIFIED
+at a7da23a, pending independent closure. IR296-D03 is FIXED_AUTHOR_VERIFIED with the
+exact-release limitation above. AS08.contract-sync's earlier independent closure
+was bounded: it did not cover this newly identified MinIO path. That path is now
+AUTHOR_VERIFIED, pending independent closure; no independent 18/18 delivery
+acceptance is claimed. The next independent review must examine the complete delta
+from `10bcc9c6b751c54c8e0e36ccfa16072bc237d30c` to the new final HEAD, including
+D01/D02/D03 and closure of IR296-03. All D01/D02 source and regression coverage is
+unchanged by this remediation. AS12, AS16, AS18, AD13, AD08, AD10, QA04, SD04,
+integrated-exposure restrictions, bounded foundation merge conditions, operational
+qualification and reserved Leader decisions remain unchanged. No merge, approval,
+Issue closure or deployment is authorized by author qualification.
+
+AI assistance: OpenAI Codex implemented, verified and audited this targeted
+remediation under the explicit Leader task; attribution uses the authenticated
+maintainer's GitHub noreply identity, preserving all seven existing commits.
