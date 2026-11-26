@@ -23,6 +23,338 @@ checks and protected integration. This records design, not newly executed tests.
 CT17's two Batch 4 operational checkpoints remain pending Leader inputs.
 Earlier dated records below retain their approval scope and history.
 
+## CO09 / IN07 integration verification — 26 November 2026
+
+Under the Project Leader's explicit integration task, Codex merged current main
+`34d5803266cc4b6b7e4253bb085ce6fdd0cedf63` (PR #292 squash) into PR #291
+at `821dbe76737e2f691473f70be8d85d08fbe07776`; merge-base was
+`87344dfffbf7e6d1fec4d9affb464b4d3b4648f4`. The four conflicts were in
+deployment.md, deploy.sh, the matrix-contract test and the real-backend privilege
+test. Both complete consumers and their containment checks are retained.
+
+The effective matrix is now [CO09 r14](deployment.md#ct17-p6-privileges-2026-11-26-r14--co09-learning-materials-within-adr012-192-26-november-2026),
+based on integrated IN07 r13. CO09's historical r13 candidate is renumbered solely
+because PR #292 consumed r13 first. The earlier CO09 r13 references and dated test
+results below describe that historical candidate; they are not new r14 results.
+IN07's r13 record remains verbatim. No ceiling, reviewed column inventory,
+migration, dependency, shared/production privilege or operational value changes.
+
+Executed in an isolated clone, with host Java 25.0.4.1, Maven Wrapper 3.9.16,
+Boot 4.1.1 and Docker Desktop (linux/arm64). Maven used the existing disposable
+DP01 PostgreSQL 17.11, Compose-pinned MinIO and real Tomcat test infrastructure.
+The shell qualifications used disposable PostgreSQL 17.11-bookworm clusters.
+From `backend/`:
+
+```sh
+./mvnw verify -Dtest=CourseServiceTest,NotificationServiceTest -Dit.test='FileStorageIntegrationTest#co09*,AuthorizationIntegrationTest#co09*,AuthorizationIntegrationTest$NotificationEndpoints,NotificationRepositoryIntegrationTest'
+```
+
+**PASS, exit 0:** 97 unit tests (83 Course, 14 Notification) and 44 integration
+cases (27 CO09 FileStorage/HTTP, 3 CO09 authorization, 6 NotificationEndpoints,
+8 NotificationRepository), zero failures, errors or skips. The existing CO12
+Course test contribution is retained; material tests retain their event-silence
+assertions. No comprehensive independent review is claimed.
+
+From repository root (scratch BUILDX_CONFIG is outside the checkout):
+
+```sh
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+BUILDX_CONFIG=../buildx BUILDKIT_PROGRESS=plain docker build -t codemastery-backend:co09-in07-integration-20261126 backend
+BACKEND_IMAGE=codemastery-backend:co09-in07-integration-20261126 bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
+bash -n infrastructure/vm/deploy.sh infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh infrastructure/vm/tests/test-runtime-real-backend-privileges.sh infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+git diff --check
+```
+
+All commands above exited **0**. Matrix contract: exact equality across historical
+r1–r14 (r9 changes no row), 27 relations, exact independent IN07/CO09 ceiling
+assertions, unchanged historical assertions and malformed-input rejection.
+PostgreSQL containment: 115 operation probes and 36 expected rejection checks;
+multi-version predecessor and both failure-containment outcomes passed.
+Real backend: both CO09 relational-material and IN07 owner-scoped notification
+exercises passed, followed by real Flyway V008-to-V009 upgrade and drift rejection;
+no permission-denied/SQLSTATE 42501 backend log entry. Both runtime and upgrade
+exercises consumed the configured image. Image ID:
+`sha256:9d254679ef2fa167fb254d887fb96252817183188971cd26ded93cca6f0dbfc9`.
+
+Additional source/structure checks exited **0**: the complete OpenAPI equals the
+structured three-way union of both parents, all 946 internal references resolve,
+and the exact eight CO09/four IN07 operation objects, schemas and responses survive.
+Security keeps both matcher groups, notification no-store, material form exclusion,
+upload transport, current-account checks, filter ordering and default-deny.
+All Authorization test methods and the entire NotificationEndpoints suite survive.
+Eleven CO09 and eight IN07 one-sided backend/frontend files are byte-identical to
+their originating parent; all 361 backend/infrastructure files identical in both
+parents remain identical. Matrix changes against each parent are exactly the other
+consumer's row, with all reviewed columns unchanged. No material event production
+was introduced. There are no merge markers, unresolved index entries or local
+artifacts in the committed tree.
+
+A preliminary matrix-contract invocation from the scratch parent directory exited
+127 and ran no tests; its correctly located execution passed. The initial scratch
+OpenAPI checker assumed the marker was exactly IMPLEMENTED; it was corrected to
+recognize the existing IMPLEMENTED_IN_PR_291 marker, then passed. No repository
+implementation or test was weakened for either invocation error.
+
+These are integration-author checks. Historical independent CO09 review is not
+independent approval of this merged revision. Exact-new-HEAD CI, applicable owning
+module/infrastructure/Leader CODEOWNER approval, resolved review threads, protected
+integration, downstream QA and operational/release acceptance remain separate gates.
+No remote CI dispatch, approval, merge into main, Issue closure or deployed-system
+operation was performed; CI was not awaited. Historical records below are retained.
+
+## CO09 / CO12 synchronization verification — 26 November 2026
+
+Under the Project Leader's explicit integration task, Codex merged main
+`87344dfffbf7e6d1fec4d9affb464b4d3b4648f4` into PR #291 starting at
+`e01224c7e6728e564da0be394b51eb02c2f1766d` (merge-base `31d92889`). The two
+content conflicts were resolved by preserving both complete test contributions,
+main's publisher constructor arguments and fixed Clock, and separate CO09/CO12
+evidence sections. No new production behavior or infrastructure correction was
+introduced; reviewed CO09, integrated CO12, SH05 and PR #293 corrections remain.
+
+Executed from `backend/` with Java 25.0.4.1 and the existing disposable
+PostgreSQL/MinIO/Tomcat test infrastructure:
+
+```sh
+./mvnw verify -Dtest=CourseServiceTest -Dit.test='InteractionAdminIntegrationTest#co12*,EnrollmentIntegrationTest#co12*+instructorAuthorsOwnedContentAndLessonPublicationReconcilesLearnerCompletion+coursePublicationChangeReconcilesJoinedCompletionWithoutCascadeOrAdaptiveRewrite+learnerCompletionWaitsBehindAnInstructorLessonPublicationAndCountsTheNewRequiredSet+instructorPublicationAndAdministratorHideSerializeOnTheRootAndTheLastCommitWins,FileStorageIntegrationTest#co09AllEightOperationsAndRealStorage+co09Ir01AllEncodedBindingsAndUnreadBodyTransport+co09UnknownCommitRetainsBothObjects'
+```
+
+**PASS, exit 0:** 83 Course unit tests and 11 integration tests (5 Enrollment,
+4 FileStorage including both unknown-commit parameters, 2 Interaction/Admin),
+with zero failures, errors or skips. The combined cases preserve Lesson event
+behavior and material creation/edit/replacement/publication silence.
+`git diff --check` passed. These are integration-author checks, distinct from
+historical independent review; full-suite, frontend, release and operational
+acceptance are not claimed. Exact-new-HEAD CI, applicable CODEOWNER approval,
+resolved review threads and protected integration remain gates. Remote CI was
+not awaited or manually rerun. Historical records below are unchanged.
+
+## CO09 protected materials qualification — 25 November 2026
+
+PR #291 delivers backend CO09.file/video/rest, all eight material operations and
+the narrowly required shared file transport. Consumed records: CT03 r1, CT01's
+current ADR014 session integration, CT18.minimum and `CT18-B5-ERRORS-2026-11-12-r1`,
+`CT21-AUTHORING-2026-11-09-r1`, CT37.embed (ADR006 §6), CT09 authorization/lifecycle/
+config/interface/rest r1 (ADR010 §§4–7/11/14, corrections §§16–18), CT37.widget r1
+only for transport boundaries, CT38 validation and ADR012 §§19.2–19.3. The current
+r12 privilege matrix is extended by consumer-specific r13 in deployment.md; no real
+host grant or new operational value is selected.
+
+### Focused independent-review remediation — 25 November 2026
+
+This dated record qualifies the earlier implementation and automated-audit claims
+below; it does not erase them. The subsequent independent review of PR #291 at
+`52eb2f9b8eb1fb8cc7faf71da79ed4914739f44b` reported 27/30 functional requirement
+groups, two P2 findings and one P3, with CO09-R02 only partially closed. This
+remediation is the author's verification, **not independent closure or approval**.
+
+Live starting main was `1e4c54be01c78b14aa4734eb6e6e50426dbe3fe6`; initial PR HEAD
+was still `52eb2f9`, merge-base `c5b9ac0ac04b057cef7ee7f62fdcb8143202bc9a`, effective
+diff 21 files / +1342 / -46. Main had advanced only by FE32 PR #272. It was merged
+without conflicts in isolated checkout synchronization commit `a8536fb`; both
+documentation additions were preserved. CO12 PR #290 remained open and was not
+modified or incorporated. The backend has no new dependency on its implementation.
+
+| Finding | Confirmed before remediation | Correction | Durable regression evidence |
+|---|---|---|---|
+| CO09-IR01 P2; remaining CO09-R02 | Real Tomcat encoded `%66ile-materials` and encoded hyphen replacement paths returned 401 instead of 415 for a valid bearer and malformed form body. Encoded uploads also lost `Connection: close`. | `SecurityConfig` shares exact method/path `PathPatternRequestMatcher` instances between authorization, the ordered form-filter exclusion and upload transport. Spring Security 7.1.1 uses Spring 7.0.9's segment-aware request path parser. No custom URI decoding, normalization, firewall changes or global filter disablement. | `FileStorageIntegrationTest.co09Ir01*`: canonical/encoded segments, all eight successful encoded bindings, malformed forms/multipart, valid/invalid/missing bearer, denied actors, media precedence, exact default-deny surface, actual configured unrelated form processing, prohibited paths, and real TCP uploads whose body is never sent before the 403/close response. |
+| CO09-IR02 P2 | Both relational PUT operations returned 400 for `{}` and a missing material instead of descendant-scope 404. | `LearningMaterialService.requireOwnedRelational` performs preliminary coherent read admission using the existing `owned` predicate. The controller completes it before reading/validating JSON. Writers still independently recheck under the unchanged Course-root guard. File on relational routes retains 400; relational material on file routes retains 404. | Real HTTP update/publication: missing material, another Lesson, another Course, owned/wrong-type material, absent/empty/malformed/incomplete/invalid JSON, role/ownership/concealment, unchanged rows after refusal and valid mutations. `AuthorizationIntegrationTest.co09RelationalInvalidJsonKeepsRoleConcealmentAndScopePrecedence` adds the role/concealment matrix; the real-PostgreSQL guard probe removes a material after preliminary admission and both guarded writers still reject it. |
+| CO09-IR03 P3 | Raw 0xFF in file title returned 200. The same lossy-decoding defect accepted relational create (201) and update (200). | All five material JSON handlers read bytes only after admission and use a local UTF-8 decoder with both error actions set to REPORT, then the existing strict closed JSON parsers. Multipart/title/file handling is unchanged. | `FileStorageIntegrationTest.co09Ir03StrictUtf8BytesAndUnicodeOnRealHttp`: actual HTTP bytes 0xFF, incomplete multibyte, overlong and surrogate encodings; 400 and unchanged PostgreSQL rows; wrong-role 403/missing material 404 first; empty/malformed JSON, Vietnamese, supplementary Unicode and genuinely encoded U+FFFD. `CourseServiceTest.co09JsonAdmissionNeverReadsARejectedBody` proves all five rejected handlers never access the input stream or reader. |
+
+All three findings are `FIXED_AND_VERIFIED_BY_REMEDIATION_AUTHOR`. CO09-R02 now has
+the same disposition; it is the same defect as IR01 and is not counted twice.
+The prior 27/30 accounting becomes **30/30 (100% authorized functional code)** on
+the basis of closing these three gaps, inspecting their adjacent manifestations,
+and preserving the previously implemented scope. This is not a new comprehensive
+independent review, downstream UI/QA completion, CODEOWNER approval or release claim.
+
+Execution used Java 25.0.4.1, Spring Boot 4.1.1 / Spring 7.0.9 / Security 7.1.1,
+Tomcat 11.0.27, Docker Desktop 29.8.1, disposable DP01 PostgreSQL 17.11 and the
+existing Compose-pinned MinIO digest. Containers, bucket and credentials were
+ephemeral. No shared or production database/storage was used. Commands ran
+serially from `backend/`:
+
+```sh
+# Before changing production, new regressions only:
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#co09Ir*'
+# Exact encoded PUT counterexample, still before changing production:
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#co09Ir01*'
+# Same first regression selection after the production correction:
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#co09Ir*'
+# Prohibited-path baseline: temporarily restore only the original SecurityConfig,
+# then restore the correction before the final run:
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#co09Ir01FirewallRejectionIsPreserved'
+# Final affected regression selection:
+./mvnw verify -Dtest=CourseServiceTest,JwtTokenProviderTest -Dit.test='FileStorageIntegrationTest#co09*,AuthorizationIntegrationTest#co09*+protectedOperationStillRequiresValidBearerForActiveAccount,AuthorizationIntegrationTest$RefreshSessions#loginIssuesAnHttpOnlyCookieStoresOnlyItsDigestAndBindsTheAccessToken+refreshRotatesTheTokenKeepsTheSessionAndReturnsTheLoginRepresentation+logoutRevokesTheSessionAndItsAccessTokensAndAlwaysDeletesTheCookie'
+git diff --check
+```
+
+| Execution | Actual result | Exit |
+|---|---|---|
+| Initial failing-before selection | 11 tests: 9 failures, 0 errors, 0 skips; one IR01 assertion first exposed the lost close header | 1 |
+| Exact encoded replacement before fix | 4 tests: 3 failures (415 expected, 401 observed), 0 errors/skips; canonical case passed | 1 |
+| Original 11-case selection after fix | 11 passed, 0 failures/errors/skips | 0 |
+| Original SecurityConfig prohibited-path baseline | 4 passed: `%25` and semicolon paths retain current HTTP 401; Tomcat rejects encoded slash/backslash with 400 | 0 |
+| Expanded first run | 77 Course unit tests passed; 23 integration cases had 1 failure from an incorrect test expectation of 400 for the existing firewall/error-dispatch 401 | 1 |
+| Expanded second run | 192 unit tests passed; 31 integration cases had 1 fixture failure because `/file-materials/unknown` is an allowed `{materialId}` route with malformed UUID (400), rather than an unsupported route (403) | 1 |
+| Final selection above | **192 unit tests passed** (82 Course, 110 JWT/Security); **34 integration tests passed** (27 storage/real-HTTP CO09; 4 Course authorization/bearer plus 3 login/refresh/logout). 0 failures, errors or skips | 0 |
+
+The two expanded-run fixture assertions were corrected without changing production
+semantics. A preliminary command invoked `./mvnw` from the repository root and
+exited 127; it ran no tests and is excluded from PASS counts. Empty enclosing
+JUnit suites are not counted as executed tests; the final counts come from
+Surefire/Failsafe cases, including the selected nested session tests. Only the
+three changed production files and the three existing test files are qualified by
+this remediation, plus this documentation update; no test file was added.
+
+Focused self-audit checked the complete remediation delta, route/method parity,
+single decoding, admission/JSON precedence, persisted state after refusals,
+guarded revalidation, valid Unicode, storage/transaction invariants and scope.
+No further confirmed in-scope production defect remains. Previously closed R03,
+R05 and R07 are exercised by the final HTTP/unit selection. R06's unchanged safe
+operation logging and unknown outcomes were exercised; R01's unchanged frontend
+transport and R04's unchanged JDBC diagnostic filter retain their historical
+qualification and were not rerun as part of this delta. No independent reclosure
+is inferred from these author checks. The TCP probe qualifies the early unread-body
+response, not every disconnect during a committed download or production ingress.
+
+Remaining gates: independent delta review, applicable CODEOWNER approval, exact-new-
+HEAD CI, protected integration, downstream QA and operator/release qualification.
+The starting HEAD's refreshed `VM HTTPS ingress` check was SUCCESS; the historical
+libexpat resolution blocker was not current evidence at session start. No Dockerfile,
+dependency pin or workflow was changed, and no remote CI job was manually rerun or
+awaited. Runtime r13 privileges, storage lifecycle, OpenAPI operation/payload shapes
+and the prohibition on material `ContentPublishedEvent` emission remain unchanged.
+
+### Requirement-to-evidence matrix
+
+All rows below are implemented; operational and downstream acceptance are separate.
+`LearningMaterialService` is the application code location unless another owner is named.
+
+| Effective requirement | Production location | Executed evidence | Remaining gate |
+|---|---|---|---|
+| Relational create | `createRelationalMaterial`, strict `CourseStructureRequests.relationalMaterialWrite` | Course unit shape matrix; real Tomcat POST and PostgreSQL | Independent review |
+| Relational update | `updateRelationalMaterial`, existing six-column repository SQL; immutable type/ancestry | Real service and HTTP PUT, runtime-role real backend | Independent review |
+| Relational publication | `setRelationalMaterialPublication` | Service/HTTP PUT, runtime-role backend | Independent review |
+| File create, hidden default | `createFileMaterial`, guarded store-then-write | Real Tomcat POST, PostgreSQL + pinned MinIO | Operational upload/storage qualification |
+| File title update | `updateFileMaterialTitle` | Service/HTTP JSON PUT | Independent review |
+| File replacement | `replaceFileMaterialFile` | Service/HTTP multipart PUT, fresh keys and old-object removal | Operational qualification |
+| File publication | `setFileMaterialPublication` | Service/HTTP JSON PUT, Learner download after publication | Independent review |
+| Protected download | `downloadMaterialFile`, controller synchronous try-with-resources | Raw Tomcat byte/header readback; authorized owner and Learner | QA10/operational acceptance |
+| Strict text/video shapes, verbatim Markdown, exact canonical video | DTO parser and `relational`, `canonicalVideo` | `CourseServiceTest.co09ClosedShapesCanonicalVideoAndUtf8Filenames`; real text/video persistence | FE14 rendering is separate |
+| Authentication, role, ownership, concealment, membership and ancestry | Existing CT01/CT03, exact material URL rules in `SecurityConfig` | `AuthorizationIntegrationTest.co09DownloadAuthorizationConcealmentAndScopeMatrix`; deferred accessor refusal | Independent security review |
+| Admission before every part; exact parts/multiplicity; error precedence | Lazy multipart, deferred Servlet Parts, query-only request access, narrowly bypassed ordered form filter | Actual Tomcat unauthenticated401, wrong-media415 before role, malformed unauthorized403, malformed admitted400, oversized unauthorized403 and admitted413; hostile GET remains404 | Ingress transport remains operational |
+| Filename UTF-8 byte bound, PDF extension/signature, nonempty/size limit, client type ignored | `validateFilename`, buffered five-byte signature read, per-file check | Unit boundary matrix, real consumer invalid-part test, PDF sent as text/plain, raw UTF-8 filename | Explicit operator limit required |
+| No key/filename/URL metadata exposure; fresh UUIDv4 keys | Existing `Material` DTO, generated material keys | Real response checks; fresh-key/version assertion | Independent review |
+| No object key diagnostics | Existing `S3FileStorage.ProviderDiagnosticsFilter`, extended for JDBC/driver/bind/error output | Actual StatementCreatorUtils TRACE through Boot default and ECS output qualification | Application-owned output configuration only |
+| Three transaction outcomes; explicit flush; reject outer transaction | `storeThenWrite`, `Outcome`, existing Course-root guard | Real PostgreSQL COMMIT executed then lost ACK, commit-phase failure before COMMIT, injected precommit statement fault; both uncertain cases retain both objects; outer-call refusal | Operational recovery remains separate |
+| Failed store and best-effort deletion | Same lifecycle and safe cleanup | Real adapter + test-scoped faults; fresh-key delete attempted; cleanup failure leaves an unserved orphan | No orphan sweeper authorized |
+| Read-only REPEATABLE READ, release connection before open/write | `downloadRow`, programmatic snapshot | Actual PostgreSQL SHOW assertions; paused real object stream with Hikari maximum1 while another SQL request completes | Runtime pool/concurrency sizing remains separate |
+| Retry exactly once only for superseded ObjectNotFound | `downloadMaterialFile` | Real MinIO delete/replacement race, unchanged missing key, provider failure without retry | Independent review |
+| Checked closure, suppressed exceptions, header/copy/disconnect failure | Controller try-with-resources, response reset before commitment | `CourseServiceTest.co09DownloadOwnsStreamAcrossHeadersCopyDisconnectAndCloseFailure`; title close-failure regression | Real network disconnect behavior remains a QA transport gate |
+| Raw multipart/Blob transport, safe names, generation/cancellation/error semantics | Existing shared `httpClient.ts`, additive contract types | 121 HTTP transport tests and TypeScript check, including File/Blob, 413, unknown upload outcome and no replay | FE14/learner material UI not integrated here |
+| Runtime least privilege and immutable-field denial | r13 matrix, existing deploy qualification | Matrix contract sync; disposable PostgreSQL containment; real backend consumer and upgrade mechanism | No grants on shared/production DB |
+| No progress/adaptive/event side effects | No such application call in material methods | Existing Course regression and production call-path audit; combined checkout records no ContentPublishedEvent from material operations | CO12/IN15 independent review |
+
+### Executed commands and scope
+
+Java25/Maven Wrapper, disposable DP01 PostgreSQL, the pinned Compose MinIO digest
+`8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40`, ephemeral
+bucket/application identity, real loopback Tomcat, Node24 and repository Vitest were used.
+No shared database or storage was touched. Run Maven commands serially per checkout;
+a concurrent recompilation during another JVM's component scan caused one discarded
+harness startup failure, resolved by a serial rerun with no production change.
+
+```sh
+cd backend
+./mvnw -Dtest=CourseServiceTest test
+./mvnw -Dtest='CourseServiceTest#co09*' test
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#co09*'
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='AuthorizationIntegrationTest#co09*'
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#diagnosticConfidentialityDuringConcurrentLoggingInIsolatedJvm+co09RealTomcatMultipartPrecedenceAndBinaryHeaders'
+cd ../frontend
+npm ci --ignore-scripts
+npm test -- src/shared/api/httpClient.test.ts
+npm run typecheck
+cd ..
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+BUILDKIT_PROGRESS=plain docker build -t codemastery-backend:privilege-test backend
+bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
+```
+
+These are targeted commands, not a whole-suite qualification. Initial consumer execution
+ran 7 cases (6 passed; the statement-fault test double needed correction). The corrected
+case passed 1/1. The later 2-case size/HTTP run exposed R07 below; remediation passed 2/2.
+The final 2-case download/HTTP run passed 2/2 (UTF-8 filename, all eight HTTP bindings,
+raw bytes, snapshot and paused one-connection pool). Authorization passed 1/1. The
+logging/HTTP audit pair passed 2/2. Course unit coverage passed 76/76, followed by the
+three CO09-specific cases passing 3/3 after the title-close regression was added.
+Transport passed 121/121; TypeScript passed. Zero skips in successful targeted runs.
+The runtime script's first run passed the CO09 operations but failed synthetic FK
+cleanup; the fixture was corrected. The final consumer and Flyway-upgrade runs both
+passed, with zero permission-denied/42501 backend log entries. The final logging/
+consumer pair passed 2/2 after translated transaction-exception diagnostics were
+added to the output-boundary regression.
+A premature selector before the new test source existed ran 0 tests and is not evidence.
+Unchanged unrelated suites and remote CI were not repeated or awaited.
+
+### B5 oracle allocation
+
+| Oracles | CO09 ownership and evidence |
+|---|---|
+| O01–O04 | Applicable authorization, keys, PDF/filename/signature/size and precedence; unit, authorization and actual Tomcat consumer cases above |
+| O05(a)–(g) | Applicable lifecycle; real PostgreSQL/MinIO with test-only statement, store/delete and connection COMMIT faults; unknown outcomes retain both objects |
+| O06–O09 | Assignment deadlines, grading, first-submission and replacement lifecycle are AS09-owned and excluded |
+| O10 | Applicable headers and exactly one missing-superseded-object reread; real MinIO and Tomcat |
+| O11 | Assignment grading-to-quiz side effects are excluded; material no-progress/no-event behavior is checked separately |
+| O12 | FE widget/unknown-outcome UI and grading-token clauses are downstream; shared transport handling alone is delivered |
+| O13 | Applicable lazy binding and full staged precedence; raw Tomcat includes default form-filter and hostile multipart GET regressions |
+| O14 | Applicable read-only REPEATABLE READ and no connection while streaming; real one-connection pause/SQL barrier |
+| O15 | Applicable resource ownership, checked close and suppression; production copy/header paths plus real storage boundary |
+| O16 | File/Blob bytes and filename transport plus raw server byte readback apply; ZIP/submission and full widget/browser qualification remain downstream |
+
+### Comprehensive automated audit and remediation
+
+One isolated automated review covered both complete effective PR diffs, followed by
+closure checks after corrections. It is not human CODEOWNER approval.
+
+| Finding | Severity | Confirmed scenario | Correction and regression |
+|---|---|---|---|
+| CO09-R01 | P2 | Lost 201 response body classified as ordinary protocol failure | Every unusable multipart success representation is unknown outcome; response-stream rejection regression |
+| CO09-R02 | P2 | Default FormContentFilter parses malformed form PUT before authentication | Skip only material routes using OrderedFormContentFilter; real Tomcat malformed percent body yields401/415 |
+| CO09-R03 | P2 | Download query binding resolves hostile multipart before admission | Raw request/query-only access; actual GET malformed multipart yields admission404 |
+| CO09-R04 | P2 | JDBC TRACE prints private bound object key | Extend existing output deny boundary; actual JDBC TRACE default/ECS probe |
+| CO09-R05 | P3 | Title close failure strands a file stream opened for a canceled return | Close title before acquiring file; unit proves file stream never acquired |
+| CO09-R06 | P3 | Unknown-outcome log omits operation name | Constant create-file/replace-file plus row/correlation IDs, without key/filename/exception |
+| CO09-R07 | P2 | BusinessRuleException rejects413, producing500 | Use Spring MaxUploadSizeExceededException; real admitted oversized upload and direct per-file size tests pass 413 |
+
+All seven confirmed in-scope findings are corrected. No confirmed CO12 production
+defect was found. No unresolved fixable production defect is retained.
+
+### Necessary upstream additions and completion boundaries
+
+FE03 #56 owns the existing shared HTTP transport. The required multipart/binary
+extension is a small slice, estimated 10–15% of FE03's effective responsibilities:
+it extends part of one shared-HTTP responsibility while leaving routing, provider,
+guards, Auth flows, session coordination and UI intact. Existing approved files only:
+httpClient.ts, its tests and apiTypes.ts; 7 new transport cases among 121, plus typecheck.
+SH05 #154 receives only the necessary JDBC diagnostic extension in its existing
+filter and dual-format test, estimated 5–10% of its 26 functional/qualification
+responsibilities. No storage API or adapter lifecycle is substituted. These estimates
+use responsibilities, complexity and verification, not lines of code. They are the
+aggregate additions across the two PRs. No CO03/CO06/CO16 upstream slice was missing;
+the existing repository methods, guard, authoring operation and joined query are reused.
+
+AI-assisted work: Codex implemented/remediated and verified the change under the
+Project Leader's explicit task. An isolated automated reviewer reproduced defects
+and checked closure. The Leader explicitly requested TamiaoNguyen metadata using the
+verified existing associated email, with chi-thanh-nguyen as authenticated pusher.
+Original contributor commits are preserved; no independent human acceptance is claimed.
+Backend code, shared transport and API persistence availability are distinct from
+FE14/learner UI, AS09, QA10, formal review, CI and operational/release acceptance.
+
 ## CO12 publication producer qualification — 25 November 2026
 
 PR #290 implements CO12.event under `CT26-EVENT-2026-11-15-r1` and consumes

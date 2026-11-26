@@ -227,12 +227,37 @@ public final class S3FileStorage implements FileStorage {
      * It owns no adapter, context listener, thread or resource; appender shutdown owns it.
      */
     public static final class ProviderDiagnosticsFilter extends Filter<ILoggingEvent> {
+        private static final Pattern PRIVATE_KEY = Pattern.compile(
+                "(?:materials|submissions)/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}");
+
         @Override
         public FilterReply decide(ILoggingEvent event) {
             String name = event.getLoggerName();
-            return name.equals("software.amazon.awssdk") || name.startsWith("software.amazon.awssdk.")
+            if (name.equals("software.amazon.awssdk") || name.startsWith("software.amazon.awssdk.")
                     || name.equals("org.apache.http") || name.startsWith("org.apache.http.")
-                    ? FilterReply.DENY : FilterReply.NEUTRAL;
+                    || name.equals("org.springframework.jdbc") || name.startsWith("org.springframework.jdbc.")
+                    || name.equals("org.postgresql") || name.startsWith("org.postgresql.")
+                    || name.startsWith("org.hibernate.orm.jdbc.bind") || name.startsWith("org.hibernate.orm.jdbc.extract")
+                    || name.equals("org.hibernate.engine.jdbc.spi.SqlExceptionHelper")) return FilterReply.DENY;
+            // Transaction/MVC diagnostics may carry a translated SQL failure outside JDBC's logger.
+            // Apply the same output boundary to formatted messages and nested exception diagnostics.
+            if (privateKey(event.getFormattedMessage())) return FilterReply.DENY;
+            var pending = new java.util.ArrayDeque<ch.qos.logback.classic.spi.IThrowableProxy>();
+            if (event.getThrowableProxy() != null) pending.add(event.getThrowableProxy());
+            var seen = java.util.Collections.newSetFromMap(
+                    new java.util.IdentityHashMap<ch.qos.logback.classic.spi.IThrowableProxy, Boolean>());
+            while (!pending.isEmpty()) {
+                var failure = pending.removeFirst();
+                if (!seen.add(failure)) continue;
+                if (privateKey(failure.getMessage())) return FilterReply.DENY;
+                if (failure.getCause() != null) pending.add(failure.getCause());
+                if (failure.getSuppressed() != null) java.util.Collections.addAll(pending, failure.getSuppressed());
+            }
+            return FilterReply.NEUTRAL;
+        }
+
+        private static boolean privateKey(String text) {
+            return text != null && PRIVATE_KEY.matcher(text).find();
         }
     }
 

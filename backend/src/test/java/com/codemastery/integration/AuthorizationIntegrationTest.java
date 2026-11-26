@@ -2899,4 +2899,77 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
     private static String syntheticPassword() {
         return "qa01-" + UUID.randomUUID() + "-synthetic";
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "/publication"})
+    void co09RelationalInvalidJsonKeepsRoleConcealmentAndScopePrecedence(String suffix) throws Exception {
+        UUID owner = insertUser("instructor", "active"), other = insertUser("instructor", "active");
+        UUID learner = insertUser("learner", "active"), admin = insertUser("admin", "active");
+        UUID course = UUID.randomUUID(), chapter = UUID.randomUUID(), lesson = UUID.randomUUID(), material = UUID.randomUUID();
+        jdbc.update("INSERT INTO courses(id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES (?,?,'CO09','Test','published',false)", course, owner);
+        jdbc.update("INSERT INTO chapters(id,course_id,title,position) VALUES (?,?,'C',1)", chapter, course);
+        jdbc.update("INSERT INTO lessons(id,chapter_id,title,position,publication_status) VALUES (?,?,'L',1,'published')", lesson, chapter);
+        jdbc.update("INSERT INTO learning_materials(id,lesson_id,title,material_type,publication_status,text_content) VALUES (?,?,'Text','text','hidden','  code')", material, lesson);
+        String path = "/api/instructor/courses/" + course + "/lessons/" + lesson + "/materials/" + material + suffix;
+        try {
+            var before = jdbc.queryForList("SELECT * FROM learning_materials WHERE id=?", material);
+            String ownerToken = sessionToken(owner), otherToken = sessionToken(other);
+            for (String body : List.of("", "{}", "{")) {
+                mvc.perform(request(HttpMethod.PUT, path).contentType("application/json").content(body)).andExpect(status().isUnauthorized());
+                for (UUID wrongRole : List.of(learner, admin)) {
+                    mvc.perform(request(HttpMethod.PUT, path.replace(course.toString(), UUID.randomUUID().toString()))
+                            .header("Authorization", "Bearer " + sessionToken(wrongRole)).contentType("application/json").content(body)).andExpect(status().isForbidden());
+                }
+                mvc.perform(request(HttpMethod.PUT, path).header("Authorization", "Bearer " + otherToken).contentType("application/json").content(body)).andExpect(status().isForbidden());
+                mvc.perform(request(HttpMethod.PUT, path).header("Authorization", "Bearer " + ownerToken).contentType("application/json").content(body)).andExpect(status().isBadRequest());
+                for (UUID missing : List.of(course, lesson, material)) {
+                    mvc.perform(request(HttpMethod.PUT, path.replace(missing.toString(), UUID.randomUUID().toString()))
+                            .header("Authorization", "Bearer " + ownerToken).contentType("application/json").content(body)).andExpect(status().isNotFound());
+                }
+            }
+            jdbc.update("UPDATE courses SET publication_status='hidden' WHERE id=?", course);
+            mvc.perform(request(HttpMethod.PUT, path).header("Authorization", "Bearer " + otherToken).contentType("application/json").content("{}")).andExpect(status().isNotFound());
+            assertEquals(before, jdbc.queryForList("SELECT * FROM learning_materials WHERE id=?", material));
+        } finally {
+            jdbc.update("DELETE FROM learning_materials WHERE id=?", material);
+            jdbc.update("DELETE FROM lessons WHERE id=?", lesson);
+            jdbc.update("DELETE FROM chapters WHERE id=?", chapter);
+            jdbc.update("DELETE FROM courses WHERE id=?", course);
+        }
+    }
+
+    @Test void co09DownloadAuthorizationConcealmentAndScopeMatrix() throws Exception {
+        UUID owner=insertUser("instructor","active"),learner=insertUser("learner","active"),admin=insertUser("admin","active"),other=insertUser("instructor","active");
+        UUID course=UUID.randomUUID(),chapter=UUID.randomUUID(),lesson=UUID.randomUUID(),material=UUID.randomUUID(),enrollment=UUID.randomUUID();
+        jdbc.update("INSERT INTO courses(id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES (?,?,'CO09','Test','published',false)",course,owner);
+        jdbc.update("INSERT INTO chapters(id,course_id,title,position) VALUES (?,?,'C',1)",chapter,course);
+        jdbc.update("INSERT INTO lessons(id,chapter_id,title,position,publication_status) VALUES (?,?,'L',1,'published')",lesson,chapter);
+        jdbc.update("INSERT INTO learning_materials(id,lesson_id,title,material_type,publication_status,object_key,original_filename) VALUES (?,?,'PDF','file','published',?,'slides.pdf')",material,lesson,"materials/"+UUID.randomUUID());
+        String path="/api/courses/"+course+"/lessons/"+lesson+"/materials/"+material+"/file";
+        try {
+            mvc.perform(get(path)).andExpect(status().isUnauthorized());
+            String learnerToken=sessionToken(learner), adminToken=sessionToken(admin),otherToken=sessionToken(other);
+            mvc.perform(get(path).header("Authorization","Bearer "+adminToken)).andExpect(status().isForbidden());
+            mvc.perform(get(path).header("Authorization","Bearer "+otherToken)).andExpect(status().isForbidden());
+            mvc.perform(get(path).header("Authorization","Bearer "+learnerToken)).andExpect(status().isForbidden());
+            jdbc.update("INSERT INTO enrollments(id,user_id,course_id,status) VALUES (?,?,?,'left')",enrollment,learner,course);
+            mvc.perform(get(path).header("Authorization","Bearer "+learnerToken)).andExpect(status().isForbidden());
+            jdbc.update("UPDATE enrollments SET status='active' WHERE id=?",enrollment);
+            for(String target:List.of("courses","lessons","learning_materials")) {
+                UUID id=target.equals("courses")?course:target.equals("lessons")?lesson:material;
+                jdbc.update("UPDATE "+target+" SET publication_status='hidden' WHERE id=?",id);
+                mvc.perform(get(path).header("Authorization","Bearer "+learnerToken)).andExpect(status().isNotFound());
+                if(target.equals("courses"))mvc.perform(get(path).header("Authorization","Bearer "+otherToken)).andExpect(status().isNotFound());
+                jdbc.update("UPDATE "+target+" SET publication_status='published' WHERE id=?",id);
+            }
+            mvc.perform(get(path.replace(material.toString(),UUID.randomUUID().toString())).header("Authorization","Bearer "+learnerToken)).andExpect(status().isNotFound());
+            mvc.perform(get(path.replace(lesson.toString(),UUID.randomUUID().toString())).header("Authorization","Bearer "+learnerToken)).andExpect(status().isNotFound());
+            String filePath="/api/instructor/courses/"+course+"/lessons/"+lesson+"/file-materials/"+UUID.randomUUID();
+            mvc.perform(request(HttpMethod.PUT,filePath).header("Authorization","Bearer "+sessionToken(owner)).contentType("application/json").content("malformed")).andExpect(status().isNotFound());
+            mvc.perform(get(path.replace(course.toString(),"not-a-uuid")).header("Authorization","Bearer "+adminToken)).andExpect(status().isBadRequest());
+        } finally {
+            jdbc.update("DELETE FROM learning_materials WHERE id=?",material);jdbc.update("DELETE FROM enrollments WHERE id=?",enrollment);
+            jdbc.update("DELETE FROM lessons WHERE id=?",lesson);jdbc.update("DELETE FROM chapters WHERE id=?",chapter);jdbc.update("DELETE FROM courses WHERE id=?",course);
+        }
+    }
 }

@@ -2199,6 +2199,35 @@ Infrastructure and independent CODEOWNER review, required CI, and protected
 integration apply. Provisioning the revision on any shared database or VM
 requires separate Project Leader authorization.
 
+### CT17-P6-PRIVILEGES-2026-11-26-r14 — CO09 learning materials (within ADR012 §19.2, 26 November 2026)
+
+The Project Leader explicitly authorizes CO09 implementation and its consumer-specific
+runtime privilege extension in PR #291. This revision replaces only the effective
+r13 matrix's material row (unchanged since r12); all other effective rows and historical records remain unchanged. It grants no real
+host privilege and does not authorize provisioning, exposure or deployment.
+
+| Relation | Runtime privileges | Implemented consumer | Ceiling |
+|---|---|---|---|
+| `learning_materials` (course) | SELECT, INSERT; UPDATE (title, publication_status, text_content, external_video_url, object_key, original_filename) | `LearningMaterialService` uses existing `CourseContentRepositoryImpl` insert, content replacement and publication SQL for text, canonical external video and protected PDF materials | Exactly ADR012 §19.2's material row |
+
+The INSERT writes all nine existing V002 columns. Content replacement writes only
+its six payload/metadata columns; publication writes only publication_status. No
+UPDATE of id, lesson_id or material_type, DELETE, DDL, grant option or future-object
+grant is permitted. No migration is needed. `deploy.sh`, matrix-contract and isolated
+PostgreSQL qualification synchronize this row with actual consumer execution.
+
+Operational gates remain: independent infrastructure/Leader review, protected
+integration, explicit operator upload limit, tmpfs budget, ingress framing margin,
+and qualification of the release's private storage identity. Local disposable tests
+are not operational acceptance or authorization to grant on a shared database.
+
+Sequencing authorization: the Project Leader's 26 November 2026 PR #291 integration
+task renumbers CO09's previously reviewed `CT17-P6-PRIVILEGES-2026-11-25-r13`
+candidate solely because IN07 consumed r13 first in merged PR #292. The IN07 r13
+record and its authorization remain intact. This r14 record is based on effective
+r13; it changes no privilege beyond the already authorized CO09 material extension.
+The previous independent review is historical evidence, not approval of this merge.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,

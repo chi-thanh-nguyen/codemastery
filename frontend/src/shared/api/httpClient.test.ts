@@ -272,3 +272,48 @@ async function typeChecks() {
     return [nothing, pair, plain];
 }
 void typeChecks;
+
+describe('CT09 file transport', () => {
+    it('sends the original File and explicit Blob filename without setting the boundary', async () => {
+        const { access } = sessionAccess(), send = createHttpClient('https://api.test', access);
+        const body = new FormData(), bytes = new Uint8Array([37, 80, 68, 70, 45, 0, 255]);
+        body.append('file', new File([bytes], 'slides.pdf')); body.append('title', 'Slides');
+        await send('/materials', { ...operation(), method: 'POST', auth: 'authenticated', bodyFormat: 'multipart', body });
+        const init = fetcher.mock.calls[0][1]; expect(init.body).toBe(body); expect(init.headers.has('Content-Type')).toBe(false);
+        expect(init.headers.get('Authorization')).toBe('Bearer synthetic-session'); expect(init.credentials).toBe('omit');
+        expect((init.body.get('file') as File).name).toBe('slides.pdf'); expect((init.body.get('file') as File).size).toBe(bytes.length);
+        const blob = new FormData(); blob.append('file', new Blob([bytes]), 'explicit.pdf');
+        await send('/materials', { ...operation(), method: 'PUT', auth: 'authenticated', bodyFormat: 'multipart', body: blob });
+        expect(fetcher.mock.calls[1][1].body.get('file').name).toBe('explicit.pdf');
+    });
+    it.each([500, 503])('classifies %s upload as unknown without retry or invalidation', async (status) => {
+        const { access } = sessionAccess(); fetcher.mockResolvedValue(json({}, status));
+        await expect(createHttpClient('https://api.test', access)('/materials', { ...operation(), method: 'POST', auth: 'authenticated', bodyFormat: 'multipart', body: new FormData() })).rejects.toMatchObject({ kind: 'unknown-outcome', status });
+        expect(fetcher).toHaveBeenCalledTimes(1); expect(access.invalidate).not.toHaveBeenCalled();
+    });
+    it('classifies network upload failure as unknown and refuses text before sending', async () => {
+        const { access } = sessionAccess(), send = createHttpClient('https://api.test', access); fetcher.mockRejectedValue(new Error('unsafe'));
+        await expect(send('/materials', { ...operation(), method: 'POST', auth: 'authenticated', bodyFormat: 'multipart', body: new FormData() })).rejects.toMatchObject({ kind: 'unknown-outcome' });
+        fetcher.mockClear();
+        await expect(send('/materials', { ...operation(), method: 'POST', auth: 'authenticated', bodyFormat: 'multipart', body: 'base64' })).rejects.toMatchObject({ kind: 'configuration' }); expect(fetcher).not.toHaveBeenCalled();
+    });
+    it('downloads a Blob with the UTF-8 filename and no token in the URL', async () => {
+        const { access } = sessionAccess();
+        fetcher.mockResolvedValue(new Response(new Uint8Array([37,80,68,70,45,0,255]), { headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': "attachment; filename=\"fallback.pdf\"; filename*=UTF-8''B%C3%A0i.pdf" } }));
+        const result = await createHttpClient('https://api.test', access)('/materials/file', { method: 'GET', auth: 'authenticated', expectedStatus: 200, responseMode: 'binary' });
+        expect(result.filename).toBe('Bài.pdf'); expect(result.blob.size).toBe(7); expect(fetcher.mock.calls[0][0]).not.toContain('synthetic-session');
+    });
+    it('recognizes 413 ProblemDetail without invalidating the session', async () => {
+        const { access } = sessionAccess();
+        fetcher.mockResolvedValue(json({ type:'about:blank',status:413,title:'Content Too Large',detail:'unsafe',instance:'/api/materials' },413,'application/problem+json'));
+        await expect(createHttpClient('https://api.test',access)('/materials',{...operation(),method:'POST',auth:'authenticated',bodyFormat:'multipart',body:new FormData()})).rejects.toMatchObject({kind:'http',status:413,problem:{title:'Content Too Large'}}); expect(access.invalidate).not.toHaveBeenCalled();
+    });
+});
+
+it('CO09-R01: a lost successful upload response body is unknown, with no automatic replay', async () => {
+    const { access } = sessionAccess();
+    const response = json({}, 201); vi.spyOn(response, 'json').mockRejectedValue(new TypeError('connection reset'));
+    fetcher.mockResolvedValue(response);
+    await expect(createHttpClient('https://api.test', access)('/materials', { ...operation(), method: 'POST', auth: 'authenticated', expectedStatus: 201, bodyFormat: 'multipart', body: new FormData() })).rejects.toMatchObject({ kind: 'unknown-outcome', status: 201 });
+    expect(fetcher).toHaveBeenCalledTimes(1); expect(access.invalidate).not.toHaveBeenCalled();
+});

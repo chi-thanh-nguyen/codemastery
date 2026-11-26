@@ -14,6 +14,8 @@ export interface RequestOptions<T> {
     decode: (value: unknown) => T;
     query?: URLSearchParams;
     body?: unknown;
+    /** ADR010 §11: raw FormData, with the boundary owned by the browser. */
+    bodyFormat?: 'multipart';
     headers?: HeadersInit;
     signal?: AbortSignal;
     /** Owning feature rejects superseded operations even within one session. */
@@ -37,12 +39,17 @@ export type NoContentRequestOptions =
 export type MetadataRequestOptions<T> = Omit<RequestOptions<T>, 'responseMode' | 'method'> & { method: 'GET'; responseMode: 'json-with-metadata' };
 export interface ResponseWithMetadata<T> { body: T; etag: string | null }
 /** The transport entry point: JSON by default, plus the explicit no-content and metadata modes. */
+export type BinaryDownloadOptions = Omit<RequestOptions<never>, 'responseMode' | 'method' | 'decode' | 'body' | 'bodyFormat' | 'auth' | 'expectedStatus'> & {
+    method: 'GET'; auth: 'authenticated'; expectedStatus: 200; responseMode: 'binary'; decode?: never; body?: never;
+};
+export interface BinaryDownload { blob: Blob; filename: string }
 export interface HttpSend {
+    (path: string, options: BinaryDownloadOptions): Promise<BinaryDownload>;
     (path: string, options: NoContentRequestOptions): Promise<void>;
     <T>(path: string, options: MetadataRequestOptions<T>): Promise<ResponseWithMetadata<T>>;
     <T>(path: string, options: RequestOptions<T>): Promise<T>;
 }
-type AnyRequestOptions = RequestOptions<unknown> | NoContentRequestOptions | MetadataRequestOptions<unknown>;
+type AnyRequestOptions = RequestOptions<unknown> | NoContentRequestOptions | MetadataRequestOptions<unknown> | BinaryDownloadOptions;
 let authAccess: AuthSessionAccess | undefined;
 /**
  * The only operations that may carry the HttpOnly refresh cookie (ADR014 §5). Every other
@@ -92,13 +99,14 @@ function endpointFor(root: URL, path: string, query?: URLSearchParams) {
 const messages: Record<number, string> = {
     400: 'Please check the supplied information.', 401: 'Authentication failed.',
     403: 'Access is denied.', 404: 'The requested resource is unavailable.',
+    413: 'Content Too Large',
     409: 'The request conflicts with existing information.',
     412: 'This information was changed elsewhere. Review the latest version before saving again.',
     428: 'Your copy of this information is out of date. Load the latest version before saving again.',
 };
 const reasons: Record<number, string> = {
     400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found',
-    405: 'Method Not Allowed', 409: 'Conflict', 412: 'Precondition Failed', 415: 'Unsupported Media Type', 428: 'Precondition Required',
+    405: 'Method Not Allowed', 413: 'Content Too Large', 409: 'Conflict', 412: 'Precondition Failed', 415: 'Unsupported Media Type', 428: 'Precondition Required',
     500: 'Internal Server Error', 503: 'Service Unavailable',
 };
 function httpFailure(status: number, value: unknown, media: string, path: string): ApiError {
@@ -127,12 +135,15 @@ export function createHttpClient(apiBase: string, access?: AuthSessionAccess, br
         const url = endpointFor(root, path, options.query);
         const mode = options.responseMode ?? 'json';
         // Modes are chosen explicitly; nothing is inferred from method, decoder, status or payload.
-        const modeValid = mode === 'no-content'
+        const multipart = 'bodyFormat' in options && options.bodyFormat === 'multipart';
+        const modeValid = mode === 'binary' ? options.method === 'GET' && options.auth === 'authenticated' && options.expectedStatus === 200
+            : mode === 'no-content'
             ? options.decode === undefined && options.expectedStatus === 204
             : (mode === 'json' || mode === 'json-with-metadata' && options.method === 'GET') && typeof options.decode === 'function';
         if (!modeValid || !['public', 'authenticated'].includes(options.auth) ||
             !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method) ||
-            options.method === 'GET' && options.body !== undefined) {
+            options.method === 'GET' && options.body !== undefined ||
+            multipart && (!(options.body instanceof FormData) || options.auth !== 'authenticated' || !['POST', 'PUT'].includes(options.method))) {
             throw new ApiError('configuration', 'The API operation is not configured correctly.');
         }
         const session = options.auth === 'authenticated' ? access?.capture() : undefined;
@@ -148,14 +159,14 @@ export function createHttpClient(apiBase: string, access?: AuthSessionAccess, br
         if (['authorization', 'cookie', 'proxy-authorization', 'accept', 'content-type'].some((key) => headers.has(key))) {
             throw new ApiError('configuration', 'Credential and representation headers are managed by the API client.');
         }
-        headers.set('Accept', 'application/json, application/problem+json');
-        if (options.body !== undefined) headers.set('Content-Type', 'application/json');
+        headers.set('Accept', mode === 'binary' ? 'application/pdf, application/zip, application/problem+json' : 'application/json, application/problem+json');
+        if (options.body !== undefined && !multipart) headers.set('Content-Type', 'application/json');
         if (session) headers.set('Authorization', `Bearer ${session.accessToken}`);
         let response: Response;
         try {
             response = await fetch(url.href, {
                 method: options.method, headers, signal,
-                body: options.body === undefined ? undefined : JSON.stringify(options.body),
+                body: multipart ? options.body as FormData : options.body === undefined ? undefined : JSON.stringify(options.body),
                 credentials: cookieOperation ? 'include' : 'omit', redirect: 'error',
                 // Sign-out must reach the server even while the page unloads.
                 ...(cookieOperation && path === '/auth/logout' ? { keepalive: true } : {}),
@@ -163,13 +174,23 @@ export function createHttpClient(apiBase: string, access?: AuthSessionAccess, br
             });
         } catch {
             requireCurrent();
-            throw new ApiError('network', 'Unable to connect. Please try again.');
+            throw multipart ? unknownUpload() : new ApiError('network', 'Unable to connect. Please try again.');
         }
         requireCurrent();
         // Do not await an untrusted error stream before invalidating current 401.
         if (response.status === 401 && session) {
             access!.invalidate(session.generation);
             throw httpFailure(401, undefined, '', url.pathname);
+        }
+        if (multipart && response.status >= 500) throw unknownUpload(response.status);
+        if (mode === 'binary' && response.ok) {
+            const media = (response.headers.get('Content-Type') ?? '').split(';')[0].trim().toLowerCase();
+            if (response.status !== 200 || !['application/pdf', 'application/zip'].includes(media)) throw protocolError();
+            const filename = downloadFilename(response.headers.get('Content-Disposition'));
+            let blob: Blob;
+            try { blob = await response.blob(); } catch { requireCurrent(); throw new ApiError('network', 'The download could not be completed.'); }
+            requireCurrent();
+            return { blob, filename };
         }
         if (mode === 'no-content' && response.ok) {
             // Only an exact 204 succeeds; its body is never read. Other successes are protocol failures.
@@ -184,23 +205,23 @@ export function createHttpClient(apiBase: string, access?: AuthSessionAccess, br
             return decoded;
         }
         const media = (response.headers.get('Content-Type') ?? '').split(';')[0].trim().toLowerCase();
-        if (response.ok && (response.status !== options.expectedStatus || media !== 'application/json')) throw protocolError();
+        if (response.ok && (response.status !== options.expectedStatus || media !== 'application/json')) throw multipart ? unknownUpload(response.status) : protocolError();
         if (!response.ok && media !== 'application/problem+json') throw httpFailure(response.status, undefined, media, url.pathname);
         let value: unknown;
         try { value = await response.json(); } catch {
             requireCurrent();
             if (!response.ok) throw httpFailure(response.status, undefined, media, url.pathname);
-            throw protocolError();
+            throw multipart ? unknownUpload(response.status) : protocolError();
         }
         requireCurrent();
         if (!response.ok) throw httpFailure(response.status, value, media, url.pathname);
-        if (response.status !== options.expectedStatus || media !== 'application/json') throw protocolError();
+        if (response.status !== options.expectedStatus || media !== 'application/json') throw multipart ? unknownUpload(response.status) : protocolError();
         let decoded: unknown;
         try {
             decoded = options.decode!(value);
         } catch (error) {
             if (error instanceof ApiError && error.kind === 'cancelled') throw error;
-            throw protocolError();
+            throw multipart ? unknownUpload(response.status) : protocolError();
         }
         requireCurrent();
         // The validator is read only now, after status, media, decoding and current checks (A14).
@@ -208,6 +229,19 @@ export function createHttpClient(apiBase: string, access?: AuthSessionAccess, br
     }
     return send as HttpSend;
 }
+function unknownUpload(status?: number) {
+    return new ApiError('unknown-outcome', 'The upload outcome is unknown. Reload the resource before uploading again.', status);
+}
+function downloadFilename(header: string | null): string {
+    if (!header || !/^attachment(?:;|$)/i.test(header)) throw protocolError();
+    const extended = /(?:^|;)\s*filename\*=UTF-8''([^;]*)/i.exec(header);
+    const fallback = /(?:^|;)\s*filename="([^"]*)"/i.exec(header);
+    let name: string;
+    try { name = extended ? decodeURIComponent(extended[1]) : fallback?.[1] ?? ''; } catch { throw protocolError(); }
+    if (!name.trim() || /[\\/\u0000-\u001f\u007f]/.test(name)) throw protocolError();
+    return name;
+}
+export function request(path: string, options: BinaryDownloadOptions): Promise<BinaryDownload>;
 export function request(path: string, options: NoContentRequestOptions): Promise<void>;
 export function request<T>(path: string, options: MetadataRequestOptions<T>): Promise<ResponseWithMetadata<T>>;
 export function request<T>(path: string, options: RequestOptions<T>): Promise<T>;

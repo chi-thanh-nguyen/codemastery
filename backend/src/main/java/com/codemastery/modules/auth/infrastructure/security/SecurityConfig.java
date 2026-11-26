@@ -31,6 +31,22 @@ import java.util.function.Supplier;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    private static final String MATERIAL_ROOT = "/api/instructor/courses/{courseId}/lessons/{lessonId}";
+    private static final RequestMatcher MATERIAL_UPLOADS = new OrRequestMatcher(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, MATERIAL_ROOT + "/file-materials"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/file-materials/{materialId}/file"));
+    // Share Security/MVC's segment-aware decoding, including before Security's filter chain.
+    // Exact methods and paths keep unrelated form processing and default-deny unchanged.
+    private static final RequestMatcher MATERIAL_OPERATIONS = new OrRequestMatcher(
+            MATERIAL_UPLOADS,
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, MATERIAL_ROOT + "/materials"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/materials/{materialId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/materials/{materialId}/publication"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/file-materials/{materialId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/file-materials/{materialId}/publication"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET,
+                    "/api/courses/{courseId}/lessons/{lessonId}/materials/{materialId}/file"));
+
     static final RequestMatcher PUBLIC_OPERATIONS = new OrRequestMatcher(
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/register"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/login"),
@@ -165,11 +181,14 @@ public class SecurityConfig {
                                 "/api/courses/{courseId}/owned-assignments/{assignmentId}").authenticated()
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/owned-assignments/{assignmentId}",
                                 "/api/courses/{courseId}/owned-assignments/{assignmentId}/publication").authenticated()
+                        // CT09/CT21 material operations: exact paths only; stage 2 precedes application role checks.
+                        .requestMatchers(MATERIAL_OPERATIONS).authenticated()
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),
                         UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(new MaterialUploadTransport(), JwtAuthenticationFilter.class);
         return http.build();
     }
 
@@ -190,8 +209,29 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(corsSettings.allowedOrigins());
         configuration.setAllowedMethods(List.of(HttpMethod.GET.name(), HttpMethod.POST.name(), HttpMethod.PUT.name(), HttpMethod.DELETE.name(), HttpMethod.OPTIONS.name()));
         configuration.setAllowedHeaders(List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE));
+        configuration.setExposedHeaders(List.of(HttpHeaders.CONTENT_DISPOSITION));
         configuration.setAllowCredentials(false);
         source.registerCorsConfiguration("/**", configuration);
         return source;
+    }
+
+    /** The default form filter parses PUT bodies before Security. Material handlers own body admission. */
+    @Bean
+    org.springframework.boot.servlet.filter.OrderedFormContentFilter formContentFilter() {
+        return new org.springframework.boot.servlet.filter.OrderedFormContentFilter() {
+            @Override protected boolean shouldNotFilter(jakarta.servlet.http.HttpServletRequest request) {
+                return MATERIAL_OPERATIONS.matches(request);
+            }
+        };
+    }
+
+    /** ADR010 §11: do not drain a rejected protected upload merely to reuse its connection. */
+    private static final class MaterialUploadTransport extends org.springframework.web.filter.OncePerRequestFilter {
+        @Override protected void doFilterInternal(jakarta.servlet.http.HttpServletRequest request,
+                jakarta.servlet.http.HttpServletResponse response, jakarta.servlet.FilterChain chain)
+                throws java.io.IOException, jakarta.servlet.ServletException {
+            if (MATERIAL_UPLOADS.matches(request)) response.setHeader(HttpHeaders.CONNECTION, "close");
+            chain.doFilter(request, response);
+        }
     }
 }
