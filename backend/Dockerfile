@@ -37,7 +37,12 @@ FROM maven-bootstrap AS build
 COPY .mvn/ .mvn/
 COPY pom.xml ./
 COPY src/ src/
-RUN /opt/maven/bin/mvn package -DskipTests
+# Give Resolver's existing 429/503 retries more time on cold runners.
+# Without Retry-After the three delays are 15, 30 and 45 seconds.
+# Resolver declines a retry when the requested delay exceeds 60 seconds.
+RUN /opt/maven/bin/mvn package -DskipTests \
+    -Daether.connector.http.retryHandler.interval=15000 \
+    -Daether.connector.http.retryHandler.intervalMax=60000
 
 # Build-only verifier: no compiler, helper class or verification inventory ships.
 FROM jdk AS truststore-verifier
