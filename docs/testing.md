@@ -8341,3 +8341,123 @@ acceptance, release admission or deployment authorization.
 
 AI-assisted work: OpenAI Codex reproduced the test gap, corrected and qualified
 the harness, and prepared the issue-level analysis under the Leader's instruction.
+
+
+## FE14 author verification and self-audit — 26 November 2026
+
+Refs #199; PR #279 is repurposed from its old FE28-only change under the Leader's explicit task.
+Baseline main: `cc6cb54ddedf226966a51c9614fc5fc5756267bb`. The granularity below is functional,
+non-overlapping behavior checkpoints, not LOC or Issue checkbox counts. Before: 9/34 complete
+(26.47%); after: 34/34 implementation checkpoints author-verified (100%). This is code/author
+verification, not completion of Issue governance, independent CODEOWNER review, CI, protected
+merge, release/deployment, broad QA or assistive-technology acceptance.
+
+### Before/after implementation inventory
+
+| ID / behavior | Initial | Final | Implementation | Verification |
+| --- | --- | --- | --- | --- |
+| E01 Owned-course pagination | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | InstructorCoursesPage.tsx / instructorCourseApi.ts | Existing authoring/routes regressions; E02 also real E2E create |
+| E02 Hidden Course creation and editor navigation | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | InstructorCoursesPage.tsx / instructorCourseApi.ts | Existing authoring/routes regressions; E02 also real E2E create |
+| E03 Course metadata and Settings causal acknowledgment | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / useCourseEditor.ts | D1/D1-R1/D1-R2 existing regressions; E04 real E2E publish/hide |
+| E04 Course publication and confirmation | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / useCourseEditor.ts | D1/D1-R1/D1-R2 existing regressions; E04 real E2E publish/hide |
+| E05 Chapter append | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / instructorCourseApi.ts | Existing/new authoring regressions; real E2E Chapter/Lesson create/edit/order/publication |
+| E06 Chapter title edit | MISSING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / instructorCourseApi.ts | Existing/new authoring regressions; real E2E Chapter/Lesson create/edit/order/publication |
+| E07 Full sibling Chapter order | MISSING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / instructorCourseApi.ts | Existing/new authoring regressions; real E2E Chapter/Lesson create/edit/order/publication |
+| E08 Hidden Lesson append | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / instructorCourseApi.ts | Existing/new authoring regressions; real E2E Chapter/Lesson create/edit/order/publication |
+| E09 Full sibling Lesson order and announcements | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / instructorCourseApi.ts | Existing/new authoring regressions; real E2E Chapter/Lesson create/edit/order/publication |
+| E10 Lesson publish/hide confirmation | PARTIAL | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / instructorCourseApi.ts | Existing/new authoring regressions; real E2E Chapter/Lesson create/edit/order/publication |
+| E11 Production Lesson route and Content Edit entry | MISSING | COMPLETE_AUTHOR_VERIFIED | LessonEditorPage.tsx / routePaths.ts / routes/index.tsx | FE14 component/API/route regressions and real E2E Lesson save/Preview |
+| E12 Whole Lesson title/Markdown replacement | MISSING | COMPLETE_AUTHOR_VERIFIED | LessonEditorPage.tsx / routePaths.ts / routes/index.tsx | FE14 component/API/route regressions and real E2E Lesson save/Preview |
+| E13 Sticky save state and leave guards | MISSING | COMPLETE_AUTHOR_VERIFIED | LessonEditorPage.tsx / routePaths.ts / routes/index.tsx | FE14 component/API/route regressions and real E2E Lesson save/Preview |
+| E14 One shared course/skill graph and session boundaries | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | useCourseEditor.ts / LessonEditorPage.tsx / existing skillGraphApi.ts | FE14/session/shared-context regressions; real E2E map/unmap/re-read |
+| E15 Skill map/unmap and authoritative graph refresh | MISSING | COMPLETE_AUTHOR_VERIFIED | useCourseEditor.ts / LessonEditorPage.tsx / existing skillGraphApi.ts | FE14/session/shared-context regressions; real E2E map/unmap/re-read |
+| E16 Lesson loading/refusal/retry and session lifecycle | MISSING | COMPLETE_AUTHOR_VERIFIED | useCourseEditor.ts / LessonEditorPage.tsx / existing skillGraphApi.ts | FE14/session/shared-context regressions; real E2E map/unmap/re-read |
+| M01 Create text/video material | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M02 Replace text/video title/content | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M03 Explicit relational publication | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M04 Create hidden PDF | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M05 Edit PDF title | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M06 Replace protected PDF | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M07 Explicit PDF publication | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M08 Protected binary download | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M09 Strict operation response decoding and returned material order | PARTIAL | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / FileUploadField.tsx / shared provider | FE14 transport/component/session/cancellation/unknown-outcome regressions; real E2E PDF lifecycle |
+| M10 Actual File bytes and one-file feedback | PARTIAL | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / FileUploadField.tsx / shared provider | FE14 transport/component/session/cancellation/unknown-outcome regressions; real E2E PDF lifecycle |
+| M11 Pending locking and cancellation | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / FileUploadField.tsx / shared provider | FE14 transport/component/session/cancellation/unknown-outcome regressions; real E2E PDF lifecycle |
+| M12 Unknown-outcome reconciliation before another upload | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / FileUploadField.tsx / shared provider | FE14 transport/component/session/cancellation/unknown-outcome regressions; real E2E PDF lifecycle |
+| M13 Safe filename/object URL lifecycle | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / FileUploadField.tsx / shared provider | FE14 transport/component/session/cancellation/unknown-outcome regressions; real E2E PDF lifecycle |
+| M14 400/413/415 accessible error states | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / FileUploadField.tsx / shared provider | FE14 transport/component/session/cancellation/unknown-outcome regressions; real E2E PDF lifecycle |
+| U01 Compliant shared Markdown preview | BLOCKED_BY_UPSTREAM | COMPLETE_AUTHOR_VERIFIED | MarkdownRenderer.tsx + exact pinned AST dependencies | 26 shared Markdown tests plus 12 canonical-video tests in the FE14 API suite; real E2E headings/table/literal HTML Preview |
+| U02 Canonical CT37 video validation/helper | MISSING | COMPLETE_AUTHOR_VERIFIED | MaterialForm.tsx youtubeEmbedAddress | Canonical/obfuscated URL cases and real E2E video create/update |
+| Q01 Production/preview isolation | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | Existing app/theme/shell + semantic FE14 surfaces | Routes/context regressions; real browser 360/768/1024/1280/1440, Dark/System and keyboard mapping |
+| Q02 Semantic themes/responsive/keyboard across new journeys | PARTIAL | COMPLETE_AUTHOR_VERIFIED | Existing app/theme/shell + semantic FE14 surfaces | Routes/context regressions; real browser 360/768/1024/1280/1440, Dark/System and keyboard mapping |
+
+### Executed commands and results
+
+All commands ran in the isolated FE14 checkout. `npm --prefix frontend ...` from the root is the
+same repository script as `npm ...` from `frontend/`.
+
+| Command | Observed result |
+| --- | --- |
+| `npm --prefix frontend test -- src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/features/instructor/course-management/api/instructorCourseApi.test.ts src/shared/components/MarkdownRenderer.test.tsx src/features/instructor/skill-graph-editor/api/skillGraphApi.test.ts src/shared/api/httpClient.test.ts src/routes/index.test.tsx` | Exit 0; 518 tests, 8 files. Includes the existing Settings/causal-read and FE15/FE16/FE18/FE32 regression protections; 68 tests in the three new frontend files at this run; four further file-error/widget tests were then added |
+| `npm --prefix frontend test -- src/features/instructor/course-management/pages/fe14Authoring.test.tsx` (after the additional 400/413/415/multi-file cases) | Exit 0; 20 tests, including the four additions. Final unique focused test coverage is 522 tests across the eight suites; the 518-suite run and this final 20-test run overlap |
+| `npm --prefix frontend run typecheck` | Exit 0 |
+| `npm --prefix frontend run build` | Exit 0, including typecheck; existing Vite warning for chunks above 500 kB |
+| `node --test e2e/fixtures/local-stack.test.mjs` | Exit 0 outside the restricted sandbox; 24 tests, 4 suites. The earlier sandbox run could not validate OS host/process identity and failed/preserved its synthetic scratch resources; it is not a PASS |
+| `E2E_MATERIAL_FILES=1 npm --prefix e2e test -- instructor-authoring.spec.ts --project=chromium-desktop --workers=1` | Exit 0; 1 real-browser integration journey, 10.2 s test / 26.5 s total. Chromium; actual backend built from the checkout, PostgreSQL and Compose-pinned MinIO. All 7 owned resources verified absent by the lifecycle finalizer |
+| `impeccable context --target frontend/src/features/instructor` (installed launcher) | Context loaded from actual project; no PRODUCT.md; existing DESIGN r13 retained. No context/init/doctor/hook write |
+| `impeccable detect --json <the five changed UI surfaces>` | Exit 0; `[]` findings. Source detector, not browser or acceptance evidence |
+| `git diff --check` | Exit 0 |
+
+The successful real E2E journey exercises hidden Course creation and navigation, Chapter edit and
+complete sibling order, Lesson creation/order/Edit routing, whole-Lesson Markdown save, safe Preview,
+text/video create and update, relational publication/hide, PDF create/title update/replacement,
+protected download (asserted replacement bytes and `replacement.pdf`), file publication/hide,
+real Skill creation followed by Lesson mapping and keyboard unmapping, Lesson publication and
+Course publish/hide. Screenshots and no-page-overflow checks at 360, 768, 1024, 1280 and 1440 px;
+Dark and System following both emulated OS schemes were asserted. The 360 px and Dark screenshots
+were visually inspected. No provider video was activated or fetched.
+
+Earlier E2E failures were investigated and corrected, never counted as PASS: (1) Compose JSON
+preserved `$$` and the direct initializer needed unescaping; (2) the first test used an exact required
+label; (3) it assumed segmented controls were tabs rather than buttons; (4) a partial label also
+matched its Dialog name; (5) it tried to reopen a closing Lesson dialog before the prior command
+finished. The final test uses typed textbox/button selectors and waits for the old dialog to close.
+All real disposable runs were finalized with their owned resources verified absent.
+
+### Full-scope author self-audit and remediation
+
+The audit covered the full effective diff, every checkpoint above, operationId/path/body/status
+parity with OpenAPI, production call/route reachability, existing assessment/graph/navigation
+consumers, ownership concealment, D12-3 and Settings D1/D1-R1/D1-R2, session/cancellation/stale-read
+interleavings, success/rejection/unknown outcomes, PDF/filename/object URL safety, Markdown, semantic
+roles, responsiveness/keyboard, dependency/lockfile/attribution and scope integrity.
+
+| Finding | Severity and root cause | Correction and regression evidence | Closure |
+| --- | --- | --- | --- |
+| A1 Lesson re-entry could lose a local post-save reconciliation barrier while the shared tree was old | P1; child state did not survive unmount | Retain a session/course-bound minimum eligible GET sequence in the provider; Content and Lesson mutations wait across remount. Dedicated delayed-GET test exercises navigation after save and verifies disabled stale-tree Edit/create controls until a fresh read; existing Settings causal tests retained | FIXED_AUTHOR_VERIFIED |
+| A2 Markdown escape decoding could remove a backslash before URL admission | P2; percent-decoded backslash was interpreted as a Markdown escape | Reject backslashes immediately after percent decoding, before escape/entity decoding; encoded host/userinfo and protocol-relative security regression cases pass | FIXED_AUTHOR_VERIFIED |
+| A3 The new graph barrier initially cleared the old S20 staleness ref before its fresh read started | P2; extra effect dependencies observed the old successful graph | Clear only after the requested loading cycle; unchanged N1 regression first failed (2 reads instead of 3), then passed with the correction; no automatic GET retry | FIXED_AUTHOR_VERIFIED |
+| A4 Course refusal wording named assessments in the shared authoring context; local invalid fields lacked a summary | P3; reused feature-specific copy | Generic owned-course wording and linked field/error-summary presentation; production refusal and validation cases, typecheck and browser source rendered successfully | FIXED_AUTHOR_VERIFIED |
+
+Regression-sensitivity probes deliberately disabled the provider barrier and the decoded-backslash check separately; each produced the expected test exit 1. Both source files were restored byte-for-byte in `finally` before final typecheck. These intentional failures are evidence of regression sensitivity, not final-suite failures.
+
+No confirmed remediable in-scope finding remains after correction/re-audit. This is implementation-author
+self-audit, not an independent review. Component/mock tests establish deterministic failure races;
+real E2E establishes the successful REST/storage journeys. Neither is release qualification.
+
+### Scope and execution limits
+
+No backend code, OpenAPI public behavior, database migration, production storage policy, auth stack,
+FE13/FE19 activation, native-router history model, Issue/Project fields, PR #280, ruleset, CI dispatch,
+merge or release/deployment was changed. No full backend, historical unrelated E2E/VM/release matrix,
+Firefox/WebKit, NVDA/VoiceOver or 200% zoom qualification was run. The existing declarative-router
+native Back/Forward limitation (DESIGN A15) remains; app Back/shell navigation and unload warnings
+are implemented. Light/Dark/System checks are targeted developer evidence, not complete WCAG
+conformance. CI is neither polled nor awaited.
+
+Metadata arrangement: by explicit consensual PR-specific Leader instruction, new commits use Git
+name `heizseung` and email `thangle12012006@gmail.com` for author and committer. GitHub commit
+`1e4c54be01c78b14aa4734eb6e6e50426dbe3fe6` associates that name/email with account `heizseung`.
+The authenticated pusher remains `chi-thanh-nguyen`. Metadata is not proof of human authorship;
+this implementation/test/documentation work was AI-assisted with Codex. No signatures, owner
+reviews or academic contribution claims are fabricated. No PR #286 code was copied.

@@ -63,8 +63,12 @@ export interface SharedCourseContextState {
         successfulRead: number;
         /** Schedules the shared read and returns its minimum eligible initiation sequence. */
         reload: () => number;
+        /** Mutation reconciliation survives child editor unmount/remount. */
+        revalidate: () => number;
+        revalidating: boolean;
     };
     skillGraph: OwnedSkillGraphRead;
+    skillsRevalidating: boolean;
     skills: SkillSource;
     /** Confirmed metadata awaiting a causally eligible GET; never a draft or shared-read evidence. */
     settingsAcknowledgment: SettingsAcknowledgment | null;
@@ -87,6 +91,7 @@ export function useCourseEditorContext(): SharedCourseContextState | null {
 export function useSharedCourseState(courseId: string): SharedCourseContextState {
     const auth = useAuth();
     const identity = auth.isAuthenticated ? `${auth.generation}|${courseId}` : null;
+    const [mutationFloor, setMutationFloor] = useState<{ identity: string; sequence: number } | null>(null);
     const [settingsSave, setSettingsSave] = useState<(SettingsAcknowledgment & { identity: string }) | null>(null);
     // Count actual GET initiations, not renders, reload scheduling or response arrival. The existing owner-read
     // lifecycle accepts only current, non-superseded results and retains this envelope unchanged on read failure.
@@ -101,6 +106,11 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
         courseRead.reload();
         return minimumRead;
     }, [courseRead.reload]);
+    const revalidateCourse = useCallback(() => {
+        const sequence = reloadCourse();
+        if (identity !== null) setMutationFloor({ identity, sequence });
+        return sequence;
+    }, [identity, reloadCourse]);
     const skillGraph = useOwnedSkillGraph(courseId);
     const { reload: reloadGraph, graph, loading: graphLoading, error: graphError } = skillGraph;
     // True from an S20 skill change until a later graph read succeeds (D12-3). A failed read keeps it set,
@@ -108,20 +118,26 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
     // never cleared during render and never triggers a read on its own: a failed read is retried only by
     // such an opening or by "Try again" (CT16.minimum: no automatic GET retry).
     const skillsStaleRef = useRef(false);
+    const [skillsRefreshIdentity, setSkillsRefreshIdentity] = useState<string | null>(null);
+    const graphReloadStarted = useRef(false);
     const tabDirtyRef = useRef(false);
 
     const graphLoadingRef = useRef(graphLoading);
     useEffect(() => {
         graphLoadingRef.current = graphLoading;
+        if (graphLoading && skillsRefreshIdentity === identity) graphReloadStarted.current = true;
+        if (graphReloadStarted.current && graph && !graphLoading && !graphError && skillsRefreshIdentity === identity) setSkillsRefreshIdentity(null);
         // Only a successful read answers the staleness: after a failed re-read the last graph stays on screen
         // with an error (U2), and it is still the stale copy.
-        if (graph && !graphLoading && !graphError) skillsStaleRef.current = false;
-    }, [graph, graphLoading, graphError]);
+        if (graph && !graphLoading && !graphError && !(skillsRefreshIdentity === identity && !graphReloadStarted.current)) skillsStaleRef.current = false;
+    }, [graph, graphLoading, graphError, skillsRefreshIdentity, identity]);
 
     const notifySkillsChanged = useCallback(() => {
         skillsStaleRef.current = true;
+        graphReloadStarted.current = false;
+        setSkillsRefreshIdentity(identity);
         reloadGraph();
-    }, [reloadGraph]);
+    }, [reloadGraph, identity]);
 
     const refreshSkillsIfStale = useCallback(() => {
         // A read already in flight (for example the one notifySkillsChanged started) answers the staleness.
@@ -155,13 +171,16 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
         : courseData
             ? 'ready'
             : 'loading';
+    const revalidating = mutationFloor?.identity === identity && successfulRead < mutationFloor.sequence;
     const course = useMemo(() => ({
         status: courseStatus,
         data: courseData,
         error: courseRead.error,
         successfulRead,
         reload: reloadCourse,
-    }), [courseStatus, courseData, courseRead.error, successfulRead, reloadCourse]);
+        revalidate: revalidateCourse,
+        revalidating,
+    }), [courseStatus, courseData, courseRead.error, successfulRead, reloadCourse, revalidateCourse, revalidating]);
 
     const skills = useMemo<SkillSource>(() => ({
         status: skillGraph.error ? 'error' : skillGraph.graph ? 'ready' : 'loading',
@@ -173,6 +192,7 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
         courseId,
         course,
         skillGraph,
+        skillsRevalidating: identity !== null && skillsRefreshIdentity === identity,
         skills,
         settingsAcknowledgment,
         acknowledgeSettings,
@@ -180,5 +200,5 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
         refreshSkillsIfStale,
         setTabDirty,
         isTabDirty,
-    }), [courseId, course, skillGraph, skills, settingsAcknowledgment, acknowledgeSettings, notifySkillsChanged, refreshSkillsIfStale, setTabDirty, isTabDirty]);
+    }), [courseId, course, skillGraph, skills, identity, skillsRefreshIdentity, settingsAcknowledgment, acknowledgeSettings, notifySkillsChanged, refreshSkillsIfStale, setTabDirty, isTabDirty]);
 }

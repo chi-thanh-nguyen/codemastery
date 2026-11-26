@@ -2417,3 +2417,19 @@ the two IN07 files introduced in that PR:
 The HTTP authorization and error cases extend the existing
 `AuthorizationIntegrationTest.java`. The canonical tree and CODEOWNERS stay
 unchanged. This record approves no other paths.
+
+
+## Bounded FE14 supporting test placement — 26 November 2026
+
+Under the Project Leader's FE14 task Sections 1, 6 and 7 (explicit supporting-file and focused-test
+authorization), the following tests are added within existing directories. No architecture-level
+module or immutable original tree is changed; this is a task-scoped placement record, not a general
+CT14 amendment or CODEOWNER acceptance:
+
+- `frontend/src/features/instructor/course-management/api/instructorCourseApi.test.ts`: FE14 operation/decoder/transport contract tests.
+- `frontend/src/features/instructor/course-management/pages/fe14Authoring.test.tsx`: production routing, authoring and reconciliation/session regressions.
+- `frontend/src/shared/components/MarkdownRenderer.test.tsx`: bounded FE08 Markdown/security and CT37 URL-admission regressions.
+- `e2e/tests/instructor-authoring.spec.ts`: FE14 browser-to-real-REST authoring, mapping and material journeys.
+
+The existing frontend and e2e CODEOWNERS rules apply unchanged. See the FE14 decision record in
+`docs/setup.md` and the executed evidence in `docs/testing.md`.

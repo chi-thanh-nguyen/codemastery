@@ -1,3 +1,4 @@
+import { ProductionLessonEditorPage } from '../features/instructor/course-management/pages/LessonEditorPage';
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import type { RouteObject } from 'react-router';
@@ -252,6 +253,7 @@ export function AppRouter({ catalogue, preview }: { catalogue?: ReactNode; previ
         'course-skills': <CourseSkillsSection />,
         'course-assessments': <CourseAssessmentsTab />,
         'course-settings': <CourseSettingsTab />,
+        'course-lesson': <ProductionLessonEditorPage />,
         'course-quiz': <CourseQuizEditor />,
         'course-assignment': <CourseAssignmentEditor />,
     };

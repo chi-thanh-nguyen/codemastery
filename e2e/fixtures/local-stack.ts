@@ -349,6 +349,7 @@ export default async function globalSetup() {
         const secrets = {
             POSTGRES_DB: 'codemastery_e2e', POSTGRES_USER: 'codemastery_e2e', POSTGRES_PASSWORD: randomBytes(24).toString('hex'),
             JWT_SECRET: randomBytes(32).toString('hex'),
+            MINIO_ROOT_USER: `e2e-root-${randomBytes(6).toString('hex')}`, MINIO_ROOT_PASSWORD: randomBytes(24).toString('hex'),
             STORAGE_ACCESS_KEY: `e2e-${randomBytes(6).toString('hex')}`, STORAGE_SECRET_KEY: randomBytes(24).toString('hex'),
         };
         // Containers run the exact image ID this run built (recorded by --iidfile); the tag is only a layer
@@ -381,6 +382,36 @@ export default async function globalSetup() {
             await docker(['exec', postgres, 'pg_isready', '-q', '-U', secrets.POSTGRES_USER, '-d', secrets.POSTGRES_DB]);
             return true;
         }, 90_000);
+
+        // Opt-in FE14 file journeys reuse the repository's pinned local MinIO images and
+        // initializer. Both containers use the existing intent/identity/volume recovery protocol.
+        // No ports or credentials are shared with another run or a production environment.
+        if (process.env.E2E_MATERIAL_FILES === '1') {
+            const { stdout } = await run('docker', ['compose', '--env-file', '/dev/null', '-f', join(repo, 'infrastructure/docker-compose.yml'), 'config', '--format', 'json'], {
+                env: dockerEnv({ ...secrets, DB_NAME: secrets.POSTGRES_DB, DB_USER: secrets.POSTGRES_USER, DB_PASSWORD: secrets.POSTGRES_PASSWORD }), maxBuffer: 1024 * 1024,
+            });
+            const config = JSON.parse(stdout);
+            const minio = `${runId}-minio`, image = config.services.minio.image;
+            const intent = intend({ kind: 'container', name: minio, image, role: 'minio', volumes: 'pending' });
+            const id = await docker(['run', '-d', '--name', minio, ...runLabels(runId), '--network', network, '--network-alias', 'minio',
+                '-e', 'MINIO_ROOT_USER', '-e', 'MINIO_ROOT_PASSWORD', image, ...config.services.minio.command], secrets);
+            created(intent, id, 'FE14 task-owned file storage');
+            await recordAnonymousVolumes(inventoryFile, intent, id, minio);
+            const init = `${runId}-minio-init`, initImage = config.services['minio-init'].image;
+            const initIntent = intend({ kind: 'container', name: init, image: initImage, role: 'minio-init', volumes: 'pending' });
+            const initId = await docker(['run', '-d', '--name', init, ...runLabels(runId), '--network', network,
+                '-e', 'MINIO_ROOT_USER', '-e', 'MINIO_ROOT_PASSWORD', '-e', 'STORAGE_ACCESS_KEY', '-e', 'STORAGE_SECRET_KEY',
+                '-e', 'STORAGE_BUCKET=codemastery', '-e', 'STORAGE_REGION=us-east-1', '--entrypoint', '/bin/sh', initImage,
+                '-ec', 'for attempt in 1 2 3 4 5 6 7 8 9 10; do /bin/sh -ec "$1" && exit 0; sleep 1; done; exit 1', 'init', ...config.services['minio-init'].command.map((command: string) => command.replaceAll('$$', '$'))], secrets);
+            created(initIntent, initId, 'FE14 task-owned storage initialization');
+            await recordAnonymousVolumes(inventoryFile, initIntent, initId, init);
+            await waitFor('FE14 storage initialization', async () => {
+                const state = JSON.parse(await docker(['inspect', '--format', '{{json .State}}', init]));
+                if (state.Running) return false;
+                if (state.ExitCode !== 0) throw new Error('FE14 storage initializer failed');
+                return true;
+            }, 30_000);
+        }
 
         const backendPort = await freePort(), apiUrl = `http://127.0.0.1:${backendPort}`;
         // Production build pointed at this backend, marked with a per-run token in the temporary copy only.
@@ -416,7 +447,7 @@ export default async function globalSetup() {
         const backendIntent = intend({ kind: 'container', name: backend, image: backendImage, role: 'backend', volumes: 'pending' });
         const backendId = await docker(['run', '-d', '--name', backend, ...runLabels(runId), '--network', network, '-p', `127.0.0.1:${backendPort}:8080`,
             '-e', 'DB_HOST=postgres', '-e', 'DB_PORT=5432', '-e', 'DB_NAME', '-e', 'DB_USER', '-e', 'DB_PASSWORD', '-e', 'JWT_SECRET',
-            '-e', 'STORAGE_ACCESS_KEY', '-e', 'STORAGE_SECRET_KEY', '-e', `CORS_ALLOWED_ORIGINS=${baseUrl}`, '-e', 'SERVER_PORT=8080', backendImage],
+            '-e', 'STORAGE_ACCESS_KEY', '-e', 'STORAGE_SECRET_KEY', ...(process.env.E2E_MATERIAL_FILES === '1' ? ['-e', 'STORAGE_ENDPOINT=http://minio:9000'] : []), '-e', `CORS_ALLOWED_ORIGINS=${baseUrl}`, '-e', 'SERVER_PORT=8080', backendImage],
         { DB_NAME: secrets.POSTGRES_DB, DB_USER: secrets.POSTGRES_USER, DB_PASSWORD: secrets.POSTGRES_PASSWORD, JWT_SECRET: secrets.JWT_SECRET,
             STORAGE_ACCESS_KEY: secrets.STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY: secrets.STORAGE_SECRET_KEY });
         created(backendIntent, backendId, 'started by this run');

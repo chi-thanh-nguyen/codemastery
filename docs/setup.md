@@ -2427,3 +2427,112 @@ This changes test synchronization only, with no production implementation change
 no rule suppression, tolerance change or removed assertion. Focused browser verification passes 6 cases in each of Firefox 155 and WebKit 26.6,
 and the 8 harness lifecycle tests pass for this follow-up; the earlier full
 matrix and runtime-source evidence remain applicable to the identical application.
+
+
+## FE14 implementation and bounded Markdown decision — 26 November 2026
+
+Authority: the Project Leader's explicit “Complete FE14 Implementation, Bounded Upstream
+Completion, PR #279 Replacement and Full-Scope Self-Audit” task. This record uses the
+Section 6 delegated technical authority for implementation details, dependencies and focused
+supporting/test files. It changes no REST contract, architecture, canonical design, owner review,
+protected integration or operational exposure decision. Refs #199; bounded renderer only: #193.
+
+### Implementation decisions and limits
+
+- Preserve the merged PR #273 Teaching/Course/Settings/graph foundation, including D1/D1-R1/D1-R2.
+  The Lesson editor consumes the shell's `getOwnedCourse` tree, never a duplicate Lesson read.
+  Activate only `TEACH_LESSON`; FE13 Q&A and FE19 learner-insight routes stay unregistered.
+- Whole-Lesson replacement uses `updateCourseLesson`; title/content drafts remain local.
+  Confirmed responses acknowledge saves; a shared provider revalidation floor prevents another
+  structure/Lesson mutation from using an older tree, even across a child remount. Settings'
+  separate metadata acknowledgment and causal sequence are retained. Shared graph refresh remains
+  single-flight, session-bound and explicitly retried after failure; mapping chips wait for it.
+- Materials are independent commands using all eight CO09 operations in OpenAPI. Render their
+  authoritative returned order. Do not synthesize filenames/timestamps/keys/URLs or counts.
+  PDF fields retain the actual File. Multipart boundaries and binary decoding stay in the existing
+  HTTP client. Cancellation, network/500 and unusable upload responses require resource re-read
+  before another manual attempt; no mutation replay. Downloads use a transient object URL and the
+  transport-validated server filename, followed by revocation. The owner DTO has no original
+  filename/upload time: only the selected local filename is shown before upload, never invented
+  server metadata.
+- CT37 video admission compares a standard URL parse and the entire canonical privacy-enhanced
+  embed serialization, including its ASCII identifier. Editing a video makes no provider request.
+  This authoring surface displays the validated address; no third-party playback acceptance or
+  media-rights assertion is made.
+- Leave confirmation covers editor Back and shell navigation; `beforeunload` warns on reload.
+  The declarative router's existing native Back/Forward limitation (DESIGN A15) is unchanged.
+
+### Bounded FE08 renderer adjudication
+
+`MarkdownRenderer.tsx` was empty on main `cc6cb54`; PR #286 at `532039a` has an unmerged
+regex-based renderer. Its source does not provide a CommonMark syntax tree and its link admission
+uses prefixes, so it is not a complete CT37 renderer baseline. No PR #286 code or commits are reused.
+
+The full FE08 functional inventory below estimates complexity in relative implementation work
+units; each row includes its focused testing. These are planning estimates, not LOC, file counts
+or a claim that FE08 is complete.
+
+| FE08 work group | Units |
+| --- | ---: |
+| Canonical outline/Path and order | 5 |
+| Progress read and display | 4 |
+| Resume/Continue/Start selection and fallback | 4 |
+| Explicit completion and authoritative reconciliation | 4 |
+| Silent post-render visit recording | 2 |
+| Lesson data/routes/access/session isolation | 6 |
+| Non-Markdown Lesson material integration: PDF and activated video | 6 |
+| Shared Markdown parser/rendering/security regressions (this slice) | 7 |
+| My courses aggregate progress read/join | 3 |
+| Responsive Lesson reader/outline/drawer | 4 |
+| Learning navigation and entry points | 3 |
+| Learning-journey recovery/concurrency | 2 |
+| Total | 50 |
+
+The bounded addition is 7/50, approximately 14%, below the task's approximately 20% threshold.
+It completes only the shared CT37 renderer and its tests/dependency support, required by FE14
+Markdown Preview. The other 43 units, including learner progress, resume, completion, learning
+routes, reader/PDF/video integration and adaptive guidance, are excluded. No FE08 completion or
+independent acceptance is asserted. The estimate aggregates the entire renderer addition.
+
+### Parser selection and dependency review
+
+Selected exact production versions (MIT): `mdast-util-from-markdown` 2.1.0,
+`mdast-util-gfm-table` 2.0.1, `micromark-extension-gfm-table` 2.1.2 and
+`micromark-util-decode-string` 2.0.1. The npm registry was queried before installation;
+Node 24.21.0 and Vite 8 consume their ESM modules, and the table adapter supports the parser's
+2.x line. Manifests/lockfile are synchronized. Installation's audit returned zero known
+vulnerabilities; that is a dated registry result, not a security guarantee.
+
+Primary package documentation: [from-markdown](https://github.com/syntax-tree/mdast-util-from-markdown),
+[table adapter](https://github.com/syntax-tree/mdast-util-gfm-table),
+[table tokenizer](https://github.com/micromark/micromark-extension-gfm-table).
+Alternatives: an in-house parser was rejected for CommonMark/security maintenance; full
+`remark-gfm` would enable unapproved extensions; HTML generation plus sanitization retains an
+unnecessary HTML-string path. The chosen AST is rendered through an explicit React node allowlist:
+raw HTML is literal text, images become safe links, headings begin at h2, code uses CodeBlock,
+and tables use MUI's shared table style. URL admission checks character references, iterative
+percent decoding, whitespace/control removal and standard URL parsing. Backslashes are rejected
+before Markdown escape decoding. No HTML/raw plugin, highlighter, HTML injection or automatic
+image request is introduced. Original implementation was AI-assisted with Codex; package
+attributions/licenses are retained in installed packages and the lockfile.
+
+### Upstream availability on the implementation baseline
+
+| Provider | Consumed implementation verified in source | Added functional scope |
+| --- | --- | --- |
+| CO06 #172 | owner Course/Chapter/Lesson operations in CourseManagement/Structure services/controllers | none |
+| CO09 #175 | relational/file material lifecycle, owner tree metadata, protected download and shared HTTP transport | none |
+| SH05 #154 | existing S3 FileStorage adapter, lifecycle/validation and configuration | none |
+| AD07 #165 | owner graph read and 204 map/unmap | none |
+| CO12 #176 | existing Course/Lesson publication event producer integration | none; materials retain their contract's event-silence semantics |
+| FE03 #56 | existing HTTP/auth/session/router foundation | none |
+| FE32 #224 | Teaching navigation/start and shell navigation registry | none |
+| FE18 #203 | shared graph client/context and mapping operations | none; FE14 provider retains refresh barriers for its consumers |
+| FE34 #255 | shared semantic Light/Dark/System theme foundation | none |
+
+Only FE08 adds a missing upstream product capability. The additive cancellation handle in
+`useAssessmentEditor` supports FE14's existing operation runner; it adds no FE15 product journey
+and preserves its current callers. Test-only `E2E_MATERIAL_FILES=1` opts the disposable E2E setup
+into the Compose-pinned MinIO server/initializer, random per-run identities and the existing
+intent/ID/volume cleanup protocol. It publishes no storage port and makes no production-policy,
+release or deployment change. Existing E2E runs leave this opt-in off.

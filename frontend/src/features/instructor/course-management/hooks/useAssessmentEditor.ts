@@ -120,7 +120,7 @@ export function useAuthoringOperation() {
                 (error: unknown) => { throw current() ? error : cancelled(); })
             .finally(() => { if (work.current === controller) { work.current = null; if (alive.current) setBusy(false); } });
     }, [generation, isCurrent]);
-    return { busy, run };
+    return { busy, run, cancel: () => work.current?.abort() };
 }
 
 /** `b3ListOwnedQuizzes` for the Quizzes view: one page in API order. */
