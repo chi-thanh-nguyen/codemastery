@@ -73,6 +73,7 @@ export const WORKSPACE_ROUTES: RouteObject[] = [
                 { id: 'course-assessments', path: ROUTE_PATHS.TEACH_COURSE_ASSESSMENTS },
                 { id: 'course-settings', path: ROUTE_PATHS.TEACH_COURSE_SETTINGS },
             ] },
+            { id: 'course-lesson', path: ROUTE_PATHS.TEACH_LESSON },
             { id: 'course-quiz', path: ROUTE_PATHS.TEACH_QUIZ },
             { id: 'course-assignment', path: ROUTE_PATHS.TEACH_ASSIGNMENT },
         ] },

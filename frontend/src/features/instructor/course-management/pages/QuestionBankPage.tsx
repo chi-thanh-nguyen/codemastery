@@ -127,7 +127,7 @@ export function useLessonLookup(course: CourseLessonSource | undefined) {
 export function CourseUnavailable({ status }: { status: number | undefined }) {
     const back = <Button component={Link} to="/courses" variant="contained">Back to catalogue</Button>;
     if (status === 400) return <SystemStateView icon="search" title="We can't open this course from this link." message="Check the address, or continue from the catalogue." actions={back} />;
-    if (status === 403) return <SystemStateView icon="shield" title="You don't have access to this course" message="Only the course's instructor can manage its assessments." actions={back} />;
+    if (status === 403) return <SystemStateView icon="shield" title="You don't have access to this course" message="Only the course's instructor can manage this course." actions={back} />;
     return <SystemStateView icon="search" title="Course not available" message="This course doesn't exist or isn't published." actions={back} />;
 }
 export const courseRefused = (error: unknown) => [400, 403, 404].includes(failureStatus(error) ?? 0);

@@ -83,7 +83,7 @@ function exact(value: unknown, keys: readonly string[]): Record<string, unknown>
     return value;
 }
 
-function decodeMaterial(value: unknown): OwnedMaterial {
+export function decodeMaterial(value: unknown): OwnedMaterial {
     if (!isRecord(value)) throw protocolError();
     const type = value.materialType;
     if (!materialTypes.includes(type as OwnedMaterialType)) throw protocolError();
@@ -211,11 +211,11 @@ function decodePage<T>(item: (value: unknown) => T, page: number, size: number) 
     };
 }
 
-function decodeSiblingOrder(expectedCount?: number) {
+function decodeSiblingOrder(expectedIds: readonly string[]) {
     return (value: unknown): string[] => {
         const row = exact(value, ['orderedIds']);
         if (!Array.isArray(row.orderedIds) || !row.orderedIds.every(id) ||
-            (expectedCount !== undefined && row.orderedIds.length !== expectedCount)) {
+            (row.orderedIds.length !== expectedIds.length || !row.orderedIds.every((value, index) => same(value as string, expectedIds[index])) || new Set(row.orderedIds.map((value) => (value as string).toLowerCase())).size !== row.orderedIds.length)) {
             throw protocolError();
         }
         return [...(row.orderedIds as string[])];
@@ -326,7 +326,7 @@ export function orderCourseChapters(courseId: string, orderedIds: readonly strin
         auth: 'authenticated',
         expectedStatus: 200,
         body: { orderedIds: [...orderedIds] },
-        decode: decodeSiblingOrder(orderedIds.length),
+        decode: decodeSiblingOrder(orderedIds),
     });
 }
 
@@ -350,7 +350,7 @@ export function orderChapterLessons(courseId: string, chapterId: string, ordered
         auth: 'authenticated',
         expectedStatus: 200,
         body: { orderedIds: [...orderedIds] },
-        decode: decodeSiblingOrder(orderedIds.length),
+        decode: decodeSiblingOrder(orderedIds),
     });
 }
 
@@ -376,3 +376,56 @@ export type RelationalMaterialWrite =
     | { title: string; materialType: 'external_video'; externalVideoUrl: string };
 export interface FileMaterialTitleWrite { title: string }
 export interface MaterialPublicationWrite { publicationStatus: CoursePublicationStatus }
+
+
+const lessonBase = (courseId: string, lessonId: string) => `${courseBase(courseId)}/lessons/${encodeURIComponent(lessonId)}`;
+const materialBase = (courseId: string, lessonId: string, materialId?: string, file = false) =>
+    `${lessonBase(courseId, lessonId)}/${file ? 'file-materials' : 'materials'}${materialId ? `/${encodeURIComponent(materialId)}` : ''}`;
+
+export function updateCourseLesson(courseId: string, lessonId: string, payload: OwnedLessonWrite, options: AuthoringRequestOptions = {}): Promise<OwnedLesson> {
+    return request(lessonBase(courseId, lessonId), { ...options, method: 'PUT', auth: 'authenticated', expectedStatus: 200, body: payload,
+        decode: (value) => { const lesson = decodeLesson(value); if (!same(lesson.id, lessonId)) throw protocolError(); return lesson; } });
+}
+
+function materialDecoder(type: OwnedMaterialType, expectedId?: string, publication?: CoursePublicationStatus) {
+    return (value: unknown): OwnedMaterial => {
+        const material = decodeMaterial(value);
+        if (material.materialType !== type || expectedId !== undefined && !same(material.id, expectedId) ||
+            publication !== undefined && material.publicationStatus !== publication) throw protocolError();
+        return material;
+    };
+}
+export function createRelationalMaterial(courseId: string, lessonId: string, payload: RelationalMaterialWrite, options: AuthoringRequestOptions = {}): Promise<OwnedMaterial> {
+    return request(materialBase(courseId, lessonId), { ...options, method: 'POST', auth: 'authenticated', expectedStatus: 201,
+        body: payload, decode: materialDecoder(payload.materialType, undefined, 'hidden') });
+}
+export function updateRelationalMaterial(courseId: string, lessonId: string, materialId: string, payload: RelationalMaterialWrite, options: AuthoringRequestOptions = {}): Promise<OwnedMaterial> {
+    return request(materialBase(courseId, lessonId, materialId), { ...options, method: 'PUT', auth: 'authenticated', expectedStatus: 200,
+        body: payload, decode: materialDecoder(payload.materialType, materialId) });
+}
+export function setRelationalMaterialPublication(courseId: string, lessonId: string, material: OwnedMaterial, publicationStatus: CoursePublicationStatus, options: AuthoringRequestOptions = {}): Promise<OwnedMaterial> {
+    return request(`${materialBase(courseId, lessonId, material.id)}/publication`, { ...options, method: 'PUT', auth: 'authenticated', expectedStatus: 200,
+        body: { publicationStatus }, decode: materialDecoder(material.materialType, material.id, publicationStatus) });
+}
+export function b5CreateFileMaterial(courseId: string, lessonId: string, title: string, file: File, options: AuthoringRequestOptions = {}): Promise<OwnedMaterial> {
+    const body = new FormData(); body.append('title', title); body.append('file', file);
+    return request(materialBase(courseId, lessonId, undefined, true), { ...options, method: 'POST', auth: 'authenticated', expectedStatus: 201,
+        bodyFormat: 'multipart', body, decode: materialDecoder('file', undefined, 'hidden') });
+}
+export function b5UpdateFileMaterialTitle(courseId: string, lessonId: string, materialId: string, title: string, options: AuthoringRequestOptions = {}): Promise<OwnedMaterial> {
+    return request(materialBase(courseId, lessonId, materialId, true), { ...options, method: 'PUT', auth: 'authenticated', expectedStatus: 200,
+        body: { title }, decode: materialDecoder('file', materialId) });
+}
+export function b5ReplaceFileMaterialFile(courseId: string, lessonId: string, materialId: string, file: File, options: AuthoringRequestOptions = {}): Promise<OwnedMaterial> {
+    const body = new FormData(); body.append('file', file);
+    return request(`${materialBase(courseId, lessonId, materialId, true)}/file`, { ...options, method: 'PUT', auth: 'authenticated', expectedStatus: 200,
+        bodyFormat: 'multipart', body, decode: materialDecoder('file', materialId) });
+}
+export function b5SetFileMaterialPublication(courseId: string, lessonId: string, materialId: string, publicationStatus: CoursePublicationStatus, options: AuthoringRequestOptions = {}): Promise<OwnedMaterial> {
+    return request(`${materialBase(courseId, lessonId, materialId, true)}/publication`, { ...options, method: 'PUT', auth: 'authenticated', expectedStatus: 200,
+        body: { publicationStatus }, decode: materialDecoder('file', materialId, publicationStatus) });
+}
+export function b5DownloadMaterialFile(courseId: string, lessonId: string, materialId: string, options: AuthoringRequestOptions = {}) {
+    return request(`/courses/${encodeURIComponent(courseId)}/lessons/${encodeURIComponent(lessonId)}/materials/${encodeURIComponent(materialId)}/file`,
+        { ...options, method: 'GET', auth: 'authenticated', expectedStatus: 200, responseMode: 'binary' });
+}

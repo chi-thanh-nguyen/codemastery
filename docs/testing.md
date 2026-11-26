@@ -9732,6 +9732,800 @@ consumer regression (96 tests total). This follow-up preserves the existing
 Bash 3.2 command path without a cache and tests argument boundaries directly from
 the committed production shell, with Docker replaced only by an argument recorder.
 
+
+## FE14 author verification and self-audit — 26 November 2026
+
+Refs #199; PR #279 is repurposed from its old FE28-only change under the Leader's explicit task.
+Baseline main: `cc6cb54ddedf226966a51c9614fc5fc5756267bb`. The granularity below is functional,
+non-overlapping behavior checkpoints, not LOC or Issue checkbox counts. Before: 9/34 complete
+(26.47%); after: 34/34 implementation checkpoints author-verified (100%). This is code/author
+verification, not completion of Issue governance, independent CODEOWNER review, CI, protected
+merge, release/deployment, broad QA or assistive-technology acceptance.
+
+### Before/after implementation inventory
+
+| ID / behavior | Initial | Final | Implementation | Verification |
+| --- | --- | --- | --- | --- |
+| E01 Owned-course pagination | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | InstructorCoursesPage.tsx / instructorCourseApi.ts | Existing authoring/routes regressions; E02 also real E2E create |
+| E02 Hidden Course creation and editor navigation | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | InstructorCoursesPage.tsx / instructorCourseApi.ts | Existing authoring/routes regressions; E02 also real E2E create |
+| E03 Course metadata and Settings causal acknowledgment | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / useCourseEditor.ts | D1/D1-R1/D1-R2 existing regressions; E04 real E2E publish/hide |
+| E04 Course publication and confirmation | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / useCourseEditor.ts | D1/D1-R1/D1-R2 existing regressions; E04 real E2E publish/hide |
+| E05 Chapter append | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / instructorCourseApi.ts | Existing/new authoring regressions; real E2E Chapter/Lesson create/edit/order/publication |
+| E06 Chapter title edit | MISSING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / instructorCourseApi.ts | Existing/new authoring regressions; real E2E Chapter/Lesson create/edit/order/publication |
+| E07 Full sibling Chapter order | MISSING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / instructorCourseApi.ts | Existing/new authoring regressions; real E2E Chapter/Lesson create/edit/order/publication |
+| E08 Hidden Lesson append | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / instructorCourseApi.ts | Existing/new authoring regressions; real E2E Chapter/Lesson create/edit/order/publication |
+| E09 Full sibling Lesson order and announcements | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / instructorCourseApi.ts | Existing/new authoring regressions; real E2E Chapter/Lesson create/edit/order/publication |
+| E10 Lesson publish/hide confirmation | PARTIAL | COMPLETE_AUTHOR_VERIFIED | CourseEditorPage.tsx / instructorCourseApi.ts | Existing/new authoring regressions; real E2E Chapter/Lesson create/edit/order/publication |
+| E11 Production Lesson route and Content Edit entry | MISSING | COMPLETE_AUTHOR_VERIFIED | LessonEditorPage.tsx / routePaths.ts / routes/index.tsx | FE14 component/API/route regressions and real E2E Lesson save/Preview |
+| E12 Whole Lesson title/Markdown replacement | MISSING | COMPLETE_AUTHOR_VERIFIED | LessonEditorPage.tsx / routePaths.ts / routes/index.tsx | FE14 component/API/route regressions and real E2E Lesson save/Preview |
+| E13 Sticky save state and leave guards | MISSING | COMPLETE_AUTHOR_VERIFIED | LessonEditorPage.tsx / routePaths.ts / routes/index.tsx | FE14 component/API/route regressions and real E2E Lesson save/Preview |
+| E14 One shared course/skill graph and session boundaries | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | useCourseEditor.ts / LessonEditorPage.tsx / existing skillGraphApi.ts | FE14/session/shared-context regressions; real E2E map/unmap/re-read |
+| E15 Skill map/unmap and authoritative graph refresh | MISSING | COMPLETE_AUTHOR_VERIFIED | useCourseEditor.ts / LessonEditorPage.tsx / existing skillGraphApi.ts | FE14/session/shared-context regressions; real E2E map/unmap/re-read |
+| E16 Lesson loading/refusal/retry and session lifecycle | MISSING | COMPLETE_AUTHOR_VERIFIED | useCourseEditor.ts / LessonEditorPage.tsx / existing skillGraphApi.ts | FE14/session/shared-context regressions; real E2E map/unmap/re-read |
+| M01 Create text/video material | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M02 Replace text/video title/content | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M03 Explicit relational publication | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M04 Create hidden PDF | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M05 Edit PDF title | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M06 Replace protected PDF | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M07 Explicit PDF publication | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M08 Protected binary download | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / LessonEditorPage.tsx / FileUploadField.tsx | Strict API tests + real E2E eight material consumers; replacement download exact bytes/name |
+| M09 Strict operation response decoding and returned material order | PARTIAL | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / FileUploadField.tsx / shared provider | FE14 transport/component/session/cancellation/unknown-outcome regressions; real E2E PDF lifecycle |
+| M10 Actual File bytes and one-file feedback | PARTIAL | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / FileUploadField.tsx / shared provider | FE14 transport/component/session/cancellation/unknown-outcome regressions; real E2E PDF lifecycle |
+| M11 Pending locking and cancellation | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / FileUploadField.tsx / shared provider | FE14 transport/component/session/cancellation/unknown-outcome regressions; real E2E PDF lifecycle |
+| M12 Unknown-outcome reconciliation before another upload | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / FileUploadField.tsx / shared provider | FE14 transport/component/session/cancellation/unknown-outcome regressions; real E2E PDF lifecycle |
+| M13 Safe filename/object URL lifecycle | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / FileUploadField.tsx / shared provider | FE14 transport/component/session/cancellation/unknown-outcome regressions; real E2E PDF lifecycle |
+| M14 400/413/415 accessible error states | MISSING | COMPLETE_AUTHOR_VERIFIED | instructorCourseApi.ts / MaterialForm.tsx / FileUploadField.tsx / shared provider | FE14 transport/component/session/cancellation/unknown-outcome regressions; real E2E PDF lifecycle |
+| U01 Compliant shared Markdown preview | BLOCKED_BY_UPSTREAM | COMPLETE_AUTHOR_VERIFIED | MarkdownRenderer.tsx + exact pinned AST dependencies | 26 shared Markdown tests plus 12 canonical-video tests in the FE14 API suite; real E2E headings/table/literal HTML Preview |
+| U02 Canonical CT37 video validation/helper | MISSING | COMPLETE_AUTHOR_VERIFIED | MaterialForm.tsx youtubeEmbedAddress | Canonical/obfuscated URL cases and real E2E video create/update |
+| Q01 Production/preview isolation | COMPLETE_EXISTING | COMPLETE_AUTHOR_VERIFIED | Existing app/theme/shell + semantic FE14 surfaces | Routes/context regressions; real browser 360/768/1024/1280/1440, Dark/System and keyboard mapping |
+| Q02 Semantic themes/responsive/keyboard across new journeys | PARTIAL | COMPLETE_AUTHOR_VERIFIED | Existing app/theme/shell + semantic FE14 surfaces | Routes/context regressions; real browser 360/768/1024/1280/1440, Dark/System and keyboard mapping |
+
+### Executed commands and results
+
+All commands ran in the isolated FE14 checkout. `npm --prefix frontend ...` from the root is the
+same repository script as `npm ...` from `frontend/`.
+
+| Command | Observed result |
+| --- | --- |
+| `npm --prefix frontend test -- src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/features/instructor/course-management/api/instructorCourseApi.test.ts src/shared/components/MarkdownRenderer.test.tsx src/features/instructor/skill-graph-editor/api/skillGraphApi.test.ts src/shared/api/httpClient.test.ts src/routes/index.test.tsx` | Exit 0; 518 tests, 8 files. Includes the existing Settings/causal-read and FE15/FE16/FE18/FE32 regression protections; 68 tests in the three new frontend files at this run; four further file-error/widget tests were then added |
+| `npm --prefix frontend test -- src/features/instructor/course-management/pages/fe14Authoring.test.tsx` (after the additional 400/413/415/multi-file cases) | Exit 0; 20 tests, including the four additions. Final unique focused test coverage is 522 tests across the eight suites; the 518-suite run and this final 20-test run overlap |
+| `npm --prefix frontend run typecheck` | Exit 0 |
+| `npm --prefix frontend run build` | Exit 0, including typecheck; existing Vite warning for chunks above 500 kB |
+| `node --test e2e/fixtures/local-stack.test.mjs` | Exit 0 outside the restricted sandbox; 24 tests, 4 suites. The earlier sandbox run could not validate OS host/process identity and failed/preserved its synthetic scratch resources; it is not a PASS |
+| `E2E_MATERIAL_FILES=1 npm --prefix e2e test -- instructor-authoring.spec.ts --project=chromium-desktop --workers=1` | Exit 0; 1 real-browser integration journey, 10.2 s test / 26.5 s total. Chromium; actual backend built from the checkout, PostgreSQL and Compose-pinned MinIO. All 7 owned resources verified absent by the lifecycle finalizer |
+| `impeccable context --target frontend/src/features/instructor` (installed launcher) | Context loaded from actual project; no PRODUCT.md; existing DESIGN r13 retained. No context/init/doctor/hook write |
+| `impeccable detect --json <the five changed UI surfaces>` | Exit 0; `[]` findings. Source detector, not browser or acceptance evidence |
+| `git diff --check` | Exit 0 |
+
+The successful real E2E journey exercises hidden Course creation and navigation, Chapter edit and
+complete sibling order, Lesson creation/order/Edit routing, whole-Lesson Markdown save, safe Preview,
+text/video create and update, relational publication/hide, PDF create/title update/replacement,
+protected download (asserted replacement bytes and `replacement.pdf`), file publication/hide,
+real Skill creation followed by Lesson mapping and keyboard unmapping, Lesson publication and
+Course publish/hide. Screenshots and no-page-overflow checks at 360, 768, 1024, 1280 and 1440 px;
+Dark and System following both emulated OS schemes were asserted. The 360 px and Dark screenshots
+were visually inspected. No provider video was activated or fetched.
+
+Earlier E2E failures were investigated and corrected, never counted as PASS: (1) Compose JSON
+preserved `$$` and the direct initializer needed unescaping; (2) the first test used an exact required
+label; (3) it assumed segmented controls were tabs rather than buttons; (4) a partial label also
+matched its Dialog name; (5) it tried to reopen a closing Lesson dialog before the prior command
+finished. The final test uses typed textbox/button selectors and waits for the old dialog to close.
+All real disposable runs were finalized with their owned resources verified absent.
+
+### Full-scope author self-audit and remediation
+
+The audit covered the full effective diff, every checkpoint above, operationId/path/body/status
+parity with OpenAPI, production call/route reachability, existing assessment/graph/navigation
+consumers, ownership concealment, D12-3 and Settings D1/D1-R1/D1-R2, session/cancellation/stale-read
+interleavings, success/rejection/unknown outcomes, PDF/filename/object URL safety, Markdown, semantic
+roles, responsiveness/keyboard, dependency/lockfile/attribution and scope integrity.
+
+| Finding | Severity and root cause | Correction and regression evidence | Closure |
+| --- | --- | --- | --- |
+| A1 Lesson re-entry could lose a local post-save reconciliation barrier while the shared tree was old | P1; child state did not survive unmount | Retain a session/course-bound minimum eligible GET sequence in the provider; Content and Lesson mutations wait across remount. Dedicated delayed-GET test exercises navigation after save and verifies disabled stale-tree Edit/create controls until a fresh read; existing Settings causal tests retained | FIXED_AUTHOR_VERIFIED |
+| A2 Markdown escape decoding could remove a backslash before URL admission | P2; percent-decoded backslash was interpreted as a Markdown escape | Reject backslashes immediately after percent decoding, before escape/entity decoding; encoded host/userinfo and protocol-relative security regression cases pass | FIXED_AUTHOR_VERIFIED |
+| A3 The new graph barrier initially cleared the old S20 staleness ref before its fresh read started | P2; extra effect dependencies observed the old successful graph | Clear only after the requested loading cycle; unchanged N1 regression first failed (2 reads instead of 3), then passed with the correction; no automatic GET retry | FIXED_AUTHOR_VERIFIED |
+| A4 Course refusal wording named assessments in the shared authoring context; local invalid fields lacked a summary | P3; reused feature-specific copy | Generic owned-course wording and linked field/error-summary presentation; production refusal and validation cases, typecheck and browser source rendered successfully | FIXED_AUTHOR_VERIFIED |
+
+Regression-sensitivity probes deliberately disabled the provider barrier and the decoded-backslash check separately; each produced the expected test exit 1. Both source files were restored byte-for-byte in `finally` before final typecheck. These intentional failures are evidence of regression sensitivity, not final-suite failures.
+
+No confirmed remediable in-scope finding remains after correction/re-audit. This is implementation-author
+self-audit, not an independent review. Component/mock tests establish deterministic failure races;
+real E2E establishes the successful REST/storage journeys. Neither is release qualification.
+
+### Scope and execution limits
+
+No backend code, OpenAPI public behavior, database migration, production storage policy, auth stack,
+FE13/FE19 activation, native-router history model, Issue/Project fields, PR #280, ruleset, CI dispatch,
+merge or release/deployment was changed. No full backend, historical unrelated E2E/VM/release matrix,
+Firefox/WebKit, NVDA/VoiceOver or 200% zoom qualification was run. The existing declarative-router
+native Back/Forward limitation (DESIGN A15) remains; app Back/shell navigation and unload warnings
+are implemented. Light/Dark/System checks are targeted developer evidence, not complete WCAG
+conformance. CI is neither polled nor awaited.
+
+Metadata arrangement: by explicit consensual PR-specific Leader instruction, new commits use Git
+name `heizseung` and email `thangle12012006@gmail.com` for author and committer. GitHub commit
+`1e4c54be01c78b14aa4734eb6e6e50426dbe3fe6` associates that name/email with account `heizseung`.
+The authenticated pusher remains `chi-thanh-nguyen`. Metadata is not proof of human authorship;
+this implementation/test/documentation work was AI-assisted with Codex. No signatures, owner
+reviews or academic contribution claims are fabricated. No PR #286 code was copied.
+
+## FE14 targeted IR-01/IR-02/IR-03 remediation — 26 November 2026
+
+### Baseline, provenance and scope
+
+This append preserves the original implementation verdict and A1–A4 audit above.
+The subsequent independent verdict was **REQUEST_CHANGES** at
+`e4d7eb3febfad8f89db1b9091c7931ed3308654a` (main/merge-base
+`cc6cb54ddedf226966a51c9614fc5fc5756267bb`, 21 files, +1943/-61, two commits).
+Remote PR state, both SHAs and legitimate existing heizseung author/committer
+metadata were reverified. Remediation uses an isolated shared-object clone; the
+clean main checkout, other occupied worktrees and PRs #280/#286 were preserved.
+Only additive commits and a normal fast-forward push are authorized.
+
+The previous review's `fe14-review-evidence.zip` was retrieved and inspected,
+including `evidence.json` and the four probes. Its executed evidence remains
+historical independent evidence. The executions below are **new author evidence**
+from Codex-assisted remediation; none is independent acceptance.
+
+### Findings, implementation and focused self-audit
+
+| Finding | Confirmed cause and correction | Status |
+| --- | --- | --- |
+| FE14-IR-01, P1 | Child unmount aborted sent work before the owner registered recovery. Register the operation/controller synchronously in the existing Course owner; preserve settlement across child routes, suppress child callbacks, sequence authoritative Course/graph recovery and enforce the shared runner entry barrier | FIXED_AUTHOR_VERIFIED |
+| FE14-IR-02, P2 | Inspection decoded and stripped the destination that was emitted. Separate inspected spellings from the emitted mdast URL; compare reference kind, standard-parser scheme/origin, validate encoding and retain encoded navigation data and external attributes | FIXED_AUTHOR_VERIFIED |
+| FE14-IR-03, P2 | Definition collection inspected only root children. Walk the complete AST in document order, retain first definitions and the parser's normalized identifiers; links/images use the same admission function | FIXED_AUTHOR_VERIFIED |
+
+Owner transitions are `idle -> pending -> recovery-required -> idle` on a
+causally eligible successful read. Unknown/cancelled settlement adds a persistent
+uncertainty notice; inspection permits a deliberate next attempt under CT16/CT37,
+not proof that an unobserved transaction ended. A failed read retains the obligation.
+No mutation replay, backend transaction-status contract, timeout, history blocking,
+new global state or provider is introduced. Owner/session replacement aborts old
+work and rejects its result. Whole-owner navigation keeps the existing CT16 scope;
+the fix guarantees survival across child-route changes while that owner remains.
+
+The actual entry-point test invokes all eight Course operations and both S20
+mapping operations directly during pending and recovery; every call is refused
+before dispatch. Course header, Settings, Chapter/Lesson operations, relational
+materials, PDF create/title/replace/publication and Lesson mapping share the owner.
+Other S20 multi-step operations retain their lifecycle and check its barrier.
+FE15/FE16 writes do not replace these resources and remain in their existing
+hooks; their shared selectors and FE18 reads were exercised in the regression set.
+
+D1/D1-R1/D1-R2 retain acknowledged fields, dirty drafts, causal read evidence,
+superseded-read suppression, explicit retry and course/session isolation. Tests
+that previously induced a competing header write now initiate an independent
+shared read: the new contract explicitly forbids that dependent write while
+pending. Second-save tests first prove refusal, then recover and explicitly save;
+no prior assertion is represented as an unchanged concurrent-write permission.
+A1 post-acknowledgment remount and A3/N1 graph stale/retry checks remain covered.
+
+Self-audit found and corrected a remediation regression: after moving recovery
+to the owner, the still-mounted Lesson form could adopt old fields while its
+post-settlement GET waited. Its synchronization now uses the owner's barrier.
+The new delayed-read test failed before this correction and passed afterwards.
+A second inspection retained external-link attributes when browser URL parsing
+removes scheme control characters; the rendered-anchor regression passes.
+
+### Newly executed commands and results
+
+Paths in the commands are relative to the isolated repository root. Tests were
+run with the repository's pinned dependencies (`npm --prefix frontend ci`, exit 0;
+no manifest/lockfile change). The 15000 ms test limit accommodates concurrent host
+load; it is not an application request deadline.
+
+| Exact command | Outcome |
+| --- | --- |
+| `npm --prefix frontend test -- src/shared/components/markdown.review.test.tsx src/features/instructor/course-management/pages/lifecycle.review.test.tsx` | Baseline: exit 1, 8 failed / 13 passed; five legitimate URL destinations, nested definition, sent PUT and sent PDF barriers reproduced in actual rendered DOM/component routes. The PDF app-link probe clicked behind a modal; native Back is established separately below. Temporary copied probes were removed from the checkout |
+| `E2E_MATERIAL_FILES=1 npm --prefix e2e test -- independent-fe14.review.spec.ts --project=chromium-desktop --project=webkit-desktop --workers=1` | Baseline: exit 1; 3 positive reproductions passed (PUT overwrite in Chromium/WebKit; two PDF rows in Chromium), WebKit intercepted upload failed with HTTP 400 before acceptance. All 7 owned resources finalized absent |
+| `npm --prefix frontend test -- src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/shared/components/MarkdownRenderer.test.tsx --maxWorkers=1 --testTimeout=15000` | Exit 0, 125 passed at that point. Subsequent final module runs below include three further regressions; these runs overlap |
+| `npm --prefix frontend test -- src/shared/components/MarkdownRenderer.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx --maxWorkers=1 --testTimeout=15000` | Exit 0, final 88 passed: Markdown 64, FE14 24 |
+| `npm --prefix frontend test -- src/features/instructor/course-management/hooks/assessmentHooks.test.tsx --maxWorkers=1 --testTimeout=15000` | Exit 0, final 40 passed, including actual Course/mapping entry points, failed recovery, early/superseded reads, cancellation and replacement isolation |
+| `npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx --testTimeout=15000` | Exit 0, 87 passed, including D1/D1-R1/D1-R2, N1/N6, FE15/FE16/FE18 and draft behavior |
+| `npm --prefix frontend test -- src/routes/index.test.tsx src/shared/api/httpClient.test.ts --maxWorkers=1 --testTimeout=15000` | Exit 0, 319 passed, route/session/navigation and transport regressions |
+| `npm --prefix ../negative/frontend test -- src/shared/components/MarkdownRenderer.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx -t 'FE14-IR-01 sent|FE14-IR-02|FE14-IR-03' --maxWorkers=1 --testTimeout=15000` | Isolated original-baseline negative probe with new tests: expected exit 1, 20 failed / 19 passed / 47 skipped. Includes both sent-child lifecycle cases and all five original URL failures plus recursive definitions. Production remediation sources were never reverted |
+| `npm --prefix frontend test -- src/features/instructor/course-management/pages/fe14Authoring.test.tsx -t 'preserves the acknowledged Lesson' --testTimeout=15000` | Self-audit sensitivity: exit 1 before the mounted-form barrier correction; exit 0 afterwards |
+| `npm --prefix frontend test -- src/features/instructor/course-management/pages/fe14Authoring.test.tsx -t 'CodeQL' --testTimeout=15000` | Exit 0, 1 passed; included in final FE14 24 above |
+| `npm --prefix ../negative/frontend test -- src/features/instructor/course-management/pages/fe14Authoring.test.tsx -t 'CodeQL' --testTimeout=15000` | Isolated old label helper: expected exit 1, 1 failed / 23 skipped |
+| `E2E_MATERIAL_FILES=1 npm --prefix e2e test -- instructor-authoring.spec.ts --grep 'FE14-IR-01' --project=chromium-desktop --project=webkit-desktop --workers=1` | Initial correction probe: exit 1, 3 passed / 1 failed. PUT preserved in both browsers; Chromium PDF recovery passed. WebKit intercepted upload again returned 400 before acceptance; it is not a passed lifecycle scenario |
+| `E2E_MATERIAL_FILES=1 npm --prefix e2e test -- instructor-authoring.spec.ts --project=chromium-desktop --project=webkit-desktop --workers=1` | Final: exit 0, 6 passed / 2 explicitly skipped. Both full authoring journeys and delayed PUT journeys pass; delayed PDF + failed GET/retry passes in Chromium. WebKit upload without interception returns 201 and one row. WebKit delayed multipart interception remains unqualified; its scoped skip is explicit. The other skip is the WebKit-only diagnostic under Chromium. All 7 owned resources finalized absent |
+| `npm --prefix frontend run typecheck` | Exit 0 |
+| `npm --prefix frontend run build` | Exit 0; existing >500 kB Vite chunk warning |
+| `git diff --check` | Exit 0 |
+
+Final positive frontend evidence is **534 unique tests across six suites**, not
+an addition of overlapping run counts. The prior full eight-suite inventory,
+backend suites, Firefox/mobile projects and fixture/recovery qualification were
+not rerun. The unchanged fixture's prior independent qualification is reused;
+only task-owned real integrations were started and finalized. Initial startup
+attempts hit a sandboxed symlink-cache write and missing main-checkout Markdown
+dependencies; an isolated dependency copy followed by pinned `npm ci` resolved
+those setup failures. Intermediate implementation failures were corrected before
+the final positive runs; no failed or unexecuted check is counted as PASS.
+
+### CodeQL adjudication
+
+Read-only GitHub evidence identifies check **CodeQL**, app
+`github-advanced-security` (integration 57789), check-run **139905851960**, at the
+reviewed HEAD (not an inferred PR merge commit). Conclusion: **failure**. Annotation
+and open [alert #8](https://github.com/chi-thanh-nguyen/codemastery/security/code-scanning/8)
+identify `js/incomplete-sanitization`, reported security severity high, in
+`frontend/src/features/instructor/course-management/pages/fe14Authoring.test.tsx:30`:
+`replace('*', '')` handles only the first occurrence. The dynamic analysis run
+**45818858868**, JavaScript job **139905562281**, completed successfully and its
+log confirms result upload; the failure is alert adjudication, not an analysis
+workflow/environment failure. Main's live rules require CodeQL and enforce its
+code-scanning gate; no rule was changed.
+
+Classification: **CONFIRMED_IN_SCOPE_CODE_DEFECT**, limited to test-helper
+correctness. The helper now compares the label's own text nodes, distinguishing
+literal asterisks from the nested required marker. A synthetic DOM label with two
+literal asterisks demonstrates the old failure and the corrected match. No
+production XSS, injection, credential leak or security impact is established by
+this finding. No alert is dismissed/suppressed and no scanner/CI configuration is
+changed. CodeQL on the final revision is **not author-verified PASS**: CI was not
+rerun manually, polled or awaited.
+
+### Inventory and remaining acceptance
+
+The Leader-supplied independent inventory remains historical: 38/41 implemented
+without a confirmed defect, 37/41 independently verified. All three original
+findings are now FIXED_AUTHOR_VERIFIED; that does not convert those counts into
+41/41 independent acceptance. The retrieved JSON does not contain a complete
+41-row crosswalk, so no reconstructed row mapping or new independent total is
+invented. The original 34-row author implementation inventory above is preserved
+as its own denominator. No new product checkpoint or FE08 learner scope is added.
+
+Next gate: targeted delta-focused independent review of IR-01 lifecycle/real
+integration, IR-02/IR-03 URL/reference rendering and the CodeQL helper correction,
+including the explicitly bounded WebKit delayed-multipart evidence gap. Required
+CI, CODEOWNER/protected merge and release/deployment remain separate. No merge,
+approval, Issue closure, Project write, deployment, manual CI rerun or CI wait was
+performed. PR #280 and #286 are untouched. Attribution remains the explicit
+PR-specific consensual heizseung author/committer and chi-thanh-nguyen pusher
+arrangement; implementation/tests/docs are AI-assisted, with no fabricated human
+contribution, signature or review.
+
+
+## FE14 main integration conflict resolution — 26 November 2026
+
+Authority: the Project Leader's narrow PR #279 integration/IR-04 task, executed
+with Codex assistance. Original PR HEAD `36be38f03cbb797c83be4e43a0dba758800ddc5b`
+and merge-base `cc6cb54ddedf226966a51c9614fc5fc5756267bb` were verified against
+GitHub. Integrated main is `23402754743e0d35048e74cbabebfa133e5e6da3`, the FE28
+#280 squash from `16d3fa45865bc9d5599a9080ca32586f370a5607` (initial ahead/behind
+4/1). All four existing FE14 commits are preserved by a regular two-parent merge.
+
+Actual three-way conflicts were limited to `docs/repository-structure.md`,
+`docs/setup.md` and this file. Each resolution is the byte-identical common base,
+then main's complete FE28 append, then FE14's complete append. Both append-only
+histories survive once; earlier FE28 references to #279 retain their dated
+meaning before the PR's authorized FE14 repurposing. No contract is amended.
+The two overlapping route files auto-merged: FE14's `course-lesson` binding and
+`TEACH_LESSON` remain inside the session-keyed Course shell, alongside FE28's
+single Workspace notification owner/Outlet, guarded route and header bell.
+All 14 other main-side changed files are byte-identical to integrated main.
+FE13/FE19 routes remain inactive. IR-01/02/03 and CodeQL helper sources are unchanged.
+
+Two focused regressions in the existing `fe14Authoring.test.tsx` exercise the
+actual Lesson editor with FE28: dirty-draft plain-click confirmation and native
+modified clicks; pending-write Keep editing, failed recovery, deliberate bell
+navigation and authoritative return without replay. Only the count/list API
+functions receive additive synthetic responses in that component harness;
+Course/graph call counts and mutation assertions remain intact. Route tests
+retain explicit unexpected-request allowlists, including unread-count GETs.
+No confirmed production integration defect required a code change.
+
+Executed commands (repository root):
+
+```bash
+npm --prefix frontend ci --cache ../npm-cache
+npm --prefix frontend test -- src/routes/index.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/features/interaction/hooks/useNotifications.test.tsx src/features/interaction/pages/NotificationsPage.test.tsx src/shared/components/presentation.test.tsx --maxWorkers=1 --testTimeout=15000
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
+npm --prefix frontend run test:browser -- --fe28-remediation --case IR-FE28 --out <isolated-evidence-directory> --engine chromium,webkit,firefox
+git diff --cached --check
+```
+
+Locked install, 350 tests in five suites, typecheck, build and diff check pass
+(exit 0). Existing Vite large-chunk advisory and jsdom native-navigation messages
+remain. Initial copied dependencies lacked FE14's Markdown parser; locked `npm ci`
+resolved that setup failure. The first new test incorrectly counted the existing
+mobile drawer as a leave dialog; it was corrected to assert the actual leave
+prompt. Final assertions pass; no production behavior was changed for that oracle.
+The native browser harness exits 1 and reports **zero executed scenarios**: all three
+native macOS engines fail launch (Chromium/WebKit closed, Firefox SIGABRT).
+This is a launch limitation, never a browser PASS. Real E2E evidence and any
+bounded diagnostic follow-up are recorded separately with IR-04 below.
+
+These are author checks, not independent closure, CODEOWNER acceptance, protected
+integration or release/deployment authorization. No CI dispatch or wait is performed.
+
+
+## FE14 IR-04 storage capability gating — 26 November 2026
+
+### Confirmed cause and exact correction
+
+GitHub run `45834577950`, original job `139959952579`, reports 124 passed,
+5 failed and 11 skipped. All five failures required HTTP 201 and received 500:
+delayed PDF recovery in Chromium desktop/mobile and Firefox desktop; direct PDF
+transport in WebKit desktop/mobile. Source confirms the full authoring journey,
+disposable MinIO plus initializer and backend storage endpoint already share the
+`E2E_MATERIAL_FILES=1` opt-in, while these two PDF tests omitted it and default CI
+does not enable it. No internal backend exception is inferred from HTTP 500.
+
+Both tests now begin with `test.skip(process.env.E2E_MATERIAL_FILES !== '1',
+'Requires the disposable MinIO-enabled fixture.')`. It runs before sign-in,
+Course creation, interception or upload, and preserves the existing disposable
+and WebKit applicability checks. The entire original spec is byte-identical
+when just those two lines are removed: exact HTTP 201, no duplicate material,
+failed recovery/explicit retry, full journey and committed PUT/remount assertions
+remain. No production source, fixture architecture, dependency or CI change.
+
+### Actual default and storage-enabled execution
+
+Exact commands from the isolated repository root:
+
+```bash
+(
+    unset E2E_MATERIAL_FILES E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD
+    E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts
+)
+npm --prefix e2e run stack:down
+(
+    unset E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD
+    E2E_MATERIAL_FILES=1 E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts
+)
+```
+
+Default exits **1 before browser execution**. The lifecycle admits run
+`cm-e2e-1a2188bbf2f-397681` for checkout lock `16777234-22098420`, but the backend
+build fails writing Docker Buildx's activity file (operation not permitted).
+No PostgreSQL build, backend start, storage provisioning or PDF operation occurs.
+Separately the sandbox denies macOS boot identity (`host.boot` is null), so cleanup
+cannot prove same-boot writer ownership and fails closed. Recovery exits **1**.
+The subsequent opt-in invocation exits **3 before Playwright entry** because that
+inventory is incomplete. Neither mode reaches test applicability or assertions.
+
+| Project | Default actual | Storage-enabled actual |
+| --- | --- | --- |
+| chromium-desktop | NOT RUN: setup failure | NOT RUN: admission refused |
+| firefox-desktop | NOT RUN: setup failure | NOT RUN: admission refused |
+| webkit-desktop | NOT RUN: setup failure | NOT RUN: admission refused |
+| chromium-mobile | NOT RUN: setup failure | NOT RUN: admission refused |
+| webkit-mobile | NOT RUN: setup failure | NOT RUN: admission refused |
+
+Both modes: **0 PASS, 0 executed SKIP, 0 browser assertion FAIL**; four scenarios
+per project remain NOT RUN. Expected 10 PASS/10 SKIP in default and 15 PASS/5 SKIP
+with storage are contract expectations, not observed results. The two guards are
+implemented and statically verified; runtime skip behavior and real 201/one-row/
+retry behavior at this revision remain unverified. No mocks, retries, direct
+Playwright invocation, external target or backend/PostgreSQL override hides this.
+
+The retained record is `~/.codemastery-e2e/runs/16777234-22098420.json`, state
+`incomplete`, with **zero Docker creation intents**. One marked temporary build
+`/var/folders/bx/b_377_w93sl91jx1l7yrbmj40000gp/T/codemastery-e2e-gjSPE8` remains
+preserved. No E2E containers, volumes or network were created. The record and
+uncertain process ownership are preserved; no process guessing, inventory edit
+or broad Docker cleanup was performed. An authorized host operator must reconcile
+this exact inventory/temp ownership under ADR008 before reusing the checkout.
+The existing automated recover command could not establish the missing identity.
+
+### Infrastructure and CI are separate
+
+Later job `139995247102` of the same run fails before browsers while PostgreSQL
+build resolves `libxml2-2.13.9-r2`, which breaks `world[libxml2=2.13.9-r3]`.
+The current Dockerfile remains identical at original FE14 HEAD and integrated
+main, including that exact security pin and the ADR003 base/byte-clean policy.
+The DP01 23 November security record explains its reviewed update. This is a
+separate observed build failure, not IR-04 and not proof of a permanent upstream
+failure. This local attempt did not reach PostgreSQL; no current cold PostgreSQL
+build PASS or reproduced package failure is claimed. DP01 must separately resolve
+package availability under the existing reviewed pinning/security process and
+qualify the exact resulting artifact. No pins, image digests or repositories change.
+
+A read-only pre-push snapshot at old HEAD `36be38f` shows E2E FAILURE (the later
+job), CodeQL SUCCESS (`139960245386`) and the other reported backend/frontend/VM
+checks SUCCESS. Alert #8's returned most-recent instance is `fixed`; that scanner
+state is not independent closure of the author correction. No final-head CI PASS
+is inferred, no workflow was dispatched/rerun and no CI completion was awaited.
+
+### Narrow self-audit and remaining gates
+
+IR-04: **FIX_IMPLEMENTED_VERIFICATION_BLOCKED**. Conflict integration:
+**CONFLICTS_RESOLVED_VERIFICATION_LIMITED**, with 350 focused component/route tests,
+typecheck/build and exact preservation checks passed; real combined E2E remains
+unverified. Original IR-01/02/03 and CodeQL author corrections remain pending
+independent acceptance. Source and both merge-parent diffs were inspected; no
+confirmed in-scope production defect or assertion weakening remains. Graphify was
+queried only as a navigation aid, with actual source checks governing conclusions.
+
+Recommend **Targeted Delta-focused Independent Review + Main Integration
+Regression Review**, covering the complete remediation delta from
+`e4d7eb3febfad8f89db1b9091c7931ed3308654a` through final PR HEAD, with integrated
+main `2340275` explicitly separated. Include IR-01 lifecycle, IR-02/03 Markdown,
+CodeQL helper, IR-04 default/opt-in runtime evidence, manual documentation merges,
+FE14/FE28 routing/navigation and the two integration regressions. Real E2E must
+be completed in a qualified environment. No full-scope rereview, independent
+closure, protected merge, Issue/Project update or release/deployment is implied.
+Attribution remains consensual heizseung author/committer and chi-thanh-nguyen
+pusher, with truthful Codex assistance disclosure and no fabricated contribution.
+
+
+### Bounded header browser follow-up on the combined production build
+
+After native launches failed, the existing cached official Playwright 1.63.0
+Linux arm64 image was independently identified by both local ID and RepoDigest:
+`sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27`
+(`mcr.microsoft.com/playwright@` that digest). This is a browser tooling image,
+not a backend/PostgreSQL override. A task-owned `--rm` container ran with network
+`none`, UID/GID `502:20`, the isolated checkout mounted read-only and a separate
+writable evidence directory. Its owned loopback static server served only the
+combined build, with SPA fallback; controlled REST doubles stayed in the existing
+harness. No security flags, dependencies, app sources or E2E fixtures changed.
+
+Executed build: `VITE_API_BASE_URL=/api npm --prefix frontend run build -- --outDir
+../../evidence/browser-dist` (exit 0). Inside the container the existing harness
+ran `node src/shared/components/presentation.browser.cjs --fe28-remediation --case
+IR-FE28 --url <that-container-owned-loopback-url> --out /evidence/header-linux
+--engine chromium,webkit,firefox`. The task-local static-server wrapper and Docker
+mounts are diagnostic artifacts outside the repository; no new project entrypoint.
+
+Results: Chromium **153.0.8010.12: 8 PASS / 0 FAIL**; WebKit **26.6: 8 PASS /
+0 FAIL**. D01 verifies focused bell identity through delayed count/reconciliation;
+D02 verifies Home's 44px target and operable edges. Six per-engine role/theme
+cases retain count geometry, hit testing and native navigation. Nineteen unrelated
+cases per successful engine are deliberately excluded by `--case`, not failed or
+executed E2E skips. Firefox executes **0**: launch fails with `CanCreateUserNamespace`
+`clone() failure: EPERM` and `Could not find profile folder`. Overall harness/container
+exit **1**, caused by this launch block, with no assertion failure in either
+executed engine. No namespace/sandbox bypass was introduced. The named container
+`codemastery-fe14-header-1a218870` was verified absent after `--rm`; its loopback
+server and browser processes ended with it. This establishes controlled frontend
+browser behavior only, not real PDF/storage/backend execution or cold-build
+qualification. IR-04 and integration classifications above remain unchanged.
+
+## FE14 post-upstream integration verification — 27 November 2026
+
+Author-side result: **INTEGRATION_COMPLETE_VERIFICATION_LIMITED**. This record
+supersedes current integration/default-storage expectations, preserving every
+earlier failure, remediation and observed result as history. Refs #199; Refs #193
+remains bounded to the shared Markdown renderer. No independent finding is closed.
+
+### Exact inputs, preservation and commands
+
+Original FE14 HEAD `b6763a36fb7ef7562a93bc6a19f2f6726cdf1eac`, merge-base
+`23402754743e0d35048e74cbabebfa133e5e6da3`, integrated actual main
+`3f1831198982b712bfdaa91381e447d39978d550`. Main adds only the #300 and #295
+squash integrations. The normal FE14 merge is
+`a07f334ad36c1c64291fd5d1b19c15265ead9458`, tree
+`6f44a30ee641196fbcff61ebd049ba042019a12d`. Tests ran on this exact integrated
+tree before its commit; the subsequent evidence commit changes only setup/testing
+documentation. Final source/input equivalence and Git checks preserve this evidence.
+
+Actual conflicts: setup, testing and local-stack. Resolution uses complete
+authoritative main fixture blob `22ea227c6563a875964e313a236cfed2815c3312`.
+Main's full setup/testing text is retained, including the in-place FT02 correction;
+each FE14 historical suffix is retained once. All 22 feature-only paths remain
+byte-identical to original HEAD; all 15 main-only paths match integrated main.
+The complete production frontend and original E2E spec are unchanged by this
+integration. No duplicated MinIO provisioning or CT38 bindings remain.
+
+Executed on macOS arm64, Node 24.21.0, Java 25.0.4.1, locked Playwright 1.63.0;
+all commands below are from the isolated checkout root except Maven:
+
+| Command | Actual result |
+| --- | --- |
+| `npm --prefix frontend ci`; `npm --prefix e2e ci` | Both exit 0, locked dependencies |
+| `node --test e2e/fixtures/local-stack.test.mjs e2e/fixtures/lifecycle.test.mjs` | Exit 0, 67 passed, zero failed/skipped |
+| `npm --prefix frontend test -- src/routes/index.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/shared/components/MarkdownRenderer.test.tsx --maxWorkers=1 --testTimeout=15000` | Exit 0, 293 passed across three suites |
+| `npm --prefix frontend run build` | Exit 0, includes typecheck; existing large-chunk advisory |
+| `(unset E2E_MATERIAL_FILES E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD; E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts)` | Exit 1, 11 passed / 4 skipped / 5 failed; classification below |
+| `npm --prefix e2e run stack:down` | Exit 0, all seven owned resources verified absent |
+| `git diff --check`; unresolved/conflict-marker, both-parent, original-HEAD/main ancestry, fixture blob and whole-file preservation checks | Pass; original six commits preserved, no rewrite |
+
+### Actual real-storage browser matrix
+
+| Project | Full authoring | Committed PUT/remount | Delayed PDF recovery | Direct WebKit PDF |
+| --- | --- | --- | --- | --- |
+| chromium-desktop | FAIL, transient 377/360 overflow after file operations | PASS | PASS | Expected browser SKIP |
+| firefox-desktop | Launch blocked | Launch blocked | Launch blocked | Launch blocked before applicability guard |
+| webkit-desktop | PASS | PASS | Expected browser SKIP | PASS, HTTP 201 |
+| chromium-mobile | PASS | PASS | PASS | Expected browser SKIP |
+| webkit-mobile | PASS | PASS | Expected browser SKIP | PASS, HTTP 201 |
+
+The oracle remains 15 PASS / 5 expected browser SKIP in a qualified five-project
+environment. These actual results do not satisfy it. Firefox fails before test
+body execution with `Could not find profile folder`; its four launch failures are
+not assertion failures or skips. No browser flag, new skip or assertion was changed.
+There are no unexpected storage-capability skips in executed journeys.
+
+Run `cm-e2e-1a21902027a-cfae1b`, lock `16777234-22404782`, initialized real
+MinIO once (exit 0 at `2026-11-26T17:58:41.544194468Z`) before backend creation
+at `17:58:44.498312969Z`. Observed private storage has no host bindings, distinct
+root/application identities and no root environment in the backend. The inventory
+contains none of the generated secrets. Backend image is
+`sha256:032dea97ef818d1af1c67af52f70266f4ac4900ef04f3be62c9c5b7bfa5de600`;
+MinIO/initializer retain the Compose pins. Successful setup enables the retained
+IR-04 guards without caller opt-in. Passing cases exercise actual PDF creation,
+replacement/download-byte equality, accepted delayed mutation, failed recovery,
+deliberate retry, one-row duplicate prevention and authoritative PUT/remount.
+Normal teardown plus explicit recovery confirms all seven resources absent and
+the temporary build removed. Historical incomplete macOS run
+`cm-e2e-1a2188bbf2f-397681` / lock `16777234-22098420` is preserved, not reused.
+
+### Prospective AS08 and responsive diagnostic
+
+Initially PR #296 is OPEN/unmerged at `4fa292386144d6ab5037058b81bef3065e7891af`
+(nine commits ahead / two behind actual main). Its isolated main integration
+conflicts in `docs/deployment.md`, `docs/testing.md` and `local-stack.ts`.
+`docs/setup.md`, release shell and release tests merge cleanly. Distinct AS08
+privilege/history and shared-CI records are retained; main's fixture completely
+supersedes the duplicate direct CT38 arguments. This is preparation evidence,
+not a published #296 resolution or a guarantee about a later revision.
+
+Local AS08+main candidate `24ddfe5bae84796c48601ff68dd63f7c9568cedf` passes
+`cd backend && ./mvnw -B test -Dtest=AppConfigTest`: exit 0, 42 tests, no
+failures/errors/skips. It exercises invalid/missing values including disabled
+mode and actual enabled scheduling registration/invocation. Combining FE14 merge
+`a07f334` yields disposable candidate
+`f8b2e747621a9f34ac08f35237d339a11e870f4d`, tree
+`4474181ecd55fe73ea9940b77f045ca635375ba7`. Only `docs/testing.md` conflicts
+at this second merge; fixture, frontend and E2E spec match FE14, while backend,
+infrastructure and workflows match the tested AS08+main candidate. No candidate
+commit is published to either feature branch.
+
+Pre-push refresh finds new AS08 HEAD
+`25ba001b3cd0b2c1aa2d2cfa2b7c7017ac8e332b`, still OPEN/unmerged, ten ahead /
+zero behind main. It normally merges the same main into the original AS08 HEAD.
+Its tree differs from local `24ddfe5` only in deployment/testing record ordering;
+all executable/configuration inputs, including the exact main fixture, are equal.
+A separate no-commit merge of FE14 `a07f334` into this actual latest AS08 revision
+merges entirely cleanly, tree `a6e9a5bd65b7bc2e973089fa0d973f0d4af19eea`.
+Its executable/configuration inputs equal the tested
+combined `f8b2e74` tree; documentation ordering is the only difference. Thus the
+focused configuration/startup evidence below is reusable for the refreshed
+candidate without claiming a repeated suite or future unknown-head mergeability.
+
+A temporary untracked copy of the full authoring test adds layout diagnostics,
+retains the original immediate-width assertion, and runs only Chromium desktop:
+`(unset E2E_MATERIAL_FILES E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD APP_QUIZ_AUTO_SUBMIT_ENABLED APP_QUIZ_AUTO_SUBMIT_DELAY_MS APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE; E2E_WORKERS=1 npm --prefix e2e test -- fe14-overflow.probe.spec.ts --project=chromium-desktop)`.
+Exit 1, one assertion failure after successful CT38 startup, real file operations
+and material POST HTTP 201. Actual backend inputs are exactly disabled `false`,
+delay `1000`, batch `2`; initialization precedes backend creation. Backend image
+is `sha256:da5a7d113e679cf8731a12cbbfc228adfe7ad07aa066cda209f0ee168123b2ff`.
+Run `cm-e2e-1a21905be1e-eddeac` cleans all seven resources; explicit recovery
+also exits 0. The probe is moved outside the checkout and is not committed.
+
+The diagnostic captures the same immediate `scroll=377`, `client=360` and an
+account monogram right edge `376.546875`; two animation frames later both document
+widths are 360. The account button temporarily shrinks to 12px around its fixed
+40px monogram. This is a pre-existing shared-header responsive transition exposed
+by immediate resize sampling. The source indicates the responsive mechanism:
+AppHeader uses `useMediaQuery` for desktop Theme
+presence while CSS already applies the compact layout (`AppHeader.tsx:250-251`,
+`:318-322`, account/monogram `:359-381`). Those sources and the assertion are
+identical to original FE14 HEAD. The observed transient is real; it is not a
+persistent Lesson-material overflow or a demonstrated integration-induced defect.
+No UI fix, frame wait, retry or weakened assertion is published. Owner follow-up
+must decide the shared-header transition/test synchronization correction; the
+historical WebKit symptom's exact original cause is not independently established
+by this Chromium reproduction. Both final WebKit full journeys pass all five widths.
+
+### Self-audit and remaining gates
+
+No confirmed defect introduced by this bounded integration requires production
+code changes. CT19's bucket/upload-limit discrepancy remains with the shared
+fixture/learner-case owners, as recorded in setup; PDF success is not CT19/QA08
+acceptance. The attempted Linux harness with host networking and Docker socket
+was rejected by automatic approval review for broad host-Docker authority; no
+such harness was created. Direct host lifecycle execution supplies the evidence
+above without that configuration. Graphify's 5 November graph was used only for
+navigation and verified against current source.
+
+Attribution preserves all original author/committer metadata and timestamps;
+new PR maintenance uses `heizseung <thangle12012006@gmail.com>` under explicit
+consent, with separate authenticated `chi-thanh-nguyen` push verification and
+accurate Codex assistance disclosure. No global configuration, credential or
+signature is changed. No full unrelated frontend/backend/AS08/VM/release suite,
+hosted-CI rerun/wait, independent review, merge/approval, Issue closure, Project
+write or deployment is performed.
+
+Next review: cumulative `e4d7eb3febfad8f89db1b9091c7931ed3308654a` through the
+actual final PR HEAD, separating upstream main changes from PR-owned remediation.
+Cover IR-01–04, Markdown URL/reference security, CodeQL helper, manual conflicts,
+FE14/FE28 coexistence, shared fixture supersession, prospective AS08 impact,
+real-storage evidence and the retained responsive/environment failures. Author
+checks do not close independent CODEOWNER, required-CI, protected integration,
+operational, security or release gates.
+
+
+## FE14 IR-05/IR-06 narrow remediation — 27 November 2026
+
+### Authority, baseline and preserved evidence
+
+The Project Leader explicitly authorized confirmation, narrow remediation, focused
+verification, attribution, commit/push and a factual PR #279 description update.
+`CLAUDE.md` and `CLAUDE_SESSION_CONTEXT_GUIDE.md` were read from the original
+project workspace; both were accessible. Work used a separate clone, preserving
+that workspace and the earlier incomplete macOS inventory. Current source and
+scoped effective ADR/DESIGN contracts govern behavior; the supplied review and
+its JSON/ZIP are historical independent evidence, not new approval.
+
+Starting published HEAD `615a0cb86f0c88cfd0db5c9959e4065e5a03433f`, tree
+`f73e77650143ee753dc18a4774bed2d66ace7050`, main/merge-base
+`114aeec3c6ec5a14eeaa0cf556774e87a7136a8c`: 9 ahead / 0 behind, 24 files
++3139/-129. No intervening delta or additional main integration was needed.
+Code/test remediation commit `a78c34db225d6256c6ae7777ebc43728343ca200`, tree
+`38673ebdac309e6bf888dfe9836fb6dd30e7e101`, descends normally from that HEAD.
+Subsequent documentation commits change only this appended record. Existing
+failed runs, author evidence and independent closures remain historical.
+
+### Confirmed causes and smallest corrections
+
+| Finding | Correction and contract preservation | Author disposition |
+| --- | --- | --- |
+| FE14-IR-05, P2 | Replace the unanchored regex suffix search in production `youtubeEmbedAddress` with two bounded, disjoint scans and `slice`. Each outer ASCII U+0020 is visited at most once; slicing is bounded by input length. URL parsing, exact serialization/origin/path, credential/port/query/fragment rejection, payload and error messages are unchanged. No Unicode trim, input cap, scanner suppression or dependency change | FIXED_AUTHOR_VERIFIED |
+| FE14-IR-06, P2 | The FE14 spec waits for the visible banner and its `Theme:` button at widths >=900, or zero such buttons below 900, before strict overflow sampling. AppHeader's React `desktop` uses the approved MUI `md` breakpoint; DESIGN puts the compact Theme control in the drawer. Both directions use bounded Playwright assertions. `expectNoPageOverflow` remains byte-identical (`scrollWidth <= clientWidth`) | FIXED_AUTHOR_VERIFIED, five-project execution limited by Firefox launch |
+
+Only MaterialForm, its existing API/admission and production authoring test
+files, the existing FE14 E2E spec and this testing record change. No production
+header, shared assertion, lifecycle/storage fixture, CI/Dockerfile, dependency,
+route, policy, normative contract or PR #286 change.
+
+### IR-05 behavior, performance and Sonar
+
+Before editing, lifecycle-controlled production probes at original HEAD reproduced
+120,041-character input (`https://www.youtube-nocookie.com/embed/x`, 120,000 ASCII
+spaces, `!`): synchronous submit took 1911.9 ms in Chromium and 4886 ms in WebKit.
+The corrected full production journey observed 0.9/1.0 ms on the desktop projects
+and 0.8/2.0 ms on Chromium/WebKit mobile, respectively; invalid input dispatched
+zero material writes and exposed the existing accessible field error. The same
+journey then sent a canonical, ASCII-space-normalized video POST with HTTP 201
+and exercised existing editing. Measurements are bounded observations, not
+portable performance guarantees or machine-dependent CI thresholds.
+
+An isolated source-extraction probe compared actual original/corrected functions:
+10k/30k/60k/120k internal-space runs took 39.42/328.00/1303.10/5132.14 ms before,
+and 0.077/0.123/0.235/0.921 ms after. The original production form/function is the
+performance negative control; the correction removes its repeated suffix search.
+A deterministic differential probe checked 49,164 inputs (U+0000..U+3000 in four
+placements, plus outer-space controls): all admission results matched the original.
+Committed tests cover canonical values, ASCII padding, disallowed forms and
+controls, large malformed/all-space/padded values, no dispatch, linked errors,
+and canonical create/edit payloads. They impose no millisecond/ratio oracle.
+
+Live Sonar at original HEAD returned issue `AaIXzm3cFLI6oz5TFngP`,
+`typescript:S8786`, OPEN, line 66, despite a successful Quality Gate.
+Disposition: **S8786_ROOT_CAUSE_REMEDIATED_AUTHOR_VERIFIED**. No NOSONAR,
+false-positive/risk acceptance, exclusion or scanner configuration change.
+Final exact-head scanner status must be read separately; this record does not
+claim official remote closure before matching analysis exists.
+
+### IR-06 geometry and negative controls
+
+Baseline Chromium and WebKit resize-frame observations independently reproduced
+377/360 overflow while CSS was compact but the desktop Theme control remained;
+settled and initial compact layouts fit. This confirms a test synchronization
+defect with the pre-existing shared-header transition dependency, not persistent
+layout failure. No production header correction was warranted.
+
+After synchronization, all four executing projects recorded exact equality of
+scroll/client width at 360, 768, 1024, 1280 and 1440, with desktop Theme counts
+0, 0, 1, 1, 1. All 28 width/Dark/System screenshots were reached. Keyboard mapping
+and subsequent Dark/System assertions remain intact, with no sleep, geometry
+polling, tolerance, retry, removed width or new capability/browser skip.
+
+Disposable probes copied the committed responsive helper verbatim. In both
+Chromium and WebKit: (1) repeated desktop/compact transitions passed with exact
+geometry; (2) after mode synchronization succeeded, an injected 5000px-wide element
+still failed the unchanged strict assertion at 360 and 1280. These four probes
+passed. Initial incomplete-mode injection removed a React-owned node and caused
+two probe failures on the subsequent transition (initial run: exit 1, 4 PASS /
+2 FAIL). This diagnostic is retained, not counted as a product regression or a pass.
+The injection was corrected to hide, then restore, the desktop control without
+removing React-owned DOM. A separate focused rerun (exit 0, 2 PASS) confirmed that
+a never-visible desktop control and a stale visible compact control both fail the
+same bounded mode assertion. No full journey was retried to obtain a pass.
+
+```bash
+(unset E2E_MATERIAL_FILES E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD
+ E2E_WORKERS=1 npm --prefix e2e test -- ir06-negative.probe.spec.ts --project=chromium-desktop --project=webkit-desktop)
+# initial disposable probe: exit 1, 4 PASS / 2 invalid-injection FAIL
+(unset E2E_MATERIAL_FILES E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD
+ E2E_WORKERS=1 npm --prefix e2e test -- ir06-negative.probe.spec.ts --grep 'incomplete responsive mode' --project=chromium-desktop --project=webkit-desktop)
+# corrected incomplete-mode probe: exit 0, 2 PASS
+```
+
+Temporary probes/faults are retained in the evidence archive and removed from the
+checkout. Test source and production source remained at the code commit above.
+
+### Executed commands and matrix
+
+Commands below ran from the isolated repository; overlapping runs are not added
+together as unique coverage. Dependencies came from both existing lockfiles.
+
+| Command | Actual result |
+| --- | --- |
+| `npm --prefix frontend ci`; `npm --prefix e2e ci` | Both exit 0; no manifest/lock change |
+| `npm --prefix frontend test -- src/features/instructor/course-management/api/instructorCourseApi.test.ts src/features/instructor/course-management/pages/fe14Authoring.test.tsx --maxWorkers=1 --testTimeout=15000` | Exit 0, 82 PASS / 2 suites, subsumed by next run |
+| `npm --prefix frontend test -- src/features/instructor/course-management/api/instructorCourseApi.test.ts src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/shared/components/MarkdownRenderer.test.tsx --maxWorkers=1 --testTimeout=15000` | Exit 0, 186 PASS / 4 suites; includes IR-01/02/03, CodeQL helper, causal/consumer protections |
+| `npm --prefix frontend run build` | Exit 0; includes typecheck; existing large-chunk advisory |
+| `node work/complexity-probe.mjs` and `node work/semantics-probe.mjs` from task workspace | Exit 0 after correcting disposable harness module/path setup; observations above |
+| Default full matrix command below | Exit 1: 12 PASS, 4 expected SKIP, 4 Firefox launch FAIL; no application assertion failures or unexpected storage-capability skips |
+| `git diff --check` | Exit 0 |
+
+```bash
+(unset E2E_MATERIAL_FILES E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD
+ E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts)
+```
+
+| Project | Full authoring/PDF | Committed PUT/remount | Delayed PDF/recovery | Direct WebKit PDF |
+| --- | --- | --- | --- | --- |
+| chromium-desktop | PASS | PASS | PASS | Expected SKIP |
+| firefox-desktop | Launch FAIL | Launch FAIL | Launch FAIL | Launch FAIL before applicability |
+| webkit-desktop | PASS | PASS | Expected SKIP | PASS |
+| chromium-mobile | PASS | PASS | PASS | Expected SKIP |
+| webkit-mobile | PASS | PASS | Expected SKIP | PASS |
+
+Firefox reports `Could not find profile folder` before application assertions.
+No launch workaround, skip or app change was introduced. The qualified-environment
+oracle remains 15 PASS / 5 expected SKIP; the local 12/4/4 result does not satisfy
+it. No hosted workflow was dispatched, rerun or awaited. Available original-HEAD
+GitHub checks were successful; they are not final-remediation-HEAD evidence.
+
+Default shared provisioning enabled real MinIO without caller opt-in. Passed
+journeys executed actual PDF acceptance, title/replace/download-byte and filename
+checks, publication/hide, protected transport, committed PUT settlement/remount,
+failed recovery/manual retry and one-row PDF recovery. WebKit direct transport
+remains separate from its legitimate delayed-interception skip. Existing tests
+retain real backend/storage operations; no mocks replace them.
+
+Lifecycle runs: baseline `cm-e2e-1a219525874-1d457e`, full matrix
+`cm-e2e-1a21954fbbf-406d68`, initial negative probes
+`cm-e2e-1a21956faf2-6068f4`, corrected mode probes
+`cm-e2e-1a21958a196-8eae92`. Every run completed with all seven owned Docker
+resources verified absent, temporary builds removed and owned processes gone.
+Final recovery via `npm --prefix e2e run stack:down` confirmed absence (exit 0).
+The earlier incomplete macOS inventory is preserved; no broad cleanup, forced
+registry edits or lifecycle fencing bypass occurred.
+
+### Self-audit, inventory and next gate
+
+Full remediation delta inspection preserves IR-01–04, CodeQL #8, D1/D1-R1/D1-R2,
+A1/A2/A3/N1, provider-owned sent-write settlement, cross-unmount recovery, causal
+Course/graph reads, Markdown URL fidelity/recursive definitions, IR-04 storage
+admission, FE14/FE28 coexistence, shared fixture supersession and AS08 integration.
+Their production sources are unchanged. No exactly-once, idempotency, transaction
+ordering or new cancellation guarantee is introduced.
+
+The historical independent inventory remains **39/41 VERIFIED_COMPLETE,
+1/41 IMPLEMENTED_NOT_FULLY_VERIFIED (Q02), 1/41 DEFECTIVE (U02)**. Author evidence
+supports removing U02's IR-05 defect and fixing Q02's responsive synchronization
+portion, not an automatic independent 41/41 upgrade or accessibility acceptance.
+Native 200% zoom, assistive technology and broader QA remain NOT RUN here.
+ADR013 CT19 bucket/explicit-limit discrepancy remains the shared-fixture/FE25
+owner's obligation; no FE14-specific provisioning or production upload policy change.
+
+Overall: **REMEDIATION_IMPLEMENTED_VERIFICATION_LIMITED**, due to unexecuted
+Firefox application assertions and pending final exact-head external analysis.
+Next: **Final Narrow Delta-focused Independent Review — FE14-IR-05 & FE14-IR-06,
+Sonar S8786 Resolution and Responsive Regression Preservation**, comparing
+`615a0cb86f0c88cfd0db5c9959e4065e5a03433f` to final published remediation HEAD.
+Preserve prior closures unless that delta affects them. If unchanged source only
+needs qualified Firefox/scanner execution, use a focused verification follow-up,
+not another comprehensive FE14 review.
+
+Raw author/committer of `aba5e9ce879ef272e1ad4f2ded827ed7828ad6b3` verified as
+`heizseung <thangle12012006@gmail.com>`; new commits use that explicitly consensual
+PR-specific attribution via process-scoped settings. Authenticated pusher is
+`chi-thanh-nguyen`. Codex assisted source/tests/docs; metadata does not establish
+human contribution or independent approval. Refs #199; bounded Refs #193
+(shared renderer retained). No approve/merge, Issue close, Project write or deploy.
+
 ## AS16 post-AS08 normalization and author qualification — 27 November 2026
 
 Authority: the Project Leader's explicit PR #301 implementation-completion task,
