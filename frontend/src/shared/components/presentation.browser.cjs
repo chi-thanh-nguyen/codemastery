@@ -1792,6 +1792,7 @@ async function runFE28Engine(playwright, engine, baseUrl) {
                 assert.equal(api.state.requests.filter((value) => value.startsWith('PUT ')).length, 0);
                 assert.equal(await page.locator('#notification-results li').count(), 20);
                 assert.equal(await page.locator('#notification-results a, #notification-results b').count(), 0);
+                assert.equal(await page.locator('#notification-results li p').first().evaluate((node) => getComputedStyle(node).fontSize), '18px');
                 await page.getByRole('button', { name: 'Go to page 2', exact: true }).click(); await ready(page);
                 assert.equal(await page.locator('#notification-results li').count(), 3);
                 await page.getByRole('button', { name: 'Unread', exact: true }).click(); await ready(page);
@@ -1803,6 +1804,8 @@ async function runFE28Engine(playwright, engine, baseUrl) {
                 await page.getByText('Marked 22 notifications as read.', { exact: true }).waitFor();
                 await page.getByRole('link', { name: 'Notifications, 1 unread', exact: true }).waitFor(); await ready(page);
                 assert.equal(await page.locator('#notification-results li').count(), 1);
+                await page.getByRole('button', { name: 'All', exact: true }).click(); await ready(page);
+                assert.equal(await page.locator('#notification-results li p').nth(1).evaluate((node) => getComputedStyle(node).fontSize), '16px');
                 api.state.fail.set('/me/notifications/unread-count', 500);
                 await page.locator('header a[href="/courses"]').click();
                 await page.getByRole('link', { name: 'Notifications', exact: true }).waitFor();

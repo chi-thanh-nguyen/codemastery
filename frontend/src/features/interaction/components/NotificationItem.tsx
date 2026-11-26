@@ -18,7 +18,7 @@ export function NotificationItem({ notification, onMarkRead, pending = false }: 
         <Box aria-hidden sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: roles.bg.fill, color: roles.text.secondary,
             display: 'grid', placeItems: 'center', '& svg': { fontSize: 20 } }}><PresentationIcon name="bell" /></Box>
         <Box sx={{ minWidth: 0 }}>
-            <Typography sx={{ fontWeight: notification.read ? 400 : 600, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{notification.message}</Typography>
+            <Typography component="p" variant={notification.read ? 'body1' : 'subtitle1'} sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{notification.message}</Typography>
             <Typography component="time" dateTime={notification.createdAt} variant="caption" sx={{ display: 'block', mt: .5, color: roles.text.secondary }}>{notification.createdAtLabel}</Typography>
         </Box>
         {!notification.read && <>

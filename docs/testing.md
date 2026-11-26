@@ -8484,6 +8484,7 @@ isolation, theme/accessibility, regression quality, documentation and attributio
 | --- | --- | --- | --- |
 | FE28-S01 | P2 | Shared small-button styling left the new row action with a 40px hit rectangle; DESIGN requires 44px | Row-local `minHeight: 44`; browser assertion raised to an actual 44px rectangle; full bounded Chromium/WebKit matrix passed |
 | FE28-S02 | P2 | Cancel a pending mutation, lose eligibility, then regain eligibility in the same generation: old `pending='all'` survives the abandoned callback and leaves actions busy | Lifecycle setup clears pending/list/count; dedicated test reproduced FAIL before the fix, then 15/15 hook tests and final focused regressions passed |
+| FE28-S03 | P3 | Final typography cross-check found unread messages retained body size (16px/600), while DESIGN Title is 18px/600/1.35 | Use existing `subtitle1` for unread and `body1` for read, both semantic paragraphs; computed browser assertions verify 18px unread and 16px read; page tests/build and the bounded browser track rerun successfully |
 
 The initial inspection targets were independently confirmed and remediated:
 missing route/shell activation, separate hook state, no route count refresh,
