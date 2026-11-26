@@ -10,7 +10,10 @@ import type {
     CoursePublicationStatus, OwnedCourse, OwnedCourseSummaryPage, OwnedCourseWrite, OwnedLessonWrite,
 } from '../api/instructorCourseApi';
 import type { SkillSource } from '../components/QuestionForm';
-import { useAuthoringOperation, useOwnerRead } from './useAssessmentEditor';
+import { ApiError, cancelled } from '../../../../shared/types/apiTypes';
+import type { AuthoringRequestOptions } from '../api/assessmentAuthoringApi';
+import type { AuthoringOperationOwner } from './useAssessmentEditor';
+import { isCancelled, outcomeUnknown, useAuthoringOperation, useOwnerRead } from './useAssessmentEditor';
 import type { OwnerRead } from './useAssessmentEditor';
 import { useOwnedSkillGraph } from '../../skill-graph-editor/hooks/useSkillGraph';
 import type { OwnedSkillGraphRead } from '../../skill-graph-editor/hooks/useSkillGraph';
@@ -34,9 +37,14 @@ export function useCourseCreation() {
 }
 
 export function useCourseOperations(courseId: string) {
-    const { busy, run } = useAuthoringOperation();
+    const ctx = useCourseEditorContext();
+    const { busy, pending, run } = useAuthoringOperation(ctx?.courseMutations);
     const actions = useMemo(() => ({
-        updateMetadata: (write: OwnedCourseWrite) => run((options) => updateOwnedCourse(courseId, write, options)),
+        updateMetadata: (write: OwnedCourseWrite) => run(async (options) => {
+            const saved = await updateOwnedCourse(courseId, write, options);
+            if (options.isCurrent?.()) ctx?.acknowledgeSettings(saved);
+            return saved;
+        }),
         setPublication: (status: CoursePublicationStatus) => run((options) => setOwnedCoursePublication(courseId, status, options)),
         createChapter: (title: string) => run((options) => createCourseChapter(courseId, title, options)),
         updateChapter: (chapterId: string, title: string) => run((options) => updateCourseChapter(courseId, chapterId, title, options)),
@@ -44,8 +52,8 @@ export function useCourseOperations(courseId: string) {
         createLesson: (chapterId: string, write: OwnedLessonWrite) => run((options) => createCourseLesson(courseId, chapterId, write, options)),
         orderLessons: (chapterId: string, orderedIds: readonly string[]) => run((options) => orderChapterLessons(courseId, chapterId, orderedIds, options)),
         setLessonPublication: (lessonId: string, status: CoursePublicationStatus) => run((options) => setCourseLessonPublication(courseId, lessonId, status, options)),
-    }), [courseId, run]);
-    return { busy, ...actions };
+    }), [courseId, run, ctx?.acknowledgeSettings]);
+    return { busy, pending, ...actions };
 }
 
 export interface SettingsAcknowledgment {
@@ -55,6 +63,12 @@ export interface SettingsAcknowledgment {
 
 export interface SharedCourseContextState {
     courseId: string;
+    courseMutations: AuthoringOperationOwner;
+    graphMutations: AuthoringOperationOwner;
+    writesBlocked: () => boolean;
+    mutationPending: boolean;
+    mutationUncertain: boolean;
+    cancelMutation: () => void;
     course: {
         status: 'loading' | 'ready' | 'error';
         data: OwnedCourse | null;
@@ -159,19 +173,81 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
     if (settingsSave && !settingsAcknowledgment) setSettingsSave(null);
     const acknowledgeSettings = useCallback((metadata: OwnedCourseWrite) => {
         if (identity === null) return;
-        const reconcileAfter = reloadCourse();
+        const reconcileAfter = revalidateCourse();
+        if (obligation.current?.identity === identity) obligation.current.courseFloor = reconcileAfter;
         setSettingsSave({
             identity,
             metadata: { title: metadata.title, description: metadata.description, prerequisiteDescription: metadata.prerequisiteDescription },
             reconcileAfter,
         });
-    }, [identity, reloadCourse]);
+    }, [identity, revalidateCourse]);
+    // The composing owner registers before dispatch. Its controller and settlement outlive child views;
+    // the child runner separately suppresses callbacks. One flight serializes dependent Course/graph writes.
+    const obligation = useRef<{ identity: string; controller: AbortController; pending: boolean;
+        affected: 'course' | 'graph'; courseFloor: number; graphFloor: number } | null>(null);
+    const [, renderMutation] = useState(0);
+    const [uncertainIdentity, setUncertainIdentity] = useState<string | null>(null);
+    const ownerLive = useRef(false);
+    const ownerIdentity = useRef(identity);
+    ownerIdentity.current = identity;
+    useEffect(() => {
+        ownerLive.current = true;
+        return () => { ownerLive.current = false; obligation.current?.controller.abort(); obligation.current = null; };
+    }, [identity]);
+    const active = obligation.current?.identity === identity ? obligation.current : null;
+    if (active && !active.pending && successfulRead >= active.courseFloor
+        && skillGraph.successfulRead >= active.graphFloor) obligation.current = null;
+    const blockedRef = useRef(false);
+    blockedRef.current = !!obligation.current || !!courseRead.error
+        || mutationFloor?.identity === identity && successfulRead < mutationFloor.sequence
+        || skillsRefreshIdentity !== null && skillsRefreshIdentity === identity;
+    const writesBlocked = useCallback(() => blockedRef.current || !!obligation.current, []);
+    const runMutation = useCallback(async <T,>(affected: 'course' | 'graph',
+        operation: (options: AuthoringRequestOptions) => Promise<T>, signal: AbortSignal): Promise<T> => {
+        if (identity === null || writesBlocked() || !ownerLive.current || !auth.isCurrent(auth.generation)) throw cancelled();
+        const record = { identity, controller: new AbortController(), pending: true, affected, courseFloor: 0, graphFloor: 0 };
+        obligation.current = record;
+        renderMutation(n => n + 1);
+        const cancel = () => record.controller.abort();
+        signal.addEventListener('abort', cancel, { once: true });
+        if (signal.aborted) cancel();
+        const current = () => ownerLive.current && ownerIdentity.current === identity
+            && obligation.current === record && auth.isCurrent(auth.generation);
+        const recover = () => {
+            record.pending = false;
+            if (affected === 'course' && !record.courseFloor) record.courseFloor = revalidateCourse();
+            else if (affected === 'graph') record.graphFloor = reloadGraph();
+            renderMutation(n => n + 1);
+        };
+        try {
+            const value = await operation({ signal: record.controller.signal, isCurrent: current });
+            if (!current()) throw cancelled();
+            recover();
+            return value;
+        } catch (error) {
+            if (!current()) throw cancelled();
+            if (isCancelled(error) || outcomeUnknown(error) || error instanceof ApiError && error.kind === 'unknown-outcome') {
+                // An inspection after transport loss permits a deliberate next action under CT16/CT37;
+                // it does not prove that an unobserved server transaction has terminated.
+                setUncertainIdentity(identity);
+                recover();
+            } else { obligation.current = null; renderMutation(n => n + 1); }
+            throw error;
+        } finally { signal.removeEventListener('abort', cancel); }
+    }, [identity, auth.generation, auth.isCurrent, writesBlocked, revalidateCourse, reloadGraph]);
+    const mutationPending = !!active?.pending;
+    const mutationBusy = writesBlocked();
+    const runCourse = useCallback<AuthoringOperationOwner['run']>((operation, signal) => runMutation('course', operation, signal), [runMutation]);
+    const runGraph = useCallback<AuthoringOperationOwner['run']>((operation, signal) => runMutation('graph', operation, signal), [runMutation]);
+    const courseMutations = useMemo(() => ({ busy: mutationBusy, pending: mutationPending, run: runCourse }), [mutationBusy, mutationPending, runCourse]);
+    const graphMutations = useMemo(() => ({ busy: mutationBusy, pending: mutationPending, run: runGraph }), [mutationBusy, mutationPending, runGraph]);
+    const cancelMutation = useCallback(() => obligation.current?.controller.abort(), []);
     const courseStatus: 'loading' | 'ready' | 'error' = courseRead.error && !courseData
         ? 'error'
         : courseData
             ? 'ready'
             : 'loading';
-    const revalidating = mutationFloor?.identity === identity && successfulRead < mutationFloor.sequence;
+    const revalidating = mutationBusy;
     const course = useMemo(() => ({
         status: courseStatus,
         data: courseData,
@@ -190,6 +266,7 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
 
     return useMemo(() => ({
         courseId,
+        courseMutations, graphMutations, writesBlocked, mutationPending, mutationUncertain: uncertainIdentity === identity && identity !== null, cancelMutation,
         course,
         skillGraph,
         skillsRevalidating: identity !== null && skillsRefreshIdentity === identity,
@@ -200,5 +277,5 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
         refreshSkillsIfStale,
         setTabDirty,
         isTabDirty,
-    }), [courseId, course, skillGraph, skills, identity, skillsRefreshIdentity, settingsAcknowledgment, acknowledgeSettings, notifySkillsChanged, refreshSkillsIfStale, setTabDirty, isTabDirty]);
+    }), [courseId, courseMutations, graphMutations, writesBlocked, mutationPending, uncertainIdentity, cancelMutation, course, skillGraph, skills, identity, skillsRefreshIdentity, settingsAcknowledgment, acknowledgeSettings, notifySkillsChanged, refreshSkillsIfStale, setTabDirty, isTabDirty]);
 }

@@ -37,11 +37,21 @@ export type DeliveredCourseTab = 'content' | 'skills' | 'assessments' | 'setting
  * (400, 403, 404) never reach it: the read discards the copy and the shell shows the F14 state instead.
  */
 export function CourseRefreshAlert({ course }: { course: { data: OwnedCourse | null; error: unknown; reload: () => void } | undefined }) {
-    if (!course?.data || !course.error || courseRefused(course.error)) return null;
-    return <Alert severity="warning" sx={{ mb: 2.5 }}
+    const ctx = useCourseEditorContext();
+    if (ctx?.mutationPending) return <Alert severity="info" sx={{ mb: 2.5 }}
+        action={<Button onClick={ctx.cancelMutation}>Stop waiting</Button>}>
+        A sent change is still pending. It will be checked when the request settles. Stopping does not undo it.
+    </Alert>;
+    if (course?.data && course.error && !courseRefused(course.error)) return <Alert severity="warning" sx={{ mb: 2.5 }}
         action={<Button size="small" variant="text" onClick={course.reload}>Try again</Button>}>
         We couldn&apos;t load this course. The last loaded version is shown.
     </Alert>;
+    if (ctx?.mutationUncertain) return <Alert severity="warning" sx={{ mb: 2.5 }}
+        action={<Button onClick={() => { ctx.course.reload(); ctx.skillGraph.reload(); }}>Inspect current state</Button>}>
+        A change had an unknown outcome. Review the current lesson, materials and skills before another explicit attempt.
+        A resource read cannot prove that an unobserved server operation has stopped. Nothing is replayed automatically.
+    </Alert>;
+    return null;
 }
 
 function activeTabFrom(pathname: string): DeliveredCourseTab {
@@ -128,13 +138,11 @@ export function CourseEditorFrame() {
         setAlert(null);
         try {
             await ops.setPublication(next);
-            course.revalidate();
             setNotice(next === 'published' ? 'Course published.' : 'Course hidden.');
         } catch (error) {
             if (isCancelled(error)) return;
             if (outcomeUnknown(error)) {
                 setAlert("We couldn't confirm whether the course publication changed.");
-                course.revalidate();
                 return;
             }
             setAlert(error instanceof ApiError ? error.message : 'Something went wrong on our side. Try again in a moment.');
@@ -184,8 +192,7 @@ export function CourseEditorFrame() {
 export function CourseContentTab() {
     const { courseId, course, skillGraph } = useCourseEditorContext()!;
     const ops = useCourseOperations(courseId), navigate = useNavigate();
-    const [reconcileAfter, setReconcileAfter] = useState(0);
-    const locked = ops.busy || course.revalidating || course.successfulRead < reconcileAfter || !!course.error;
+    const locked = ops.busy || course.revalidating || !!course.error;
     const [editingChapter, setEditingChapter] = useState<string | null>(null);
     const [publication, setPublication] = useState<{ lessonId: string; next: CoursePublicationStatus } | null>(null);
     const data = course.data!;
@@ -215,12 +222,11 @@ export function CourseContentTab() {
             if (editingChapter) await ops.updateChapter(editingChapter, chapterTitle.trim());
             else await ops.createChapter(chapterTitle.trim());
             setChapterModal(false); setChapterTitle('');
-            setReconcileAfter(course.revalidate());
             setStatusLine(editingChapter ? 'Chapter saved.' : 'Chapter added.');
         } catch (error) {
             if (isCancelled(error)) return;
             setErrorAlert(outcomeUnknown(error) ? 'The change could not be confirmed. Check the refreshed course before trying again.' : errorMessage(error));
-            if (outcomeUnknown(error) || courseRefused(error)) setReconcileAfter(course.revalidate());
+            if (courseRefused(error)) course.reload();
         }
     }
 
@@ -234,12 +240,11 @@ export function CourseContentTab() {
                 contentMarkdown: /\S/.test(lessonContent) ? lessonContent : null,
             });
             setLessonModal(null); setLessonTitle(''); setLessonContent('');
-            setReconcileAfter(course.revalidate());
             setStatusLine('Lesson added.');
         } catch (error) {
             if (isCancelled(error)) return;
             setErrorAlert(outcomeUnknown(error) ? 'The change could not be confirmed. Check the refreshed course before trying again.' : errorMessage(error));
-            if (outcomeUnknown(error) || courseRefused(error)) setReconcileAfter(course.revalidate());
+            if (courseRefused(error)) course.reload();
         }
     }
 
@@ -255,12 +260,11 @@ export function CourseContentTab() {
         setErrorAlert(null);
         try {
             await ops.orderLessons(chapterId, ids);
-            setReconcileAfter(course.revalidate());
             setStatusLine(`Moved ${movedLesson.title} to position ${targetIndex + 1}.`);
         } catch (error) {
             if (isCancelled(error)) return;
             setErrorAlert(outcomeUnknown(error) ? 'The change could not be confirmed. Check the refreshed course before trying again.' : errorMessage(error));
-            if (outcomeUnknown(error) || courseRefused(error)) setReconcileAfter(course.revalidate());
+            if (courseRefused(error)) course.reload();
         }
     }
 
@@ -268,12 +272,11 @@ export function CourseContentTab() {
         setErrorAlert(null);
         try {
             await ops.setLessonPublication(lessonId, next);
-            setReconcileAfter(course.revalidate());
             setStatusLine(next === 'published' ? 'Lesson published.' : 'Lesson hidden.');
         } catch (error) {
             if (isCancelled(error)) return;
             setErrorAlert(outcomeUnknown(error) ? 'The change could not be confirmed. Check the refreshed course before trying again.' : errorMessage(error));
-            if (outcomeUnknown(error) || courseRefused(error)) setReconcileAfter(course.revalidate());
+            if (courseRefused(error)) course.reload();
         }
     }
 
@@ -283,8 +286,8 @@ export function CourseContentTab() {
         if (index < 0 || target < 0 || target >= data.chapters.length) return;
         const ids = data.chapters.map((item) => item.id); [ids[index], ids[target]] = [ids[target], ids[index]];
         setErrorAlert(null);
-        try { await ops.orderChapters(ids); setReconcileAfter(course.revalidate()); setStatusLine(`Moved ${data.chapters[index].title} to position ${target + 1}.`); }
-        catch (error) { if (isCancelled(error)) return; setErrorAlert(errorMessage(error)); if (outcomeUnknown(error) || courseRefused(error)) setReconcileAfter(course.revalidate()); }
+        try { await ops.orderChapters(ids); setStatusLine(`Moved ${data.chapters[index].title} to position ${target + 1}.`); }
+        catch (error) { if (isCancelled(error)) return; setErrorAlert(errorMessage(error)); if (courseRefused(error)) course.reload(); }
     }
     return <Box sx={{ display: 'grid', gap: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
@@ -293,7 +296,6 @@ export function CourseContentTab() {
                 disabled={locked} startIcon={<PresentationIcon name="plus" />}>Add chapter</Button>
         </Box>
         {errorAlert && <Alert severity="error">{errorAlert}</Alert>}
-        {course.successfulRead < reconcileAfter && <Typography role="status">Checking the current course…</Typography>}
         {!!skillGraph.error && <Alert severity="warning" action={<Button onClick={skillGraph.reload}>Try again</Button>}>Skill mappings are unavailable.</Alert>}
         <Typography role="status" className="cm-visually-hidden">{statusLine}</Typography>
         {data.chapters.length === 0
@@ -382,25 +384,22 @@ export function CourseContentTab() {
 
 /** S18 Settings tab: course title, description, optional prerequisites text, and metadata save. */
 export function CourseSettingsTab() {
-    const { courseId, course, settingsAcknowledgment, acknowledgeSettings, setTabDirty } = useCourseEditorContext()!;
+    const { courseId, course, settingsAcknowledgment, setTabDirty } = useCourseEditorContext()!;
     const ops = useCourseOperations(courseId);
     const data = course.data!;
     // Keyed by the course identity only (U5): a re-read after a save, or another writer's change, must not remount the
     // form, which would drop the "Saved" status or an unsaved draft. The form adopts new committed values itself.
     return <CourseSettingsForm key={data.id}
         course={data} successfulRead={course.successfulRead} refreshError={course.error}
-        acknowledgment={settingsAcknowledgment} ops={ops} onSaved={acknowledgeSettings}
-        onUnknown={course.reload} setTabDirty={setTabDirty} />;
+        acknowledgment={settingsAcknowledgment} ops={ops} setTabDirty={setTabDirty} />;
 }
 
-function CourseSettingsForm({ course, successfulRead, refreshError, acknowledgment, ops, onSaved, onUnknown, setTabDirty }: {
+function CourseSettingsForm({ course, successfulRead, refreshError, acknowledgment, ops, setTabDirty }: {
     course: OwnedCourse;
     successfulRead: number;
     refreshError: unknown;
     acknowledgment: SettingsAcknowledgment | null;
     ops: ReturnType<typeof useCourseOperations>;
-    onSaved: (metadata: OwnedCourse) => void;
-    onUnknown: () => number;
     setTabDirty: (dirty: boolean) => void;
 }) {
     const baseline = acknowledgment?.metadata ?? course;
@@ -454,7 +453,6 @@ function CourseSettingsForm({ course, successfulRead, refreshError, acknowledgme
             setPrerequisites(saved.prerequisiteDescription ?? '');
             setDirty(false);
             setSavedNotice(true);
-            onSaved(saved);
         } catch (error) {
             if (isCancelled(error)) return;
             const fields = fieldErrorsFrom(error, {
@@ -465,14 +463,13 @@ function CourseSettingsForm({ course, successfulRead, refreshError, acknowledgme
             if (Object.keys(fields).length) { setErrors(fields); return; }
             if (outcomeUnknown(error)) {
                 setAlert("We couldn't confirm whether your changes were saved.");
-                onUnknown();
                 return;
             }
             setAlert(error instanceof ApiError ? error.message : 'Something went wrong on our side. Try again in a moment.');
         }
     }
 
-    const status = ops.busy ? 'Saving…' : dirty ? 'Unsaved changes' : savedNotice
+    const status = ops.pending ? 'Saving…' : dirty ? 'Unsaved changes' : savedNotice
         ? acknowledgment !== null
             ? refreshError ? "Settings saved, but the current values couldn't be loaded." : 'Settings saved. Refreshing course…'
             : 'Saved'
@@ -483,13 +480,13 @@ function CourseSettingsForm({ course, successfulRead, refreshError, acknowledgme
         <Tile padding={{ xs: 3, sm: 4 }}>
             <Box component="form" noValidate onSubmit={(event) => { event.preventDefault(); void save(); }}
                 sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 2.5 }}>
-                <TextField label="Course title" value={title} required disabled={ops.busy}
+                <TextField label="Course title" value={title} required disabled={ops.pending}
                     onChange={(event) => { setTitle(event.target.value); setDirty(true); setSavedNotice(false); setErrors({}); }}
                     error={!!errors.title} helperText={errors.title} />
-                <TextField label="Description" multiline minRows={4} value={description} required disabled={ops.busy}
+                <TextField label="Description" multiline minRows={4} value={description} required disabled={ops.pending}
                     onChange={(event) => { setDescription(event.target.value); setDirty(true); setSavedNotice(false); setErrors({}); }}
                     error={!!errors.description} helperText={errors.description ?? 'Shown on the course detail page.'} />
-                <TextField label="Prerequisites (optional)" multiline minRows={2} value={prerequisites} disabled={ops.busy}
+                <TextField label="Prerequisites (optional)" multiline minRows={2} value={prerequisites} disabled={ops.pending}
                     onChange={(event) => { setPrerequisites(event.target.value); setDirty(true); setSavedNotice(false); setErrors({}); }}
                     error={!!errors.prerequisites} helperText={errors.prerequisites ?? 'A learner-facing description. It never blocks enrolment.'} />
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center' }}>

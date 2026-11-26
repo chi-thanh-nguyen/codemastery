@@ -99,15 +99,22 @@ export function useOwnerRead<T>(key: string | null, load: (options: AuthoringReq
 
 /**
  * Single-flight operations for one editor. A second operation while one runs is refused locally;
- * unmounting aborts the running request and its late result is discarded (rejected as cancelled).
+ * unmounting suppresses child callbacks. A supplied composing owner retains sent work; otherwise
+ * unmounting also aborts the request. Explicit cancellation always reaches the request signal.
  */
-export function useAuthoringOperation() {
+export interface AuthoringOperationOwner {
+    busy: boolean;
+    pending?: boolean;
+    run: <T>(operation: (options: AuthoringRequestOptions) => Promise<T>, signal: AbortSignal) => Promise<T>;
+}
+
+export function useAuthoringOperation(owner?: AuthoringOperationOwner) {
     const auth = useAuth(), generation = auth.generation, isCurrent = auth.isCurrent;
     const alive = useRef(false), work = useRef<AbortController | null>(null);
     const [busy, setBusy] = useState(false);
     useEffect(() => {
         alive.current = true;
-        return () => { alive.current = false; work.current?.abort(); work.current = null; };
+        return () => { alive.current = false; if (!owner) work.current?.abort(); work.current = null; };
     }, []);
     const run = useCallback(<T,>(operation: (options: AuthoringRequestOptions) => Promise<T>): Promise<T> => {
         if (work.current || !alive.current) return Promise.reject(cancelled());
@@ -115,12 +122,12 @@ export function useAuthoringOperation() {
         work.current = controller;
         const current = () => alive.current && work.current === controller && isCurrent(generation);
         setBusy(true);
-        return operation({ signal: controller.signal, isCurrent: current })
+        return (owner ? owner.run(operation, controller.signal) : operation({ signal: controller.signal, isCurrent: current }))
             .then((value) => { if (!current()) throw cancelled(); return value; },
                 (error: unknown) => { throw current() ? error : cancelled(); })
             .finally(() => { if (work.current === controller) { work.current = null; if (alive.current) setBusy(false); } });
-    }, [generation, isCurrent]);
-    return { busy, run, cancel: () => work.current?.abort() };
+    }, [generation, isCurrent, owner?.run]);
+    return { busy: busy || !!owner?.busy, pending: busy || !!owner?.pending, run, cancel: () => work.current?.abort() };
 }
 
 /** `b3ListOwnedQuizzes` for the Quizzes view: one page in API order. */

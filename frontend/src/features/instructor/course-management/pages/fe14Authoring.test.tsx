@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthContext } from '../../../../app/providers/AuthProvider';
 import type { AuthContextValue } from '../../../../app/providers/AuthProvider';
@@ -27,9 +27,10 @@ const controls = (scope: ParentNode = document) => [...scope.querySelectorAll<HT
 function button(text: string, scope: ParentNode = document) { const found = controls(scope).find((item) => item.textContent?.trim() === text || item.getAttribute('aria-label') === text); if (!found) throw new Error(`Missing ${text} in ${controls(scope).map(x => x.textContent).join('|')}`); return found as HTMLButtonElement; }
 const click = async (text: string, scope: ParentNode = document) => { await act(async () => button(text, scope).click()); await flush(); };
 const modal = () => [...document.querySelectorAll<HTMLElement>('[role="dialog"]')].at(-1)!;
-function field(label: string, scope: ParentNode = document) { const node = [...scope.querySelectorAll('label')].find((x) => x.textContent?.replace('*', '').trim() === label); if (!node) throw new Error(`Missing field ${label}`); return document.getElementById(node.htmlFor) as HTMLInputElement; }
+function field(label: string, scope: ParentNode = document) { const node = [...scope.querySelectorAll('label')].find((x) => [...x.childNodes].filter(n => n.nodeType === Node.TEXT_NODE).map(n => n.textContent).join('').trim() === label); if (!node) throw new Error(`Missing field ${label}`); return document.getElementById(node.htmlFor) as HTMLInputElement; }
 async function type(label: string, value: string, scope: ParentNode = document) { const el = field(label, scope); await act(async () => { Object.getOwnPropertyDescriptor(el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })); }); }
-async function mount(path = `/teach/courses/${c}/lessons/${l}`) { await act(async () => root.render(<MemoryRouter initialEntries={[path]}><AuthContext.Provider value={auth}><AppRouter /></AuthContext.Provider></MemoryRouter>)); await flush(); }
+function HistoryProbe() { const navigate = useNavigate(); return <><button onClick={() => navigate(-1)}>Native back probe</button><button onClick={() => navigate(1)}>Native forward probe</button></>; }
+async function mount(path = `/teach/courses/${c}/lessons/${l}`) { await act(async () => root.render(<MemoryRouter initialEntries={[`/teach/courses/${c}`, path]}><HistoryProbe /><AuthContext.Provider value={auth}><AppRouter /></AuthContext.Provider></MemoryRouter>)); await flush(); }
 const text = () => document.body.textContent ?? '';
 beforeEach(() => {
     vi.resetAllMocks(); vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} }); vi.stubGlobal('DOMMatrixReadOnly', class { m22 = 1; });
@@ -147,4 +148,64 @@ describe('FE14 production authoring and reconciliation', () => {
         URL.createObjectURL = create; URL.revokeObjectURL = revoke;
         await act(async () => root.render(<FileDownloadButton load={async () => ({ blob: new Blob(['pdf']), filename: 'server.pdf' })} />)); await click('Download PDF'); expect(create).toHaveBeenCalledTimes(1); expect(revoke).toHaveBeenCalledWith('blob:synthetic'); expect(clickAnchor).toHaveBeenCalledTimes(1); clickAnchor.mockRestore();
     });
+});
+
+
+describe('FE14-IR-01 sent work outlives the initiating child', () => {
+    it('retains the committed Lesson PUT through app Leave, then prevents a stale full replacement', async () => {
+        let settle!: (value: api.OwnedLesson) => void, signal!: AbortSignal, isCurrent!: () => boolean;
+        vi.mocked(api.updateCourseLesson).mockImplementation((_, __, write, options) => {
+            lesson().title = write.title;
+            signal = options!.signal!; isCurrent = options!.isCurrent!;
+            return new Promise(r => { settle = r; });
+        });
+        await mount(); await type('Lesson title', 'Server committed title'); await click('Save changes');
+        await click('Content'); await click('Leave', modal());
+        expect(signal.aborted).toBe(false); expect(isCurrent()).toBe(true);
+        expect(button('Edit').disabled).toBe(true); expect(button('Add chapter').disabled).toBe(true);
+        expect(api.getOwnedCourse).toHaveBeenCalledTimes(1);
+        await act(async () => settle(structuredClone(lesson()))); await flush();
+        expect(button('Edit').disabled).toBe(false);
+        await click('Edit'); expect(field('Lesson title').value).toBe('Server committed title');
+        vi.mocked(api.updateCourseLesson).mockImplementation(async (_, __, write) => { Object.assign(lesson(), write); return structuredClone(lesson()); });
+        await type('Content (Markdown)', 'Later content only'); await click('Save changes');
+        expect(vi.mocked(api.updateCourseLesson).mock.calls[1][2].title).toBe('Server committed title');
+    });
+    it('keeps an accepted PDF pending through native Back/Forward, failed recovery and explicit retry', async () => {
+        let settle!: (value: OwnedMaterial) => void, signal!: AbortSignal;
+        const row: OwnedMaterial = { id: m, title: 'Committed PDF', materialType: 'file', publicationStatus: 'hidden' };
+        vi.mocked(api.b5CreateFileMaterial).mockImplementation((_, __, ___, ____, options) => {
+            lesson().materials = [row]; signal = options!.signal!;
+            return new Promise(r => { settle = r; });
+        });
+        await mount(); await click('Add PDF file'); await type('Title', row.title, modal());
+        const input = modal().querySelector<HTMLInputElement>('input[type=file]')!;
+        await act(async () => { Object.defineProperty(input, 'files', { value: [new File(['%PDF-1.7'], 'actual.pdf')] }); input.dispatchEvent(new Event('change', { bubbles: true })); });
+        await click('Add material', modal()); await click('Native back probe'); await click('Native forward probe');
+        expect(signal.aborted).toBe(false); expect(button('Add PDF file').disabled).toBe(true);
+        expect(api.getOwnedCourse).toHaveBeenCalledTimes(1);
+        vi.mocked(api.getOwnedCourse).mockRejectedValueOnce(new ApiError('network', 'offline'));
+        await act(async () => settle(row)); await flush();
+        expect(button('Add PDF file').disabled).toBe(true); expect(api.b5CreateFileMaterial).toHaveBeenCalledTimes(1);
+        await click('Try again');
+        expect(button('Add PDF file').disabled).toBe(false); expect(text()).toContain('Committed PDF');
+        expect(lesson().materials).toHaveLength(1); expect(api.b5CreateFileMaterial).toHaveBeenCalledTimes(1);
+    });
+});
+
+it('preserves the acknowledged Lesson fields while its post-settlement read is delayed', async () => {
+    let resolveRead!: (body: OwnedCourse) => void;
+    await mount();
+    vi.mocked(api.getOwnedCourse).mockImplementation(() => new Promise(r => { resolveRead = r; }));
+    vi.mocked(api.updateCourseLesson).mockImplementation(async (_, __, write) => { lesson().title = write.title; return structuredClone(lesson()); });
+    await type('Lesson title', 'Acknowledged title'); await click('Save changes');
+    expect(field('Lesson title').value).toBe('Acknowledged title');
+    expect(button('Save changes').disabled).toBe(true);
+    await act(async () => resolveRead(structuredClone(course))); await flush();
+    expect(field('Lesson title').value).toBe('Acknowledged title');
+});
+
+it('CodeQL #8: distinguishes literal asterisks in label text from the required marker', async () => {
+    await act(async () => root.render(<><label htmlFor="literal-stars">Two * literal * marks<span aria-hidden="true">*</span></label><input id="literal-stars" /></>));
+    expect(field('Two * literal * marks').id).toBe('literal-stars');
 });

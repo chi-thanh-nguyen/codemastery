@@ -13,7 +13,6 @@ import { useCourseEditorContext } from '../hooks/useCourseEditor';
 import { failureStatus, fieldErrorsFrom, isCancelled, outcomeUnknown, useAuthoringOperation } from '../hooks/useAssessmentEditor';
 import * as api from '../api/instructorCourseApi';
 import type { OwnedLesson, OwnedMaterial, OwnedMaterialType } from '../api/instructorCourseApi';
-import type { OwnedSkillGraph } from '../../skill-graph-editor/api/skillGraphApi';
 import { mapCourseLessonSkill, unmapCourseLessonSkill } from '../../skill-graph-editor/api/skillGraphApi';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -110,13 +109,12 @@ export function ProductionLessonEditorPage() {
 function ProductionLessonForm({ lesson }: { lesson: OwnedLesson }) {
     const ctx = useCourseEditorContext()!, navigate = useNavigate(), auth = useAuth();
     const { courseId, course, skillGraph } = ctx;
-    const ops = useAuthoringOperation();
+    const ops = useAuthoringOperation(ctx.courseMutations);
+    const mappingOps = useAuthoringOperation(ctx.graphMutations);
     const initial = { title: lesson.title, contentMarkdown: lesson.contentMarkdown ?? '' };
     const [draft, setDraft] = useState(initial), [saved, setSaved] = useState(initial);
     const [preview, setPreview] = useState(false), [notice, setNotice] = useState(''), [alert, setAlert] = useState<string | null>(null);
     const [fields, setFields] = useState<Record<string, string>>({});
-    const [barrier, setBarrier] = useState<number | null>(null);
-    const [graphBarrier, setGraphBarrier] = useState<OwnedSkillGraph | null>(null);
     const [refusal, setRefusal] = useState<number | null>(null);
     const [material, setMaterial] = useState<{ kind: OwnedMaterialType; initial?: OwnedMaterial; replaceFile?: boolean } | null>(null);
     const [materialDirty, setMaterialDirty] = useState(false), [uploading, setUploading] = useState(false);
@@ -125,9 +123,8 @@ function ProductionLessonForm({ lesson }: { lesson: OwnedLesson }) {
     const alive = useRef(false), cancelledUpload = useRef(false);
     useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
     const dirty = draft.title !== saved.title || draft.contentMarkdown !== saved.contentMarkdown;
-    const reconciling = barrier !== null && course.successfulRead < barrier;
-    const graphReconciling = graphBarrier !== null && (skillGraph.graph === graphBarrier || skillGraph.loading || !!skillGraph.error);
-    const locked = ops.busy || course.revalidating || ctx.skillsRevalidating || reconciling || graphReconciling || !!course.error;
+    const reconciling = course.revalidating;
+    const locked = ops.busy || reconciling || ctx.skillsRevalidating || !!course.error;
     const current = () => alive.current && auth.isCurrent(auth.generation);
     useEffect(() => {
         // Neither an old in-flight GET nor a failed refresh may overwrite a confirmed save or a draft.
@@ -137,15 +134,14 @@ function ProductionLessonForm({ lesson }: { lesson: OwnedLesson }) {
         }
     }, [lesson, dirty, reconciling, course.error]);
     useEffect(() => {
-        if (!dirty && !materialDirty && !ops.busy) return;
+        if (!dirty && !materialDirty && !ops.pending) return;
         const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
         window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn);
-    }, [dirty, materialDirty, ops.busy]);
+    }, [dirty, materialDirty, ops.pending]);
     const attemptLeave = (go: () => void) => {
-        if (dirty || materialDirty || ops.busy) setLeave({ go }); else go();
+        if (dirty || materialDirty || ops.pending) setLeave({ go }); else go();
     };
-    useNavigationGuard((go) => { if (!dirty && !materialDirty && !ops.busy) return false; setLeave({ go }); return true; });
-    const reload = () => setBarrier(course.revalidate());
+    useNavigationGuard((go) => { if (!dirty && !materialDirty && !ops.pending) return false; setLeave({ go }); return true; });
     const handleError = (error: unknown, wasUpload = false) => {
         if (!current()) return;
         if (isCancelled(error) && !cancelledUpload.current) return;
@@ -153,7 +149,7 @@ function ProductionLessonForm({ lesson }: { lesson: OwnedLesson }) {
         if (status === 403 || status === 404) { setRefusal(status); course.reload(); return; }
         if (outcomeUnknown(error) || error instanceof ApiError && error.kind === 'unknown-outcome' || wasUpload && cancelledUpload.current) {
             setAlert(wasUpload ? 'The upload outcome is unknown. Checking the current materials before another upload. Review the returned list before submitting again.' : 'The change could not be confirmed. Checking the current lesson before another change.');
-            reload(); return;
+            return;
         }
         setFields(fieldErrorsFrom(error, { title: 'title', contentMarkdown: 'contentMarkdown', textContent: 'textContent', externalVideoUrl: 'externalVideoUrl', file: 'file' }));
         setAlert(status === 413 ? 'The file is larger than the allowed size.' : errorMessage(error));
@@ -165,7 +161,8 @@ function ProductionLessonForm({ lesson }: { lesson: OwnedLesson }) {
         try {
             const response = await ops.run((options) => api.updateCourseLesson(courseId, lesson.id, { title: draft.title.trim(), contentMarkdown: /\S/.test(draft.contentMarkdown) ? draft.contentMarkdown : null }, options));
             const next = { title: response.title, contentMarkdown: response.contentMarkdown ?? '' };
-            setDraft(next); setSaved(next); setNotice('Saved'); reload();
+            if (!current()) return;
+            setDraft(next); setSaved(next); setNotice('Saved');
         } catch (error) { handleError(error); }
     }
     async function publish(item?: OwnedMaterial) {
@@ -177,7 +174,8 @@ function ProductionLessonForm({ lesson }: { lesson: OwnedLesson }) {
                 ? api.b5SetFileMaterialPublication(courseId, lesson.id, item.id, next, options)
                 : api.setRelationalMaterialPublication(courseId, lesson.id, item, next, options)
                 : api.setCourseLessonPublication(courseId, lesson.id, next, options));
-            setNotice(`${item ? 'Material' : 'Lesson'} ${next}.`); reload();
+            if (!current()) return;
+            setNotice(`${item ? 'Material' : 'Lesson'} ${next}.`);
         } catch (error) { handleError(error); }
     }
     const confirmPublication = (item?: OwnedMaterial) => {
@@ -202,7 +200,8 @@ function ProductionLessonForm({ lesson }: { lesson: OwnedLesson }) {
                 return material.initial ? api.updateRelationalMaterial(courseId, lesson.id, material.initial.id, payload, options)
                     : api.createRelationalMaterial(courseId, lesson.id, payload, options);
             });
-            setNotice('Material saved.'); reload(); return true;
+            if (!current()) return false;
+            setNotice('Material saved.'); return true;
         } catch (error) { handleError(error, isUpload); return false; }
         finally { if (current()) setUploading(false); }
     }
@@ -210,10 +209,11 @@ function ProductionLessonForm({ lesson }: { lesson: OwnedLesson }) {
         if (locked || !skillGraph.graph || skillGraph.error || skillGraph.loading) return;
         setAlert(null); setNotice('');
         try {
-            await ops.run((options) => mapped ? unmapCourseLessonSkill(courseId, lesson.id, skillId, options) : mapCourseLessonSkill(courseId, lesson.id, skillId, options));
-            setNotice('Skill mapping saved.'); setGraphBarrier(skillGraph.graph); ctx.notifySkillsChanged();
+            await mappingOps.run((options) => mapped ? unmapCourseLessonSkill(courseId, lesson.id, skillId, options) : mapCourseLessonSkill(courseId, lesson.id, skillId, options));
+            if (!current()) return;
+            setNotice('Skill mapping saved.');
         } catch (error) {
-            if (outcomeUnknown(error)) { setGraphBarrier(skillGraph.graph); ctx.notifySkillsChanged(); }
+            if (!current()) return;
             handleError(error);
         }
     }
@@ -225,7 +225,7 @@ function ProductionLessonForm({ lesson }: { lesson: OwnedLesson }) {
             meta={<PublicationPill publication={lesson.publicationStatus} />} actions={<Button variant="outlined" disabled={locked} onClick={() => confirmPublication()}>{lesson.publicationStatus === 'published' ? 'Hide lesson' : 'Publish lesson'}</Button>} />
         <CourseRefreshAlert course={course} />
         {alert && <Alert severity="warning" sx={{ mb: 2 }}>{alert}</Alert>}
-        {reconciling && <Box sx={{ mb: 2 }}><Typography role="status">Checking the current lesson…</Typography>{!!course.error && <Button onClick={reload}>Try again</Button>}</Box>}
+        {reconciling && <Box sx={{ mb: 2 }}><Typography role="status">Checking the current lesson…</Typography></Box>}
         <Box sx={{ display: 'grid', gap: 3, minWidth: 0, pb: 12 }}>
             <Tile component="section" aria-labelledby="lesson-edit-heading" sx={{ display: 'grid', gap: 2.5 }}>
                 <Typography id="lesson-edit-heading" component="h2" variant="h3">Lesson</Typography>
@@ -268,7 +268,7 @@ function ProductionLessonForm({ lesson }: { lesson: OwnedLesson }) {
                 })}</Box>
             </Tile>
             <Box role="region" aria-label="Save lesson" sx={{ position: 'sticky', bottom: 16, zIndex: 5, bgcolor: roles.bg.raised, borderRadius: `${radius.lg}px`, boxShadow: shadow.raised, p: 2, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2 }}>
-                <Typography role="status" sx={{ flex: '1 1 120px', color: 'text.secondary' }}>{ops.busy ? uploading ? 'Uploading…' : 'Saving…' : dirty ? 'Unsaved changes' : notice || 'All changes saved'}</Typography>
+                <Typography role="status" sx={{ flex: '1 1 120px', color: 'text.secondary' }}>{ops.pending ? uploading ? 'Uploading…' : 'Saving…' : dirty ? 'Unsaved changes' : notice || 'All changes saved'}</Typography>
                 <Button variant="contained" disabled={locked || !dirty} onClick={() => void save()}>Save changes</Button>
             </Box>
         </Box>

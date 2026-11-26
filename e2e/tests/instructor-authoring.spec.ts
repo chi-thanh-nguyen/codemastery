@@ -141,3 +141,119 @@ test('FE14 real Course, Lesson, mappings and three material types', async ({ pag
     await page.getByRole('dialog').getByRole('button', { name: 'Hide course', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Publish course', exact: true })).toBeEnabled();
 });
+
+test('FE14-IR-01: committed PUT survives app Leave and remount',async({page},info)=>{
+ test.skip(!target.fixture); test.setTimeout(90000); await signIn(page,target.instructor!,'teach');
+ await page.getByRole('link',{name:'Create course',exact:true}).first().click();
+ await page.getByRole('textbox',{name:'Course title'}).fill(`Review ${randomUUID()}`);
+ await page.getByRole('textbox',{name:'Description'}).fill('Disposable remediation regression');
+ await page.getByRole('button',{name:'Create course',exact:true}).click();
+ await page.getByRole('button',{name:'Add chapter',exact:true}).first().click();
+ await page.getByRole('textbox',{name:'Chapter title'}).fill('Probe chapter');
+ await page.getByRole('dialog').getByRole('button',{name:'Add chapter',exact:true}).click();
+ await page.getByRole('button',{name:'Add lesson',exact:true}).first().click();
+ await page.getByRole('textbox',{name:'Lesson title'}).fill('Original title');
+ await page.getByRole('dialog').getByRole('button',{name:'Add lesson',exact:true}).click();
+ await expect(page.getByRole('dialog')).toHaveCount(0); await page.getByRole('button',{name:'Edit',exact:true}).click();
+ const lessonPath=new URL(page.url()).pathname, courseId=lessonPath.split('/')[3];
+ let reads=0, first=true, release!:()=>void, committed!:()=>void;
+ const commit=new Promise<void>(r=>committed=r), gate=new Promise<void>(r=>release=r);
+ page.on('request',r=>{if(r.method()==='GET'&&new URL(r.url()).pathname===`/api/instructor/courses/${courseId}`)reads++});
+ let serverTitle='';
+ await page.route(`**/api/instructor/courses/${courseId}/lessons/*`,async route=>{
+  if(route.request().method()!=='PUT'||!first){await route.continue();return} first=false;
+  const response=await route.fetch(); const data=await response.json();serverTitle=data.title;committed();await gate;
+  await route.fulfill({response}).catch(()=>{});
+ });
+ await page.getByRole('textbox',{name:'Lesson title'}).fill('Server committed title');
+ await page.getByRole('button',{name:'Save changes',exact:true}).click(); await commit;
+ await page.getByRole('link',{name:'Content',exact:true}).click();
+ await page.getByRole('dialog').getByRole('button',{name:'Leave',exact:true}).click();
+ await expect(page.getByRole('button',{name:'Edit',exact:true})).toBeDisabled();
+ await expect(page.getByRole('button',{name:'Add chapter',exact:true}).first()).toBeDisabled();
+ expect(reads).toBe(0); release();
+ await expect(page.getByRole('button',{name:'Edit',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'Edit',exact:true}).click();
+ const displayed=await page.getByRole('textbox',{name:'Lesson title'}).inputValue();
+ expect(serverTitle).toBe('Server committed title'); expect(displayed).toBe('Server committed title'); expect(reads).toBeGreaterThanOrEqual(1);
+ const evidence={serverTitle,displayedTitleOnRemount:displayed,authoritativeReadsSinceSend:reads};
+ console.log('AUTHOR_REMEDIATION_PUT',JSON.stringify(evidence));
+ await info.attach('pending-put-evidence',{body:JSON.stringify(evidence,null,2),contentType:'application/json'});
+ await page.getByRole('textbox',{name:'Content (Markdown)'}).fill('A later content edit');
+ const saved=page.waitForResponse(r=>r.request().method()==='PUT'&&new URL(r.url()).pathname.endsWith(lessonPath.replace('/teach/','/api/instructor/')));
+ await page.getByRole('button',{name:'Save changes',exact:true}).click(); const second=await saved; const overwritten=await second.json();
+ expect(overwritten.title).toBe('Server committed title');
+ console.log('AUTHOR_REMEDIATION_PRESERVED_TITLE',JSON.stringify({title:overwritten.title,contentMarkdown:overwritten.contentMarkdown}));
+ await expect(page.getByText('Saved',{exact:true})).toBeVisible();
+
+});
+
+test('FE14-IR-01: accepted PDF survives native Back and failed recovery',async({page,browserName},info)=>{
+ test.skip(browserName === 'webkit', 'The WebKit route.fetch multipart probe returned 400 before acceptance on both baseline and remediation; qualify the delayed-upload race in Chromium.');
+ test.skip(!target.fixture);test.setTimeout(90000);await signIn(page,target.instructor!,'teach');
+ await page.getByRole('link',{name:'Create course',exact:true}).first().click();
+ await page.getByRole('textbox',{name:'Course title'}).fill(`Review ${randomUUID()}`);
+ await page.getByRole('textbox',{name:'Description'}).fill('Disposable remediation regression');
+ await page.getByRole('button',{name:'Create course',exact:true}).click();
+ await page.getByRole('button',{name:'Add chapter',exact:true}).first().click();
+ await page.getByRole('textbox',{name:'Chapter title'}).fill('Probe chapter');
+ await page.getByRole('dialog').getByRole('button',{name:'Add chapter',exact:true}).click();
+ await page.getByRole('button',{name:'Add lesson',exact:true}).first().click();
+ await page.getByRole('textbox',{name:'Lesson title'}).fill('Original title');
+ await page.getByRole('dialog').getByRole('button',{name:'Add lesson',exact:true}).click();
+ await expect(page.getByRole('dialog')).toHaveCount(0); await page.getByRole('button',{name:'Edit',exact:true}).click();
+
+ const lessonPath=new URL(page.url()).pathname, c=lessonPath.split('/')[3];let reads=0,first=true,release!:()=>void,accepted!:()=>void;
+ const gate=new Promise<void>(r=>release=r),commit=new Promise<void>(r=>accepted=r);
+ page.on('request',r=>{if(r.method()==='GET'&&new URL(r.url()).pathname===`/api/instructor/courses/${c}`)reads++});
+ await page.route(`**/api/instructor/courses/${c}/lessons/*/file-materials`,async route=>{
+  if(!first){await route.continue();return}first=false;const response=await route.fetch();expect(response.status(), await response.text()).toBe(201);accepted();await gate;await route.fulfill({response}).catch(()=>{});
+ });
+ const add=async()=>{await page.getByRole('button',{name:'Add PDF file',exact:true}).click();await page.getByRole('dialog').getByRole('textbox',{name:'Title'}).fill('PDF accepted');await page.locator('input[type=file]').setInputFiles({name:'pending.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.7\nRemediation pending upload')});await page.getByRole('dialog').getByRole('button',{name:'Add material',exact:true}).click()};
+ let failRecovery = true;
+ await page.route(`**/api/instructor/courses/${c}`, async route => {
+  if(route.request().method()==='GET' && failRecovery) {
+   failRecovery=false; await route.fulfill({status:503,contentType:'application/json',body:'{}'});
+  } else await route.continue();
+ });
+ await add(); await commit; await page.goBack();
+ await expect(page.getByRole('button',{name:'Edit',exact:true})).toBeDisabled();
+ await page.goForward();
+ await expect(page.getByRole('button',{name:'Add PDF file',exact:true})).toBeDisabled();
+ expect(reads).toBe(0); release();
+ await expect(page.getByText("We couldn't load this course. The last loaded version is shown.")).toBeVisible();
+ await expect(page.getByRole('button',{name:'Add PDF file',exact:true})).toBeDisabled();
+ await page.getByRole('button',{name:'Try again',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'PDF accepted',exact:true})).toHaveCount(1);
+ await expect(page.getByRole('button',{name:'Add PDF file',exact:true})).toBeEnabled();
+ expect(reads).toBe(2);
+ const evidence={materialRows:await page.getByRole('heading',{name:'PDF accepted',exact:true}).count(),authoritativeReads:reads};
+ console.log('AUTHOR_REMEDIATION_PDF',JSON.stringify(evidence));
+ await info.attach('pending-pdf-recovery',{body:JSON.stringify(evidence),contentType:'application/json'});
+});
+
+// Isolate the response-interception limitation from actual WebKit file transport.
+test('FE14-IR-01: WebKit PDF transport without response interception', async ({page, browserName}) => {
+    test.skip(browserName !== 'webkit' || !target.fixture);
+    await signIn(page, target.instructor!, 'teach');
+    await page.getByRole('link', {name:'Create course',exact:true}).first().click();
+    await page.getByRole('textbox', {name:'Course title'}).fill(`PDF diagnostic ${randomUUID()}`);
+    await page.getByRole('textbox', {name:'Description'}).fill('Disposable transport diagnostic.');
+    await page.getByRole('button', {name:'Create course',exact:true}).click();
+    await page.getByRole('button', {name:'Add chapter',exact:true}).first().click();
+    await page.getByRole('textbox', {name:'Chapter title'}).fill('Chapter');
+    await page.getByRole('dialog').getByRole('button', {name:'Add chapter',exact:true}).click();
+    await page.getByRole('button', {name:'Add lesson',exact:true}).first().click();
+    await page.getByRole('textbox', {name:'Lesson title'}).fill('Lesson');
+    await page.getByRole('dialog').getByRole('button', {name:'Add lesson',exact:true}).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.getByRole('button', {name:'Edit',exact:true}).click();
+    await page.getByRole('button', {name:'Add PDF file',exact:true}).click();
+    await page.getByRole('dialog').getByRole('textbox', {name:'Title'}).fill('WebKit PDF');
+    await page.locator('input[type=file]').setInputFiles({name:'pending.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.7\nRemediation pending upload')});
+    const response = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/file-materials'));
+    await page.getByRole('dialog').getByRole('button', {name:'Add material',exact:true}).click();
+    expect((await response).status()).toBe(201);
+    await expect(page.getByRole('heading', {name:'WebKit PDF',exact:true})).toHaveCount(1);
+    console.log('AUTHOR_WEBKIT_DIRECT_PDF: HTTP 201, one authoritative material row, no response interception');
+});
