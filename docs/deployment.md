@@ -5563,8 +5563,11 @@ extraction. Upstream's unpinned mode and mvnd distributions are therefore
 unsupported. The cache identity, staging, publication and warm-reuse trust model
 are unchanged. The Backend job runs
 `infrastructure/vm/tests/test-maven-wrapper-pins.sh` before Java setup. It
-exercises the committed scripts against a synthetic distribution, with no
-network access and no shared Maven cache. Native Windows PowerShell 5.1 and
+exercises the committed scripts against a synthetic distribution from a local
+file mirror, with no shared Maven cache. The Backend step does not enforce OS
+network isolation. Its PowerShell extraction-order observation and durable
+sensitivity controls are recorded in the
+[targeted follow-up](testing.md#pr-293-powershell-extraction-order-regression-remediation--26-november-2026). Native Windows PowerShell 5.1 and
 `cmd.exe` execution has not been qualified. Evidence is in
 [testing.md](testing.md#pr-293-host-wrapper-pin-remediation-ir293-sec-01--26-november-2026).
 

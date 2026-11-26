@@ -7755,10 +7755,11 @@ before choosing an installation. Each must appear exactly once as
 The Backend job runs `test-maven-wrapper-pins.sh` before Java setup. The script
 copies the committed scripts into disposable projects whose paths contain a
 space. It serves a synthetic distribution (not Apache Maven) and a tampered
-copy from a local file mirror. A minimal `PATH` uses shims to record every
-download, extraction and Maven start. Each rejected case must fail for its
-pin or digest reason, without download or extraction where that applies, and
-must leave no installation, staging directory or Maven start. Each `mvnw` run
+copy from a local file mirror. For `mvnw`, a minimal `PATH` uses shims to record every download, extraction
+and Maven start. Each rejected case must fail for its pin or digest reason
+and leave no installation, staging directory or Maven start. The initial
+PowerShell oracle checked the post-cleanup state and launcher output; its
+extraction-order observation gap is corrected in the follow-up below. Each `mvnw` run
 has `stdin` closed, so no run can consume the case list.
 
 | Group | Cases |
@@ -7821,3 +7822,120 @@ The dated records above keep the former names; use the new paths to run them.
 
 The host GNU tar mode of the recovery test runs as root in CI only. Job names,
 step names, required checks and the completion markers are unchanged.
+
+
+### PR #293 PowerShell extraction-order regression remediation — 26 November 2026
+
+Author verification under the Leader's targeted remediation instruction, based on
+`a43c6626f47cbcfae95648c089a882040a7c9579`. The production Wrappers, archive pins,
+Dockerfiles, Maven Resolver properties and three VM test renames are unchanged.
+IR293-R2-01's corrected Retry-After contract remains unchanged.
+
+**Reproduction.** In a disposable copy only, the PowerShell body extracted the
+synthetic ZIP before hashing it, removed that early extraction, then retained the
+real checksum rejection and trap cleanup. The original harness returned 0 and
+`MAVEN_WRAPPER_PIN_TESTS_PASS mvnw=36 powershell=19`. An independent file outside
+the installation recorded the early extraction, including W-H10's wrong-digest
+archive. This is a test sensitivity failure, not an observed production compromise.
+
+**Observation.** The harness parses a byte-for-byte `.ps1` copy of `mvnw.cmd`
+(PowerShell line breakpoints require that extension), retaining `$script=mvnw.cmd`
+and the project's `$scriptDir`, and executes its actual AST through
+`Invoke-Command -NoNewScope`. Test-only debugger actions record execution of the
+single `DownloadFile` statement, entry into the real `Get-FileHash`, continuation
+past the mismatch branch, and actual `Expand-Archive` command entry. The
+`verified` event is continuation after the real hash comparison, not hash entry
+alone. Neither hashing, comparison, extraction nor exception handling is replaced.
+Unsupported verification/download structure or missing/malformed events fails.
+
+Every invocation starts fresh observation state in its case directory, outside
+`m2/wrapper/dists`, so installation cleanup cannot erase it. The observer emits
+no launcher stdout and records only fixed event names. A command breakpoint can
+report both entry and process callbacks for `Expand-Archive`: one or more adjacent
+`extract` events are permitted after `verified`; callback count is not an exact
+count of archive invocations. `download` observes execution of the selected
+method-call statement, not a separate network/transport trace. These synthetic
+cases use a local file mirror; the Backend workflow does not impose OS network
+isolation. The local Linux qualification below additionally uses `--network none`.
+
+| Control | Required events and outcome |
+| --- | --- |
+| W01 cold ZIP, W03 CRLF, paths containing spaces | `ready download hash verified extract...`; real extraction and fixture publication, exact launcher stdout |
+| W02 warm, mirror withdrawn | `ready` only; same trusted installation and launcher |
+| Invalid pins, including warm/legacy caches | `ready` only, pin error, no launcher and unchanged cache paths |
+| W-H10 wrong digest | `ready download hash` only; checksum error, zero extraction callbacks, no launcher or residual staging/install |
+| W-S early extraction, with and without explicit early cleanup | `ready download extract... hash`; both preserve checksum error and complete cleanup, and the same digest oracle must reject their event order |
+| W-S missing, malformed, missing-ready and missing-verified evidence | The actual cold-install acceptance oracle must reject each independently altered observation |
+| W04 correctly pinned non-ZIP | `ready download hash verified extract...`, real cmdlet failure, nonzero status, no launcher or residual staging/install |
+
+All existing substantive controls remain. There are now 36 Unix cases per shell
+when both digest tools are available and 27 PowerShell controls (19 original,
+one 64-character inner-space case, four evidence sensitivity controls, two
+extraction-order mutations and one failed-extraction control). The existing
+mandatory Backend step runs them before setup-java and Maven verification;
+missing PowerShell remains fatal there. H06e now substitutes one character with
+an internal space, keeping exactly 64 characters. Every Bash condition in this
+harness uses `[[ ... ]]` with quoted literal comparisons. Generated POSIX `sh`
+launchers and production `backend/mvnw` retain POSIX syntax. The three `eval`
+inputs remain checked-in static fixture tables, with generated hexadecimal pins;
+no externally supplied command text enters them, and neither Sonar rule flags
+these expressions. No framework redesign or suppression was added.
+
+**Executed local evidence:** macOS arm64 Bash 3.2 ran 36 cases each under `sh`,
+`dash` and `bash` (108). Linux PowerShell 7.4.6 amd64 under emulation passed
+72 Unix (36 each under dash and Bash) + 27 PowerShell controls in one
+container with disposable caches and no network. Native Linux arm64 passed the
+same 72 Unix controls. The unchanged Docker Maven suite passed all 31 controls
+on native arm64 and emulated amd64. ShellCheck 0.11.0 at warning severity,
+Bash syntax, POSIX Wrapper syntax and `git diff --check` also passed.
+Native Windows PowerShell 5.1, `cmd.exe`, argument/status propagation, native
+filesystem publication and contention remain unqualified. The PowerShell observer
+uses APIs/syntax available in Windows PowerShell 5.1, but source compatibility is
+not native execution evidence. An authorized Windows host is needed for that
+qualification; no workflow job or required-check change is authorized here.
+
+**SonarCloud baseline:** analysis of `a43c662` at `2026-11-26T05:06:23Z`, check
+`139705810941`, has 43 issues: 38 `shell:S7688` and five `shell:S5332`.
+S7688 is a legacy `CODE_SMELL`/MAJOR with RELIABILITY/HIGH impact; the source
+normalization addresses all 38 baseline annotations. S5332 is an ordinary
+`VULNERABILITY`/MINOR with SECURITY/LOW impact, not a hotspot. The Quality Gate
+fails `new_security_rating=2` (B), maximum 1 (A); hotspot review is already 100%.
+The API returns both legacy types and software-quality impacts. The gate's exact
+metric is verified; the organization-wide UI analysis-mode setting was not
+exposed by the public settings response and is not inferred from annotation labels.
+
+| S5332 PR issue | Recovery test line | Matching main issue |
+| --- | --- | --- |
+| `AaIWP_jE02ZzFMqK9oxo` | 99 | `AaIL-_0KPWUT3T_MHBiC` |
+| `AaIWP_jE02ZzFMqK9oxp` | 102 | `AaIL-_0KPWUT3T_MHBiD` |
+| `AaIWP_jE02ZzFMqK9oxq` | 112 | `AaIL-_0KPWUT3T_MHBiE` |
+| `AaIWP_jE02ZzFMqK9oxr` | 300 | `AaIL-_0KPWUT3T_MHBiF` |
+| `AaIWP_jE02ZzFMqK9oxs` | 305 | `AaIL-_0KPWUT3T_MHBiG` |
+
+Each match has the same rule, line, source hash and creation timestamp. All five
+source lines are identical at main `1e4c54b`, intermediate `361bafb` and renamed
+`a43c662`. The 38 intermediate style annotations are also identical by path,
+range and title. This supports existing-issue attribution after the rename;
+SonarCloud's internal rename algorithm is not independently observable.
+The five calls reach only disposable source/restored MinIO containers on the
+unique `docker network create --internal` network, with no published ports.
+The script generates its own PostgreSQL/MinIO credentials, synthetic data and
+per-run keys, passes only these credentials explicitly, and cleans up fixture
+containers, volumes, network and keys. It does not read a production env/escrow.
+Internal Docker networking does not encrypt traffic or protect it from the host
+or daemon administrator. No new production defect is established in this scope.
+
+**Outstanding decision:** the Leader/security authority must adjudicate each
+ordinary S5332 issue's applicability using the exact fixture evidence and choose
+the authorized issue-specific disposition. A context-based False Positive
+classification is a proposal for that authority, not an applied decision or a
+statement that HTTP is encrypted. Do not use a hotspot Safe review, silently
+accept risk, change thresholds/exclusions/baselines, or revert the rename to
+obtain a green gate. No issue status was changed. Final exact-revision scan and
+hosted results belong in the PR readback; this baseline does not qualify a later
+head. The inventory decisions for both Maven regression scripts and an eligible
+CODEOWNER review route remain outstanding. Author verification is not independent
+acceptance, release admission or deployment authorization.
+
+AI-assisted work: OpenAI Codex reproduced the test gap, corrected and qualified
+the harness, and prepared the issue-level analysis under the Leader's instruction.
