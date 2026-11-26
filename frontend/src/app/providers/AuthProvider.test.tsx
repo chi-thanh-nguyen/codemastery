@@ -849,3 +849,16 @@ describe('CT02 password-reset REST client (FE06 part 1)', () => {
         expect(auth.isAuthenticated).toBe(true); expect(auth.generation).toBe(generation);
     });
 });
+
+
+describe('FE32 one shared start decision and one-use Profile memory', () => {
+    it.each([['Learner', '/home'], ['Instructor', '/teach'], ['Administrator', '/courses']] as const)
+    ('uses the delivered start for %s, gives Profile precedence once and clears it on explicit logout', async (role, start) => {
+        await mount(); await signIn('Role fixture', role);
+        expect(auth.startPath).toBe(start); expect(auth.consumeReturn()).toBe(start);
+        auth.rememberProfile(); expect(auth.startPath).toBe('/profile'); expect(auth.startPath).toBe('/profile');
+        expect(auth.consumeReturn()).toBe('/profile'); expect(auth.startPath).toBe(start); expect(auth.consumeReturn()).toBe(start);
+        auth.rememberProfile(); await act(async () => auth.logout()); await signIn('Next session', role);
+        expect(auth.startPath).toBe(start); expect(auth.consumeReturn()).toBe(start);
+    });
+});

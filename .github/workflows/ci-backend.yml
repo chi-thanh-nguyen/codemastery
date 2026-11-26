@@ -19,6 +19,13 @@ jobs:
         working-directory: backend
     steps:
       - uses: actions/checkout@v7
+      # Offline synthetic fixture under RUNNER_TEMP; the Maven cache is not used.
+      - name: Check Maven Wrapper archive pins
+        working-directory: .
+        shell: bash
+        env:
+          MAVEN_WRAPPER_TEST_REQUIRE_PWSH: 'true'
+        run: exec bash infrastructure/vm/tests/test-maven-wrapper-pins.sh
       - name: Set up Java
         uses: actions/setup-java@v6
         with:

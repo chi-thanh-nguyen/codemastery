@@ -97,7 +97,7 @@ export async function gotoAfterRestore(page: Page, path: string) {
  * catalogue (Leader instruction of 7 November 2026; the one-use /profile return is unchanged).
  * On failure the error also carries the auth traffic and the page state (see watchAuthTraffic).
  */
-export async function signIn(page: Page, account: Account, start: 'home' | 'courses' = 'home') {
+export async function signIn(page: Page, account: Account, start: 'home' | 'teach' | 'courses' = 'home') {
     const traffic = watchAuthTraffic(page);
     try {
         await gotoAfterRestore(page, '/login');
@@ -106,7 +106,7 @@ export async function signIn(page: Page, account: Account, start: 'home' | 'cour
         await page.locator('#login-password').fill(account.password);
         traffic.mark('form submitted');
         await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-        await expect(page).toHaveURL(start === 'home' ? /\/home$/ : /\/courses$/);
+        await expect(page).toHaveURL(start === 'home' ? /\/home$/ : start === 'teach' ? /\/teach$/ : /\/courses$/);
         await expect(page.getByRole('button', { name: accountMenuName(account) })).toBeVisible();
     } catch (error) {
         if (error instanceof Error) {

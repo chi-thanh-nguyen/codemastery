@@ -132,6 +132,9 @@ jobs:
       BACKEND_IMAGE: codemastery-ci/backend:ingress-test
     steps:
       - uses: actions/checkout@v7
+      - name: Verify Maven distribution integrity offline
+        shell: bash
+        run: exec bash infrastructure/vm/tests/test-maven-bootstrap.sh
       - name: Build the release and local images; reject invalid release origins
         shell: bash
         run: exec bash infrastructure/vm/tests/test-ingress-release-image-build.sh
@@ -165,7 +168,22 @@ jobs:
           # The Chainguard release-server candidate, pinned by digest in the suite.
           mapfile -t candidate < <(sed -n "s/^CHAINGUARD_SERVER_IMAGE='\(cgr\.dev\/chainguard\/minio@sha256:[0-9a-f]\{64\}\)'$/\1/p" infrastructure/minio/test-minio-init.sh)
           [[ ${#candidate[@]} -eq 1 ]] || { echo "Unexpected Chainguard MinIO pin." >&2; exit 1; }
-          for ref in "${pins[@]}" "${candidate[@]}"; do docker pull -q --platform linux/amd64 "$ref" >/dev/null; done
+          for ref in "${pins[@]}" "${candidate[@]}"; do
+            for attempt in 1 2 3; do
+              if pull_output="$(docker pull -q --platform linux/amd64 "$ref" 2>&1)"; then
+                break
+              else
+                status=$?
+              fi
+              printf '%s\n' "$pull_output" >&2
+              if (( attempt == 3 )) || ! grep -Eq '^Error response from daemon: received unexpected HTTP status: (500|502|503|504)([[:space:]]|$)' <<< "$pull_output"; then
+                exit "$status"
+              fi
+              delay=$((5 * attempt))
+              printf 'Transient registry response for %s; retrying pull in %ss.\n' "$ref" "$delay" >&2
+              sleep "$delay"
+            done
+          done
       # One job keeps the required check name; all three servers run the same suite.
       - name: Build the initializer image and run it against disposable golithus MinIO servers
         shell: bash
@@ -208,13 +226,13 @@ jobs:
           for script in infrastructure/vm/cd/*.sh infrastructure/vm/host/codemastery-ops infrastructure/vm/host/codemastery-ssh-gate; do
             bash -n "$script"
           done
-          python3 -m unittest -v infrastructure/vm/tests/test_phase5_units.py
+          python3 -m unittest -v infrastructure/vm/tests/test_deployment_recovery_units.py
       - name: SSH transport, forced-command gate and VM-side upload/tooling gates
         shell: bash
-        run: exec bash infrastructure/vm/tests/test-phase5-ssh-gates.sh
+        run: exec bash infrastructure/vm/tests/test-ssh-deployment-gates.sh
       - name: Recovery capture, publication, isolated restore and fault injection
         shell: bash
-        run: exec bash infrastructure/vm/tests/test-phase5-recovery-roundtrip.sh
+        run: exec bash infrastructure/vm/tests/test-recovery-roundtrip.sh
       - name: The same round trip with the VM's host GNU tar capture mode, as root
         shell: bash
-        run: sudo env "PATH=$PATH" TAR_MODE=host bash infrastructure/vm/tests/test-phase5-recovery-roundtrip.sh
+        run: sudo env "PATH=$PATH" TAR_MODE=host bash infrastructure/vm/tests/test-recovery-roundtrip.sh

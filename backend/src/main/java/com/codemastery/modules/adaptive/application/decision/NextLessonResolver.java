@@ -96,6 +96,22 @@ final class NextLessonResolver {
                         RecommendationReasonBuilder.continueInCourseOrder()));
     }
 
+    List<UUID> prerequisiteWarnings(DecisionContext context, UUID lessonId) {
+        LessonInput lesson = context.lessons().stream()
+                .filter(candidate -> candidate.lessonId().equals(lessonId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Lesson is not in the snapshot"));
+
+        return context.prerequisites().stream()
+                .filter(edge -> lesson.skillIds().contains(edge.skillId()))
+                .map(PrerequisiteInput::prerequisiteSkillId)
+                .filter(prerequisite -> !lesson.skillIds().contains(prerequisite))
+                .filter(prerequisite -> context.masteryBySkill().get(prerequisite) != MasteryState.MASTERED)
+                .distinct()
+                .sorted(RecommendationReasonBuilder.nameOrder(context.skillNames()))
+                .toList();
+    }
+
     private record RemedialTarget(UUID prerequisiteId, int lessonIndex) {
     }
 }
