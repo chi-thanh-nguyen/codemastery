@@ -2287,7 +2287,7 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                 assertNull(jdbc.queryForObject(
                         "SELECT submitted_at FROM attempts WHERE id=?", java.sql.Timestamp.class, third.attemptId()));
                 assertEquals(2, jdbc.queryForObject(
-                        "SELECT count(*) FROM attempt_answers WHERE attempt_id=? AND correct IS NULL",
+                        "SELECT count(*) FROM attempt_answers WHERE attempt_id=? AND is_correct IS NULL",
                         Integer.class, third.attemptId()));
             } finally {
                 listenerActive.set(false);
