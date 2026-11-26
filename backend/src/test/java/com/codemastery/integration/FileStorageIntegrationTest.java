@@ -473,37 +473,108 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void diagnosticConfidentialitySurvivesLoggingLifecycleInIsolatedJvm() throws Exception {
-        runLoggingProbe(LoggingLifecycleProbe.class, "SH05 logging lifecycle PASS");
+        runLoggingProbe(LoggingLifecycleProbe.class);
     }
 
     @Test
     void diagnosticConfidentialityDuringConcurrentLoggingInIsolatedJvm() throws Exception {
-        runLoggingProbe(LoggingConcurrencyProbe.class, "SH05 concurrent logging PASS");
+        runLoggingProbe(LoggingConcurrencyProbe.class);
     }
 
-    private static void runLoggingProbe(Class<?> probe, String completion) throws Exception {
-        Path output = Files.createTempFile("sh05-logging-lifecycle-", ".log");
+    @Test
+    void loggingProbeReportsOnlyAllowlistedFailureEvidence() throws Exception {
+        var failure = assertThrows(AssertionError.class, () -> runLoggingProbe(LoggingProbeFailureControl.class));
+        assertEquals("Isolated logging probe failed during OUTPUT_BOUNDARY (exit 1)", failure.getMessage());
+        var incomplete = assertThrows(AssertionError.class, () -> runLoggingProbe(LoggingProbeIncompleteControl.class));
+        assertEquals("Isolated logging probe terminated without a valid result (exit 0)", incomplete.getMessage());
+    }
+
+    private static void runLoggingProbe(Class<?> probe) throws Exception {
+        Path result = Files.createTempFile("sh05-logging-probe-", ".result");
         Process child = null;
         try {
             child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                     "-cp", System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")),
-                    probe.getName()).redirectErrorStream(true).redirectOutput(output.toFile()).start();
-            assertTrue(child.waitFor(60, TimeUnit.SECONDS), "Isolated logging lifecycle must terminate");
-            assertEquals(0, child.exitValue(), "Isolated logging lifecycle assertions failed");
-            assertTrue(Files.readString(output).contains(completion), "Child must report completed assertions");
+                    probe.getName(), result.toString()).redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+            if (!child.waitFor(60, TimeUnit.SECONDS)) {
+                fail("Isolated logging probe timed out");
+            }
+            String reported = Files.readString(result);
+            int exit = child.exitValue();
+            if (exit == 0 && ProbePhase.PASS.name().equals(reported)) {
+                return;
+            }
+            if (exit == 1) {
+                for (ProbePhase phase : ProbePhase.values()) {
+                    if (phase != ProbePhase.PASS && phase.name().equals(reported)) {
+                        fail("Isolated logging probe failed during " + phase + " (exit 1)");
+                    }
+                }
+            }
+            fail("Isolated logging probe terminated without a valid result (exit " + exit + ")");
         } finally {
             try {
                 if (child != null && child.isAlive()) {
                     child.destroyForcibly();
                     assertTrue(child.waitFor(5, TimeUnit.SECONDS), "Isolated logging child cleanup failed");
                 }
-            } finally { Files.deleteIfExists(output); }
+            } finally { Files.deleteIfExists(result); }
+        }
+    }
+
+    private enum ProbePhase {
+        SETUP, LIFECYCLE_REQUESTS, LIFECYCLE_RECONFIGURATION, LIFECYCLE_IN_FLIGHT_IO,
+        LIFECYCLE_FINAL_ASSERTIONS, OUTPUT_BOUNDARY, DEFERRED_DEFAULT, DEFERRED_ECS,
+        WORKER_START, CONCURRENT_RESETS, WORKER_SHUTDOWN, CONCURRENT_ASSERTIONS, CLEANUP, PASS
+    }
+
+    @FunctionalInterface
+    private interface ProbeAssertions {
+        void run(ProbeProgress progress) throws Exception;
+    }
+
+    private static final class ProbeProgress {
+        private ProbePhase phase = ProbePhase.SETUP;
+
+        private static void run(String[] args, ProbeAssertions assertions) throws IOException {
+            Path result = Path.of(args[0]);
+            var progress = new ProbeProgress();
+            try {
+                assertions.run(progress);
+            } catch (Throwable failure) {
+                // Assertion text, causes and console output may contain protected fixture values.
+                Files.writeString(result, progress.phase.name());
+                System.exit(1);
+                return;
+            }
+            Files.writeString(result, ProbePhase.PASS.name());
+        }
+    }
+
+    public static final class LoggingProbeFailureControl {
+        public static void main(String[] args) throws IOException {
+            ProbeProgress.run(args, progress -> {
+                progress.phase = ProbePhase.OUTPUT_BOUNDARY;
+                System.err.println("SH05 synthetic credential and object key");
+                throw new AssertionError("SH05 synthetic authorization value");
+            });
+        }
+    }
+
+    public static final class LoggingProbeIncompleteControl {
+        public static void main(String[] args) {
+            System.out.println(ProbePhase.PASS.name());
         }
     }
 
     /** No access to outer static fixtures: this child owns only synthetic loopback resources. */
     public static final class LoggingLifecycleProbe {
         public static void main(String[] args) throws Exception {
+            ProbeProgress.run(args, LoggingLifecycleProbe::verify);
+        }
+
+        private static void verify(ProbeProgress progress) throws Exception {
             String access = UUID.randomUUID().toString();
             String secret = UUID.randomUUID().toString();
             String objectKey = "materials/" + UUID.randomUUID();
@@ -562,12 +633,14 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                 // As in application startup, configure output before consuming the adapter.
                 LoggingConcurrencyProbe.initialize(logging, false);
                 try (var first = context(environment); var second = context(environment)) {
+                    progress.phase = ProbePhase.LIFECYCLE_REQUESTS;
                     FileStorage firstAdapter = first.getBean(FileStorage.class);
                     FileStorage retained = second.getBean(FileStorage.class);
                     captureEvents(loggingContext, events);
                     operations(firstAdapter, objectKey);
                     assertConfidential(events, console, access, secret, objectKey);
 
+                    progress.phase = ProbePhase.LIFECYCLE_RECONFIGURATION;
                     for (int iteration = 0; iteration < 3; iteration++) {
                         logging.cleanUp();
                         logging.beforeInitialize();
@@ -602,6 +675,7 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                     assertConfidential(events, console, access, secret, objectKey);
 
                     // A response/operation admitted before reconfiguration stays protected afterwards.
+                    progress.phase = ProbePhase.LIFECYCLE_IN_FLIGHT_IO;
                     download.set(true);
                     try (StoredObject opened = retained.open(objectKey)) {
                         assertEquals(1, opened.content().read());
@@ -638,6 +712,7 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                     download.set(false);
                     operations(retained, objectKey);
 
+                    progress.phase = ProbePhase.LIFECYCLE_FINAL_ASSERTIONS;
                     try (var invalid = context(new MockEnvironment())) {
                         var failure = assertThrows(org.springframework.beans.factory.BeanCreationException.class,
                                 () -> invalid.getBean(FileStorage.class));
@@ -652,10 +727,7 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                 }
                 LoggerFactory.getLogger("org.apache.http.wire").trace("{}", secret);
                 assertConfidential(events, console, access, secret, objectKey);
-                previousOut.println("SH05 logging lifecycle PASS: provider events=0; no key/access/secret disclosure; "
-                        + "application positive controls present; Boot resets=4 (including ECS/in-flight IO); Joran=1; "
-                        + "Logback resets=20; contexts=2; "
-                        + "active stream and concurrent requests passed; one output filter per appender; no guard listener");
+                progress.phase = ProbePhase.CLEANUP;
             } finally {
                 bodyRelease.countDown();
                 deleteRelease.countDown();
@@ -722,6 +794,10 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
     /** Network-free child: deterministic deferred delivery plus concurrent ordinary logging. */
     public static final class LoggingConcurrencyProbe {
         public static void main(String[] args) throws Exception {
+            ProbeProgress.run(args, LoggingConcurrencyProbe::verify);
+        }
+
+        private static void verify(ProbeProgress progress) throws Exception {
             PrintStream previousOut = System.out;
             PrintStream previousErr = System.err;
             ByteArrayOutputStream console = new ByteArrayOutputStream();
@@ -729,10 +805,13 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
             try (PrintStream capture = new PrintStream(console, true, StandardCharsets.UTF_8)) {
                 System.setOut(capture);
                 System.setErr(capture);
+                progress.phase = ProbePhase.OUTPUT_BOUNDARY;
                 verifyOutputBoundary();
+                progress.phase = ProbePhase.SETUP;
                 LoggingSystem logging = LoggingSystem.get(LoggingConcurrencyProbe.class.getClassLoader());
                 initialize(logging, false);
                 for (boolean structured : new boolean[]{false, true}) {
+                    progress.phase = structured ? ProbePhase.DEFERRED_ECS : ProbePhase.DEFERRED_DEFAULT;
                     setTrace(context);
                     String pending = "SH05 synthetic deferred provider diagnostic";
                     CountDownLatch admitted = new CountDownLatch(1);
@@ -783,11 +862,9 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                         }
                     }
                 }
-                verifyConcurrentResets(context);
+                verifyConcurrentResets(context, progress);
                 assertFalse(console.toString(StandardCharsets.UTF_8).contains("SH05 synthetic provider"));
-                previousOut.println("SH05 concurrent logging PASS: deterministic deferred Boot default/ECS events denied; "
-                        + "1000 resets with four logging workers; zero provider output; application controls present; "
-                        + "output negative control detected; no guard listener");
+                progress.phase = ProbePhase.CLEANUP;
             } finally {
                 context.stop();
                 System.setOut(previousOut);
@@ -840,11 +917,12 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
             } finally { context.stop(); }
         }
 
-        private static void verifyConcurrentResets(LoggerContext context) throws Exception {
+        private static void verifyConcurrentResets(LoggerContext context, ProbeProgress progress) throws Exception {
             List<ILoggingEvent> events = Collections.synchronizedList(new ArrayList<>());
             var running = new java.util.concurrent.atomic.AtomicBoolean(true);
             CountDownLatch active = new CountDownLatch(4);
             var tasks = new ArrayList<java.util.concurrent.Future<?>>();
+            progress.phase = ProbePhase.WORKER_START;
             try (var workers = Executors.newFixedThreadPool(4)) {
                 try {
                     for (int i = 0; i < 4; i++) {
@@ -858,6 +936,7 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                         }));
                     }
                     assertTrue(active.await(5, TimeUnit.SECONDS), "All logging workers must be active");
+                    progress.phase = ProbePhase.CONCURRENT_RESETS;
                     for (int i = 0; i < 1000; i++) {
                         var lock = context.getConfigurationLock();
                         lock.lock();
@@ -871,9 +950,11 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                     }
                 } finally {
                     running.set(false);
-                    for (var task : tasks) { task.get(5, TimeUnit.SECONDS); }
                 }
+                progress.phase = ProbePhase.WORKER_SHUTDOWN;
+                for (var task : tasks) { task.get(5, TimeUnit.SECONDS); }
             }
+            progress.phase = ProbePhase.CONCURRENT_ASSERTIONS;
             LoggerFactory.getLogger("com.codemastery.sh05-concurrent-control").warn("final application control");
             synchronized (events) {
                 assertTrue(events.stream().anyMatch(event -> "final application control".equals(event.getFormattedMessage())));
