@@ -85,6 +85,10 @@ import static org.mockito.Mockito.*;
  * explicitly simulated. Credentials, network, bucket and keys belong to this JVM.
  */
 @Timeout(90)
+@org.springframework.test.context.event.RecordApplicationEvents
+@org.springframework.boot.test.context.SpringBootTest(classes = com.codemastery.CodeMasteryApplication.class,
+        webEnvironment = org.springframework.boot.test.context.SpringBootTest.WebEnvironment.RANDOM_PORT)
+@org.springframework.context.annotation.Import(FileStorageIntegrationTest.CommitFaultConfiguration.class)
 class FileStorageIntegrationTest extends AbstractIntegrationTest {
     private static final String MINIO_IMAGE = "ghcr.io/golithus/minio:RELEASE.2025-10-15T17-29-55Z"
             + "@sha256:8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40";
@@ -119,6 +123,9 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
     @DynamicPropertySource
     static void configureStorage(DynamicPropertyRegistry registry) {
         registry.add("JWT_SECRET", () -> JWT);
+        registry.add("server.address", () -> "127.0.0.1");
+        registry.add("spring.servlet.multipart.max-file-size", () -> "1KB");
+        registry.add("spring.servlet.multipart.max-request-size", () -> "1KB");
         // This adapter suite needs PostgreSQL only for the approved application foundation.
         // Do not retain ten idle connections in the shared JVM's cached Spring context.
         // Flyway holds its migration lock connection while acquiring another connection.
@@ -473,37 +480,108 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
 
     @Test
     void diagnosticConfidentialitySurvivesLoggingLifecycleInIsolatedJvm() throws Exception {
-        runLoggingProbe(LoggingLifecycleProbe.class, "SH05 logging lifecycle PASS");
+        runLoggingProbe(LoggingLifecycleProbe.class);
     }
 
     @Test
     void diagnosticConfidentialityDuringConcurrentLoggingInIsolatedJvm() throws Exception {
-        runLoggingProbe(LoggingConcurrencyProbe.class, "SH05 concurrent logging PASS");
+        runLoggingProbe(LoggingConcurrencyProbe.class);
     }
 
-    private static void runLoggingProbe(Class<?> probe, String completion) throws Exception {
-        Path output = Files.createTempFile("sh05-logging-lifecycle-", ".log");
+    @Test
+    void loggingProbeReportsOnlyAllowlistedFailureEvidence() throws Exception {
+        var failure = assertThrows(AssertionError.class, () -> runLoggingProbe(LoggingProbeFailureControl.class));
+        assertEquals("Isolated logging probe failed during OUTPUT_BOUNDARY (exit 1)", failure.getMessage());
+        var incomplete = assertThrows(AssertionError.class, () -> runLoggingProbe(LoggingProbeIncompleteControl.class));
+        assertEquals("Isolated logging probe terminated without a valid result (exit 0)", incomplete.getMessage());
+    }
+
+    private static void runLoggingProbe(Class<?> probe) throws Exception {
+        Path result = Files.createTempFile("sh05-logging-probe-", ".result");
         Process child = null;
         try {
             child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                     "-cp", System.getProperty("surefire.test.class.path", System.getProperty("java.class.path")),
-                    probe.getName()).redirectErrorStream(true).redirectOutput(output.toFile()).start();
-            assertTrue(child.waitFor(60, TimeUnit.SECONDS), "Isolated logging lifecycle must terminate");
-            assertEquals(0, child.exitValue(), "Isolated logging lifecycle assertions failed");
-            assertTrue(Files.readString(output).contains(completion), "Child must report completed assertions");
+                    probe.getName(), result.toString()).redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+            if (!child.waitFor(60, TimeUnit.SECONDS)) {
+                fail("Isolated logging probe timed out");
+            }
+            String reported = Files.readString(result);
+            int exit = child.exitValue();
+            if (exit == 0 && ProbePhase.PASS.name().equals(reported)) {
+                return;
+            }
+            if (exit == 1) {
+                for (ProbePhase phase : ProbePhase.values()) {
+                    if (phase != ProbePhase.PASS && phase.name().equals(reported)) {
+                        fail("Isolated logging probe failed during " + phase + " (exit 1)");
+                    }
+                }
+            }
+            fail("Isolated logging probe terminated without a valid result (exit " + exit + ")");
         } finally {
             try {
                 if (child != null && child.isAlive()) {
                     child.destroyForcibly();
                     assertTrue(child.waitFor(5, TimeUnit.SECONDS), "Isolated logging child cleanup failed");
                 }
-            } finally { Files.deleteIfExists(output); }
+            } finally { Files.deleteIfExists(result); }
+        }
+    }
+
+    private enum ProbePhase {
+        SETUP, LIFECYCLE_REQUESTS, LIFECYCLE_RECONFIGURATION, LIFECYCLE_IN_FLIGHT_IO,
+        LIFECYCLE_FINAL_ASSERTIONS, OUTPUT_BOUNDARY, DEFERRED_DEFAULT, DEFERRED_ECS,
+        WORKER_START, CONCURRENT_RESETS, WORKER_SHUTDOWN, CONCURRENT_ASSERTIONS, CLEANUP, PASS
+    }
+
+    @FunctionalInterface
+    private interface ProbeAssertions {
+        void run(ProbeProgress progress) throws Exception;
+    }
+
+    private static final class ProbeProgress {
+        private ProbePhase phase = ProbePhase.SETUP;
+
+        private static void run(String[] args, ProbeAssertions assertions) throws IOException {
+            Path result = Path.of(args[0]);
+            var progress = new ProbeProgress();
+            try {
+                assertions.run(progress);
+            } catch (Throwable failure) {
+                // Assertion text, causes and console output may contain protected fixture values.
+                Files.writeString(result, progress.phase.name());
+                System.exit(1);
+                return;
+            }
+            Files.writeString(result, ProbePhase.PASS.name());
+        }
+    }
+
+    public static final class LoggingProbeFailureControl {
+        public static void main(String[] args) throws IOException {
+            ProbeProgress.run(args, progress -> {
+                progress.phase = ProbePhase.OUTPUT_BOUNDARY;
+                System.err.println("SH05 synthetic credential and object key");
+                throw new AssertionError("SH05 synthetic authorization value");
+            });
+        }
+    }
+
+    public static final class LoggingProbeIncompleteControl {
+        public static void main(String[] args) {
+            System.out.println(ProbePhase.PASS.name());
         }
     }
 
     /** No access to outer static fixtures: this child owns only synthetic loopback resources. */
     public static final class LoggingLifecycleProbe {
         public static void main(String[] args) throws Exception {
+            ProbeProgress.run(args, LoggingLifecycleProbe::verify);
+        }
+
+        private static void verify(ProbeProgress progress) throws Exception {
             String access = UUID.randomUUID().toString();
             String secret = UUID.randomUUID().toString();
             String objectKey = "materials/" + UUID.randomUUID();
@@ -562,12 +640,14 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                 // As in application startup, configure output before consuming the adapter.
                 LoggingConcurrencyProbe.initialize(logging, false);
                 try (var first = context(environment); var second = context(environment)) {
+                    progress.phase = ProbePhase.LIFECYCLE_REQUESTS;
                     FileStorage firstAdapter = first.getBean(FileStorage.class);
                     FileStorage retained = second.getBean(FileStorage.class);
                     captureEvents(loggingContext, events);
                     operations(firstAdapter, objectKey);
                     assertConfidential(events, console, access, secret, objectKey);
 
+                    progress.phase = ProbePhase.LIFECYCLE_RECONFIGURATION;
                     for (int iteration = 0; iteration < 3; iteration++) {
                         logging.cleanUp();
                         logging.beforeInitialize();
@@ -602,6 +682,7 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                     assertConfidential(events, console, access, secret, objectKey);
 
                     // A response/operation admitted before reconfiguration stays protected afterwards.
+                    progress.phase = ProbePhase.LIFECYCLE_IN_FLIGHT_IO;
                     download.set(true);
                     try (StoredObject opened = retained.open(objectKey)) {
                         assertEquals(1, opened.content().read());
@@ -638,6 +719,7 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                     download.set(false);
                     operations(retained, objectKey);
 
+                    progress.phase = ProbePhase.LIFECYCLE_FINAL_ASSERTIONS;
                     try (var invalid = context(new MockEnvironment())) {
                         var failure = assertThrows(org.springframework.beans.factory.BeanCreationException.class,
                                 () -> invalid.getBean(FileStorage.class));
@@ -652,10 +734,7 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                 }
                 LoggerFactory.getLogger("org.apache.http.wire").trace("{}", secret);
                 assertConfidential(events, console, access, secret, objectKey);
-                previousOut.println("SH05 logging lifecycle PASS: provider events=0; no key/access/secret disclosure; "
-                        + "application positive controls present; Boot resets=4 (including ECS/in-flight IO); Joran=1; "
-                        + "Logback resets=20; contexts=2; "
-                        + "active stream and concurrent requests passed; one output filter per appender; no guard listener");
+                progress.phase = ProbePhase.CLEANUP;
             } finally {
                 bodyRelease.countDown();
                 deleteRelease.countDown();
@@ -722,6 +801,10 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
     /** Network-free child: deterministic deferred delivery plus concurrent ordinary logging. */
     public static final class LoggingConcurrencyProbe {
         public static void main(String[] args) throws Exception {
+            ProbeProgress.run(args, LoggingConcurrencyProbe::verify);
+        }
+
+        private static void verify(ProbeProgress progress) throws Exception {
             PrintStream previousOut = System.out;
             PrintStream previousErr = System.err;
             ByteArrayOutputStream console = new ByteArrayOutputStream();
@@ -729,11 +812,22 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
             try (PrintStream capture = new PrintStream(console, true, StandardCharsets.UTF_8)) {
                 System.setOut(capture);
                 System.setErr(capture);
+                progress.phase = ProbePhase.OUTPUT_BOUNDARY;
                 verifyOutputBoundary();
+                progress.phase = ProbePhase.SETUP;
                 LoggingSystem logging = LoggingSystem.get(LoggingConcurrencyProbe.class.getClassLoader());
                 initialize(logging, false);
                 for (boolean structured : new boolean[]{false, true}) {
+                    progress.phase = structured ? ProbePhase.DEFERRED_ECS : ProbePhase.DEFERRED_DEFAULT;
                     setTrace(context);
+                    String privateKey = "materials/00000000-0000-4000-8000-000000000001";
+                    org.springframework.jdbc.core.StatementCreatorUtils.setParameterValue(
+                            mock(java.sql.PreparedStatement.class), 1, java.sql.Types.VARCHAR, privateKey);
+                    LoggerFactory.getLogger("org.springframework.transaction.support.TransactionTemplate")
+                            .debug("Synthetic translated failure", new IllegalStateException("Synthetic row " + privateKey));
+                    LoggerFactory.getLogger("com.codemastery.synthetic-control").debug("Synthetic accidental key {}", privateKey);
+                    assertFalse(console.toString(StandardCharsets.UTF_8).contains(privateKey),
+                            "CO09-R04: actual JDBC bind diagnostics must be denied by both output formats");
                     String pending = "SH05 synthetic deferred provider diagnostic";
                     CountDownLatch admitted = new CountDownLatch(1);
                     CountDownLatch release = new CountDownLatch(1);
@@ -783,11 +877,9 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                         }
                     }
                 }
-                verifyConcurrentResets(context);
+                verifyConcurrentResets(context, progress);
                 assertFalse(console.toString(StandardCharsets.UTF_8).contains("SH05 synthetic provider"));
-                previousOut.println("SH05 concurrent logging PASS: deterministic deferred Boot default/ECS events denied; "
-                        + "1000 resets with four logging workers; zero provider output; application controls present; "
-                        + "output negative control detected; no guard listener");
+                progress.phase = ProbePhase.CLEANUP;
             } finally {
                 context.stop();
                 System.setOut(previousOut);
@@ -840,11 +932,12 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
             } finally { context.stop(); }
         }
 
-        private static void verifyConcurrentResets(LoggerContext context) throws Exception {
+        private static void verifyConcurrentResets(LoggerContext context, ProbeProgress progress) throws Exception {
             List<ILoggingEvent> events = Collections.synchronizedList(new ArrayList<>());
             var running = new java.util.concurrent.atomic.AtomicBoolean(true);
             CountDownLatch active = new CountDownLatch(4);
             var tasks = new ArrayList<java.util.concurrent.Future<?>>();
+            progress.phase = ProbePhase.WORKER_START;
             try (var workers = Executors.newFixedThreadPool(4)) {
                 try {
                     for (int i = 0; i < 4; i++) {
@@ -858,6 +951,7 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                         }));
                     }
                     assertTrue(active.await(5, TimeUnit.SECONDS), "All logging workers must be active");
+                    progress.phase = ProbePhase.CONCURRENT_RESETS;
                     for (int i = 0; i < 1000; i++) {
                         var lock = context.getConfigurationLock();
                         lock.lock();
@@ -871,9 +965,11 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                     }
                 } finally {
                     running.set(false);
-                    for (var task : tasks) { task.get(5, TimeUnit.SECONDS); }
                 }
+                progress.phase = ProbePhase.WORKER_SHUTDOWN;
+                for (var task : tasks) { task.get(5, TimeUnit.SECONDS); }
             }
+            progress.phase = ProbePhase.CONCURRENT_ASSERTIONS;
             LoggerFactory.getLogger("com.codemastery.sh05-concurrent-control").warn("final application control");
             synchronized (events) {
                 assertTrue(events.stream().anyMatch(event -> "final application control".equals(event.getFormattedMessage())));
@@ -998,5 +1094,532 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
         StringWriter result = new StringWriter();
         failure.printStackTrace(new PrintWriter(result));
         return result.toString();
+    }
+
+    // CO09 consumer qualification. Faults below decorate test beans only; real storage is retained.
+    static final ThreadLocal<String> COMMIT_FAULT = new ThreadLocal<>();
+    static final AtomicInteger BORROWED = new AtomicInteger();
+    @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
+    static class CommitFaultConfiguration {
+        @org.springframework.context.annotation.Bean
+        static org.springframework.beans.factory.config.BeanPostProcessor commitFaultDataSource() {
+            return new org.springframework.beans.factory.config.BeanPostProcessor() {
+                @Override public Object postProcessAfterInitialization(Object bean, String name) {
+                    if (!(bean instanceof javax.sql.DataSource source)) return bean;
+                    return new org.springframework.jdbc.datasource.DelegatingDataSource(source) {
+                        @Override public java.sql.Connection getConnection() throws java.sql.SQLException { return wrap(super.getConnection()); }
+                        @Override public java.sql.Connection getConnection(String u,String p) throws java.sql.SQLException { return wrap(super.getConnection(u,p)); }
+                        java.sql.Connection wrap(java.sql.Connection connection) {
+                            BORROWED.incrementAndGet(); var closed = new java.util.concurrent.atomic.AtomicBoolean();
+                            return (java.sql.Connection)java.lang.reflect.Proxy.newProxyInstance(getClass().getClassLoader(),
+                                new Class<?>[]{java.sql.Connection.class}, (proxy,method,args)->{
+                                    try {
+                                        if (method.getName().equals("commit")) {
+                                            String fault=COMMIT_FAULT.get(); COMMIT_FAULT.remove();
+                                            if ("before".equals(fault)) throw new java.sql.SQLException("Synthetic commit rejection","08006");
+                                            Object result=method.invoke(connection,args);
+                                            if ("after".equals(fault)) throw new java.sql.SQLException("Synthetic lost acknowledgement","08006");
+                                            return result;
+                                        }
+                                        if (method.getName().equals("close") && closed.compareAndSet(false,true)) BORROWED.decrementAndGet();
+                                        return method.invoke(connection,args);
+                                    } catch(java.lang.reflect.InvocationTargetException failure) { throw failure.getCause(); }
+                                });
+                        }
+                    };
+                }
+            };
+        }
+    }
+    @Autowired org.springframework.test.context.event.ApplicationEvents recordedMaterialEvents;
+    @Autowired com.codemastery.modules.course.application.service.LearningMaterialService materials;
+    @Autowired com.codemastery.modules.course.application.service.CourseManagementService materialManagement;
+    @Autowired com.codemastery.modules.course.application.service.CourseAccessService materialAccess;
+    @Autowired com.codemastery.modules.course.domain.repository.CourseContentRepository materialRows;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate materialJdbc;
+    @Autowired org.springframework.transaction.PlatformTransactionManager materialTransactions;
+    @jakarta.persistence.PersistenceContext jakarta.persistence.EntityManager materialPersistence;
+    @org.springframework.beans.factory.annotation.Value("${local.server.port}") int materialPort;
+    @Autowired com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider materialTokens;
+    @Autowired org.springframework.boot.servlet.filter.OrderedFormContentFilter materialFormFilter;
+    static final byte[] PDF_A={'%','P','D','F','-',0,(byte)255,10,1}, PDF_B={'%','P','D','F','-',0,(byte)128,10,2};
+
+    final class MaterialFixture implements AutoCloseable {
+        final UUID owner=UUID.randomUUID(), learner=UUID.randomUUID(), course=UUID.randomUUID(), chapter=UUID.randomUUID(), lesson=UUID.randomUUID();
+        MaterialFixture() {
+            materialJdbc.update("INSERT INTO users(id,email,password_hash,display_name,role,account_status) VALUES (?,?,'unused','Owner','instructor','active'),(?,?,'unused','Learner','learner','active')",owner,owner+"@example.test",learner,learner+"@example.test");
+            materialJdbc.update("INSERT INTO courses(id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES (?,?,'CO09','Test','published',false)",course,owner);
+            materialJdbc.update("INSERT INTO chapters(id,course_id,title,position) VALUES (?,?,'C',1)",chapter,course);
+            materialJdbc.update("INSERT INTO lessons(id,chapter_id,title,position,publication_status) VALUES (?,?,'L',1,'published')",lesson,chapter);
+            materialJdbc.update("INSERT INTO enrollments(id,user_id,course_id,status) VALUES (?,?,?,'active')",UUID.randomUUID(),learner,course);
+            signIn(owner,com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR);
+        }
+        String key(UUID id) { return materialJdbc.queryForObject("SELECT object_key FROM learning_materials WHERE id=?",String.class,id); }
+        String token(UUID user) {
+            UUID session=UUID.randomUUID();
+            materialJdbc.update("INSERT INTO refresh_sessions(id,user_id,created_at,expires_at) VALUES (?,?,now(),now()+interval '1 hour')",session,user);
+            return materialTokens.createToken(user,session);
+        }
+        String path() { return "/api/instructor/courses/"+course+"/lessons/"+lesson+"/file-materials"; }
+        String download(UUID id) { return "/api/courses/"+course+"/lessons/"+lesson+"/materials/"+id+"/file"; }
+        public void close() {
+            COMMIT_FAULT.remove();org.springframework.security.core.context.SecurityContextHolder.clearContext();
+            for(String k:materialJdbc.queryForList("SELECT object_key FROM learning_materials WHERE lesson_id=? AND object_key IS NOT NULL",String.class,lesson))storage.delete(k);
+            materialJdbc.update("DELETE FROM learning_materials WHERE lesson_id=?",lesson);
+            materialJdbc.update("DELETE FROM enrollments WHERE course_id=?",course);
+            materialJdbc.update("DELETE FROM lessons WHERE id=?",lesson);materialJdbc.update("DELETE FROM chapters WHERE id=?",chapter);
+            materialJdbc.update("DELETE FROM courses WHERE id=?",course);
+            materialJdbc.update("DELETE FROM refresh_tokens WHERE session_id IN (SELECT id FROM refresh_sessions WHERE user_id IN (?,?))",owner,learner);
+            materialJdbc.update("DELETE FROM refresh_sessions WHERE user_id IN (?,?)",owner,learner);
+            materialJdbc.update("DELETE FROM users WHERE id IN (?,?)",owner,learner);
+        }
+    }
+    static void signIn(UUID user,com.codemastery.modules.auth.domain.model.Role role) {
+        var principal=new com.codemastery.modules.auth.infrastructure.security.AuthenticatedUser(user,role);
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+            new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(principal,null,principal.getAuthorities()));
+    }
+    static com.codemastery.modules.course.application.service.LearningMaterialService.FilePart pdf(String name,byte[] bytes) {
+        return new com.codemastery.modules.course.application.service.LearningMaterialService.FilePart(name,bytes.length,new ByteArrayInputStream(bytes));
+    }
+    com.codemastery.modules.course.api.dto.CourseStructureResponses.Material createPdf(MaterialFixture f) {
+        return materials.createFileMaterial(f.course,f.lesson,()->new com.codemastery.modules.course.application.service.LearningMaterialService.FileMaterialUpload(" Slides ",pdf("Bài học.PDF",PDF_A)));
+    }
+    final class ObservedStorage implements FileStorage {
+        final List<String> stored=new ArrayList<>(),deleted=new ArrayList<>(); int opens;
+        String commitFault; Runnable beforeOpen; boolean failStore,failDelete,providerFailure;
+        public void store(String key,InputStream in,long size,String media) {
+            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());assertEquals(0,BORROWED.get());
+            stored.add(key);if(failStore)throw new FileStorageException();storage.store(key,in,size,media);
+            if(commitFault!=null)COMMIT_FAULT.set(commitFault);
+        }
+        public StoredObject open(String key) {
+            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());assertEquals(0,BORROWED.get());opens++;
+            if(beforeOpen!=null){Runnable r=beforeOpen;beforeOpen=null;r.run();}
+            if(providerFailure)throw new FileStorageException();return storage.open(key);
+        }
+        public void delete(String key) {
+            assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+            deleted.add(key);if(failDelete)throw new FileStorageException();storage.delete(key);
+        }
+    }
+    com.codemastery.modules.course.application.service.LearningMaterialService consumer(FileStorage adapter,com.codemastery.modules.course.domain.repository.CourseContentRepository rows) {
+        return new com.codemastery.modules.course.application.service.LearningMaterialService(materialManagement,materialAccess,rows,adapter,materialPersistence,materialTransactions,environment);
+    }
+    @Test void co09AllEightOperationsAndRealStorage() throws Exception {
+        try(var f=new MaterialFixture()) {
+            var text=materials.createRelationalMaterial(f.course,f.lesson,new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite(" Text ",com.codemastery.modules.course.domain.model.MaterialType.TEXT,"  code\n",null));
+            assertEquals("hidden",text.publicationStatus());assertEquals("  code\n",text.textContent());
+            materials.updateRelationalMaterial(f.course,f.lesson,text.id(),new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite("Edited",com.codemastery.modules.course.domain.model.MaterialType.TEXT," new ",null));
+            materials.setRelationalMaterialPublication(f.course,f.lesson,text.id(),com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED);
+            var video=materials.createRelationalMaterial(f.course,f.lesson,new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite("Video",com.codemastery.modules.course.domain.model.MaterialType.EXTERNAL_VIDEO,null," https://www.youtube-nocookie.com/embed/abc_-9 "));
+            assertEquals("https://www.youtube-nocookie.com/embed/abc_-9",video.externalVideoUrl());
+            var file=createPdf(f);String old=f.key(file.id());
+            assertEquals(4,UUID.fromString(old.substring("materials/".length())).version());
+            assertEquals("Slides",file.title());assertEquals("hidden",file.publicationStatus());
+            assertEquals("Renamed",materials.updateFileMaterialTitle(f.course,f.lesson,file.id()," Renamed ").title());
+            var replaced=materials.replaceFileMaterialFile(f.course,f.lesson,file.id(),()->pdf("new.pdf",PDF_B));
+            assertEquals(file.id(),replaced.id());assertNotEquals(old,f.key(file.id()));assertThrows(ObjectNotFoundException.class,()->storage.open(old));
+            materials.setFileMaterialPublication(f.course,f.lesson,file.id(),com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED);
+            signIn(f.learner,com.codemastery.modules.auth.domain.model.Role.LEARNER);
+            try(var download=materials.downloadMaterialFile(f.course,f.lesson,file.id())) {assertEquals("new.pdf",download.originalFilename());assertArrayEquals(PDF_B,download.content().readAllBytes());assertEquals(0,BORROWED.get());}
+            materialJdbc.update("UPDATE learning_materials SET publication_status='hidden' WHERE id=?",file.id());
+            assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,()->materials.downloadMaterialFile(f.course,f.lesson,file.id()));
+            assertTrue(recordedMaterialEvents.stream().noneMatch(event->event.getClass().getName().endsWith("ContentPublishedEvent")),
+                    "Material authoring/publication never emits the CO12 Lesson event, including in a combined checkout");
+        }
+    }
+    @ParameterizedTest @ValueSource(strings={"after","before"})
+    void co09UnknownCommitRetainsBothObjects(String fault) throws Exception {
+        try(var f=new MaterialFixture()) {
+            var file=createPdf(f);String old=f.key(file.id());var observed=new ObservedStorage();observed.commitFault=fault;
+            assertThrows(RuntimeException.class,()->consumer(observed,materialRows).replaceFileMaterialFile(f.course,f.lesson,file.id(),()->pdf("new.pdf",PDF_B)));
+            assertEquals(1,observed.stored.size());assertTrue(observed.deleted.isEmpty());String fresh=observed.stored.getFirst();
+            try(var one=storage.open(old);var two=storage.open(fresh)){assertEquals(PDF_A.length,one.contentLength());assertEquals(PDF_B.length,two.contentLength());}
+            assertEquals(fault.equals("after")?fresh:old,f.key(file.id()));
+            try(var download=materials.downloadMaterialFile(f.course,f.lesson,file.id())){assertArrayEquals(fault.equals("after")?PDF_B:PDF_A,download.content().readAllBytes());}
+            storage.delete(fresh);storage.delete(old);
+        }
+    }
+    @Test void co09PreCommitStoreAndCleanupFailures() throws Exception {
+        try(var f=new MaterialFixture()) {
+            var file=createPdf(f);String old=f.key(file.id());var observed=new ObservedStorage();var rows=mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class, org.mockito.AdditionalAnswers.delegatesTo(materialRows));
+            doThrow(new IllegalStateException("Synthetic statement fault")).when(rows).replaceMaterialContent(any());
+            assertThrows(RuntimeException.class,()->consumer(observed,rows).replaceFileMaterialFile(f.course,f.lesson,file.id(),()->pdf("new.pdf",PDF_B)));
+            assertEquals(observed.stored,observed.deleted);assertEquals(old,f.key(file.id()));assertThrows(ObjectNotFoundException.class,()->storage.open(observed.stored.getFirst()));
+            observed.stored.clear();observed.deleted.clear();observed.failStore=true;
+            assertThrows(FileStorageException.class,()->consumer(observed,materialRows).replaceFileMaterialFile(f.course,f.lesson,file.id(),()->pdf("new.pdf",PDF_B)));
+            assertEquals(observed.stored,observed.deleted);observed.failStore=false;observed.failDelete=true;observed.stored.clear();observed.deleted.clear();
+            consumer(observed,materialRows).replaceFileMaterialFile(f.course,f.lesson,file.id(),()->pdf("new.pdf",PDF_B));
+            assertEquals(List.of(old),observed.deleted);try(var orphan=storage.open(old)){assertArrayEquals(PDF_A,orphan.content().readAllBytes());}storage.delete(old);
+        }
+    }
+    @Test void co09AdmissionAndOuterTransactionPrecedeParts() {
+        try(var f=new MaterialFixture()) {
+            var touched=new java.util.concurrent.atomic.AtomicBoolean();signIn(f.learner,com.codemastery.modules.auth.domain.model.Role.LEARNER);
+            assertThrows(org.springframework.security.access.AccessDeniedException.class,()->materials.createFileMaterial(f.course,f.lesson,()->{touched.set(true);throw new AssertionError();}));
+            assertFalse(touched.get());signIn(f.owner,com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR);
+            new org.springframework.transaction.support.TransactionTemplate(materialTransactions).executeWithoutResult(tx->{
+                assertThrows(IllegalStateException.class,()->materials.createFileMaterial(f.course,f.lesson,()->{touched.set(true);throw new AssertionError();}));assertFalse(touched.get());
+            });
+        }
+    }
+    @Test void co09DownloadRereadsOnlySupersededMissingObject() throws Exception {
+        try(var f=new MaterialFixture()) {
+            var file=createPdf(f);var observed=new ObservedStorage();var service=consumer(observed,materialRows);
+            observed.beforeOpen=()->materials.replaceFileMaterialFile(f.course,f.lesson,file.id(),()->pdf("current.pdf",PDF_B));
+            try(var download=service.downloadMaterialFile(f.course,f.lesson,file.id())){assertArrayEquals(PDF_B,download.content().readAllBytes());assertEquals("current.pdf",download.originalFilename());}
+            assertEquals(2,observed.opens);observed.opens=0;observed.providerFailure=true;
+            assertThrows(FileStorageException.class,()->service.downloadMaterialFile(f.course,f.lesson,file.id()));assertEquals(1,observed.opens);
+            observed.providerFailure=false;storage.delete(f.key(file.id()));observed.opens=0;
+            assertThrows(IllegalStateException.class,()->service.downloadMaterialFile(f.course,f.lesson,file.id()));assertEquals(1,observed.opens);
+        }
+    }
+    java.net.http.HttpResponse<byte[]> materialHttp(String method,String path,String token,String type,byte[] body) throws Exception {
+        var request=java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://localhost:"+materialPort+path));
+        if(token!=null)request.header("Authorization","Bearer "+token);if(type!=null)request.header("Content-Type",type);
+        return java.net.http.HttpClient.newHttpClient().send(request.method(method,java.net.http.HttpRequest.BodyPublishers.ofByteArray(body)).build(),java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+    }
+    @Test void co09RealTomcatMultipartPrecedenceAndBinaryHeaders() throws Exception {
+        try(var f=new MaterialFixture()) {
+            String owner=f.token(f.owner),learner=f.token(f.learner);byte[] malformed="unparseable".getBytes(StandardCharsets.US_ASCII);
+            // CO09-R02: FormContentFilter must not parse a wrong-media replacement before Security.
+            String replacement=f.path()+"/"+UUID.randomUUID()+"/file";
+            byte[] badForm="x=%ZZ".getBytes(StandardCharsets.US_ASCII);
+            assertEquals(401,materialHttp("PUT",replacement,null,"application/x-www-form-urlencoded",badForm).statusCode());
+            assertEquals(415,materialHttp("PUT",replacement,learner,"application/x-www-form-urlencoded",badForm).statusCode());
+            assertEquals(401,materialHttp("POST",f.path(),null,"multipart/form-data; boundary=x",malformed).statusCode());
+            assertEquals(415,materialHttp("POST",f.path(),learner,"text/plain",malformed).statusCode());
+            var denied=materialHttp("POST",f.path(),learner,"multipart/form-data; boundary=x",malformed);
+            assertEquals(403,denied.statusCode());assertEquals("close",denied.headers().firstValue("Connection").orElse(""));
+            assertEquals(400,materialHttp("POST",f.path(),owner,"multipart/form-data; boundary=x",malformed).statusCode());
+            // CO09-R03: a GET parameter resolver must never parse hostile multipart before admission.
+            assertEquals(404,materialHttp("GET",f.download(UUID.randomUUID()),learner,"multipart/form-data; boundary=x",malformed).statusCode());
+            ByteArrayOutputStream body=new ByteArrayOutputStream();
+            body.write("--x\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nSlides\r\n--x\r\nContent-Disposition: form-data; name=\"file\"; filename=\"Bài.pdf\"\r\nContent-Type: text/plain\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+            body.write(PDF_A);body.write("\r\n--x--\r\n".getBytes(StandardCharsets.US_ASCII));
+            var created=materialHttp("POST",f.path(),owner,"multipart/form-data; boundary=x",body.toByteArray());assertEquals(201,created.statusCode(),new String(created.body()));
+            String json=new String(created.body(),StandardCharsets.UTF_8);assertFalse(json.contains("materials/"));assertFalse(json.contains("slides.pdf"));
+            UUID id=UUID.fromString(new tools.jackson.databind.json.JsonMapper().readTree(json).get("id").asString());
+            var download=materialHttp("GET",f.download(id),owner,null,new byte[0]);assertEquals(200,download.statusCode());assertArrayEquals(PDF_A,download.body());
+            assertEquals("application/pdf",download.headers().firstValue("Content-Type").orElse(""));
+            assertTrue(download.headers().firstValue("Content-Disposition").orElse("").contains("filename*=UTF-8''B%C3%A0i.pdf"));
+            assertTrue(download.headers().firstValue("Cache-Control").orElse("").contains("no-store"));
+            assertEquals("nosniff",download.headers().firstValue("X-Content-Type-Options").orElse(""));
+            assertEquals(200,materialHttp("PUT",f.path()+"/"+id,owner,"application/json","{\"title\":\"Renamed\"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            assertEquals(200,materialHttp("PUT",f.path()+"/"+id+"/publication",owner,"application/json","{\"publicationStatus\":\"published\"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            assertEquals(200,materialHttp("GET",f.download(id),learner,null,new byte[0]).statusCode());
+            ByteArrayOutputStream replacementBody=new ByteArrayOutputStream();
+            replacementBody.write("--x\r\nContent-Disposition: form-data; name=\"file\"; filename=\"replacement.pdf\"\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+            replacementBody.write(PDF_B);replacementBody.write("\r\n--x--\r\n".getBytes(StandardCharsets.US_ASCII));
+            assertEquals(200,materialHttp("PUT",f.path()+"/"+id+"/file",owner,"multipart/form-data; boundary=x",replacementBody.toByteArray()).statusCode());
+            assertArrayEquals(PDF_B,materialHttp("GET",f.download(id),learner,null,new byte[0]).body());
+            String relational=f.path().replace("file-materials","materials");
+            var textCreated=materialHttp("POST",relational,owner,"application/json","{\"title\":\"Text\",\"materialType\":\"text\",\"textContent\":\"  code\"}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(201,textCreated.statusCode());
+            UUID textId=UUID.fromString(new tools.jackson.databind.json.JsonMapper().readTree(textCreated.body()).get("id").asString());
+            assertEquals(200,materialHttp("PUT",relational+"/"+textId,owner,"application/json","{\"title\":\"Edited\",\"materialType\":\"text\",\"textContent\":\" body \"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            assertEquals(200,materialHttp("PUT",relational+"/"+textId+"/publication",owner,"application/json","{\"publicationStatus\":\"published\"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            byte[] oversized=new byte[2048];
+            assertEquals(403,materialHttp("POST",f.path(),learner,"multipart/form-data; boundary=x",oversized).statusCode());
+            assertEquals(413,materialHttp("POST",f.path(),owner,"multipart/form-data; boundary=x",oversized).statusCode());
+        }
+    }
+
+
+    @ParameterizedTest
+    @ValueSource(strings = {"file-materials", "%66ile-materials", "file%2Dmaterials", "%66ile%2dmaterials"})
+    void co09Ir01EquivalentUploadRoutesKeepAdmissionBeforeFormParsing(String segment) throws Exception {
+        try (var f = new MaterialFixture()) {
+            String owner = f.token(f.owner), learner = f.token(f.learner);
+            String path = f.path().replace("file-materials", segment);
+            byte[] badForm = "x=%ZZ".getBytes(StandardCharsets.US_ASCII);
+            for (String target : List.of(path + "/" + UUID.randomUUID() + "/file", path)) {
+                String method = target.equals(path) ? "POST" : "PUT";
+                for (String token : List.of(owner, learner, "invalid")) {
+                    var response = materialHttp(method, target, token, "application/x-www-form-urlencoded", badForm);
+                    assertEquals(token.equals("invalid") ? 401 : 415, response.statusCode(), target);
+                    assertEquals("close", response.headers().firstValue("Connection").orElse(""), target);
+                }
+                assertEquals(401, materialHttp(method, target, null, "application/x-www-form-urlencoded", badForm).statusCode());
+                assertEquals(403, materialHttp(method, target, learner, "multipart/form-data; boundary=x", badForm).statusCode());
+                assertEquals(target.equals(path) ? 400 : 404,
+                        materialHttp(method, target, owner, "multipart/form-data; boundary=x", badForm).statusCode());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "/publication"})
+    void co09Ir02RelationalScopePrecedesInvalidBodyOnRealHttp(String suffix) throws Exception {
+        try (var f = new MaterialFixture(); var foreign = new MaterialFixture()) {
+            String owner = f.token(f.owner), learner = f.token(f.learner), other = foreign.token(foreign.owner);
+            signIn(f.owner, com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR);
+            var text = materials.createRelationalMaterial(f.course, f.lesson,
+                    new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite(
+                            "Original", com.codemastery.modules.course.domain.model.MaterialType.TEXT, "  code\n", null));
+            var file = createPdf(f);
+            signIn(foreign.owner, com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR);
+            var foreignText = materials.createRelationalMaterial(foreign.course, foreign.lesson,
+                    new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite(
+                            "Foreign", com.codemastery.modules.course.domain.model.MaterialType.TEXT, "foreign", null));
+            String path = f.path().replace("file-materials", "materials") + "/";
+            List<String> invalid = List.of("{}", "", "{", "null", "{\"title\":\"Only\"}",
+                    "{\"publicationStatus\":\"invalid\"}", "{\"publicationStatus\":true}",
+                    "{\"title\":\"x\",\"title\":\"y\"}");
+            for (String body : invalid) {
+                byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+                for (UUID absent : List.of(UUID.randomUUID(), foreignText.id())) {
+                    assertEquals(404, materialHttp("PUT", path + absent + suffix, owner, "application/json", bytes).statusCode(), body);
+                }
+                assertEquals(400, materialHttp("PUT", path + text.id() + suffix, owner, "application/json", bytes).statusCode());
+                assertEquals(400, materialHttp("PUT", path + file.id() + suffix, owner, "application/json", bytes).statusCode());
+                assertEquals(403, materialHttp("PUT", path + text.id() + suffix, learner, "application/json", bytes).statusCode());
+                assertEquals(403, materialHttp("PUT", path + text.id() + suffix, other, "application/json", bytes).statusCode());
+            }
+            assertEquals("Original", materialRows.findMaterial(f.lesson, text.id()).orElseThrow().title());
+            assertEquals("hidden", materialRows.findMaterial(f.lesson, text.id()).orElseThrow().publicationStatus().getStatus());
+            assertEquals("  code\n", materialRows.findMaterial(f.lesson, text.id()).orElseThrow().textContent());
+            // Same-Course but different Lesson is also a descendant mismatch.
+            materialJdbc.update("UPDATE lessons SET chapter_id=?, position=2 WHERE id=?", f.chapter, foreign.lesson);
+            try {
+                assertEquals(404, materialHttp("PUT", path + foreignText.id() + suffix, owner, "application/json", "{}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            } finally {
+                materialJdbc.update("UPDATE lessons SET chapter_id=?, position=1 WHERE id=?", foreign.chapter, foreign.lesson);
+            }
+            materialJdbc.update("UPDATE courses SET publication_status='hidden' WHERE id=?", f.course);
+            assertEquals(404, materialHttp("PUT", path + text.id() + suffix, other, "application/json", "{}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            String valid = suffix.isEmpty() ? "{\"title\":\"Edited\",\"materialType\":\"text\",\"textContent\":\" body \"}"
+                    : "{\"publicationStatus\":\"published\"}";
+            assertEquals(200, materialHttp("PUT", path + text.id() + suffix, owner, "application/json", valid.getBytes(StandardCharsets.UTF_8)).statusCode());
+        }
+    }
+
+    private static byte[] materialMultipart(boolean title) throws IOException {
+        ByteArrayOutputStream body = new ByteArrayOutputStream();
+        if (title) body.write("--x\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nSlides\r\n".getBytes(StandardCharsets.UTF_8));
+        body.write("--x\r\nContent-Disposition: form-data; name=\"file\"; filename=\"Bài.pdf\"\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+        body.write(PDF_A);
+        body.write("\r\n--x--\r\n".getBytes(StandardCharsets.US_ASCII));
+        return body.toByteArray();
+    }
+
+    @Test void co09Ir01AllEncodedBindingsAndUnreadBodyTransport() throws Exception {
+        try (var f = new MaterialFixture()) {
+            String owner = f.token(f.owner), learner = f.token(f.learner);
+            String root = f.path().replace("/api/instructor/courses/", "/%61pi/%69nstructor/%63ourses/")
+                    .replace("/lessons/", "/%6cessons/").replace("file-materials", "%66ile%2Dmaterials");
+            var created = materialHttp("POST", root, owner, "multipart/form-data; boundary=x", materialMultipart(true));
+            assertEquals(201, created.statusCode());
+            var json = new tools.jackson.databind.json.JsonMapper();
+            UUID id = UUID.fromString(json.readTree(created.body()).get("id").asString());
+            String selected = root + "/" + id;
+            assertEquals(200, materialHttp("PUT", selected, owner, "application/json", "{\"title\":\"Bài học\"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            assertEquals(200, materialHttp("PUT", selected + "/%66ile", owner, "multipart/form-data; boundary=x", materialMultipart(false)).statusCode());
+            assertEquals(200, materialHttp("PUT", selected + "/%70ublication", owner, "application/json", "{\"publicationStatus\":\"published\"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            String download = f.download(id).replace("/api/courses/", "/%61pi/%63ourses/")
+                    .replace("/lessons/", "/%6cessons/").replace("/materials/", "/%6daterials/").replace("/file", "/%66ile");
+            var downloaded = materialHttp("GET", download, learner, null, new byte[0]);
+            assertEquals(200, downloaded.statusCode());
+            assertArrayEquals(PDF_A, downloaded.body());
+            String relational = root.replace("%66ile%2Dmaterials", "%6daterials");
+            byte[] text = "{\"title\":\"Text\",\"materialType\":\"text\",\"textContent\":\"  code\\n\"}".getBytes(StandardCharsets.UTF_8);
+            var textCreated = materialHttp("POST", relational, owner, "application/json", text);
+            assertEquals(201, textCreated.statusCode());
+            UUID textId = UUID.fromString(json.readTree(textCreated.body()).get("id").asString());
+            String textPath = relational + "/" + textId;
+            assertEquals(200, materialHttp("PUT", textPath, owner, "application/json", text).statusCode());
+            assertEquals(200, materialHttp("PUT", textPath + "/%70ublication", owner, "application/json", "{\"publicationStatus\":\"published\"}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            // Every JSON material route, including encoded static ancestors/suffixes, rejects media before role/body.
+            for (String target : List.of(relational, textPath, textPath + "/%70ublication", selected, selected + "/%70ublication")) {
+                assertEquals(415, materialHttp(target.equals(relational) ? "POST" : "PUT", target, learner,
+                        "application/x-www-form-urlencoded", "x=%ZZ".getBytes(StandardCharsets.US_ASCII)).statusCode(), target);
+            }
+            // Deliberately send NO body: an attempted form/part read would block instead of replying.
+            for (String target : List.of(root, selected + "/%66ile")) {
+                try (var socket = new java.net.Socket("127.0.0.1", materialPort)) {
+                    socket.setSoTimeout(5000);
+                    String request = (target.equals(root) ? "POST " : "PUT ") + target
+                            + " HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer " + learner
+                            + "\r\nContent-Type: multipart/form-data; boundary=x\r\nContent-Length: 100000\r\n\r\n";
+                    socket.getOutputStream().write(request.getBytes(StandardCharsets.US_ASCII));
+                    socket.getOutputStream().flush();
+                    var reader = new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+                    assertTrue(reader.readLine().startsWith("HTTP/1.1 403"));
+                    List<String> headers = new ArrayList<>();
+                    String line;
+                    while ((line = reader.readLine()) != null && !line.isEmpty()) headers.add(line.toLowerCase(java.util.Locale.ROOT));
+                    assertTrue(headers.contains("connection: close"));
+                }
+            }
+            assertTrue(recordedMaterialEvents.stream().noneMatch(event -> event.getClass().getName().endsWith("ContentPublishedEvent")));
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"%2566ile-materials,401", "file%2fmaterials,400", "file-materials;extra=x,401", "file%5cmaterials,400"})
+    void co09Ir01FirewallRejectionIsPreserved(String segment, int expected) throws Exception {
+        try (var f = new MaterialFixture()) {
+            String path = f.path().replace("file-materials", segment) + "/" + UUID.randomUUID() + "/file";
+            assertEquals(expected, materialHttp("PUT", path, f.token(f.owner), "application/json",
+                    "{}".getBytes(StandardCharsets.UTF_8)).statusCode(), segment);
+        }
+    }
+
+    @Test void co09Ir01UnrelatedFormProcessingAndDefaultDenyArePreserved() throws Exception {
+        try (var f = new MaterialFixture()) {
+            String owner = f.token(f.owner);
+            for (String target : List.of(f.path() + "/" + UUID.randomUUID() + "/unknown", f.path() + "/" + UUID.randomUUID() + "/file/extra")) {
+                assertEquals(403, materialHttp("PUT", target, owner, "application/json", "{}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            }
+            assertEquals(403, materialHttp("DELETE", f.path(), owner, "application/json", "{}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            // Exercise the actual configured filter on an unrelated form; the chain receives parsed parameters.
+            var request = new org.springframework.mock.web.MockHttpServletRequest("PUT", "/unrelated-form");
+            request.setContentType("application/x-www-form-urlencoded");
+            request.setContent("note=one%2Btwo&space=a+b".getBytes(StandardCharsets.US_ASCII));
+            var called = new java.util.concurrent.atomic.AtomicBoolean();
+            materialFormFilter.doFilter(request, new org.springframework.mock.web.MockHttpServletResponse(), (parsed, response) -> {
+                called.set(true);
+                assertEquals("one+two", parsed.getParameter("note"));
+                assertEquals("a b", parsed.getParameter("space"));
+            });
+            assertTrue(called.get());
+        }
+    }
+
+    @Test void co09Ir02GuardRechecksAdmissionAfterPreliminaryRead() {
+        try (var f = new MaterialFixture()) {
+            var text = materials.createRelationalMaterial(f.course, f.lesson,
+                    new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite(
+                            "Original", com.codemastery.modules.course.domain.model.MaterialType.TEXT, "old", null));
+            materials.requireOwnedRelational(f.course, f.lesson, text.id());
+            materialJdbc.update("DELETE FROM learning_materials WHERE id=?", text.id());
+            var command = new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite(
+                    "Edited", com.codemastery.modules.course.domain.model.MaterialType.TEXT, "new", null);
+            assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,
+                    () -> materials.updateRelationalMaterial(f.course, f.lesson, text.id(), command));
+            assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,
+                    () -> materials.setRelationalMaterialPublication(f.course, f.lesson, text.id(), com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED));
+            assertTrue(materialRows.findMaterial(f.lesson, text.id()).isEmpty());
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"create", "update", "publication", "file-title", "file-publication"})
+    void co09Ir03StrictUtf8BytesAndUnicodeOnRealHttp(String operation) throws Exception {
+        try (var f = new MaterialFixture()) {
+            String owner = f.token(f.owner), learner = f.token(f.learner);
+            var file = createPdf(f);
+            var text = materials.createRelationalMaterial(f.course, f.lesson,
+                    new com.codemastery.modules.course.api.dto.CourseStructureRequests.MaterialWrite(
+                            "Original", com.codemastery.modules.course.domain.model.MaterialType.TEXT, "  code\n", null));
+            String relational = f.path().replace("file-materials", "materials");
+            String path = switch (operation) {
+                case "create" -> relational;
+                case "update" -> relational + "/" + text.id();
+                case "publication" -> relational + "/" + text.id() + "/publication";
+                case "file-title" -> f.path() + "/" + file.id();
+                default -> f.path() + "/" + file.id() + "/publication";
+            };
+            String method = operation.equals("create") ? "POST" : "PUT";
+            String template = operation.endsWith("publication") ? "{\"publicationStatus\":\"%s\"}"
+                    : operation.equals("file-title") ? "{\"title\":\"%s\"}"
+                    : "{\"title\":\"%s\",\"materialType\":\"text\",\"textContent\":\"  code\\n\"}";
+            var before = materialJdbc.queryForList("SELECT * FROM learning_materials WHERE lesson_id=? ORDER BY id", f.lesson);
+            for (byte[] malformed : List.of(new byte[]{(byte) 0xff}, new byte[]{(byte) 0xc3},
+                    new byte[]{(byte) 0xc0, (byte) 0xaf}, new byte[]{(byte) 0xed, (byte) 0xa0, (byte) 0x80})) {
+                ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+                String marked = template.formatted("MARK");
+                bytes.write(marked.substring(0, marked.indexOf("MARK")).getBytes(StandardCharsets.UTF_8));
+                bytes.write(malformed);
+                bytes.write(marked.substring(marked.indexOf("MARK") + 4).getBytes(StandardCharsets.UTF_8));
+                assertEquals(400, materialHttp(method, path, owner, "application/json", bytes.toByteArray()).statusCode(), operation);
+                assertEquals(before, materialJdbc.queryForList("SELECT * FROM learning_materials WHERE lesson_id=? ORDER BY id", f.lesson));
+                assertEquals(403, materialHttp(method, path, learner, "application/json", bytes.toByteArray()).statusCode());
+                if (!operation.equals("create")) {
+                    UUID selected = operation.startsWith("file-") ? file.id() : text.id();
+                    assertEquals(404, materialHttp(method, path.replace(selected.toString(), UUID.randomUUID().toString()), owner,
+                            "application/json", bytes.toByteArray()).statusCode());
+                }
+            }
+            for (String invalid : List.of("", "{}", "{", "null", "[]")) {
+                assertEquals(400, materialHttp(method, path, owner, "application/json", invalid.getBytes(StandardCharsets.UTF_8)).statusCode());
+                assertEquals(before, materialJdbc.queryForList("SELECT * FROM learning_materials WHERE lesson_id=? ORDER BY id", f.lesson));
+            }
+            for (String unicode : List.of("Bài học tiếng Việt", "学习 😀", "\uFFFD")) {
+                String value = operation.endsWith("publication") ? "published" : unicode;
+                var response = materialHttp(method, path, owner, "application/json", template.formatted(value).getBytes(StandardCharsets.UTF_8));
+                assertEquals(operation.equals("create") ? 201 : 200, response.statusCode());
+                var json = new tools.jackson.databind.json.JsonMapper().readTree(response.body());
+                UUID id = UUID.fromString(json.get("id").asString());
+                var persisted = materialRows.findMaterial(f.lesson, id).orElseThrow();
+                if (!operation.endsWith("publication")) assertEquals(unicode, persisted.title());
+                if (!operation.startsWith("file-")) assertEquals("  code\n", persisted.textContent());
+            }
+        }
+    }
+
+    @Test void co09InvalidPartValidationClosesInputsBeforeAnyStorage() {
+        try(var f=new MaterialFixture()) {
+            var observed=new ObservedStorage();var service=consumer(observed,materialRows);
+            for(String name:List.of("x.zip","../x.pdf","x\n.pdf","中".repeat(84)+".pdf","x".repeat(252)+".pdf")) {
+                var closed=new java.util.concurrent.atomic.AtomicBoolean();
+                var input=new ByteArrayInputStream(PDF_A){public void close()throws IOException{closed.set(true);super.close();}};
+                var rejected=assertThrows(com.codemastery.common.exception.BusinessRuleException.class,()->service.createFileMaterial(f.course,f.lesson,()->new com.codemastery.modules.course.application.service.LearningMaterialService.FileMaterialUpload("T",new com.codemastery.modules.course.application.service.LearningMaterialService.FilePart(name,PDF_A.length,input))));
+                assertEquals(400,rejected.getStatus().value());assertTrue(closed.get());
+            }
+            for(byte[] bytes:List.of(new byte[0],"wrong".getBytes(StandardCharsets.US_ASCII))) {
+                assertEquals(400,assertThrows(com.codemastery.common.exception.BusinessRuleException.class,()->service.createFileMaterial(f.course,f.lesson,()->new com.codemastery.modules.course.application.service.LearningMaterialService.FileMaterialUpload("T",pdf("x.pdf",bytes)))).getStatus().value());
+            }
+            assertEquals(413,assertThrows(org.springframework.web.multipart.MaxUploadSizeExceededException.class,()->service.createFileMaterial(f.course,f.lesson,()->new com.codemastery.modules.course.application.service.LearningMaterialService.FileMaterialUpload("T",new com.codemastery.modules.course.application.service.LearningMaterialService.FilePart("x.pdf",1025,new ByteArrayInputStream(PDF_A))))).getStatusCode().value());
+            assertTrue(observed.stored.isEmpty());
+        }
+    }
+
+    @Test void co09PausedDownloadLeavesTheOnlyPoolConnectionAvailable() throws Exception {
+        try(var f=new MaterialFixture()) {
+            var file=createPdf(f);
+            var snapshotRows=mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class,org.mockito.AdditionalAnswers.delegatesTo(materialRows));
+            doAnswer(call->{
+                assertEquals("repeatable read",materialJdbc.queryForObject("SHOW transaction_isolation",String.class));
+                assertEquals("on",materialJdbc.queryForObject("SHOW transaction_read_only",String.class));
+                return materialRows.findMaterial(call.getArgument(0),call.getArgument(1));
+            }).when(snapshotRows).findMaterial(any(),any());
+            javax.sql.DataSource delegate=((org.springframework.jdbc.datasource.DelegatingDataSource)materialJdbc.getDataSource()).getTargetDataSource();
+            var pool=delegate.unwrap(com.zaxxer.hikari.HikariDataSource.class);
+            int maximum=pool.getMaximumPoolSize();long timeout=pool.getConnectionTimeout();
+            CountDownLatch paused=new CountDownLatch(1),release=new CountDownLatch(1);
+            pool.setMaximumPoolSize(1);pool.setConnectionTimeout(2000);pool.getHikariPoolMXBean().softEvictConnections();
+            FileStorage pausedStorage=new FileStorage(){
+                public void store(String key,InputStream in,long length,String type){storage.store(key,in,length,type);}
+                public void delete(String key){storage.delete(key);}
+                public StoredObject open(String key){
+                    assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+                    assertEquals(0,BORROWED.get());
+                    var opened=storage.open(key);
+                    return new StoredObject(opened.contentLength(),opened.mediaType(),new java.io.FilterInputStream(opened.content()){
+                        boolean first=true;
+                        @Override public int read(byte[] bytes,int off,int length)throws IOException{
+                            if(first){first=false;paused.countDown();try{if(!release.await(10,TimeUnit.SECONDS))throw new IOException("Pause timed out");}catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw new IOException(interrupted);}}
+                            return super.read(bytes,off,length);
+                        }
+                    });
+                }
+            };
+            try(var workers=Executors.newFixedThreadPool(2)){
+                var streaming=workers.submit(()->{
+                    signIn(f.owner,com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR);
+                    try(var download=consumer(pausedStorage,snapshotRows).downloadMaterialFile(f.course,f.lesson,file.id())){
+                        ByteArrayOutputStream response=new ByteArrayOutputStream();download.content().transferTo(response);return response.toByteArray();
+                    }finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}
+                });
+                try{
+                    assertTrue(paused.await(5,TimeUnit.SECONDS));
+                    var another=workers.submit(()->materialJdbc.queryForObject("SELECT 1",Integer.class));
+                    assertEquals(1,another.get(3,TimeUnit.SECONDS));
+                }finally{release.countDown();}
+                assertArrayEquals(PDF_A,streaming.get(5,TimeUnit.SECONDS));
+            }finally{release.countDown();pool.setMaximumPoolSize(maximum);pool.setConnectionTimeout(timeout);}
+        }
     }
 }

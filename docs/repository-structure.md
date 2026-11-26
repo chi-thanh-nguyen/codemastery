@@ -2194,6 +2194,26 @@ dependency, module or directory outside these paths changes. The tree below is n
 redrawn for these files; this table is the explicit addition. The immutable canonical tree
 remains unchanged.
 
+## Bounded VM test file renames — 26 November 2026
+
+On 2026-11-26 (Asia/Ho_Chi_Minh), Project Leader and repository Owner @chi-thanh-nguyen
+explicitly authorized, in the instruction “PR #293 — Test File Naming Standardization”,
+renaming three of the test files added by the Phase 5 record above. The new names state
+what each file tests rather than the delivery phase that added it:
+
+| Former path (Phase 5 record) | Current path | What it tests |
+| --- | --- | --- |
+| `infrastructure/vm/tests/test-phase5-recovery-roundtrip.sh` | `infrastructure/vm/tests/test-recovery-roundtrip.sh` | Recovery capture, publication, isolated restore and fault injection |
+| `infrastructure/vm/tests/test-phase5-ssh-gates.sh` | `infrastructure/vm/tests/test-ssh-deployment-gates.sh` | SSH transport, forced-command gate and VM-side upload and tooling gates |
+| `infrastructure/vm/tests/test_phase5_units.py` | `infrastructure/vm/tests/test_deployment_recovery_units.py` | Unit tests of the SSH deployment and recovery tooling |
+
+Contents, assertions and the `PHASE5_*_PASS` completion markers are unchanged. The
+invocations in `ci-vm.yml` and `deploy.yml` and the `deploy.yml` pull-request path filter
+use the new paths. Job names, step names, required checks, permissions and the existing
+`/infrastructure/` CODEOWNERS rule are unchanged. The Phase 5 record above and dated
+verification records keep the former names as historical evidence. This record is the
+explicit rename and adds no file. The immutable canonical tree remains unchanged.
+
 ## ADR014 hybrid-authentication file additions — 16 November 2026
 
 `STRUCT-AUTH-SESSION-2026-11-16-r1` is **DELEGATED_APPROVED** under the Project
@@ -2381,3 +2401,19 @@ the existing Admin test rule (@tihh647-ui, @chi-thanh-nguyen) covers the four un
 the other `integration/repository/` suites, the repository suite matches no rule. No production
 file, dependency, directory or other test path is approved. The canonical tree above is unchanged;
 this is an explicit addition.
+
+### IN07 test placement — 25 November 2026
+
+`CT14-IN07-PLACEMENT-2026-11-25-r1` is
+**[LEADER_APPROVED](decisions/README.md#approval-status-labels)** under the
+Project Leader's bounded placement instruction for PR #292. It covers exactly
+the two IN07 files introduced in that PR:
+
+| File | Responsibility |
+| --- | --- |
+| `backend/src/test/java/com/codemastery/modules/interaction/NotificationServiceTest.java` | CT11 unit contracts for identifiers, ordering, time, transaction guard and owner-scoped operations |
+| `backend/src/test/java/com/codemastery/integration/repository/NotificationRepositoryIntegrationTest.java` | Disposable PostgreSQL verification of IN07 creation, atomicity, concurrency, paging and mark-read, including creation under the r13 notification privileges |
+
+The HTTP authorization and error cases extend the existing
+`AuthorizationIntegrationTest.java`. The canonical tree and CODEOWNERS stay
+unchanged. This record approves no other paths.

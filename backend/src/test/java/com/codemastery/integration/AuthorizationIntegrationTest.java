@@ -67,6 +67,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -2323,6 +2324,135 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
         assertEquals("[\"liveness\",\"readiness\"]", health.get("groups").toString());
     }
 
+    @Nested
+    class NotificationEndpoints {
+
+        private static final String PATH = "/api/me/notifications";
+        private final List<UUID> notices = new ArrayList<>();
+
+        @AfterEach
+        void removeNotices() {
+            for (UUID notice : notices) {
+                jdbc.update("DELETE FROM public.notifications WHERE id = ?", notice);
+            }
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"learner", "instructor", "admin"})
+        void allFourOperationsAreAvailableToEachActiveRole(String role) throws Exception {
+            UUID user = insertUser(role, "active");
+            UUID mine = notice(user);
+            UUID second = notice(user);
+            UUID foreignOwner = insertUser("learner", "active");
+            UUID foreign = notice(foreignOwner);
+            String bearer = "Bearer " + sessionToken(user);
+
+            String body = mvc.perform(get(PATH).header("Authorization", bearer).param("userId", foreignOwner.toString()))
+                    .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.size").value(20)).andExpect(jsonPath("$.totalElements").value(2))
+                    .andReturn().getResponse().getContentAsString();
+            var page = JSON.readTree(body);
+            assertEquals(Set.of("content", "page", "size", "totalElements", "totalPages"), Set.copyOf(page.propertyNames()));
+            var firstRow = page.get("content").get(0);
+            assertEquals(Set.of("id", "message", "read", "createdAt"), Set.copyOf(firstRow.propertyNames()));
+            assertEquals(List.of(mine, second).stream().map(UUID::toString).max(String::compareTo).orElseThrow(),
+                    firstRow.get("id").asString());
+
+            for (int attempt = 0; attempt < 2; attempt++) {
+                mvc.perform(put(PATH + "/" + mine + "/read").header("Authorization", bearer)
+                                .contentType(MediaType.TEXT_PLAIN).content("{ignored"))
+                        .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(jsonPath("$.id").value(mine.toString())).andExpect(jsonPath("$.read").value(true));
+            }
+            mvc.perform(get(PATH + "/unread-count").header("Authorization", bearer))
+                    .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(content().json("{\"unreadCount\":1}",
+                            org.springframework.test.json.JsonCompareMode.STRICT));
+            mvc.perform(get(PATH).param("unreadOnly", "true").param("size", "1").header("Authorization", bearer))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                    .andExpect(jsonPath("$.content[0].id").value(second.toString()));
+            for (int pageNumber : List.of(2, Integer.MAX_VALUE)) {
+                mvc.perform(get(PATH).param("page", Integer.toString(pageNumber)).param("size", "100")
+                                .header("Authorization", bearer))
+                        .andExpect(status().isOk()).andExpect(jsonPath("$.content").isEmpty())
+                        .andExpect(jsonPath("$.totalElements").value(2)).andExpect(jsonPath("$.totalPages").value(1));
+            }
+            for (int marked : List.of(1, 0)) {
+                mvc.perform(put(PATH + "/read-all").header("Authorization", bearer)
+                                .contentType(MediaType.APPLICATION_JSON).content("{ignored"))
+                        .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().json("{\"markedCount\":" + marked + "}",
+                                org.springframework.test.json.JsonCompareMode.STRICT));
+            }
+            assertEquals(Boolean.TRUE, jdbc.queryForObject(
+                    "SELECT is_read FROM public.notifications WHERE id = ?", Boolean.class, second));
+            assertEquals(Boolean.FALSE, jdbc.queryForObject(
+                    "SELECT is_read FROM public.notifications WHERE id = ?", Boolean.class, foreign));
+        }
+
+        @Test
+        void authenticationPrecedesValidationAndUsesCurrentAccountAndSession() throws Exception {
+            UUID user = insertUser("learner", "active");
+            String bearer = "Bearer " + sessionToken(user);
+            UUID revokedUser = insertUser("learner", "active");
+            String revoked = "Bearer " + sessionToken(revokedUser);
+            jdbc.update("UPDATE public.users SET account_status='locked' WHERE id=?", user);
+            jdbc.update("UPDATE public.refresh_sessions SET revoked_at=now() WHERE user_id=?", revokedUser);
+            for (String auth : List.of("", "Bearer invalid", bearer, revoked)) {
+                for (var operation : List.of(get(PATH).param("page", "invalid"), get(PATH + "/unread-count"),
+                        put(PATH + "/invalid/read"), put(PATH + "/read-all"))) {
+                    mvc.perform(operation.header("Authorization", auth))
+                            .andExpect(status().isUnauthorized()).andExpect(header().string("Cache-Control", "no-store"))
+                            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                            .andExpect(jsonPath("$.detail").value("Authentication failed."));
+                }
+            }
+        }
+
+        @Test
+        void malformedInputsReturnSafe400AndUnapprovedRoutesStayDenied() throws Exception {
+            String bearer = "Bearer " + sessionToken(insertUser("admin", "active"));
+            for (var operation : List.of(get(PATH).param("unreadOnly", "on"), get(PATH).param("unreadOnly", ""),
+                    get(PATH).param("unreadOnly", "true", "false"), get(PATH).param("page", "0x10"),
+                    get(PATH).param("page", "-1"), get(PATH).param("page", "2147483648"),
+                    get(PATH).param("size", "0"), get(PATH).param("size", "101"), put(PATH + "/1-2-3-4-5/read"))) {
+                mvc.perform(operation.header("Authorization", bearer)).andExpect(status().isBadRequest())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                        .andExpect(jsonPath("$.type").value("about:blank"));
+            }
+            for (var operation : List.of(post(PATH), put(PATH), get(PATH + "/read-all"),
+                    request(HttpMethod.DELETE, PATH + "/" + UUID.randomUUID()), get(PATH + "/unknown"))) {
+                mvc.perform(operation.header("Authorization", bearer)).andExpect(status().isForbidden());
+            }
+        }
+
+        @Test
+        void missingAndForeignIdsHaveIdenticalProblemDetailsApartFromTheRequestPath() throws Exception {
+            UUID foreign = notice(insertUser("learner", "active"));
+            String bearer = "Bearer " + sessionToken(insertUser("instructor", "active"));
+            UUID missing = UUID.randomUUID();
+            var responses = new ArrayList<String>();
+            for (UUID id : List.of(foreign, missing)) {
+                String path = PATH + "/" + id + "/read";
+                responses.add(mvc.perform(put(path).header("Authorization", bearer))
+                        .andExpect(status().isNotFound()).andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                        .andExpect(jsonPath("$.instance").value(path)).andReturn().getResponse().getContentAsString()
+                        .replace(path, PATH));
+            }
+            assertEquals(JSON.readTree(responses.getFirst()), JSON.readTree(responses.getLast()));
+        }
+
+        private UUID notice(UUID user) {
+            UUID id = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.notifications (id,user_id,message,is_read,created_at) "
+                    + "VALUES (?,?,'Plain text <a>',false,'2026-11-25T01:00:00.123456Z')", id, user);
+            notices.add(id);
+            return id;
+        }
+    }
+
     /**
      * CT31.read (ADR012 sections 7.3 and 12, B7-O12; IN10 #184) through the production security chain:
      * 401 authentication, then 400 malformed query values, then the role 403 before any lookup; no-store
@@ -2768,5 +2898,78 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
 
     private static String syntheticPassword() {
         return "qa01-" + UUID.randomUUID() + "-synthetic";
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "/publication"})
+    void co09RelationalInvalidJsonKeepsRoleConcealmentAndScopePrecedence(String suffix) throws Exception {
+        UUID owner = insertUser("instructor", "active"), other = insertUser("instructor", "active");
+        UUID learner = insertUser("learner", "active"), admin = insertUser("admin", "active");
+        UUID course = UUID.randomUUID(), chapter = UUID.randomUUID(), lesson = UUID.randomUUID(), material = UUID.randomUUID();
+        jdbc.update("INSERT INTO courses(id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES (?,?,'CO09','Test','published',false)", course, owner);
+        jdbc.update("INSERT INTO chapters(id,course_id,title,position) VALUES (?,?,'C',1)", chapter, course);
+        jdbc.update("INSERT INTO lessons(id,chapter_id,title,position,publication_status) VALUES (?,?,'L',1,'published')", lesson, chapter);
+        jdbc.update("INSERT INTO learning_materials(id,lesson_id,title,material_type,publication_status,text_content) VALUES (?,?,'Text','text','hidden','  code')", material, lesson);
+        String path = "/api/instructor/courses/" + course + "/lessons/" + lesson + "/materials/" + material + suffix;
+        try {
+            var before = jdbc.queryForList("SELECT * FROM learning_materials WHERE id=?", material);
+            String ownerToken = sessionToken(owner), otherToken = sessionToken(other);
+            for (String body : List.of("", "{}", "{")) {
+                mvc.perform(request(HttpMethod.PUT, path).contentType("application/json").content(body)).andExpect(status().isUnauthorized());
+                for (UUID wrongRole : List.of(learner, admin)) {
+                    mvc.perform(request(HttpMethod.PUT, path.replace(course.toString(), UUID.randomUUID().toString()))
+                            .header("Authorization", "Bearer " + sessionToken(wrongRole)).contentType("application/json").content(body)).andExpect(status().isForbidden());
+                }
+                mvc.perform(request(HttpMethod.PUT, path).header("Authorization", "Bearer " + otherToken).contentType("application/json").content(body)).andExpect(status().isForbidden());
+                mvc.perform(request(HttpMethod.PUT, path).header("Authorization", "Bearer " + ownerToken).contentType("application/json").content(body)).andExpect(status().isBadRequest());
+                for (UUID missing : List.of(course, lesson, material)) {
+                    mvc.perform(request(HttpMethod.PUT, path.replace(missing.toString(), UUID.randomUUID().toString()))
+                            .header("Authorization", "Bearer " + ownerToken).contentType("application/json").content(body)).andExpect(status().isNotFound());
+                }
+            }
+            jdbc.update("UPDATE courses SET publication_status='hidden' WHERE id=?", course);
+            mvc.perform(request(HttpMethod.PUT, path).header("Authorization", "Bearer " + otherToken).contentType("application/json").content("{}")).andExpect(status().isNotFound());
+            assertEquals(before, jdbc.queryForList("SELECT * FROM learning_materials WHERE id=?", material));
+        } finally {
+            jdbc.update("DELETE FROM learning_materials WHERE id=?", material);
+            jdbc.update("DELETE FROM lessons WHERE id=?", lesson);
+            jdbc.update("DELETE FROM chapters WHERE id=?", chapter);
+            jdbc.update("DELETE FROM courses WHERE id=?", course);
+        }
+    }
+
+    @Test void co09DownloadAuthorizationConcealmentAndScopeMatrix() throws Exception {
+        UUID owner=insertUser("instructor","active"),learner=insertUser("learner","active"),admin=insertUser("admin","active"),other=insertUser("instructor","active");
+        UUID course=UUID.randomUUID(),chapter=UUID.randomUUID(),lesson=UUID.randomUUID(),material=UUID.randomUUID(),enrollment=UUID.randomUUID();
+        jdbc.update("INSERT INTO courses(id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES (?,?,'CO09','Test','published',false)",course,owner);
+        jdbc.update("INSERT INTO chapters(id,course_id,title,position) VALUES (?,?,'C',1)",chapter,course);
+        jdbc.update("INSERT INTO lessons(id,chapter_id,title,position,publication_status) VALUES (?,?,'L',1,'published')",lesson,chapter);
+        jdbc.update("INSERT INTO learning_materials(id,lesson_id,title,material_type,publication_status,object_key,original_filename) VALUES (?,?,'PDF','file','published',?,'slides.pdf')",material,lesson,"materials/"+UUID.randomUUID());
+        String path="/api/courses/"+course+"/lessons/"+lesson+"/materials/"+material+"/file";
+        try {
+            mvc.perform(get(path)).andExpect(status().isUnauthorized());
+            String learnerToken=sessionToken(learner), adminToken=sessionToken(admin),otherToken=sessionToken(other);
+            mvc.perform(get(path).header("Authorization","Bearer "+adminToken)).andExpect(status().isForbidden());
+            mvc.perform(get(path).header("Authorization","Bearer "+otherToken)).andExpect(status().isForbidden());
+            mvc.perform(get(path).header("Authorization","Bearer "+learnerToken)).andExpect(status().isForbidden());
+            jdbc.update("INSERT INTO enrollments(id,user_id,course_id,status) VALUES (?,?,?,'left')",enrollment,learner,course);
+            mvc.perform(get(path).header("Authorization","Bearer "+learnerToken)).andExpect(status().isForbidden());
+            jdbc.update("UPDATE enrollments SET status='active' WHERE id=?",enrollment);
+            for(String target:List.of("courses","lessons","learning_materials")) {
+                UUID id=target.equals("courses")?course:target.equals("lessons")?lesson:material;
+                jdbc.update("UPDATE "+target+" SET publication_status='hidden' WHERE id=?",id);
+                mvc.perform(get(path).header("Authorization","Bearer "+learnerToken)).andExpect(status().isNotFound());
+                if(target.equals("courses"))mvc.perform(get(path).header("Authorization","Bearer "+otherToken)).andExpect(status().isNotFound());
+                jdbc.update("UPDATE "+target+" SET publication_status='published' WHERE id=?",id);
+            }
+            mvc.perform(get(path.replace(material.toString(),UUID.randomUUID().toString())).header("Authorization","Bearer "+learnerToken)).andExpect(status().isNotFound());
+            mvc.perform(get(path.replace(lesson.toString(),UUID.randomUUID().toString())).header("Authorization","Bearer "+learnerToken)).andExpect(status().isNotFound());
+            String filePath="/api/instructor/courses/"+course+"/lessons/"+lesson+"/file-materials/"+UUID.randomUUID();
+            mvc.perform(request(HttpMethod.PUT,filePath).header("Authorization","Bearer "+sessionToken(owner)).contentType("application/json").content("malformed")).andExpect(status().isNotFound());
+            mvc.perform(get(path.replace(course.toString(),"not-a-uuid")).header("Authorization","Bearer "+adminToken)).andExpect(status().isBadRequest());
+        } finally {
+            jdbc.update("DELETE FROM learning_materials WHERE id=?",material);jdbc.update("DELETE FROM enrollments WHERE id=?",enrollment);
+            jdbc.update("DELETE FROM lessons WHERE id=?",lesson);jdbc.update("DELETE FROM chapters WHERE id=?",chapter);jdbc.update("DELETE FROM courses WHERE id=?",course);
+        }
     }
 }

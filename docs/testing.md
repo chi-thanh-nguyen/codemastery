@@ -23,6 +23,386 @@ checks and protected integration. This records design, not newly executed tests.
 CT17's two Batch 4 operational checkpoints remain pending Leader inputs.
 Earlier dated records below retain their approval scope and history.
 
+## CO09 / IN07 integration verification — 26 November 2026
+
+Under the Project Leader's explicit integration task, Codex merged current main
+`34d5803266cc4b6b7e4253bb085ce6fdd0cedf63` (PR #292 squash) into PR #291
+at `821dbe76737e2f691473f70be8d85d08fbe07776`; merge-base was
+`87344dfffbf7e6d1fec4d9affb464b4d3b4648f4`. The four conflicts were in
+deployment.md, deploy.sh, the matrix-contract test and the real-backend privilege
+test. Both complete consumers and their containment checks are retained.
+
+The effective matrix is now [CO09 r14](deployment.md#ct17-p6-privileges-2026-11-26-r14--co09-learning-materials-within-adr012-192-26-november-2026),
+based on integrated IN07 r13. CO09's historical r13 candidate is renumbered solely
+because PR #292 consumed r13 first. The earlier CO09 r13 references and dated test
+results below describe that historical candidate; they are not new r14 results.
+IN07's r13 record remains verbatim. No ceiling, reviewed column inventory,
+migration, dependency, shared/production privilege or operational value changes.
+
+Executed in an isolated clone, with host Java 25.0.4.1, Maven Wrapper 3.9.16,
+Boot 4.1.1 and Docker Desktop (linux/arm64). Maven used the existing disposable
+DP01 PostgreSQL 17.11, Compose-pinned MinIO and real Tomcat test infrastructure.
+The shell qualifications used disposable PostgreSQL 17.11-bookworm clusters.
+From `backend/`:
+
+```sh
+./mvnw verify -Dtest=CourseServiceTest,NotificationServiceTest -Dit.test='FileStorageIntegrationTest#co09*,AuthorizationIntegrationTest#co09*,AuthorizationIntegrationTest$NotificationEndpoints,NotificationRepositoryIntegrationTest'
+```
+
+**PASS, exit 0:** 97 unit tests (83 Course, 14 Notification) and 44 integration
+cases (27 CO09 FileStorage/HTTP, 3 CO09 authorization, 6 NotificationEndpoints,
+8 NotificationRepository), zero failures, errors or skips. The existing CO12
+Course test contribution is retained; material tests retain their event-silence
+assertions. No comprehensive independent review is claimed.
+
+From repository root (scratch BUILDX_CONFIG is outside the checkout):
+
+```sh
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+BUILDX_CONFIG=../buildx BUILDKIT_PROGRESS=plain docker build -t codemastery-backend:co09-in07-integration-20261126 backend
+BACKEND_IMAGE=codemastery-backend:co09-in07-integration-20261126 bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
+bash -n infrastructure/vm/deploy.sh infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh infrastructure/vm/tests/test-runtime-real-backend-privileges.sh infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+git diff --check
+```
+
+All commands above exited **0**. Matrix contract: exact equality across historical
+r1–r14 (r9 changes no row), 27 relations, exact independent IN07/CO09 ceiling
+assertions, unchanged historical assertions and malformed-input rejection.
+PostgreSQL containment: 115 operation probes and 36 expected rejection checks;
+multi-version predecessor and both failure-containment outcomes passed.
+Real backend: both CO09 relational-material and IN07 owner-scoped notification
+exercises passed, followed by real Flyway V008-to-V009 upgrade and drift rejection;
+no permission-denied/SQLSTATE 42501 backend log entry. Both runtime and upgrade
+exercises consumed the configured image. Image ID:
+`sha256:9d254679ef2fa167fb254d887fb96252817183188971cd26ded93cca6f0dbfc9`.
+
+Additional source/structure checks exited **0**: the complete OpenAPI equals the
+structured three-way union of both parents, all 946 internal references resolve,
+and the exact eight CO09/four IN07 operation objects, schemas and responses survive.
+Security keeps both matcher groups, notification no-store, material form exclusion,
+upload transport, current-account checks, filter ordering and default-deny.
+All Authorization test methods and the entire NotificationEndpoints suite survive.
+Eleven CO09 and eight IN07 one-sided backend/frontend files are byte-identical to
+their originating parent; all 361 backend/infrastructure files identical in both
+parents remain identical. Matrix changes against each parent are exactly the other
+consumer's row, with all reviewed columns unchanged. No material event production
+was introduced. There are no merge markers, unresolved index entries or local
+artifacts in the committed tree.
+
+A preliminary matrix-contract invocation from the scratch parent directory exited
+127 and ran no tests; its correctly located execution passed. The initial scratch
+OpenAPI checker assumed the marker was exactly IMPLEMENTED; it was corrected to
+recognize the existing IMPLEMENTED_IN_PR_291 marker, then passed. No repository
+implementation or test was weakened for either invocation error.
+
+These are integration-author checks. Historical independent CO09 review is not
+independent approval of this merged revision. Exact-new-HEAD CI, applicable owning
+module/infrastructure/Leader CODEOWNER approval, resolved review threads, protected
+integration, downstream QA and operational/release acceptance remain separate gates.
+No remote CI dispatch, approval, merge into main, Issue closure or deployed-system
+operation was performed; CI was not awaited. Historical records below are retained.
+
+## CO09 / CO12 synchronization verification — 26 November 2026
+
+Under the Project Leader's explicit integration task, Codex merged main
+`87344dfffbf7e6d1fec4d9affb464b4d3b4648f4` into PR #291 starting at
+`e01224c7e6728e564da0be394b51eb02c2f1766d` (merge-base `31d92889`). The two
+content conflicts were resolved by preserving both complete test contributions,
+main's publisher constructor arguments and fixed Clock, and separate CO09/CO12
+evidence sections. No new production behavior or infrastructure correction was
+introduced; reviewed CO09, integrated CO12, SH05 and PR #293 corrections remain.
+
+Executed from `backend/` with Java 25.0.4.1 and the existing disposable
+PostgreSQL/MinIO/Tomcat test infrastructure:
+
+```sh
+./mvnw verify -Dtest=CourseServiceTest -Dit.test='InteractionAdminIntegrationTest#co12*,EnrollmentIntegrationTest#co12*+instructorAuthorsOwnedContentAndLessonPublicationReconcilesLearnerCompletion+coursePublicationChangeReconcilesJoinedCompletionWithoutCascadeOrAdaptiveRewrite+learnerCompletionWaitsBehindAnInstructorLessonPublicationAndCountsTheNewRequiredSet+instructorPublicationAndAdministratorHideSerializeOnTheRootAndTheLastCommitWins,FileStorageIntegrationTest#co09AllEightOperationsAndRealStorage+co09Ir01AllEncodedBindingsAndUnreadBodyTransport+co09UnknownCommitRetainsBothObjects'
+```
+
+**PASS, exit 0:** 83 Course unit tests and 11 integration tests (5 Enrollment,
+4 FileStorage including both unknown-commit parameters, 2 Interaction/Admin),
+with zero failures, errors or skips. The combined cases preserve Lesson event
+behavior and material creation/edit/replacement/publication silence.
+`git diff --check` passed. These are integration-author checks, distinct from
+historical independent review; full-suite, frontend, release and operational
+acceptance are not claimed. Exact-new-HEAD CI, applicable CODEOWNER approval,
+resolved review threads and protected integration remain gates. Remote CI was
+not awaited or manually rerun. Historical records below are unchanged.
+
+## CO09 protected materials qualification — 25 November 2026
+
+PR #291 delivers backend CO09.file/video/rest, all eight material operations and
+the narrowly required shared file transport. Consumed records: CT03 r1, CT01's
+current ADR014 session integration, CT18.minimum and `CT18-B5-ERRORS-2026-11-12-r1`,
+`CT21-AUTHORING-2026-11-09-r1`, CT37.embed (ADR006 §6), CT09 authorization/lifecycle/
+config/interface/rest r1 (ADR010 §§4–7/11/14, corrections §§16–18), CT37.widget r1
+only for transport boundaries, CT38 validation and ADR012 §§19.2–19.3. The current
+r12 privilege matrix is extended by consumer-specific r13 in deployment.md; no real
+host grant or new operational value is selected.
+
+### Focused independent-review remediation — 25 November 2026
+
+This dated record qualifies the earlier implementation and automated-audit claims
+below; it does not erase them. The subsequent independent review of PR #291 at
+`52eb2f9b8eb1fb8cc7faf71da79ed4914739f44b` reported 27/30 functional requirement
+groups, two P2 findings and one P3, with CO09-R02 only partially closed. This
+remediation is the author's verification, **not independent closure or approval**.
+
+Live starting main was `1e4c54be01c78b14aa4734eb6e6e50426dbe3fe6`; initial PR HEAD
+was still `52eb2f9`, merge-base `c5b9ac0ac04b057cef7ee7f62fdcb8143202bc9a`, effective
+diff 21 files / +1342 / -46. Main had advanced only by FE32 PR #272. It was merged
+without conflicts in isolated checkout synchronization commit `a8536fb`; both
+documentation additions were preserved. CO12 PR #290 remained open and was not
+modified or incorporated. The backend has no new dependency on its implementation.
+
+| Finding | Confirmed before remediation | Correction | Durable regression evidence |
+|---|---|---|---|
+| CO09-IR01 P2; remaining CO09-R02 | Real Tomcat encoded `%66ile-materials` and encoded hyphen replacement paths returned 401 instead of 415 for a valid bearer and malformed form body. Encoded uploads also lost `Connection: close`. | `SecurityConfig` shares exact method/path `PathPatternRequestMatcher` instances between authorization, the ordered form-filter exclusion and upload transport. Spring Security 7.1.1 uses Spring 7.0.9's segment-aware request path parser. No custom URI decoding, normalization, firewall changes or global filter disablement. | `FileStorageIntegrationTest.co09Ir01*`: canonical/encoded segments, all eight successful encoded bindings, malformed forms/multipart, valid/invalid/missing bearer, denied actors, media precedence, exact default-deny surface, actual configured unrelated form processing, prohibited paths, and real TCP uploads whose body is never sent before the 403/close response. |
+| CO09-IR02 P2 | Both relational PUT operations returned 400 for `{}` and a missing material instead of descendant-scope 404. | `LearningMaterialService.requireOwnedRelational` performs preliminary coherent read admission using the existing `owned` predicate. The controller completes it before reading/validating JSON. Writers still independently recheck under the unchanged Course-root guard. File on relational routes retains 400; relational material on file routes retains 404. | Real HTTP update/publication: missing material, another Lesson, another Course, owned/wrong-type material, absent/empty/malformed/incomplete/invalid JSON, role/ownership/concealment, unchanged rows after refusal and valid mutations. `AuthorizationIntegrationTest.co09RelationalInvalidJsonKeepsRoleConcealmentAndScopePrecedence` adds the role/concealment matrix; the real-PostgreSQL guard probe removes a material after preliminary admission and both guarded writers still reject it. |
+| CO09-IR03 P3 | Raw 0xFF in file title returned 200. The same lossy-decoding defect accepted relational create (201) and update (200). | All five material JSON handlers read bytes only after admission and use a local UTF-8 decoder with both error actions set to REPORT, then the existing strict closed JSON parsers. Multipart/title/file handling is unchanged. | `FileStorageIntegrationTest.co09Ir03StrictUtf8BytesAndUnicodeOnRealHttp`: actual HTTP bytes 0xFF, incomplete multibyte, overlong and surrogate encodings; 400 and unchanged PostgreSQL rows; wrong-role 403/missing material 404 first; empty/malformed JSON, Vietnamese, supplementary Unicode and genuinely encoded U+FFFD. `CourseServiceTest.co09JsonAdmissionNeverReadsARejectedBody` proves all five rejected handlers never access the input stream or reader. |
+
+All three findings are `FIXED_AND_VERIFIED_BY_REMEDIATION_AUTHOR`. CO09-R02 now has
+the same disposition; it is the same defect as IR01 and is not counted twice.
+The prior 27/30 accounting becomes **30/30 (100% authorized functional code)** on
+the basis of closing these three gaps, inspecting their adjacent manifestations,
+and preserving the previously implemented scope. This is not a new comprehensive
+independent review, downstream UI/QA completion, CODEOWNER approval or release claim.
+
+Execution used Java 25.0.4.1, Spring Boot 4.1.1 / Spring 7.0.9 / Security 7.1.1,
+Tomcat 11.0.27, Docker Desktop 29.8.1, disposable DP01 PostgreSQL 17.11 and the
+existing Compose-pinned MinIO digest. Containers, bucket and credentials were
+ephemeral. No shared or production database/storage was used. Commands ran
+serially from `backend/`:
+
+```sh
+# Before changing production, new regressions only:
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#co09Ir*'
+# Exact encoded PUT counterexample, still before changing production:
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#co09Ir01*'
+# Same first regression selection after the production correction:
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#co09Ir*'
+# Prohibited-path baseline: temporarily restore only the original SecurityConfig,
+# then restore the correction before the final run:
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#co09Ir01FirewallRejectionIsPreserved'
+# Final affected regression selection:
+./mvnw verify -Dtest=CourseServiceTest,JwtTokenProviderTest -Dit.test='FileStorageIntegrationTest#co09*,AuthorizationIntegrationTest#co09*+protectedOperationStillRequiresValidBearerForActiveAccount,AuthorizationIntegrationTest$RefreshSessions#loginIssuesAnHttpOnlyCookieStoresOnlyItsDigestAndBindsTheAccessToken+refreshRotatesTheTokenKeepsTheSessionAndReturnsTheLoginRepresentation+logoutRevokesTheSessionAndItsAccessTokensAndAlwaysDeletesTheCookie'
+git diff --check
+```
+
+| Execution | Actual result | Exit |
+|---|---|---|
+| Initial failing-before selection | 11 tests: 9 failures, 0 errors, 0 skips; one IR01 assertion first exposed the lost close header | 1 |
+| Exact encoded replacement before fix | 4 tests: 3 failures (415 expected, 401 observed), 0 errors/skips; canonical case passed | 1 |
+| Original 11-case selection after fix | 11 passed, 0 failures/errors/skips | 0 |
+| Original SecurityConfig prohibited-path baseline | 4 passed: `%25` and semicolon paths retain current HTTP 401; Tomcat rejects encoded slash/backslash with 400 | 0 |
+| Expanded first run | 77 Course unit tests passed; 23 integration cases had 1 failure from an incorrect test expectation of 400 for the existing firewall/error-dispatch 401 | 1 |
+| Expanded second run | 192 unit tests passed; 31 integration cases had 1 fixture failure because `/file-materials/unknown` is an allowed `{materialId}` route with malformed UUID (400), rather than an unsupported route (403) | 1 |
+| Final selection above | **192 unit tests passed** (82 Course, 110 JWT/Security); **34 integration tests passed** (27 storage/real-HTTP CO09; 4 Course authorization/bearer plus 3 login/refresh/logout). 0 failures, errors or skips | 0 |
+
+The two expanded-run fixture assertions were corrected without changing production
+semantics. A preliminary command invoked `./mvnw` from the repository root and
+exited 127; it ran no tests and is excluded from PASS counts. Empty enclosing
+JUnit suites are not counted as executed tests; the final counts come from
+Surefire/Failsafe cases, including the selected nested session tests. Only the
+three changed production files and the three existing test files are qualified by
+this remediation, plus this documentation update; no test file was added.
+
+Focused self-audit checked the complete remediation delta, route/method parity,
+single decoding, admission/JSON precedence, persisted state after refusals,
+guarded revalidation, valid Unicode, storage/transaction invariants and scope.
+No further confirmed in-scope production defect remains. Previously closed R03,
+R05 and R07 are exercised by the final HTTP/unit selection. R06's unchanged safe
+operation logging and unknown outcomes were exercised; R01's unchanged frontend
+transport and R04's unchanged JDBC diagnostic filter retain their historical
+qualification and were not rerun as part of this delta. No independent reclosure
+is inferred from these author checks. The TCP probe qualifies the early unread-body
+response, not every disconnect during a committed download or production ingress.
+
+Remaining gates: independent delta review, applicable CODEOWNER approval, exact-new-
+HEAD CI, protected integration, downstream QA and operator/release qualification.
+The starting HEAD's refreshed `VM HTTPS ingress` check was SUCCESS; the historical
+libexpat resolution blocker was not current evidence at session start. No Dockerfile,
+dependency pin or workflow was changed, and no remote CI job was manually rerun or
+awaited. Runtime r13 privileges, storage lifecycle, OpenAPI operation/payload shapes
+and the prohibition on material `ContentPublishedEvent` emission remain unchanged.
+
+### Requirement-to-evidence matrix
+
+All rows below are implemented; operational and downstream acceptance are separate.
+`LearningMaterialService` is the application code location unless another owner is named.
+
+| Effective requirement | Production location | Executed evidence | Remaining gate |
+|---|---|---|---|
+| Relational create | `createRelationalMaterial`, strict `CourseStructureRequests.relationalMaterialWrite` | Course unit shape matrix; real Tomcat POST and PostgreSQL | Independent review |
+| Relational update | `updateRelationalMaterial`, existing six-column repository SQL; immutable type/ancestry | Real service and HTTP PUT, runtime-role real backend | Independent review |
+| Relational publication | `setRelationalMaterialPublication` | Service/HTTP PUT, runtime-role backend | Independent review |
+| File create, hidden default | `createFileMaterial`, guarded store-then-write | Real Tomcat POST, PostgreSQL + pinned MinIO | Operational upload/storage qualification |
+| File title update | `updateFileMaterialTitle` | Service/HTTP JSON PUT | Independent review |
+| File replacement | `replaceFileMaterialFile` | Service/HTTP multipart PUT, fresh keys and old-object removal | Operational qualification |
+| File publication | `setFileMaterialPublication` | Service/HTTP JSON PUT, Learner download after publication | Independent review |
+| Protected download | `downloadMaterialFile`, controller synchronous try-with-resources | Raw Tomcat byte/header readback; authorized owner and Learner | QA10/operational acceptance |
+| Strict text/video shapes, verbatim Markdown, exact canonical video | DTO parser and `relational`, `canonicalVideo` | `CourseServiceTest.co09ClosedShapesCanonicalVideoAndUtf8Filenames`; real text/video persistence | FE14 rendering is separate |
+| Authentication, role, ownership, concealment, membership and ancestry | Existing CT01/CT03, exact material URL rules in `SecurityConfig` | `AuthorizationIntegrationTest.co09DownloadAuthorizationConcealmentAndScopeMatrix`; deferred accessor refusal | Independent security review |
+| Admission before every part; exact parts/multiplicity; error precedence | Lazy multipart, deferred Servlet Parts, query-only request access, narrowly bypassed ordered form filter | Actual Tomcat unauthenticated401, wrong-media415 before role, malformed unauthorized403, malformed admitted400, oversized unauthorized403 and admitted413; hostile GET remains404 | Ingress transport remains operational |
+| Filename UTF-8 byte bound, PDF extension/signature, nonempty/size limit, client type ignored | `validateFilename`, buffered five-byte signature read, per-file check | Unit boundary matrix, real consumer invalid-part test, PDF sent as text/plain, raw UTF-8 filename | Explicit operator limit required |
+| No key/filename/URL metadata exposure; fresh UUIDv4 keys | Existing `Material` DTO, generated material keys | Real response checks; fresh-key/version assertion | Independent review |
+| No object key diagnostics | Existing `S3FileStorage.ProviderDiagnosticsFilter`, extended for JDBC/driver/bind/error output | Actual StatementCreatorUtils TRACE through Boot default and ECS output qualification | Application-owned output configuration only |
+| Three transaction outcomes; explicit flush; reject outer transaction | `storeThenWrite`, `Outcome`, existing Course-root guard | Real PostgreSQL COMMIT executed then lost ACK, commit-phase failure before COMMIT, injected precommit statement fault; both uncertain cases retain both objects; outer-call refusal | Operational recovery remains separate |
+| Failed store and best-effort deletion | Same lifecycle and safe cleanup | Real adapter + test-scoped faults; fresh-key delete attempted; cleanup failure leaves an unserved orphan | No orphan sweeper authorized |
+| Read-only REPEATABLE READ, release connection before open/write | `downloadRow`, programmatic snapshot | Actual PostgreSQL SHOW assertions; paused real object stream with Hikari maximum1 while another SQL request completes | Runtime pool/concurrency sizing remains separate |
+| Retry exactly once only for superseded ObjectNotFound | `downloadMaterialFile` | Real MinIO delete/replacement race, unchanged missing key, provider failure without retry | Independent review |
+| Checked closure, suppressed exceptions, header/copy/disconnect failure | Controller try-with-resources, response reset before commitment | `CourseServiceTest.co09DownloadOwnsStreamAcrossHeadersCopyDisconnectAndCloseFailure`; title close-failure regression | Real network disconnect behavior remains a QA transport gate |
+| Raw multipart/Blob transport, safe names, generation/cancellation/error semantics | Existing shared `httpClient.ts`, additive contract types | 121 HTTP transport tests and TypeScript check, including File/Blob, 413, unknown upload outcome and no replay | FE14/learner material UI not integrated here |
+| Runtime least privilege and immutable-field denial | r13 matrix, existing deploy qualification | Matrix contract sync; disposable PostgreSQL containment; real backend consumer and upgrade mechanism | No grants on shared/production DB |
+| No progress/adaptive/event side effects | No such application call in material methods | Existing Course regression and production call-path audit; combined checkout records no ContentPublishedEvent from material operations | CO12/IN15 independent review |
+
+### Executed commands and scope
+
+Java25/Maven Wrapper, disposable DP01 PostgreSQL, the pinned Compose MinIO digest
+`8793e960474071520bdb91bb9a6d1793eb229fdbc9dcb7ec75ad836b69bbab40`, ephemeral
+bucket/application identity, real loopback Tomcat, Node24 and repository Vitest were used.
+No shared database or storage was touched. Run Maven commands serially per checkout;
+a concurrent recompilation during another JVM's component scan caused one discarded
+harness startup failure, resolved by a serial rerun with no production change.
+
+```sh
+cd backend
+./mvnw -Dtest=CourseServiceTest test
+./mvnw -Dtest='CourseServiceTest#co09*' test
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#co09*'
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='AuthorizationIntegrationTest#co09*'
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='FileStorageIntegrationTest#diagnosticConfidentialityDuringConcurrentLoggingInIsolatedJvm+co09RealTomcatMultipartPrecedenceAndBinaryHeaders'
+cd ../frontend
+npm ci --ignore-scripts
+npm test -- src/shared/api/httpClient.test.ts
+npm run typecheck
+cd ..
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+BUILDKIT_PROGRESS=plain docker build -t codemastery-backend:privilege-test backend
+bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
+```
+
+These are targeted commands, not a whole-suite qualification. Initial consumer execution
+ran 7 cases (6 passed; the statement-fault test double needed correction). The corrected
+case passed 1/1. The later 2-case size/HTTP run exposed R07 below; remediation passed 2/2.
+The final 2-case download/HTTP run passed 2/2 (UTF-8 filename, all eight HTTP bindings,
+raw bytes, snapshot and paused one-connection pool). Authorization passed 1/1. The
+logging/HTTP audit pair passed 2/2. Course unit coverage passed 76/76, followed by the
+three CO09-specific cases passing 3/3 after the title-close regression was added.
+Transport passed 121/121; TypeScript passed. Zero skips in successful targeted runs.
+The runtime script's first run passed the CO09 operations but failed synthetic FK
+cleanup; the fixture was corrected. The final consumer and Flyway-upgrade runs both
+passed, with zero permission-denied/42501 backend log entries. The final logging/
+consumer pair passed 2/2 after translated transaction-exception diagnostics were
+added to the output-boundary regression.
+A premature selector before the new test source existed ran 0 tests and is not evidence.
+Unchanged unrelated suites and remote CI were not repeated or awaited.
+
+### B5 oracle allocation
+
+| Oracles | CO09 ownership and evidence |
+|---|---|
+| O01–O04 | Applicable authorization, keys, PDF/filename/signature/size and precedence; unit, authorization and actual Tomcat consumer cases above |
+| O05(a)–(g) | Applicable lifecycle; real PostgreSQL/MinIO with test-only statement, store/delete and connection COMMIT faults; unknown outcomes retain both objects |
+| O06–O09 | Assignment deadlines, grading, first-submission and replacement lifecycle are AS09-owned and excluded |
+| O10 | Applicable headers and exactly one missing-superseded-object reread; real MinIO and Tomcat |
+| O11 | Assignment grading-to-quiz side effects are excluded; material no-progress/no-event behavior is checked separately |
+| O12 | FE widget/unknown-outcome UI and grading-token clauses are downstream; shared transport handling alone is delivered |
+| O13 | Applicable lazy binding and full staged precedence; raw Tomcat includes default form-filter and hostile multipart GET regressions |
+| O14 | Applicable read-only REPEATABLE READ and no connection while streaming; real one-connection pause/SQL barrier |
+| O15 | Applicable resource ownership, checked close and suppression; production copy/header paths plus real storage boundary |
+| O16 | File/Blob bytes and filename transport plus raw server byte readback apply; ZIP/submission and full widget/browser qualification remain downstream |
+
+### Comprehensive automated audit and remediation
+
+One isolated automated review covered both complete effective PR diffs, followed by
+closure checks after corrections. It is not human CODEOWNER approval.
+
+| Finding | Severity | Confirmed scenario | Correction and regression |
+|---|---|---|---|
+| CO09-R01 | P2 | Lost 201 response body classified as ordinary protocol failure | Every unusable multipart success representation is unknown outcome; response-stream rejection regression |
+| CO09-R02 | P2 | Default FormContentFilter parses malformed form PUT before authentication | Skip only material routes using OrderedFormContentFilter; real Tomcat malformed percent body yields401/415 |
+| CO09-R03 | P2 | Download query binding resolves hostile multipart before admission | Raw request/query-only access; actual GET malformed multipart yields admission404 |
+| CO09-R04 | P2 | JDBC TRACE prints private bound object key | Extend existing output deny boundary; actual JDBC TRACE default/ECS probe |
+| CO09-R05 | P3 | Title close failure strands a file stream opened for a canceled return | Close title before acquiring file; unit proves file stream never acquired |
+| CO09-R06 | P3 | Unknown-outcome log omits operation name | Constant create-file/replace-file plus row/correlation IDs, without key/filename/exception |
+| CO09-R07 | P2 | BusinessRuleException rejects413, producing500 | Use Spring MaxUploadSizeExceededException; real admitted oversized upload and direct per-file size tests pass 413 |
+
+All seven confirmed in-scope findings are corrected. No confirmed CO12 production
+defect was found. No unresolved fixable production defect is retained.
+
+### Necessary upstream additions and completion boundaries
+
+FE03 #56 owns the existing shared HTTP transport. The required multipart/binary
+extension is a small slice, estimated 10–15% of FE03's effective responsibilities:
+it extends part of one shared-HTTP responsibility while leaving routing, provider,
+guards, Auth flows, session coordination and UI intact. Existing approved files only:
+httpClient.ts, its tests and apiTypes.ts; 7 new transport cases among 121, plus typecheck.
+SH05 #154 receives only the necessary JDBC diagnostic extension in its existing
+filter and dual-format test, estimated 5–10% of its 26 functional/qualification
+responsibilities. No storage API or adapter lifecycle is substituted. These estimates
+use responsibilities, complexity and verification, not lines of code. They are the
+aggregate additions across the two PRs. No CO03/CO06/CO16 upstream slice was missing;
+the existing repository methods, guard, authoring operation and joined query are reused.
+
+AI-assisted work: Codex implemented/remediated and verified the change under the
+Project Leader's explicit task. An isolated automated reviewer reproduced defects
+and checked closure. The Leader explicitly requested TamiaoNguyen metadata using the
+verified existing associated email, with chi-thanh-nguyen as authenticated pusher.
+Original contributor commits are preserved; no independent human acceptance is claimed.
+Backend code, shared transport and API persistence availability are distinct from
+FE14/learner UI, AS09, QA10, formal review, CI and operational/release acceptance.
+
+## CO12 publication producer qualification — 25 November 2026
+
+PR #290 implements CO12.event under `CT26-EVENT-2026-11-15-r1` and consumes
+`CT26-SUBSCRIPTION-2026-11-15-r1` only as the producer's transaction boundary
+(ADR012 §§8–9.1, B7-O02). CT21 authoring r1, ADR006 §§3/5, ADR005's unchanged
+Course-root guard, CT14 placement and CT39's negative global-Clock selection apply.
+The actual publication call is `CourseStructureService.setCourseLessonPublication`;
+`CourseManagementService.publishLessonPublished` checks the held root, flushes,
+reads the current Course and joined recipients, then publishes inside that unit.
+
+| Requirement | Production evidence | Executed oracle |
+|---|---|---|
+| Actual hidden-to-published Lesson of a published Course only | Structure publication calls helper only in the changed-to-published branch; helper checks Course status | `InteractionAdminIntegrationTest.co12PublicationReconcilesThenDeliversOnlyAfterCommitAndConsumerFailureIsIsolated` |
+| Reconciliation and flush precede event; recipient set is active/completed, unsigned UUID ascending, distinct and immutable | Existing JDBC reconciliation/joined query, explicit persistence flush, UUID-string ordering and event defensive copy | Same integration case; `CourseServiceTest.co12PayloadUsesOperationClockUnsignedUuidOrderAndFlushBeforeEvent` uses high-bit UUIDs and verifies order of calls |
+| UTC operation-local injectable Clock, exact microseconds, no global bean | Management constructor delegates to local Clock seam and truncates to MICROS | Fixed nanosecond Clock unit test |
+| No-op, hiding, Course publication, edits, Chapter changes and reorder are silent | Sole production helper call is the Lesson transition branch | Interaction case and `EnrollmentIntegrationTest.co12UnauthorizedForeignAndNonPublicationMutationsAreSilent` |
+| Unauthorized, missing and foreign-scoped publication has no event | Existing CT03 admission and authoritative guard precede the branch | Enrollment negative cases and affected authoring regression |
+| Rollback silence, no recipients, committed producer survives listener failure | Spring transactional event synchronization; no production subscriber is added | Two `InteractionAdminIntegrationTest#co12*` cases; test-only AFTER_COMMIT + REQUIRES_NEW probe reads published state on a separate connection before deliberately failing |
+
+Executed with Java 25.0.4.1, the Maven Wrapper and disposable DP01 PostgreSQL:
+
+```sh
+cd backend
+./mvnw -Dtest=CourseServiceTest test
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='InteractionAdminIntegrationTest#co12*,EnrollmentIntegrationTest#co12*+instructorAuthorsOwnedContentAndLessonPublicationReconcilesLearnerCompletion+coursePublicationChangeReconcilesJoinedCompletionWithoutCascadeOrAdaptiveRewrite+learnerCompletionWaitsBehindAnInstructorLessonPublicationAndCountsTheNewRequiredSet+instructorPublicationAndAdministratorHideSerializeOnTheRootAndTheLastCommitWins'
+```
+
+The unit run passed 75/75. The final integration selection passed 7/7: two event
+transaction cases in InteractionAdminIntegrationTest, the negative publication
+case and four affected authoring/reconciliation/root-serialization regressions in
+EnrollmentIntegrationTest. No failures, errors or skips remained. Earlier iterations exercised the same producer with three passing
+Course integration cases; transaction cases now live in ADR012 §19.3's dedicated
+Interaction/Admin suite. The deliberate after-commit error is expected evidence,
+not a producer failure. Tests use committed FK-safe fixtures and no shared database.
+
+The comprehensive automated audit of PR #290/#291 found no confirmed CO12
+production defect. This is author-side automated verification, not independent
+human CODEOWNER acceptance. IN15's actual production subscriber, notification
+persistence, pool-capacity operational qualification, QA and protected integration
+remain separate gates. No notification workflow, broker, outbox or global Clock
+was implemented. No remote CI run was awaited or dispatched.
+
+AI-assisted work: Codex implemented and tested the producer under the Project
+Leader's explicit instruction; an isolated automated reviewer inspected both full
+diffs. The Leader explicitly requested TamiaoNguyen author/committer metadata,
+with the verified existing associated email and the Leader's authenticated push.
+Original skeleton attribution is preserved; no human review is claimed.
+
 ## SH05 storage adapter qualification — 25 November 2026
 
 `FileStorageIntegrationTest` implements the SH05 portion of ADR012 §19.3 at its
@@ -835,7 +1215,7 @@ Together they define eight independent jobs on `ubuntu-24.04`:
 
 | Job display name (ID) | What it runs |
 | --- | --- |
-| Backend (`backend`) | Temurin 25; `./mvnw verify` from `backend/`, including the Testcontainers integration tests on the runner's Docker |
+| Backend (`backend`) | `infrastructure/vm/tests/test-maven-wrapper-pins.sh` (offline host Maven Wrapper pin regression, [record](#pr-293-host-wrapper-pin-remediation-ir293-sec-01--26-november-2026)); then Temurin 25 and `./mvnw verify` from `backend/`, including the Testcontainers integration tests on the runner's Docker |
 | Frontend (`frontend`) | Node 22; `npm ci`, `npm test`, then `npm run build` from `frontend/` |
 | VM deployment script (`deployment-script`) | Checks of `infrastructure/vm/deploy.sh` without starting the application: shell syntax, authorization gates, Compose and provisioning guards, the runtime privilege matrix, env-file custody, preflight against rendered Compose, release-archive identity models and image identity through a real `docker save`/`load` round trip |
 | VM deployment PostgreSQL and containment tests (`deployment-script-postgres`) | The runtime privilege matrix on the real migrated schema, failure containment and published-port verification against real containers |
@@ -7521,3 +7901,443 @@ This changes test synchronization only, with no production implementation change
 no rule suppression, tolerance change or removed assertion. Focused browser verification passes 6 cases in each of Firefox 155 and WebKit 26.6,
 and the 8 harness lifecycle tests pass for this follow-up; the earlier full
 matrix and runtime-source evidence remain applicable to the identical application.
+
+
+## IN07 notifications — 25 November 2026
+
+PR #292 implements CT11.create and CT11.read
+([ADR012 §4](decisions/012-batch-07-contract-approvals.md#4-ct11-notification-core)).
+Test placement follows
+[CT14-IN07-PLACEMENT-2026-11-25-r1](repository-structure.md#in07-test-placement--25-november-2026)
+and the runtime matrix follows
+[CT17-P6-PRIVILEGES-2026-11-25-r13](deployment.md#ct17-p6-privileges-2026-11-25-r13--in07-notifications-25-november-2026).
+
+| Executed check | Result and IN07 evidence |
+| --- | --- |
+| Focused Maven Wrapper `verify` with `NotificationServiceTest`, `NotificationRepositoryIntegrationTest` and `AuthorizationIntegrationTest$NotificationEndpoints` | Build succeeded: 14 unit tests and 14 integration cases, zero failures, errors or skips. PostgreSQL 17.11 with V001–V009. The repository cases cover actual INSERT, duplicate collapse and counts, missing-recipient rollback after an earlier successful INSERT, simultaneous creators with opposite input order, and service execution under exactly the r13 notification privileges. The HTTP cases cover all four routes for all three active roles, 401 before validation (including locked accounts and revoked sessions), 400 for malformed input, indistinguishable 404s, no-store, response shapes, stable order, distant empty pages with exact totals, ownership, persistence, and ignored bodies. |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | PASS. The 27-relation matrix matches the existing revisions and the one r13 row. |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | PASS. The disposable PostgreSQL runtime role can read, insert idempotently and update only `is_read`. Re-key, recipient, message and timestamp updates, DELETE and TRUNCATE all return SQLSTATE 42501. Existing containment and upgrade checks also pass. |
+| Backend Dockerfile build and `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | PASS with the locally built image and disposable databases. The four HTTP operations execute under the provisioned runtime role. SQL fixtures use the runtime-role INSERT, and the HTTP assertions verify the committed mark-read and mark-all-read state and foreign-row isolation. The existing Flyway upgrade cases also pass. |
+| OpenAPI, shell syntax and whitespace checks | PASS. The four operation bindings, schemas, authentication, statuses and no-store headers match. Other OpenAPI operations and schema definitions are unchanged. |
+
+This covers the IN07 portions of B7-O01, B7-O04, B7-O12 and B7-O18. Producer,
+reminder and browser cases belong to their implementing Issues. This is
+remediation-author verification. Independent review, CI and protected
+integration are separate gates. No shared environment was used.
+## CI package-index remediation qualification — 25 November 2026
+
+Leader-authorized investigation and narrowly scoped remediation on
+`fix/ci-libexpat-security-pin`, based on `main` 1e4c54b. See the complete
+[incident and security record](deployment.md#dp01-ci-package-index-remediation--25-november-2026).
+Only the release libexpat pin is raised, to signed Alpine v3.24/main 2.11.0-r0;
+an installed-version assertion is added to the existing build regression.
+
+Local environment: macOS arm64, Docker Desktop Linux/aarch64 daemon, amd64
+images executed under emulation. Clean builds passed `--platform linux/amd64
+--no-cache --progress plain`; FROM/COPY metadata reuse is not a cached RUN.
+The new installed-package assertion also rejects the inherited base (exit 1)
+and accepts the candidate (exit 0), without network access.
+Subsequent existing-script runs use `DOCKER_DEFAULT_PLATFORM=linux/amd64` and
+may reuse build layers. All images use task-specific local tags, with synthetic
+credentials/certificates and disposable networks/databases only.
+
+| Command / scenario | Result |
+| --- | --- |
+| Exact pinned release base, root, fresh official signed indexes: `apk add --no-cache libexpat=2.10.0-r0` | FAIL as expected, exit 4, exact CI world/fontconfig signature; 2.11.0-r0 is the current index candidate |
+| `docker build --platform linux/amd64 --no-cache --progress plain --target release --build-arg PUBLIC_ORIGIN=https://ingress.codemastery.test -t codemastery-ci-investigation/frontend:release frontend` | PASS; signed exact pins resolve, including 2.11.0-r0 |
+| Same clean build, default frontend target, tag `codemastery-ci-investigation/frontend:local` | PASS; bounded related-pin audit includes all local runtime pins |
+| `docker build --platform linux/amd64 --no-cache --progress plain -t codemastery-ci-investigation/backend:qualification backend` | PASS; current Maven bootstrap and compilation succeed; Maven tests intentionally skipped by the existing Dockerfile |
+| `bash infrastructure/vm/tests/test-ingress-release-image-build.sh` | PASS; new installed libexpat assertion, Nginx binary/modules 1.30.7, UID 101, root-owned non-writable config, no setuid/setgid files in all three images, eight invalid/missing origin refusals |
+| `test-java-truststore.sh` (invoked by the build regression) | PASS, 13 build cases, including prohibited-root mutations and verification failures |
+| `bash infrastructure/vm/tests/test-ingress-release-ca-store.sh` | PASS, three chain/hostname positive and negative controls, with installed Homebrew OpenSSL 3 first on PATH; macOS default OpenSSL lacks the required verify option and its initial run failed |
+| `bash infrastructure/vm/tests/test-ingress-stub-backend.sh` | PASS, 168 assertions, `INGRESS_STUB_TESTS_PASS` |
+| `bash infrastructure/vm/tests/test-ingress-real-backend.sh` | PASS, 83 assertions, `INGRESS_BACKEND_TESTS_PASS`; real disposable PostgreSQL/Flyway and backend |
+| `bash infrastructure/vm/tests/test-ingress-dp01-preflight.sh` | PASS, `INGRESS_PREFLIGHT_TESTS_PASS`, inside disposable Ubuntu 24.04 amd64 Docker-in-Docker, non-root operator with Docker/sudo and root-custody cases. Actual host platform/custody gates remain enforced |
+| Trivy 0.76.2 default and comprehensive on final rebuilt image archives | Frontend release 0/0, local 0/0; unchanged backend 34/34 (29 MEDIUM, 5 LOW; no listed fixed versions), no Java findings. Database updated 25 November 13:07:24 UTC; no ignored vulnerabilities |
+| Same database, default scan of the exact inherited release base | Four libexpat 2.9.0-r0 HIGH findings, each listing 2.10.0-r0 as fixed; none reintroduced on the candidate |
+| `bash -n infrastructure/vm/tests/test-ingress-release-image-build.sh`; `git diff --check` | PASS |
+
+The final scan archive configuration identities are recorded in deployment.md.
+The regression script rebuilds tags, so earlier scans were not reused as proof
+for those final artifacts. Nginx signing-key SHA-512 and ABI-compatible dynamic
+modules remain enforced by the build and regression. The installed fontconfig
+library resolves the new `libexpat.so.1` successfully; real Nginx startup/HTTPS
+tests pass. Both frontend final filesystems have no reported libexpat finding.
+Inherited base-layer bytes are not claimed erased by these merged-view scans.
+
+The complete VM runtime-privilege script was also attempted. macOS's shell/host
+run exited before assertions; a disposable Alpine amd64 harness completed the
+consumer phase (`RUNTIME_CONSUMER_TESTS_PASS`) but exited 2 before the upgrade
+phase. These are not full-suite passes. The final complete run on Ubuntu 24.04
+amd64 passed both `RUNTIME_CONSUMER_TESTS_PASS` and `RUNTIME_UPGRADE_TESTS_PASS`,
+including real Flyway V008/r3 -> V009/r4 provisioning, invalid-history refusals
+and CO08 writes after upgrade. No test or host-policy gate was weakened.
+
+Self-audit caught an initial assertion using `apk info -v libexpat`, which prints
+descriptive metadata with APK 3. The assertion now checks the installed inventory
+from `apk info -v` instead, and the complete build regression passed afterwards.
+No other confirmed in-scope implementation defect was found in the reviewed
+diff; this is author-side automated evidence, not independent human approval.
+Full local application unit/integration/E2E suites, release candidate creation,
+MinIO/PostgreSQL image requalification and production deployment were not run
+for this isolated frontend package change. The existing workflows remain the
+protected CI gates; pending or skipped executions are not passes. No full release
+or risk acceptance is asserted for the unchanged backend residual findings.
+
+AI-assisted work: Codex investigated logs and upstream metadata, implemented the
+pin/assertion, and executed the listed local checks under the Leader's task.
+
+## Maven bootstrap reliability qualification — 25 November 2026
+
+[The recurrence and design record](deployment.md#maven-bootstrap-reliability--25-november-2026)
+documents the scope, source provenance and consumer matrix. This follow-up used
+the existing isolated PR #293 branch on `main` 1e4c54b, with the frontend
+libexpat pin and its installed-version assertion preserved.
+
+| Command or evidence | Result |
+| --- | --- |
+| `bash infrastructure/vm/tests/test-maven-bootstrap.sh`, then `MAVEN_TEST_PLATFORM=linux/arm64` with the same command | Ten cases pass on each platform, amd64 emulated and arm64 native in Docker Desktop. Correct and CRLF properties work offline. A changed executable, removed JAR, added file, wrong executable mode, different requested version, alternate source and duplicate URLs fail before Maven runs. |
+| `docker build --no-cache --platform linux/amd64 --progress plain -t codemastery-ci-investigation/backend:combined backend` | Pass. Verified Maven 3.9.16, zero direct distribution requests, one package invocation. BuildKit can reuse the input image blobs even when `RUN` caching is disabled. |
+| `docker build --platform linux/arm64 --network none --target maven-bootstrap --output type=cacheonly backend` followed by the same command | Pass. The repeat used the verified stage from the local builder. The full arm64 backend build also passed before the CRLF guard refinement. The refined guard passed the native arm64 fixture matrix. |
+| Disposable source-only edit, `docker build --platform linux/amd64 --network none --target build ...` | Verified Maven stage cached. The single packaging command failed with nonzero exit at unresolved project dependency. This establishes both source-only reuse and an observable dependency failure. |
+| `docker build --no-cache --platform linux/amd64 --network none --target truststore-verifier --output type=cacheonly backend` | Pass. `javac` ran without a Maven stage or project dependency downloads. |
+| Host `cd backend && ./mvnw -B verify`, macOS arm64 Temurin 25.0.4.1 and disposable Testcontainers | 1,146 unit and 594 integration tests pass, no failures or skips. Uses the existing host Wrapper path. |
+| Combined build/origin regression, public CA chain, stub and real backend ingress, and Ubuntu amd64 DP01 preflight | Pass. Includes 13 Java trust-store cases, eight invalid-origin refusals, three CA controls, 168 stub assertions and 83 real-backend assertions. The re-exported backend from the real ingress build has the same scanned config and application layer. |
+| `python3 -m unittest discover -s infrastructure/release/tests` | 95 pass, with release tooling operating on test fixtures. The release backend build uses the same Dockerfile and amd64 target. |
+| Exact exported frontend and backend archives, pinned Trivy 0.76.2, precise and comprehensive | Both frontend targets 0/0. Backend 34/34, including 29 MEDIUM and 5 LOW with no listed fixes, matching the prior finding set. Vulnerability DB updated 25 November 13:07:24 UTC. |
+
+The backend scan archive contains config
+`sha256:03a9e488bd0edd92d58fbd1ddcfa0a658ed5e2230e1b1b3ada7985107b9564c5`.
+The frontend archive configs match the two previously qualified frontend
+identities above. The root inspection of the new backend verifies no Maven
+directory, Maven cache, Maven command, compiler or setuid/setgid files. The
+runtime user and root-owned `0444` JAR are preserved. The prior backend JAR
+and this scanned JAR have the same 754 archive entries. The only entry with a
+byte difference is `META-INF/build-info.properties`, whose build time changed.
+
+This is author-side qualification. The original rollout's host Wrapper remains
+unchanged and its installed distribution cache is not reverified on every
+invocation. The Docker bootstrap deliberately removes the outbound distribution
+request, so HTTP 429/503, timeout and reset retries for that request do not apply.
+Docker Hub and repository dependency retrieval can still fail. Do not interpret
+local layer reuse as cross-run GitHub cache availability.
+
+AI-assisted work: Codex inspected the Actions logs and upstream artifacts,
+implemented the Docker bootstrap change, and executed the local qualification.
+
+### PR #293 author-side Maven regression follow-up
+
+The earlier ten-case runs above apply to `94118b6`. Its GitHub E2E job reported
+114 passed and six skipped on Linux, and its release rehearsal passed. Its
+Backend job passed on attempt 2 with 1,146 unit and 594 integration tests.
+Attempt 1 had one SH05 integration failure. The parent reported exit 1
+without the child's assertion, so the original cause remains undetermined.
+
+The follow-up runs `bash infrastructure/vm/tests/test-maven-bootstrap.sh` in
+the required `VM HTTPS ingress` job. The 18 cases passed locally on amd64
+(emulated) and arm64 (native) with Docker Desktop. Cases cover the reviewed
+archive, LF and CRLF, value whitespace, comments, four distribution tree
+mutations and malformed, empty, conflicting or mismatched URL declarations.
+The harness checks the explicit build target, verifies marker placement and
+requires actual output from the verifier. Disposable controls showed that
+unrelated registry errors, command echoes, diagnostics from other steps and
+malformed markers do not count as passes.
+
+The release frontend inventory check now uses a fixed-string match. The
+synthetic inventory line `libexpat-201100-r0` matched the old regular
+expression and fails the literal check. The installed `libexpat-2.11.0-r0`
+line passes.
+
+The clean amd64 rebuild ran one Maven package command. The runtime retained
+its non-root user, read-only JAR and Java trust-store check. Comparing the
+754 JAR entries with the earlier qualification found only a build timestamp
+change. Trivy 0.76.2, using the database dated 25 November 2026 13:07 UTC,
+reported the same 29 MEDIUM and five LOW findings with no listed fixes in both
+detection modes. These scan results are a point-in-time measurement.
+
+AI-assisted work: Codex performed the author-side review, corrected the Docker
+URL check and CI regression harness, and ran the follow-up qualification.
+
+### PR #293 independent-review remediation (IR293-01) — 26 November 2026
+
+The comprehensive independent review of `f97af14` requested changes. Finding
+IR293-01 (P2) showed three harness false passes. Each was reproduced on that
+baseline against disposable Dockerfile copies, native `linux/arm64`, and each
+run reported 18/18 and exit 0:
+
+| Control | Baseline mechanism | Independent observation |
+| --- | --- | --- |
+| A: the verifier runs the replaced launcher quietly (`>/dev/null 2>&1 \|\| true`) before the digest check | Execution was inferred only from launcher output in the build log, and the expected digest failure satisfied the case | A sentinel that slept 5 s delayed the verifier's `FAILED` line to 5.058 s, against 0.066 s and 0.113 s for other tree mutations |
+| B: the verifier no longer runs Maven; a second `RUN --network=none` inside the marked block prints `Apache Maven 3.9.16` | Output of every offline `maven-bootstrap` RUN counted as verifier output | The version line came from step 5/5, not from the verifier at step 4/5 |
+| C: a RUN after the end marker overwrites the verified launcher | Extraction stopped at the end marker | The instruction occurs once in the source Dockerfile and zero times in the test copy |
+
+`test-maven-bootstrap.sh` now:
+
+- copies the Dockerfile through the end of the `maven-bootstrap` stage. Exactly one stage of that name is allowed. Before the begin marker, only `WORKDIR` and `COPY` are allowed. The single RUN must directly follow the begin marker, and the end marker must directly follow that RUN. Nothing may follow it in the stage. Heredocs and malformed, duplicated or misplaced markers are refused.
+- inserts, in the test copy only, after the begin marker: the case mutation and a test-only `SHELL` wrapper for the unchanged verifier. The wrapper runs the command with `/bin/sh -c`, as the default shell does, records its exit status and exits 0. BuildKit discards a failed step's filesystem, and a cache mount did not persist between builds here, so this is how the record survives an expected failure.
+- exports the record and requires status 0 for accepted cases and exactly 1 for rejected cases. A missing or malformed record fails.
+- uses a sentinel launcher that creates a marker file in the committed layer. Any marker fails the run, whatever the launcher printed.
+- attributes diagnostics only to the final `maven-bootstrap` step and refuses zero or several such steps.
+- refuses 11 Dockerfile regressions with the stated reason: Controls A, B and C, an offline RUN before the block, a masked verifier exit status, the expected diagnostic printed by a failed setup step, a missing begin marker, a duplicate end marker, an end marker inside the RUN, markers outside the target and a second target stage.
+
+`backend/Dockerfile`, the production verifier and the workflow are unchanged. The
+existing required step runs the 18 cases and the 11 controls; any failure exits
+nonzero.
+
+| Command or evidence | Result |
+| --- | --- |
+| `MAVEN_TEST_PLATFORM=linux/arm64 bash infrastructure/vm/tests/test-maven-bootstrap.sh` (native) | 18 cases and 11 controls pass, exit 0 |
+| `bash infrastructure/vm/tests/test-maven-bootstrap.sh` (amd64 under emulation) | 18 cases and 11 controls pass, exit 0 |
+| Corrected harness against the Control A, B and C fixtures | All fail, exit 1, no pass line. A: `Unverified Maven launcher executed before verification`. B: `RUN outside the verifier block`. C: `instruction after the verifier end marker` |
+| Control A with the 5 s sentinel under the corrected harness | `FAILED` at 5.061 s and the run is refused. The sentinel's output text appears only in the echoed mutation command |
+| Extraction, control transforms and attribution under macOS awk and Ubuntu noble mawk | Identical refusals and byte-identical extracted Dockerfiles |
+| `bash -n`; `git diff --check` | Pass |
+
+Author-side evidence on Docker Desktop 29.8.1 (Linux arm64 daemon), not
+independent review. The earlier artifact-level qualification still applies
+because no build input or runtime artifact changed. A hosted run of this
+revision is pending at the time of writing.
+
+AI-assisted work: Claude Code reproduced the findings, corrected the harness
+and ran these checks under the Leader's remediation task.
+
+### PR #293 remaining CI failures — 26 November 2026
+
+The hosted observation after the earlier IR293-01 cutoff is
+[CI VM 45663373135 attempt 3](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45663373135/job/139636899469).
+The checked-out merge SHA was ff0c388707848e73b53860b133615e5c6d4057d4.
+Ingress passed 29 Maven controls. Attempts 1 and 2 had six successful VM
+jobs and failed ingress before the old placement of the regression step.
+The Job now runs the mandatory verifier harness before the network-dependent
+backend packaging step. Two new controls reject a missing or overridden
+explicit network-disable flag, bringing the suite to 31 controls.
+
+The Backend SH05 parent now consumes only an exact allowlisted phase or
+completion token from a private temporary result file. Raw child stdout and
+stderr are discarded and the child's confidentiality assertions still inspect
+their original captured logging. The parent distinguishes failure in a named
+phase, timeout and abnormal or incomplete termination. A negative control
+throws with synthetic protected text and requires the exact sanitized failure
+message. Another child emits a completion-shaped stdout line and exits
+successfully without writing the result; it must fail the parent check. The
+original CI exit 1 remains unattributed.
+
+Two failures in shared VM fixtures were also investigated. The SSH
+qualification sometimes embedded a space in the Docker tag after truncating
+short decimal cksum outputs; the recovery test had the same construction.
+Both now use the checksum field in full. Also, a release rehearsal reported
+a permission failure when the digits 42501 appeared in an ordinary log
+timestamp. The runtime checks now recognize actual permission-denied text
+or the SQLState field Hibernate emits. The inline control includes the
+historical timestamp, a longer SQLState-like token and two genuine denial
+forms. A failed Docker log read fails the test.
+
+### PR #293 host Wrapper pin remediation (IR293-SEC-01) — 26 November 2026
+
+The independent review of `5bf8a62` requested changes for IR293-SEC-01 (P2):
+the host Wrapper archive pins could be removed without any check failing. It
+also raised IR293-R2-01 (P3) on the Retry-After description. Both were
+reproduced before the correction.
+
+On `5bf8a62`, macOS arm64, the official Apache 3.9.16 archives were served from
+a local file mirror to a disposable `MAVEN_USER_HOME`. The Unix Wrapper started
+Maven with both pins blank, both absent, the TAR.GZ pin absent or malformed, a
+wrong ZIP declaration followed by the correct one, or the pins supplied only
+as environment variables. With blank pins it ran a pre-existing installation
+from the unpinned cache namespace. A wrong pin, uppercase hex and a ZIP pin
+with only a leading-space spelling already failed. Because the Unix Wrapper
+read the pins only when they were present, upstream's unpinned path remained
+reachable. The PowerShell body also emitted a launcher for absent or blank
+pins, an absent, blank or malformed TAR.GZ pin, a space before `=`, and blank
+pins with an installation in that namespace.
+
+`mvnw` and the PowerShell body of `mvnw.cmd` now read both pins from the file
+before choosing an installation. Each must appear exactly once as
+`name=<64 lowercase hex>`. Archive verification always runs before extraction.
+The Backend job runs `test-maven-wrapper-pins.sh` before Java setup. The script
+copies the committed scripts into disposable projects whose paths contain a
+space. It serves a synthetic distribution (not Apache Maven) and a tampered
+copy from a local file mirror. For `mvnw`, a minimal `PATH` uses shims to record every download, extraction
+and Maven start. Each rejected case must fail for its pin or digest reason
+and leave no installation, staging directory or Maven start. The initial
+PowerShell oracle checked the post-cleanup state and launcher output; its
+extraction-order observation gap is corrected in the follow-up below. Each `mvnw` run
+has `stdin` closed, so no run can consume the case list.
+
+| Group | Cases |
+| --- | --- |
+| `mvnw` positive | P00 committed pins reach the pinned download; P01–P02 ZIP cold and warm (no download), argument propagation including spaces and an empty argument; P03 exit status 7; P04–P05 TAR.GZ cold and warm without `unzip`; P06 `shasum` instead of `sha256sum`; P07 CRLF with spaces around values; P08 two concurrent cold installs publish one installation |
+| `mvnw` pin rejection | H01–H05 absent or blank; H06a–f wrong length, uppercase, non-hex, inner space, malformed unselected TAR.GZ; H07a–b, H08 duplicates; H09a–e leading space, space before `=`, `:`, whitespace separator, case variant; H14 inherited variables |
+| `mvnw` digest rejection | H10 tampered ZIP, H10b wrong well-formed ZIP pin, H11 tampered TAR.GZ: download only, then failure |
+| `mvnw` warm or unpinned cache | H12a–c invalid pins with a warm installation; H13 blank pins with an unpinned installation present |
+| PowerShell body under `pwsh` | W01–W02 cold, and warm with the mirror withdrawn; W03 CRLF; W-H01–W-H09c, W-H14 pin rejection; W-H10 tampered ZIP; W-H12 warm; W-H13 the blank-pin namespace. A verdict depends on the emitted `MVN_CMD` line, which the batch uses; upstream's warm path exits 1 |
+
+| Command or evidence | Result |
+| --- | --- |
+| `MAVEN_WRAPPER_TEST_SHELLS="/bin/sh /bin/dash /bin/bash" bash …/test-maven-wrapper-pins.sh`, macOS arm64, runner Bash 3.2 | 36 cases per shell, 108 in total. PowerShell skipped: no `pwsh` |
+| Same script, Docker `ubuntu:24.04` arm64 native and amd64 emulated (`dash`, `mawk`; `wget` present) | 70 per platform: 35 under each of `/bin/sh` and `/bin/bash`. P06 omitted: no `shasum` |
+| Same script, Docker `alpine:3.22` arm64 (BusyBox `sh` and `awk`) | 35 pass |
+| `MAVEN_WRAPPER_TEST_REQUIRE_PWSH=true`, PowerShell 7.4.6 image, amd64 emulated, `gawk` | 36 `mvnw` and 19 PowerShell cases pass |
+| A copy with failures counted instead of fatal, against the `5bf8a62` scripts | Substantive acceptance in `mvnw` H01, H02, H04, H05, H06e, H06f, H07a, H07b, H08, H09e, H12a–c, H13 and H14. Launcher emitted in W-H01, W-H02, W-H04, W-H05, W-H06b, W-H09a, W-H12, W-H13 and W-H14. The remaining rejection cases failed closed and differed only in diagnostic wording. H10, H10b, H11, W-H10 and all positive cases pass on both revisions |
+| Corrected `mvnw`, committed properties, official archives, file mirror, `MAVEN_USER_HOME` containing a space | Two concurrent ZIP cold starts run Maven 3.9.16 and publish one installation, bound to the ZIP pin. Warm reuse succeeds with the mirror withdrawn. Without `unzip`, TAR.GZ cold and warm succeed. The installed tree equals the extracted Apache ZIP apart from `mvnw.url`. The original blank, absent, duplicate, inherited and unpinned-namespace reproductions now fail with the pin diagnostic |
+| Official Maven 3.9.16 (Resolver 1.9.27), Docker retry properties, loopback fault server for the parent POM | 429 with no Retry-After or `soon`: one retry after 15.01 s. `-1` or a past HTTP date: immediate retry. 503 with `2`: 2.01 s. `61`: no retry, the build fails with 429. Persistent 429: four requests, 15.01, 30.01 and 45.01 s apart, then failure |
+| `MAVEN_USER_HOME=<disposable> ./mvnw -B -o verify` from `backend/` with the corrected Wrapper, macOS arm64 Temurin 25.0.4.1, disposable Testcontainers | 1,146 unit and 595 integration tests pass, no failures, errors or skips |
+| `MAVEN_TEST_PLATFORM=linux/arm64 bash infrastructure/vm/tests/test-maven-bootstrap.sh` (native), then the same without the variable (amd64 emulated) | 31 Docker Maven controls pass on each platform, `MAVEN_BOOTSTRAP_TESTS_PASS`. Its inputs are unchanged by this remediation |
+| `sh -n` and `dash -n backend/mvnw`; `bash -n` on every script in `infrastructure/vm/tests/`; `git -c core.whitespace=cr-at-eol diff --check` | Pass. `mvnw.cmd` keeps CRLF line endings |
+
+The PowerShell body ran under PowerShell 7.4 on Linux. There, a trapped
+`Write-Error` with `Stop`, a `throw` and a .NET exception each ended the script.
+Windows PowerShell 5.1, `cmd.exe`, argument and exit propagation through the
+batch, NTFS and Windows cold-install contention were not executed. Native
+Windows qualification remains outstanding. `backend/Dockerfile`, the Docker
+verifier and its 31 controls, the cache identity of a valid configuration and
+the runtime artifacts are unchanged. The Retry-After corrections are in
+[setup](setup.md#backend-image) and
+[deployment](deployment.md#host-wrapper-pin-enforcement--26-november-2026).
+Adding `test-maven-wrapper-pins.sh` to the repository inventory needs a separate
+Leader decision.
+
+Author-side evidence only, not independent review.
+
+AI-assisted work: Claude Code reproduced both findings, corrected the Wrappers
+and documentation, wrote the regression and ran these checks under the Leader's
+remediation task.
+
+### PR #293 VM test file renames — 26 November 2026
+
+Three VM test files were renamed under the Leader's naming-standardization
+instruction
+([inventory record](repository-structure.md#bounded-vm-test-file-renames--26-november-2026)):
+`test-phase5-recovery-roundtrip.sh` to `test-recovery-roundtrip.sh`,
+`test-phase5-ssh-gates.sh` to `test-ssh-deployment-gates.sh`, and
+`test_phase5_units.py` to `test_deployment_recovery_units.py`, all under
+`infrastructure/vm/tests/`. Git records each as a rename with unchanged
+content apart from its own run instruction and the unit test's two script names.
+The dated records above keep the former names; use the new paths to run them.
+
+| Command | Result |
+| --- | --- |
+| `CODEMASTERY_OPENSSL=<OpenSSL 3> python3 -m unittest -v infrastructure/vm/tests/test_deployment_recovery_units.py`, macOS arm64 | 48 tests pass, none skipped, including the resource-name case that reads both renamed scripts |
+| `bash infrastructure/vm/tests/test-ssh-deployment-gates.sh`, Docker Desktop 29.8.1 | 3 PASS and 23 expected-refusal lines, `PHASE5_SSH_GATES_PASS`, exit 0 |
+| `bash infrastructure/vm/tests/test-recovery-roundtrip.sh` (helper-container tar), same host | 20 PASS and 10 expected-refusal lines, `PHASE5_RECOVERY_ROUNDTRIP_PASS`, exit 0 |
+| `bash -n` on every VM test, `cd` and host script; `py_compile`; YAML parse of `ci-vm.yml` and `deploy.yml`; `git diff --check` | Pass |
+
+The host GNU tar mode of the recovery test runs as root in CI only. Job names,
+step names, required checks and the completion markers are unchanged.
+
+
+### PR #293 PowerShell extraction-order regression remediation — 26 November 2026
+
+Author verification under the Leader's targeted remediation instruction, based on
+`a43c6626f47cbcfae95648c089a882040a7c9579`. The production Wrappers, archive pins,
+Dockerfiles, Maven Resolver properties and three VM test renames are unchanged.
+IR293-R2-01's corrected Retry-After contract remains unchanged.
+
+**Reproduction.** In a disposable copy only, the PowerShell body extracted the
+synthetic ZIP before hashing it, removed that early extraction, then retained the
+real checksum rejection and trap cleanup. The original harness returned 0 and
+`MAVEN_WRAPPER_PIN_TESTS_PASS mvnw=36 powershell=19`. An independent file outside
+the installation recorded the early extraction, including W-H10's wrong-digest
+archive. This is a test sensitivity failure, not an observed production compromise.
+
+**Observation.** The harness parses a byte-for-byte `.ps1` copy of `mvnw.cmd`
+(PowerShell line breakpoints require that extension), retaining `$script=mvnw.cmd`
+and the project's `$scriptDir`, and executes its actual AST through
+`Invoke-Command -NoNewScope`. Test-only debugger actions record execution of the
+single `DownloadFile` statement, entry into the real `Get-FileHash`, continuation
+past the mismatch branch, and actual `Expand-Archive` command entry. The
+`verified` event is continuation after the real hash comparison, not hash entry
+alone. Neither hashing, comparison, extraction nor exception handling is replaced.
+Unsupported verification/download structure or missing/malformed events fails.
+
+Every invocation starts fresh observation state in its case directory, outside
+`m2/wrapper/dists`, so installation cleanup cannot erase it. The observer emits
+no launcher stdout and records only fixed event names. A command breakpoint can
+report both entry and process callbacks for `Expand-Archive`: one or more adjacent
+`extract` events are permitted after `verified`; callback count is not an exact
+count of archive invocations. `download` observes execution of the selected
+method-call statement, not a separate network/transport trace. These synthetic
+cases use a local file mirror; the Backend workflow does not impose OS network
+isolation. The local Linux qualification below additionally uses `--network none`.
+
+| Control | Required events and outcome |
+| --- | --- |
+| W01 cold ZIP, W03 CRLF, paths containing spaces | `ready download hash verified extract...`; real extraction and fixture publication, exact launcher stdout |
+| W02 warm, mirror withdrawn | `ready` only; same trusted installation and launcher |
+| Invalid pins, including warm/legacy caches | `ready` only, pin error, no launcher and unchanged cache paths |
+| W-H10 wrong digest | `ready download hash` only; checksum error, zero extraction callbacks, no launcher or residual staging/install |
+| W-S early extraction, with and without explicit early cleanup | `ready download extract... hash`; both preserve checksum error and complete cleanup, and the same digest oracle must reject their event order |
+| W-S missing, malformed, missing-ready and missing-verified evidence | The actual cold-install acceptance oracle must reject each independently altered observation |
+| W04 correctly pinned non-ZIP | `ready download hash verified extract...`, real cmdlet failure, nonzero status, no launcher or residual staging/install |
+
+All existing substantive controls remain. There are now 36 Unix cases per shell
+when both digest tools are available and 27 PowerShell controls (19 original,
+one 64-character inner-space case, four evidence sensitivity controls, two
+extraction-order mutations and one failed-extraction control). The existing
+mandatory Backend step runs them before setup-java and Maven verification;
+missing PowerShell remains fatal there. H06e now substitutes one character with
+an internal space, keeping exactly 64 characters. Every Bash condition in this
+harness uses `[[ ... ]]` with quoted literal comparisons. Generated POSIX `sh`
+launchers and production `backend/mvnw` retain POSIX syntax. The three `eval`
+inputs remain checked-in static fixture tables, with generated hexadecimal pins;
+no externally supplied command text enters them, and neither Sonar rule flags
+these expressions. No framework redesign or suppression was added.
+
+**Executed local evidence:** macOS arm64 Bash 3.2 ran 36 cases each under `sh`,
+`dash` and `bash` (108). Linux PowerShell 7.4.6 amd64 under emulation passed
+72 Unix (36 each under dash and Bash) + 27 PowerShell controls in one
+container with disposable caches and no network. Native Linux arm64 passed the
+same 72 Unix controls. The unchanged Docker Maven suite passed all 31 controls
+on native arm64 and emulated amd64. ShellCheck 0.11.0 at warning severity,
+Bash syntax, POSIX Wrapper syntax and `git diff --check` also passed.
+Native Windows PowerShell 5.1, `cmd.exe`, argument/status propagation, native
+filesystem publication and contention remain unqualified. The PowerShell observer
+uses APIs/syntax available in Windows PowerShell 5.1, but source compatibility is
+not native execution evidence. An authorized Windows host is needed for that
+qualification; no workflow job or required-check change is authorized here.
+
+**SonarCloud baseline:** analysis of `a43c662` at `2026-11-26T05:06:23Z`, check
+`139705810941`, has 43 issues: 38 `shell:S7688` and five `shell:S5332`.
+S7688 is a legacy `CODE_SMELL`/MAJOR with RELIABILITY/HIGH impact; the source
+normalization addresses all 38 baseline annotations. S5332 is an ordinary
+`VULNERABILITY`/MINOR with SECURITY/LOW impact, not a hotspot. The Quality Gate
+fails `new_security_rating=2` (B), maximum 1 (A); hotspot review is already 100%.
+The API returns both legacy types and software-quality impacts. The gate's exact
+metric is verified; the organization-wide UI analysis-mode setting was not
+exposed by the public settings response and is not inferred from annotation labels.
+
+| S5332 PR issue | Recovery test line | Matching main issue |
+| --- | --- | --- |
+| `AaIWP_jE02ZzFMqK9oxo` | 99 | `AaIL-_0KPWUT3T_MHBiC` |
+| `AaIWP_jE02ZzFMqK9oxp` | 102 | `AaIL-_0KPWUT3T_MHBiD` |
+| `AaIWP_jE02ZzFMqK9oxq` | 112 | `AaIL-_0KPWUT3T_MHBiE` |
+| `AaIWP_jE02ZzFMqK9oxr` | 300 | `AaIL-_0KPWUT3T_MHBiF` |
+| `AaIWP_jE02ZzFMqK9oxs` | 305 | `AaIL-_0KPWUT3T_MHBiG` |
+
+Each match has the same rule, line, source hash and creation timestamp. All five
+source lines are identical at main `1e4c54b`, intermediate `361bafb` and renamed
+`a43c662`. The 38 intermediate style annotations are also identical by path,
+range and title. This supports existing-issue attribution after the rename;
+SonarCloud's internal rename algorithm is not independently observable.
+The five calls reach only disposable source/restored MinIO containers on the
+unique `docker network create --internal` network, with no published ports.
+The script generates its own PostgreSQL/MinIO credentials, synthetic data and
+per-run keys, passes only these credentials explicitly, and cleans up fixture
+containers, volumes, network and keys. It does not read a production env/escrow.
+Internal Docker networking does not encrypt traffic or protect it from the host
+or daemon administrator. No new production defect is established in this scope.
+
+**Outstanding decision:** the Leader/security authority must adjudicate each
+ordinary S5332 issue's applicability using the exact fixture evidence and choose
+the authorized issue-specific disposition. A context-based False Positive
+classification is a proposal for that authority, not an applied decision or a
+statement that HTTP is encrypted. Do not use a hotspot Safe review, silently
+accept risk, change thresholds/exclusions/baselines, or revert the rename to
+obtain a green gate. No issue status was changed. Final exact-revision scan and
+hosted results belong in the PR readback; this baseline does not qualify a later
+head. The inventory decisions for both Maven regression scripts and an eligible
+CODEOWNER review route remain outstanding. Author verification is not independent
+acceptance, release admission or deployment authorization.
+
+AI-assisted work: OpenAI Codex reproduced the test gap, corrected and qualified
+the harness, and prepared the issue-level analysis under the Leader's instruction.

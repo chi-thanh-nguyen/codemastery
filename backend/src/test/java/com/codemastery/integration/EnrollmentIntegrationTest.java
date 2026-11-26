@@ -59,7 +59,18 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
 
 /** Real MVC, JWT/current-account validation, application transactions and disposable PostgreSQL. */
+@org.springframework.context.annotation.Import(EnrollmentIntegrationTest.PublicationProbe.class)
 class EnrollmentIntegrationTest extends AbstractIntegrationTest {
+    @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
+    static class PublicationProbe {
+        final java.util.List<com.codemastery.modules.course.application.event.ContentPublishedEvent> committed = new java.util.ArrayList<>();
+        @org.springframework.transaction.event.TransactionalEventListener
+        public void afterCommit(com.codemastery.modules.course.application.event.ContentPublishedEvent event) {
+            committed.add(event);
+        }
+    }
+    @Autowired PublicationProbe publicationProbe;
+
     private static final UUID OWNER = id("owner"), LEARNER = id("learner"), OTHER = id("other"), ADMIN = id("admin");
     private static final UUID COURSE = id("course"), SECOND = id("second"), HIDDEN = id("hidden");
     private static final UUID EMPTY_CHAPTER = id("empty-chapter");
@@ -1883,4 +1894,21 @@ class EnrollmentIntegrationTest extends AbstractIntegrationTest {
         fail("No session waited on the held Course root lock");
     }
 
+
+    @Test void co12UnauthorizedForeignAndNonPublicationMutationsAreSilent() throws Exception {
+        row("active"); publicationProbe.committed.clear();
+        mvc.perform(as(put(lessonPublication(COURSE,HIDDEN_LESSON)),LEARNER).contentType("application/json").content("{\"publicationStatus\":\"published\"}")).andExpect(status().isForbidden());
+        mvc.perform(as(put(lessonPublication(SECOND,HIDDEN_LESSON)),OWNER).contentType("application/json").content("{\"publicationStatus\":\"published\"}")).andExpect(status().isNotFound());
+        mvc.perform(as(put(lessonPublication(COURSE,UUID.randomUUID())),OWNER).contentType("application/json").content("{\"publicationStatus\":\"published\"}")).andExpect(status().isNotFound());
+        var principal=new AuthenticatedUser(OWNER,Role.INSTRUCTOR);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(principal,null,principal.getAuthorities()));
+        try {
+            structure.updateCourseLesson(COURSE,LESSON,"Edited","Body");
+            structure.updateCourseChapter(COURSE,CHAPTER,"Edited");
+            structure.orderChapterLessons(COURSE,CHAPTER,List.of(HIDDEN_LESSON,LESSON));
+            management.setOwnedCoursePublication(COURSE,PublishStatus.HIDDEN);
+            management.setOwnedCoursePublication(COURSE,PublishStatus.PUBLISHED);
+            assertTrue(publicationProbe.committed.isEmpty());
+        } finally { SecurityContextHolder.clearContext(); publicationProbe.committed.clear(); }
+    }
 }
