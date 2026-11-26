@@ -4,7 +4,7 @@ import { Alert, Box, Button, IconButton, ListItemIcon, Menu, MenuItem, Typograph
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '../../auth/hooks/useAuth';
 import { getCourseMembership, getMyEnrolledCourses, enrollInCourse, leaveCourse } from '../api/learningApi';
-import type { CourseMembership, MembershipCourse, MembershipFilter, MembershipPage, MembershipStatus } from '../types/learningTypes';
+import type { CourseMembership, CourseProgressSummary, MembershipCourse, MembershipFilter, MembershipPage, MembershipStatus } from '../types/learningTypes';
 import { ApiError } from '../../../shared/types/apiTypes';
 import { PageHeader } from '../../../shared/components/PageHeader';
 import { ConfirmDialog } from '../../../shared/components/ConfirmDialog';
@@ -16,7 +16,7 @@ import type { PresentationIconName } from '../../../shared/components/Presentati
 import { SegmentedControl } from '../../../shared/components/ViewRail';
 import { PaginationBar, TableToolbar } from '../../../shared/components/DataTable';
 import { Page } from '../../../layouts/DashboardLayout';
-import { CourseTile } from '../../../shared/components/Tile';
+import { CourseTile, ProgressLine } from '../../../shared/components/Tile';
 import { isPlainClick } from '../../../shared/components/SidebarNav';
 import { control } from '../../../app/theme/theme';
 
@@ -108,11 +108,12 @@ export function MembershipTileMenu({ title, status, detailsHref, onDetails, onLe
 }
 
 /** One joined course: the tile opens course details; the overflow menu changes membership. */
-export function MembershipCourseTile({ course, href, onOpen, menu }: { course: Pick<MembershipCourse, 'title' | 'description' | 'instructorDisplayName' | 'status'>; href: string; onOpen: () => void; menu?: ReactNode }) {
+export function MembershipCourseTile({ course, href, onOpen, menu, progress }: { course: Pick<MembershipCourse, 'title' | 'description' | 'instructorDisplayName' | 'status'>; href: string; onOpen: () => void; menu?: ReactNode; progress?: ReactNode }) {
     return <CourseTile title={course.title} description={course.description} byline={`Instructor · ${course.instructorDisplayName ?? 'Instructor name unavailable'}`}
-        href={href} onOpen={onOpen} extraActions={menu}
+        href={href} onOpen={onOpen} extraActions={menu} children={progress}
         status={<><span className="cm-visually-hidden">Membership: </span><MembershipPill status={course.status} /></>} />;
 }
+
 
 const MEMBERSHIP_FILTERS: readonly MembershipFilter[] = ['joined', 'active', 'completed', 'left', 'all'];
 /** `?status=` preselects a filter (for example from Learner home); a missing or unknown value means Joined. */
@@ -139,6 +140,7 @@ export function MyCoursesPage() {
     const [data, setData] = useState<MembershipPage | null>(null);
     const [revision, retry] = useState(0);
     const [loading, setLoading] = useState(true), [error, setError] = useState<string | null>(null);
+    const [progressMap, setProgressMap] = useState<Record<string, CourseProgressSummary>>({});
     useEffect(() => {
         let alive = true, recovering = false; const controller = new AbortController();
         const current = () => alive && auth.isCurrent(generation);
@@ -207,8 +209,10 @@ export function MyCoursesPage() {
         {data && data.content.length > 0 && <Box component="ul" aria-label="Your courses" sx={{ listStyle: 'none', m: 0, p: 0, display: 'grid', gap: 3, mb: 4, gridTemplateColumns: { xs: 'minmax(0, 1fr)', md: 'repeat(2, minmax(0, 1fr))' } }}>
             {data.content.map((course) => {
                 const href = `/courses/${encodeURIComponent(course.id)}`;
+                const summary = course.status === 'active' ? progressMap[course.id] : undefined;
                 return <Box component="li" key={course.id} sx={{ minWidth: 0 }} aria-busy={mutating === course.id || undefined}>
                     <MembershipCourseTile course={course} href={href} onOpen={() => navigate(href)}
+                        progress={summary ? <ProgressLine completed={summary.completedLessons} total={summary.totalLessons} percent={summary.progressPercentage} label={`${course.title} progress`} /> : undefined}
                         menu={<MembershipTileMenu title={course.title} status={course.status} detailsHref={href} onDetails={() => navigate(href)} disabled={mutating !== null}
                             onLeave={() => setLeaving(course)} onReenroll={() => void changeMembership(course, true)} />} />
                 </Box>;

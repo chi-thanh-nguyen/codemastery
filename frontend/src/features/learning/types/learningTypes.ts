@@ -44,3 +44,105 @@ export type LessonBlock =
 export type LessonMaterialView =
     | { id: string; kind: 'file'; name: string; description: string }
     | { id: string; kind: 'external_video'; title: string; url: string };
+
+export interface LessonProgressEntry {
+    lessonId: string;
+    completed: boolean;
+    masterySkipped: boolean;
+}
+
+export interface CourseProgressSummary {
+    courseId: string;
+    title: string;
+    membershipStatus: 'active' | 'completed';
+    completedLessons: number;
+    totalLessons: number;
+    progressPercentage: number;
+    isComplete: boolean;
+    nextLessonId: string | null;
+}
+
+export interface CourseProgress extends CourseProgressSummary {
+    lessons: LessonProgressEntry[];
+}
+
+export interface CourseProgressPage {
+    content: CourseProgressSummary[];
+    page: number;
+    size: number;
+    totalElements: number;
+    totalPages: number;
+}
+
+export interface CourseResume {
+    courseId: string;
+    resumeLessonId: string | null;
+    nextLessonId: string | null;
+}
+
+export interface LearnerResumePosition {
+    courseId: string;
+    lessonId: string;
+    lastVisitedAt: string;
+}
+
+export interface LearnerResume {
+    position: LearnerResumePosition | null;
+}
+
+export interface TextMaterial {
+    id: string;
+    title: string;
+    publicationStatus: 'hidden' | 'published';
+    materialType: 'text';
+    textContent: string;
+}
+
+export interface VideoMaterial {
+    id: string;
+    title: string;
+    publicationStatus: 'hidden' | 'published';
+    materialType: 'external_video';
+    externalVideoUrl: string;
+}
+
+export interface FileMaterialMetadata {
+    id: string;
+    title: string;
+    publicationStatus: 'hidden' | 'published';
+    materialType: 'file';
+}
+
+export type RelationalMaterial = TextMaterial | VideoMaterial | FileMaterialMetadata;
+
+export interface LearnerLesson {
+    id: string;
+    courseId: string;
+    chapterId: string;
+    title: string;
+    contentMarkdown: string | null;
+    materials: RelationalMaterial[];
+}
+
+export interface LearningSyllabusLesson {
+    id: string;
+    title: string;
+    position: number;
+}
+
+export interface LearningSyllabusChapter {
+    id: string;
+    title: string;
+    position: number;
+    lessons: LearningSyllabusLesson[];
+}
+
+export interface LearningCourseStructure {
+    id: string;
+    title: string;
+    description: string;
+    instructorId: string;
+    instructorDisplayName: string | null;
+    prerequisiteDescription: string | null;
+    syllabus: LearningSyllabusChapter[];
+}

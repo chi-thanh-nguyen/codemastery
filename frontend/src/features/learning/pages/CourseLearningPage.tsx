@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Box, Button, Typography } from '@mui/material';
 import { Page } from '../../../layouts/DashboardLayout';
 import { PageHeader } from '../../../shared/components/PageHeader';
@@ -13,6 +13,9 @@ import { PresentationIcon } from '../../../shared/components/PresentationIcon';
 import { EmptyView } from '../../../shared/components/StatusViews';
 import { CourseOutline } from '../components/CourseOutline';
 import type { CourseProgressView, OutlineChapterView } from '../types/learningTypes';
+import { Link, useNavigate } from 'react-router';
+import { useCourseLearning } from '../hooks/useCourseLearning';
+import { ErrorView, LoadingView, SystemStateView } from '../../../shared/components/StatusViews';
 
 export interface CourseLearningPageProps {
     courseTitle: string;
@@ -70,4 +73,53 @@ export function CourseLearningPage({ courseTitle, chapters, progress, view, onVi
             </Box>
         </Box>
     </Page>;
+}
+
+/** Live S7 Course Workspace (Path): connects CT22 progress, resume, and canonical syllabus. */
+export function LiveCourseLearningPage({ courseId }: { courseId: string }) {
+    const navigate = useNavigate();
+    const [view, setView] = useState<'path' | 'outline'>('path');
+    const { course, progress, resume, loading, errorStatus, errorMessage, refresh } = useCourseLearning(courseId);
+
+    if (loading) {
+        return <Page><LoadingView message="Loading course path…" variant="tiles" count={3} /></Page>;
+    }
+
+    if (errorStatus === 403) {
+        return <Page><SystemStateView icon="lock" title="Join this course to see your path" message="You need an active or completed membership to view this course workspace." actions={<Button component={Link} to={`/courses/${encodeURIComponent(courseId)}`} variant="contained">View course details</Button>} /></Page>;
+    }
+
+    if (errorStatus === 404) {
+        return <Page><SystemStateView icon="search" title="Course not available" message="This course doesn't exist or isn't published." actions={<Button component={Link} to="/courses" variant="contained">Back to catalogue</Button>} /></Page>;
+    }
+
+    if (errorMessage || !course || !progress || !resume) {
+        return <Page><ErrorView title="Couldn't load course" message={errorMessage ?? 'Please try again.'} onRetry={refresh} /></Page>;
+    }
+
+    const progressByLesson = new Map(progress.lessons.map((l) => [l.lessonId, l]));
+    const chapters: OutlineChapterView[] = course.syllabus.slice().sort((a, b) => a.position - b.position).map((ch) => ({
+        id: ch.id, title: ch.title, position: ch.position,
+        lessons: ch.lessons.slice().sort((a, b) => a.position - b.position).map((l) => {
+            const entry = progressByLesson.get(l.id);
+            const lessonState = entry?.masterySkipped ? 'mastered-skip' : entry?.completed ? 'completed' : 'not-started';
+            return { id: l.id, title: l.title, position: l.position, progress: lessonState, isResume: resume.resumeLessonId === l.id };
+        }),
+    }));
+
+    const targetLessonId = resume.resumeLessonId ?? resume.nextLessonId;
+    const openLesson = (lessonId: string) => navigate(`/courses/${encodeURIComponent(courseId)}/lessons/${encodeURIComponent(lessonId)}`);
+
+    return <CourseLearningPage
+        courseTitle={course.title}
+        chapters={chapters}
+        progress={{ completed: progress.completedLessons, total: progress.totalLessons, percent: progress.progressPercentage }}
+        view={view}
+        onViewChange={setView}
+        onOpenLesson={openLesson}
+        hasResumePoint={Boolean(resume.resumeLessonId)}
+        onResume={() => { if (targetLessonId) openLesson(targetLessonId); }}
+        back={{ label: 'My courses', href: '/my-courses' }}
+        guidance={[]}
+    />;
 }

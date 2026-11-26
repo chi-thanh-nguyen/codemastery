@@ -1,9 +1,9 @@
 import { Box, ButtonBase, Typography } from '@mui/material';
 import { CodeBlock } from '../../../shared/components/CodeBlock';
 import { PresentationIcon } from '../../../shared/components/PresentationIcon';
-import type { LessonBlock, LessonMaterialView } from '../types/learningTypes';
+import type { LessonBlock, LessonMaterialView, RelationalMaterial } from '../types/learningTypes';
 import { radius, roles } from '../../../app/theme/theme';
-
+import { MarkdownRenderer } from '../../../shared/components/MarkdownRenderer';
 /**
  * Structured lesson text rendered as plain React text. Lesson Markdown rendering
  * is BLOCKED pending an approved rendering/sanitisation decision (MarkdownRenderer).
@@ -41,4 +41,15 @@ export function MaterialList({ materials, onDownload }: { materials: LessonMater
             </ButtonBase>
         </Box>)}
     </Box>;
+}
+
+export function LiveLessonContent({ markdown, materials, onDownload }: { markdown?: string | null; materials?: RelationalMaterial[]; onDownload?: (id: string) => void }) {
+    return (
+        <Box sx={{ display: 'grid', gap: 3 }}>
+            {markdown && <MarkdownRenderer markdown={markdown} />}
+            {materials && materials.length > 0 && (
+                <MaterialList materials={materials.map(m => m.materialType === 'file' ? { id: m.id, kind: 'file', name: m.title, description: 'PDF file' } : m.materialType === 'external_video' ? { id: m.id, kind: 'external_video', title: m.title, url: m.externalVideoUrl } : { id: m.id, kind: 'file', name: m.title, description: 'Text material' })} onDownload={onDownload} />
+            )}
+        </Box>
+    );
 }

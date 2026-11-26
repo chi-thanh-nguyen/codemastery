@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, Box, Button, Drawer, IconButton, Typography, useMediaQuery, useTheme } from '@mui/material';
 import { Page } from '../../../layouts/DashboardLayout';
@@ -10,9 +10,13 @@ import { GuidanceEntry } from '../../../shared/components/GuidanceStack';
 import type { GuidanceEntryData } from '../../../shared/components/GuidanceStack';
 import { CourseOutline, LessonProgressPill, MarkerTag } from '../components/CourseOutline';
 import { LessonContent, MaterialList } from '../components/LessonContent';
-import type { LessonBlock, LessonMaterialView, LessonProgressState, OutlineChapterView, SkillTagView, LessonAdaptiveMarker } from '../types/learningTypes';
+import type { LessonBlock, LessonMaterialView, LessonProgressState, OutlineChapterView, SkillTagView, LessonAdaptiveMarker, LearnerLesson } from '../types/learningTypes';
 import { control, presentationTokens, radius, shadow, roles } from '../../../app/theme/theme';
-
+import { getLearnerLesson } from '../api/learningApi';
+import { useCourseLearning } from '../hooks/useCourseLearning';
+import { ErrorView, LoadingView, SystemStateView } from '../../../shared/components/StatusViews';
+import { Link, useNavigate } from 'react-router';
+import { ApiError } from '../../../shared/types/apiTypes';
 export interface PrerequisiteWarningView { skillName: string; reviewLessonTitle?: string; onReview?: () => void }
 export interface LessonPageProps {
     courseTitle: string;
@@ -24,6 +28,10 @@ export interface LessonPageProps {
     completion: 'idle' | 'saving' | 'error';
     onPrevious?: () => void;
     onNext?: () => void;
+    hasPrevious?: boolean;
+    hasNext?: boolean;
+    completing?: boolean;
+    completionError?: string | null;
     /** US-06: an unmastered prerequisite warns but never blocks. */
     prerequisiteWarning?: PrerequisiteWarningView;
     /** Shown when this lesson is the target of a remedial recommendation. */
@@ -84,17 +92,19 @@ export function LessonPage({ courseTitle, chapterTitle, lesson, chapters, onOpen
                     </Typography>
                 </Box>}
                 {discussion && <Box sx={{ mt: 6 }}>{discussion}</Box>}
-                <Box role="region" aria-label="Lesson actions" sx={{ position: 'sticky', bottom: { xs: 8, sm: 16 }, zIndex: 5, mt: 6, maxWidth: 720, bgcolor: roles.bg.raised, borderRadius: `${radius.pill}px`,
-            boxShadow: `${shadow.raised}, inset 0 0 0 1px ${roles.line.floating}`, p: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-            <IconButton aria-label="Previous lesson" onClick={onPrevious} disabled={!onPrevious} sx={control.secondary}><PresentationIcon name="arrow-left" /></IconButton>
-            <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
-                {completion === 'error' && <Typography role="alert" variant="body2" sx={{ color: roles.tone.rose.strong, display: { xs: 'none', sm: 'block' } }}>Couldn't save. Try again.</Typography>}
-                {done ? <Typography role="status" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}><PresentationIcon name="check-circle" sx={{ color: roles.tone.mint.strong }} />{lesson.progress === 'completed' ? 'Lesson completed' : 'Counted as complete'}</Typography>
-                    : <Button variant="contained" onClick={onMarkComplete} disabled={completion === 'saving'} aria-busy={completion === 'saving' || undefined}>{completion === 'saving' ? 'Saving…' : completion === 'error' ? 'Try again' : 'Mark as complete'}</Button>}
-            </Box>
-            {onNext ? <Button variant={done ? 'contained' : 'outlined'} onClick={onNext} endIcon={<PresentationIcon name="arrow-right" />} sx={{ display: { xs: 'none', sm: 'inline-flex' } }}>Next lesson</Button> : null}
-            <IconButton aria-label="Next lesson" onClick={onNext} disabled={!onNext} sx={{ ...control.secondary, display: { sm: 'none' } }}><PresentationIcon name="arrow-right" /></IconButton>
-        </Box>
+                <Box role="region" aria-label="Lesson actions" sx={{
+                    position: 'sticky', bottom: { xs: 8, sm: 16 }, zIndex: 5, mt: 6, maxWidth: 720, bgcolor: roles.bg.raised, borderRadius: `${radius.pill}px`,
+                    boxShadow: `${shadow.raised}, inset 0 0 0 1px ${roles.line.floating}`, p: 1, display: 'flex', alignItems: 'center', gap: 1
+                }}>
+                    <IconButton aria-label="Previous lesson" onClick={onPrevious} disabled={!onPrevious} sx={control.secondary}><PresentationIcon name="arrow-left" /></IconButton>
+                    <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+                        {completion === 'error' && <Typography role="alert" variant="body2" sx={{ color: roles.tone.rose.strong, display: { xs: 'none', sm: 'block' } }}>Couldn't save. Try again.</Typography>}
+                        {done ? <Typography role="status" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}><PresentationIcon name="check-circle" sx={{ color: roles.tone.mint.strong }} />{lesson.progress === 'completed' ? 'Lesson completed' : 'Counted as complete'}</Typography>
+                            : <Button variant="contained" onClick={onMarkComplete} disabled={completion === 'saving'} aria-busy={completion === 'saving' || undefined}>{completion === 'saving' ? 'Saving…' : completion === 'error' ? 'Try again' : 'Mark as complete'}</Button>}
+                    </Box>
+                    {onNext ? <Button variant={done ? 'contained' : 'outlined'} onClick={onNext} endIcon={<PresentationIcon name="arrow-right" />} sx={{ display: { xs: 'none', sm: 'inline-flex' } }}>Next lesson</Button> : null}
+                    <IconButton aria-label="Next lesson" onClick={onNext} disabled={!onNext} sx={{ ...control.secondary, display: { sm: 'none' } }}><PresentationIcon name="arrow-right" /></IconButton>
+                </Box>
             </Box>
         </Box>
         <Drawer anchor="left" open={outlineOpen && !wide} onClose={() => setOutlineOpen(false)}
@@ -106,4 +116,81 @@ export function LessonPage({ courseTitle, chapterTitle, lesson, chapters, onOpen
             {outline}
         </Drawer>
     </Page>;
+}
+
+/** Live S8 Lesson Reader: renders CT21 lesson, records silent post-render visit, handles monotonic completion. */
+export function LiveLessonPage({ courseId, lessonId }: { courseId: string; lessonId: string }) {
+    const navigate = useNavigate();
+    const { course, progress, loading: workspaceLoading, errorStatus: workspaceErrorStatus, errorMessage: workspaceErrorMessage, completing, completionError, refresh, markComplete, recordVisit } = useCourseLearning(courseId);
+
+    const [lesson, setLesson] = useState<LearnerLesson | null>(null);
+    const [lessonLoading, setLessonLoading] = useState(true);
+    const [lessonErrorStatus, setLessonErrorStatus] = useState<number | null>(null);
+    const [lessonErrorMessage, setLessonErrorMessage] = useState<string | null>(null);
+    const visitedRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        let alive = true;
+        const controller = new AbortController();
+        setLessonLoading(true); setLessonErrorStatus(null); setLessonErrorMessage(null);
+
+        getLearnerLesson(courseId, lessonId, { signal: controller.signal })
+            .then((data) => {
+                if (!alive) return;
+                setLesson(data);
+                if (visitedRef.current !== data.id) {
+                    visitedRef.current = data.id;
+                    void recordVisit(data.id);
+                }
+            })
+            .catch((err: unknown) => {
+                if (!alive || (err instanceof ApiError && err.kind === 'cancelled')) return;
+                if (err instanceof ApiError) { setLessonErrorStatus(err.status ?? null); setLessonErrorMessage(err.message); }
+                else { setLessonErrorMessage("Couldn't load this lesson."); }
+            })
+            .finally(() => { if (alive) setLessonLoading(false); });
+
+        return () => { alive = false; controller.abort(); };
+    }, [courseId, lessonId, recordVisit]);
+
+    if (workspaceLoading || lessonLoading) return <Page><LoadingView message="Loading lesson…" /></Page>;
+
+    const errStatus = lessonErrorStatus ?? workspaceErrorStatus;
+    if (errStatus === 403) return <Page><SystemStateView icon="lock" title="Rejoin the course to continue" message="Your membership is required to access this lesson." actions={<Button component={Link} to={`/courses/${encodeURIComponent(courseId)}`} variant="contained">View course details</Button>} /></Page>;
+    if (errStatus === 404) return <Page><SystemStateView icon="search" title="Lesson not available" message="It may have been hidden by the instructor." actions={<Button component={Link} to={`/courses/${encodeURIComponent(courseId)}`} variant="contained">Back to course</Button>} /></Page>;
+    if (lessonErrorMessage || workspaceErrorMessage || !lesson || !course || !progress) {
+        return <Page><ErrorView title="Couldn't load lesson" message={lessonErrorMessage ?? workspaceErrorMessage ?? 'Please try again.'} onRetry={refresh} /></Page>;
+    }
+
+    const progressByLesson = new Map(progress.lessons.map((l) => [l.lessonId, l]));
+    const flatLessons: { id: string; position: number; chapterTitle: string; title: string }[] = [];
+    const chapters: OutlineChapterView[] = course.syllabus.slice().sort((a, b) => a.position - b.position).map((ch) => ({
+        id: ch.id, title: ch.title, position: ch.position,
+        lessons: ch.lessons.slice().sort((a, b) => a.position - b.position).map((l) => {
+            flatLessons.push({ id: l.id, position: l.position, chapterTitle: ch.title, title: l.title });
+            const entry = progressByLesson.get(l.id);
+            return { id: l.id, title: l.title, position: l.position, progress: entry?.masterySkipped ? 'mastered-skip' : entry?.completed ? 'completed' : 'not-started' };
+        }),
+    }));
+
+    const currentIndex = flatLessons.findIndex((l) => l.id === lesson.id);
+    const currentMeta = currentIndex >= 0 ? flatLessons[currentIndex] : { position: 1, chapterTitle: '', title: lesson.title };
+    const prevLesson = currentIndex > 0 ? flatLessons[currentIndex - 1] : null;
+    const nextLesson = currentIndex >= 0 && currentIndex < flatLessons.length - 1 ? flatLessons[currentIndex + 1] : null;
+    const currentProgress = progressByLesson.get(lesson.id);
+
+    const goToLesson = (id: string) => navigate(`/courses/${encodeURIComponent(courseId)}/lessons/${encodeURIComponent(id)}`);
+    const relationalMaterials = lesson.materials.map(m => m.materialType === 'file' ? { id: m.id, kind: 'file' as const, name: m.title, description: 'PDF file' } : m.materialType === 'external_video' ? { id: m.id, kind: 'external_video' as const, title: m.title, url: m.externalVideoUrl } : { id: m.id, kind: 'file' as const, name: m.title, description: 'Text material' });
+
+    return <LessonPage
+        courseTitle={course.title} chapterTitle={currentMeta.chapterTitle}
+        lesson={{ id: lesson.id, title: lesson.title, position: currentMeta.position, progress: currentProgress?.masterySkipped ? 'mastered-skip' : currentProgress?.completed ? 'completed' : 'not-started', blocks: [], materials: relationalMaterials, skills: [] }}
+        chapters={chapters} hasPrevious={Boolean(prevLesson)} hasNext={Boolean(nextLesson)}
+        onPrevious={() => { if (prevLesson) goToLesson(prevLesson.id); }}
+        onNext={() => { if (nextLesson) goToLesson(nextLesson.id); }}
+        onMarkComplete={() => void markComplete(lesson.id)}
+        completion={completing ? 'saving' : completionError ? 'error' : 'idle'}
+        onOpenLesson={goToLesson}
+        back={{ label: course.title, href: `/courses/${encodeURIComponent(courseId)}` }}
+    />;
 }
