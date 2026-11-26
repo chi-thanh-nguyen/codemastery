@@ -23,6 +23,86 @@ checks and protected integration. This records design, not newly executed tests.
 CT17's two Batch 4 operational checkpoints remain pending Leader inputs.
 Earlier dated records below retain their approval scope and history.
 
+## CO09 / IN07 integration verification — 26 November 2026
+
+Under the Project Leader's explicit integration task, Codex merged current main
+`34d5803266cc4b6b7e4253bb085ce6fdd0cedf63` (PR #292 squash) into PR #291
+at `821dbe76737e2f691473f70be8d85d08fbe07776`; merge-base was
+`87344dfffbf7e6d1fec4d9affb464b4d3b4648f4`. The four conflicts were in
+deployment.md, deploy.sh, the matrix-contract test and the real-backend privilege
+test. Both complete consumers and their containment checks are retained.
+
+The effective matrix is now [CO09 r14](deployment.md#ct17-p6-privileges-2026-11-26-r14--co09-learning-materials-within-adr012-192-26-november-2026),
+based on integrated IN07 r13. CO09's historical r13 candidate is renumbered solely
+because PR #292 consumed r13 first. The earlier CO09 r13 references and dated test
+results below describe that historical candidate; they are not new r14 results.
+IN07's r13 record remains verbatim. No ceiling, reviewed column inventory,
+migration, dependency, shared/production privilege or operational value changes.
+
+Executed in an isolated clone, with host Java 25.0.4.1, Maven Wrapper 3.9.16,
+Boot 4.1.1 and Docker Desktop (linux/arm64). Maven used the existing disposable
+DP01 PostgreSQL 17.11, Compose-pinned MinIO and real Tomcat test infrastructure.
+The shell qualifications used disposable PostgreSQL 17.11-bookworm clusters.
+From `backend/`:
+
+```sh
+./mvnw verify -Dtest=CourseServiceTest,NotificationServiceTest -Dit.test='FileStorageIntegrationTest#co09*,AuthorizationIntegrationTest#co09*,AuthorizationIntegrationTest$NotificationEndpoints,NotificationRepositoryIntegrationTest'
+```
+
+**PASS, exit 0:** 97 unit tests (83 Course, 14 Notification) and 44 integration
+cases (27 CO09 FileStorage/HTTP, 3 CO09 authorization, 6 NotificationEndpoints,
+8 NotificationRepository), zero failures, errors or skips. The existing CO12
+Course test contribution is retained; material tests retain their event-silence
+assertions. No comprehensive independent review is claimed.
+
+From repository root (scratch BUILDX_CONFIG is outside the checkout):
+
+```sh
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+BUILDX_CONFIG=../buildx BUILDKIT_PROGRESS=plain docker build -t codemastery-backend:co09-in07-integration-20261126 backend
+BACKEND_IMAGE=codemastery-backend:co09-in07-integration-20261126 bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
+bash -n infrastructure/vm/deploy.sh infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh infrastructure/vm/tests/test-runtime-real-backend-privileges.sh infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+git diff --check
+```
+
+All commands above exited **0**. Matrix contract: exact equality across historical
+r1–r14 (r9 changes no row), 27 relations, exact independent IN07/CO09 ceiling
+assertions, unchanged historical assertions and malformed-input rejection.
+PostgreSQL containment: 115 operation probes and 36 expected rejection checks;
+multi-version predecessor and both failure-containment outcomes passed.
+Real backend: both CO09 relational-material and IN07 owner-scoped notification
+exercises passed, followed by real Flyway V008-to-V009 upgrade and drift rejection;
+no permission-denied/SQLSTATE 42501 backend log entry. Both runtime and upgrade
+exercises consumed the configured image. Image ID:
+`sha256:9d254679ef2fa167fb254d887fb96252817183188971cd26ded93cca6f0dbfc9`.
+
+Additional source/structure checks exited **0**: the complete OpenAPI equals the
+structured three-way union of both parents, all 946 internal references resolve,
+and the exact eight CO09/four IN07 operation objects, schemas and responses survive.
+Security keeps both matcher groups, notification no-store, material form exclusion,
+upload transport, current-account checks, filter ordering and default-deny.
+All Authorization test methods and the entire NotificationEndpoints suite survive.
+Eleven CO09 and eight IN07 one-sided backend/frontend files are byte-identical to
+their originating parent; all 361 backend/infrastructure files identical in both
+parents remain identical. Matrix changes against each parent are exactly the other
+consumer's row, with all reviewed columns unchanged. No material event production
+was introduced. There are no merge markers, unresolved index entries or local
+artifacts in the committed tree.
+
+A preliminary matrix-contract invocation from the scratch parent directory exited
+127 and ran no tests; its correctly located execution passed. The initial scratch
+OpenAPI checker assumed the marker was exactly IMPLEMENTED; it was corrected to
+recognize the existing IMPLEMENTED_IN_PR_291 marker, then passed. No repository
+implementation or test was weakened for either invocation error.
+
+These are integration-author checks. Historical independent CO09 review is not
+independent approval of this merged revision. Exact-new-HEAD CI, applicable owning
+module/infrastructure/Leader CODEOWNER approval, resolved review threads, protected
+integration, downstream QA and operational/release acceptance remain separate gates.
+No remote CI dispatch, approval, merge into main, Issue closure or deployed-system
+operation was performed; CI was not awaited. Historical records below are retained.
+
 ## CO09 / CO12 synchronization verification — 26 November 2026
 
 Under the Project Leader's explicit integration task, Codex merged main
@@ -7822,6 +7902,28 @@ no rule suppression, tolerance change or removed assertion. Focused browser veri
 and the 8 harness lifecycle tests pass for this follow-up; the earlier full
 matrix and runtime-source evidence remain applicable to the identical application.
 
+
+## IN07 notifications — 25 November 2026
+
+PR #292 implements CT11.create and CT11.read
+([ADR012 §4](decisions/012-batch-07-contract-approvals.md#4-ct11-notification-core)).
+Test placement follows
+[CT14-IN07-PLACEMENT-2026-11-25-r1](repository-structure.md#in07-test-placement--25-november-2026)
+and the runtime matrix follows
+[CT17-P6-PRIVILEGES-2026-11-25-r13](deployment.md#ct17-p6-privileges-2026-11-25-r13--in07-notifications-25-november-2026).
+
+| Executed check | Result and IN07 evidence |
+| --- | --- |
+| Focused Maven Wrapper `verify` with `NotificationServiceTest`, `NotificationRepositoryIntegrationTest` and `AuthorizationIntegrationTest$NotificationEndpoints` | Build succeeded: 14 unit tests and 14 integration cases, zero failures, errors or skips. PostgreSQL 17.11 with V001–V009. The repository cases cover actual INSERT, duplicate collapse and counts, missing-recipient rollback after an earlier successful INSERT, simultaneous creators with opposite input order, and service execution under exactly the r13 notification privileges. The HTTP cases cover all four routes for all three active roles, 401 before validation (including locked accounts and revoked sessions), 400 for malformed input, indistinguishable 404s, no-store, response shapes, stable order, distant empty pages with exact totals, ownership, persistence, and ignored bodies. |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | PASS. The 27-relation matrix matches the existing revisions and the one r13 row. |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | PASS. The disposable PostgreSQL runtime role can read, insert idempotently and update only `is_read`. Re-key, recipient, message and timestamp updates, DELETE and TRUNCATE all return SQLSTATE 42501. Existing containment and upgrade checks also pass. |
+| Backend Dockerfile build and `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | PASS with the locally built image and disposable databases. The four HTTP operations execute under the provisioned runtime role. SQL fixtures use the runtime-role INSERT, and the HTTP assertions verify the committed mark-read and mark-all-read state and foreign-row isolation. The existing Flyway upgrade cases also pass. |
+| OpenAPI, shell syntax and whitespace checks | PASS. The four operation bindings, schemas, authentication, statuses and no-store headers match. Other OpenAPI operations and schema definitions are unchanged. |
+
+This covers the IN07 portions of B7-O01, B7-O04, B7-O12 and B7-O18. Producer,
+reminder and browser cases belong to their implementing Issues. This is
+remediation-author verification. Independent review, CI and protected
+integration are separate gates. No shared environment was used.
 ## CI package-index remediation qualification — 25 November 2026
 
 Leader-authorized investigation and narrowly scoped remediation on

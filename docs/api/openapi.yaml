@@ -7010,7 +7010,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Any authenticated active account; own notifications only, newest first (createdAt desc, then id desc); unreadOnly filters unread rows. Message-only rows (CT11-READ-FIELDS r1) rendered as plain text. Read-only REPEATABLE READ. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Any authenticated active account; own notifications only, newest first (createdAt desc, then id desc); unreadOnly filters unread rows. Message-only rows (CT11-READ-FIELDS r1) rendered as plain text. Read-only REPEATABLE READ. CT11-READ-2026-11-15-r1. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7047,7 +7047,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7071,7 +7071,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       }
     },
@@ -7081,7 +7081,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Any authenticated active account; count of own unread notifications. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Any authenticated active account; count of own unread notifications. CT11-READ-2026-11-15-r1. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7090,7 +7090,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7111,7 +7111,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       }
     },
@@ -7121,7 +7121,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Marks one own notification read; idempotent; no body is needed and any body is ignored. A missing or foreign notification is the same 404. There is no mark-unread or delete. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Marks one own notification read; idempotent; no body is needed and any body is ignored. A missing or foreign notification is the same 404. There is no mark-unread or delete. CT11-READ-2026-11-15-r1. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7140,7 +7140,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7167,7 +7167,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       }
     },
@@ -7177,7 +7177,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Marks every own unread notification read in one statement and returns how many changed; no body is needed. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Marks every own unread notification read in one statement and returns how many changed; no body is needed and any body is ignored. CT11-READ-2026-11-15-r1. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7186,7 +7186,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7207,7 +7207,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       }
     },

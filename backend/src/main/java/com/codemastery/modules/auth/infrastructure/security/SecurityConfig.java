@@ -16,6 +16,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
@@ -57,6 +58,12 @@ public class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}"));
 
+    private static final RequestMatcher NOTIFICATION_OPERATIONS = new OrRequestMatcher(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/me/notifications"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/me/notifications/unread-count"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/me/notifications/{notificationId}/read"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/me/notifications/read-all"));
+
     /** Adapts only Auth's validated principal, keeping infrastructure out of application consumers. */
     @Bean
     Supplier<CurrentIdentity> currentIdentity() {
@@ -95,11 +102,15 @@ public class SecurityConfig {
                 .logout(logout -> logout.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .cors(cors -> cors.configurationSource(corsConfigurationSource(corsSettings)))
+                .headers(headers -> headers.addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
+                        NOTIFICATION_OPERATIONS, (request, response) -> response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store"))))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(restSecurityErrorHandler)
                         .accessDeniedHandler(restSecurityErrorHandler))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(PUBLIC_OPERATIONS).permitAll()
+                        // CT11.read: all active account roles, with authentication before MVC validation.
+                        .requestMatchers(NOTIFICATION_OPERATIONS).authenticated()
                         // CT17 P4: nondetailed health for the private operator probe only. Ingress does not
                         // proxy /actuator; probe groups and other Actuator endpoints retain default-deny.
                         .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
