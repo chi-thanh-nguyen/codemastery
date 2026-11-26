@@ -189,7 +189,9 @@ RUN set -eu; \
 # 7 November: the v3.24 index replaced alpine-release 3.24.3-r0 and zlib
 # 1.3.2-r1 with 3.24.4-r0 and 1.4-r0, which also fixes CVE-2026-4738, so the old
 # pins no longer resolved; 23 November: libxml2 2.13.9-r3 and libxslt 1.1.43-r4
-# for HIGH findings, libcrypto3/libssl3 3.5.9-r1 for MEDIUM/LOW findings), which
+# for HIGH findings, libcrypto3/libssl3 3.5.9-r1 for MEDIUM/LOW findings;
+# 25 November: libexpat 2.11.0-r0 replaces the unavailable 2.10.0-r0 pin,
+# preserving its fixes and adding the upstream 2.11.0 security fixes), which
 # apk verifies against the signing keys in the pinned base. Unlike an unbounded
 # `apk upgrade`, the build fails if the index no longer offers one of these
 # versions; re-scan and update the list instead (docs/deployment.md, "DP01
@@ -215,7 +217,7 @@ RUN set -eu; \
     apk add --no-cache \
         alpine-release=3.24.4-r0 brotli-libs=1.2.1-r0 c-ares=1.34.9-r0 \
         ca-certificates=20261020-r0 ca-certificates-bundle=20261020-r0 \
-        curl=8.23.0-r0 libcrypto3=3.5.9-r1 libcurl=8.23.0-r0 libexpat=2.10.0-r0 \
+        curl=8.23.0-r0 libcrypto3=3.5.9-r1 libcurl=8.23.0-r0 libexpat=2.11.0-r0 \
         libssl3=3.5.9-r1 libxml2=2.13.9-r3 libxslt=1.1.43-r4 musl=1.2.6-r3 \
         musl-utils=1.2.6-r3 zlib=1.4-r0; \
     echo 'e09fa32f0a0eab2b879ccbbc4d0e4fb9751486eedda75e35fac65802cc9faa266425edf83e261137a2f4d16281ce2c1a5f4502930fe75154723da014214f0655  /etc/apk/keys/nginx_signing.rsa.pub' \

@@ -51,7 +51,7 @@ on:
       - '.github/workflows/deploy.yml'
       - 'infrastructure/vm/cd/**'
       - 'infrastructure/vm/host/**'
-      - 'infrastructure/vm/tests/test_phase5_units.py'
+      - 'infrastructure/vm/tests/test_deployment_recovery_units.py'
 
 permissions:
   contents: read
@@ -77,7 +77,7 @@ jobs:
           for script in infrastructure/vm/cd/*.sh infrastructure/vm/host/codemastery-ops infrastructure/vm/host/codemastery-ssh-gate; do
             bash -n "$script"
           done
-          python3 -m unittest -v infrastructure/vm/tests/test_phase5_units.py
+          python3 -m unittest -v infrastructure/vm/tests/test_deployment_recovery_units.py
 
   request:
     name: Deployment request
