@@ -1,7 +1,7 @@
 /*
  * Presentation view models for assessment screens (S9–S13). NOT API contracts:
- * Assessment operations (CT04/CT10/CT23), the Assessment → Adaptive event (CT08)
- * and file delivery (CT09) are DEFERRED. The backend is the authority for time
+ * The wire contracts below are separate from presentation views. AS09 implements
+ * CT10 assignment/submission and CT09 protected file endpoints; screens remain separate. The backend is the authority for time
  * limits, expiry, attempt numbering, scoring and submission acceptance.
  */
 import type { MasteryState } from '../../../shared/components/StatusPill';
@@ -24,3 +24,27 @@ export interface AssignmentView { id: string; title: string; instructions: strin
 export interface SubmissionView { fileName: string; submittedAtLabel: string; graded?: { grade: number; feedback: string; gradedAtLabel: string } }
 
 export const quizKindLabel: Record<QuizKind, string> = { diagnostic: 'Placement diagnostic', practice: 'Practice quiz', test: 'Test' };
+
+/** AS09 wire contracts (OpenAPI B5*). Timestamps retain their exact microsecond text. */
+export interface LearnerAssignmentSummary {
+    id: string;
+    courseId: string;
+    lessonId: string | null;
+    title: string;
+    deadlineAt: string;
+    open: boolean;
+    submissionStatus: 'none' | 'submitted' | 'graded';
+}
+export interface LearnerSubmission {
+    originalFilename: string;
+    /** Echo this exact value as the grade precondition; never round-trip through Date. */
+    submittedAt: string;
+    graded: boolean;
+    gradePercentage: number | null;
+    feedback: string | null;
+    gradedAt: string | null;
+}
+export interface LearnerAssignment extends Omit<LearnerAssignmentSummary, 'submissionStatus'> {
+    instructions: string;
+    submission: LearnerSubmission | null;
+}

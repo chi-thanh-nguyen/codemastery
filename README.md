@@ -64,6 +64,14 @@ controllers, [security route rules](backend/src/main/java/com/codemastery/module
 and test evidence before relying on an operation. Empty scaffolds do not supply
 missing contracts or functionality.
 
+**AS09 branch update — 27 November 2026:** [PR #297](https://github.com/chi-thanh-nguyen/codemastery/pull/297)
+implements backend Assignment authoring/learner reads, protected PDF/ZIP submissions,
+replacement, grade/regrade and the CT27 producer, including bounded Course/Auth name
+lookups and the CT17 r15 runtime matrix. The dated snapshot above is historical;
+this branch work is author-verified, with [scope and execution evidence](docs/testing.md#as09-full-scope-author-verification--27-november-2026).
+Independent review, required CI, protected integration, notification consumers,
+frontend screens and release/deployment remain separate gates.
+
 ### Releases and deployment
 
 The published `v0.1.0-preview.1` is a prerelease. At this snapshot,
@@ -218,6 +226,11 @@ The frontend visual reference and its non-reuse boundaries are credited in
 recorded in the [sample-data guide](sample-data/README.md#content-provenance).
 
 ## AI and third-party service disclosure
+
+OpenAI Codex assisted the AS09 completion in PR #297: source/contract inspection,
+bounded Auth/Course implementation, regression testing, runtime-privilege
+synchronization and implementation-agent self-audit. This is development assistance,
+not an application runtime dependency or an independent human review.
 
 <details>
 <summary>Development assistance and third-party tools</summary>

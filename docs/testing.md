@@ -1,5 +1,330 @@
 # Testing
 
+## AS09 safe main integration and targeted self-audit — 27 November 2026
+
+**Scope and authority.** The Project Leader's explicit AS09 safe-integration task
+permits normal main integration, conflict and directly related semantic fixes,
+focused tests, commit/push to existing PR #297 and synchronization of its body.
+This is OpenAI Codex-assisted implementation-agent verification, not independent
+acceptance. No merge, Issue/Project change, production grant or deployment occurs.
+
+**Exact parents.** AS09/P3 parent: `b36d9397a6f2f37a38b491cda49be633051e0d60`;
+verified main/AS08 parent: `114aeec3c6ec5a14eeaa0cf556774e87a7136a8c`;
+previous merge-base: `3f1831198982b712bfdaa91381e447d39978d550`.
+Remote PR was OPEN with `mergeable=false`, `mergeable_state=dirty`. A clean,
+isolated clone preserves the occupied repository/worktrees. The delivery commit
+is the normal two-parent merge whose parents are above; its exact SHA is recorded
+by Git and the PR body, avoiding a self-referential SHA in this file.
+
+**Conflict inventory and correction.** Actual textual conflicts are only
+`infrastructure/vm/deploy.sh` and
+`infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh`.
+Nine files overlap: those two, SecurityConfig, OpenAPI, deployment/setup/testing
+and the PostgreSQL containment/real-backend runtime scripts. Both privilege
+extensions are required. Keep merged AS08
+`CT17-P6-PRIVILEGES-2026-11-26-r15`; renumber the unmerged AS09 extension to
+`CT17-P6-PRIVILEGES-2026-11-27-r16`. Preserve the authorized Submission row and
+all AS08 Attempt/Answer rows. Reconcile behavioral probes, contract overlay,
+revision provenance, current OpenAPI/setup references, diagnostics and test labels.
+The contract test now also rejects duplicate revision numbers across dates; a
+scratch duplicate-r15 mutant was rejected by that exact assertion. Historical
+AS09 r15 and exact-SHA execution records below remain unchanged as history.
+
+**Static preservation/self-audit.** Full comparisons against both parents and the
+merge-base verified 658 files without overlapping edits are byte-identical to
+the appropriate parent; only the nine overlapping files need reconciliation.
+No Java production or test source was manually changed in this integration.
+SecurityConfig retains both exact parent matcher groups: AS08's owner result
+matcher precedes the Learner attempt group; AS09's authenticated bindings defer
+role/error precedence to its application admission. Material protection, lazy
+multipart handling, connection-close transport and default deny remain intact.
+The OpenAPI tree equals the semantic three-way union plus five AS09 r16 wording
+updates: seven modified operation objects from each feature, all 946 internal
+references resolved, duplicate keys rejected, normative shapes unchanged.
+Documentation additions from both parents survive; recorded historical evidence
+is not reassigned to this tree. The matrix is the exact parent-row union over
+27 relations, within ADR012 §19.2. No new identity UPDATE, DELETE, DDL, grant
+option, future-object or broader privilege is introduced; existing unrelated
+privileges and restrictions remain unchanged. AS08 scheduler settings, fail-closed
+validation, Compose bindings and explicit disabled test/harness inputs come from
+main unchanged. No additional scheduler consumer is enabled by this work.
+
+**Executed focused Maven verification**, from `backend/`, Java 25.0.4.1,
+Docker Desktop, disposable hardened PostgreSQL 17.11 and Compose-pinned MinIO:
+
+```bash
+./mvnw -q '-Dtest=SubmissionServiceTest#notificationAdmissionRejectsInvalidTransactionBeforeRepositoryAccess,AppConfigTest' '-Dit.test=FileStorageIntegrationTest#as09NotificationProducerDiscoveryAndSharedLockAdmission+as09NotificationStateRefreshesPreloadedEntityAndHoldsCallerSharedLock+as09RestrictedRuntimeConsumerUsesTheExecutableMatrix+as09RealTomcatAdmissionRawMultipartAndGradeContracts+co09RealTomcatMultipartPrecedenceAndBinaryHeaders,AuthorizationIntegrationTest$AssignmentAuthoringEndpoints,AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#realRuntimeMatrixPermitsOnlyTheImplementedAttemptOperations+httpSecurityClosedBodiesNoStoreAndResultConfidentialityUseTheRealStack+exactDeadlineAndLogicalExpiryUseOnlyTheLastCommittedSavedMasks+manualSaveAndExpiryRacesProduceOneImmutableTerminalResult' verify
+```
+
+PASS: **44 unit cases + 12 integration tests**, zero failures/errors/skips,
+from Surefire/Failsafe XML. This compiles all production/test sources and verifies
+application wiring, startup input validation, both feature security paths,
+material/submission multipart transport, both actual restricted-role consumers,
+AS08 expiry/manual-save races and exact deadline, and AS09-R01's proxy/transaction
+and PostgreSQL current-state/shared-lock regressions.
+
+**Repository-root checks:**
+
+```bash
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+bash -n infrastructure/vm/deploy.sh infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
+BUILDX_CONFIG=../buildx BUILDKIT_PROGRESS=plain docker build -t codemastery-backend:as09-as08-integration-20261127 backend
+BACKEND_IMAGE=codemastery-backend:as09-as08-integration-20261127 BACKEND_PORT=18097 bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
+git diff --check
+```
+
+Contract/shell/diff/build checks PASS. PostgreSQL containment PASS:
+**121 operation probes + 36 expected rejection checks**, including idempotence,
+excess-grant drift, PUBLIC/role/ownership/default-privilege escalation, unknown
+objects/columns, V008-to-V009 and V006-to-V009 upgrades, failed-stop reporting and
+fail-closed application containment. Packaged real-backend harness PASS: **198 assertions**, actual runtime consumer
+HTTP/SQL checks and real Flyway V008-to-V009 upgrade, with zero backend permission
+errors/SQLSTATE 42501 entries. The image is built from the integrated backend tree;
+no container image from a previous revision is reused as verification evidence.
+Built image ID: `sha256:d49fda50a96b857b2185e7649b8584492bffb2834b358b5bc86dc8bb2d245bb4`.
+
+**Finding dispositions and retained inventory.** The actual conflict, duplicate
+r15 sequence, stale AS09 references and incomplete diagnostics are resolved.
+No other confirmed actionable integration defect remains after the focused
+source audit and completed checks. AS09-R01/F08 remain FIXED_AUTHOR_VERIFIED:
+exact IllegalStateException outside an active read-write transaction, no repository
+access or implicit transaction on refusal, caller transaction identity, current
+rereads, FOR SHARE lifetime and release are retained. AssignmentService,
+repositories, SubmissionService and their regressions are byte-identical to the
+P3 parent. The prior remediation's **29/29 author inventory remains applicable**;
+this is preservation plus targeted revalidation, not a new comprehensive or
+independent 29-unit execution. The earlier 110 independent passing executions
+remain historical baseline evidence; the former failing oracle was rerun through
+the preserved corrected regression.
+
+**Deliberate omissions and remaining gates.** No comprehensive AS09/AS08 suite,
+all browsers, complete repository suite, frontend rebuild or release qualification
+is repeated: frontend/types, feature implementation and unrelated sources are
+parent-preserved, and focused real SQL/HTTP/lock checks exercise the changed
+integration boundaries. The packaged runtime harness is justified specifically
+by the merged privilege probes and new required AS08 startup inputs; its existing
+unrelated consumer checks were retained. Hosted CI is not awaited or dispatched.
+Final narrow independent review must cover P3 `21bb06cd..b36d9397` plus this main
+integration, both parent comparisons and r15/r16/security/API/operational-test
+coexistence. Independent acceptance, required exact-head CI, eligible CODEOWNER
+approval, QA, protected integration, notification consumers, operational tuning,
+privilege provisioning, hostile-file risk acceptance and deployment remain
+separate gates.
+
+## AS09 targeted P3 remediation — 27 November 2026
+
+**Authority and baseline.** The Project Leader explicitly authorized independent
+finding validation, targeted remediation, tests, commit and push to existing
+PR #297 (`feat/as09-assignment-submissions`). Initial/reviewed HEAD is
+`21bb06cd963f3b8e00d1b8583981f24b9e0bcfd3`; live main and merge-base are
+`3f1831198982b712bfdaa91381e447d39978d550`. No intervening PR commits were found.
+This record is remediation-agent verification with OpenAI Codex assistance;
+independent acceptance remains pending.
+
+**Confirmed AS09-R01 / P3.** ADR012 §3.3,
+`CT10-REMINDER-READ-2026-11-15-r2`, requires `IllegalStateException` without an
+active read-write transaction. The Spring `MANDATORY` interceptor instead threw
+`IllegalTransactionStateException` before the explicit guard. Changing the existing
+integration oracle to `assertThrowsExactly(IllegalStateException.class, ...)` and
+running it against the unchanged production service reproduced **one assertion
+failure, zero errors/skips**, through the actual Spring-managed bean.
+
+**Correction.** Remove only the method's `MANDATORY` annotation and unused import;
+retain its active/read-only guard and document why it owns the exception contract.
+There is no class-level transaction annotation. The method opens no transaction:
+the existing repository `FOR SHARE`, entity refresh and subsequent submitter query
+remain in the caller's transaction. No authorization, SQL, lock order, persistence,
+consumer, dependency, migration or technical-contract change is made.
+
+**Executed commands**, from `backend/` with Java 25.0.4.1 and disposable hardened
+PostgreSQL 17.11 / pinned MinIO using the existing integration foundation:
+
+```bash
+# Corrected oracle, unchanged production code: expected reproduction failure.
+./mvnw -q '-Dtest=SubmissionServiceTest#noSuchTest' -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=FileStorageIntegrationTest#as09NotificationProducerDiscoveryAndSharedLockAdmission' verify
+# Remediated code: PASS, 2 unit cases + 2 integration tests, no failures/errors/skips.
+./mvnw -q '-Dtest=SubmissionServiceTest#notificationAdmissionRejectsInvalidTransactionBeforeRepositoryAccess' '-Dit.test=FileStorageIntegrationTest#as09NotificationProducerDiscoveryAndSharedLockAdmission+as09NotificationStateRefreshesPreloadedEntityAndHoldsCallerSharedLock' verify
+# Repository root: PASS.
+git diff --check
+```
+
+The two parameterized unit cases use the real annotation-driven Spring interceptor
+and transaction manager: absent/read-only transaction rejection has the exact Java
+exception, zero repository/Course access and no JDBC work or transaction creation
+by admission. Real integration tests exercise the autowired service's absent,
+read-only and valid caller-owned transactions; discovery bounds/cursor, hidden
+Assignment exclusion and a competing publication edit remain covered. The retained
+reviewer current-state probe is adapted from the supplied test-only patch, with
+additional caller transaction-ID equality and post-completion lock release checks.
+It preloads an old entity, commits title/Lesson/deadline/submission changes from
+another connection, verifies current fields/submitters and immutability, and proves
+that a competing `FOR UPDATE` gets SQLSTATE `55P03` until the caller completes.
+
+**Focused self-audit.** AS09-R01 and F08's remaining exception discrepancy are
+remediated in author verification. Using the supplied independent review's
+29-unit inventory, unchanged units 1–26/28–29 retain their baseline evidence;
+unit 27 now meets the missing obligation. The resulting author assessment is
+**29/29**, pending Final Narrow Delta-focused Independent Review. This does not
+claim independent closure or repeat comprehensive verification. The earlier
+25/25 inventory and closure statements below are historical author claims; the
+independent review corrected them to 28/29 at `21bb06cd` before this remediation.
+
+**Omissions and gates.** The 110 prior passing executions, full backend suite,
+browser/E2E, unrelated upstream/provider/runtime-privilege suites and release
+qualification were not rerun: their production paths are unchanged and the focused
+set exercises the affected proxy, guard and real lock boundaries. Hosted CI was
+not awaited. Independent delta review, applicable human/CODEOWNER approval,
+required CI, QA, notification-consumer integration, protected integration and
+release/deployment authority remain separate; no merge, Issue closure, approval,
+production grant or deployment is performed.
+
+
+## AS09 full-scope author verification — 27 November 2026
+
+**Scope and authority.** The Project Leader's explicit “CodeMastery — AS09 Full-Scope
+Completion, Bounded Upstream Implementation, and Post-Implementation Audit” task
+covers Issue #160 in existing PR #297, the bounded AU06/CO07 slices below, necessary
+supporting files and CT17 consumer synchronization. This is implementation-agent
+self-audit with Codex assistance, not independent CODEOWNER review or acceptance.
+No mandatory requirement, effective ADR, schema, dependency or production resource
+is changed. CT09/CT10/CT18 use ADR010's r1 revisions including §§16–18 corrections;
+CT01 learner names use `CT01-LEARNER-NAMES-2026-11-12-r1`; CT27 and the Assessment-owned
+notification reads use ADR012 §§3.3/9.2/19, including r2 concurrency corrections.
+
+**Git baseline.** Initial PR HEAD `5af4f4b96ad56b57d5a3ad2c64e4479b54175ba1`;
+remote main `23402754743e0d35048e74cbabebfa133e5e6da3`; initial PR base and merge-base
+`cc6cb54ddedf226966a51c9614fc5fc5756267bb`. Main was integrated by an ordinary merge,
+preserving the contributor commit and attribution. PR #273's owner authoring and
+PR #289's SH05 adapter were verified integrated and reused.
+
+**Implementation inventory.** These are functional units, not lines or test counts.
+Before/after states compare the initial PR against the delivered candidate.
+`COMPLETE` means its implementation obligation is met; verification and acceptance
+remain distinct below. The completed-unit ratio is 12/25 before (48%, with partial
+units deliberately not assigned fractional credit), 25/25 after (100%). This is an
+explicit inventory measure, not an estimate of how many lines already existed.
+
+| Unit | Checkpoint | Before | After | Concrete implementation evidence |
+|---|---|---|---|---|
+| Assignment schema mapping and exact UTC deadlines | persist | COMPLETE | COMPLETE | `AssignmentEntity.DeadlineJdbcType`, `AssignmentRepositoryImpl`, existing owner integration tests |
+| Submission persistence, null grades, immutable identities and targeted SQL | persist | COMPLETE | COMPLETE | `SubmissionEntity`, `SubmissionJpaRepository`, real PostgreSQL consumer test |
+| Five owner Assignment authoring/read operations | persist | COMPLETE | COMPLETE | `AssignmentController`, `AssignmentService.create/replace/setPublication/readOwned/listOwned` |
+| Deterministic owner order and submission/grade counts | persist | COMPLETE | COMPLETE | `AssignmentJpaRepository.findPageInCourse`, `SubmissionJpaRepository.countByAssignmentIds` |
+| Learner visibility filtering, order, total and pagination | persist | INCORRECT | COMPLETE | `AssignmentService.listForLearner`, Assessment-only candidate queries, Course access gates |
+| Learner detail admission and own submission projection | persist | PARTIAL | COMPLETE | `AssignmentService.readForLearner`: one strongest CT03 Course/Lesson gate |
+| Coherent read snapshots | persist | COMPLETE | COMPLETE | REPEATABLE READ service/transaction templates for admission, rows and counts |
+| All implemented HTTP bindings, default-deny elsewhere | submit/grade | MISSING | COMPLETE | exact method/path `ASSIGNMENT_OPERATIONS` in Auth `SecurityConfig` |
+| Multipart admission, request-shape precedence and unread-body transport | submit | PARTIAL | COMPLETE | lazy resolution, deferred part accessor, raw query parser, form-filter exclusions and `Connection: close` |
+| File signature, filename, extension, size and byte preservation | submit | COMPLETE | COMPLETE | `SubmissionService` validation, SH05 real MinIO adapter, raw Tomcat round trip |
+| First submission, exclusive deadline and post-lock microsecond clock | submit | COMPLETE | COMPLETE | `submitOrReplace`; real deadline-minus-1µs/equality and upload-crossing tests |
+| Replacement, stable row ID, monotonic version and lock order | submit | COMPLETE | COMPLETE | Assignment-before-Submission `FOR UPDATE`; concurrent-first and replacement/grade barriers |
+| Store/transaction/compensation and unknown commit outcome | submit | COMPLETE | COMPLETE | `Outcome` callbacks, explicit flush, real JDBC commit-before/after fault injection |
+| Learner protected download | submit | PARTIAL | COMPLETE | strongest CT03 admission; current-user row, re-admitted replacement retry |
+| Owner protected download, attachment headers and resource closure | grade | COMPLETE | COMPLETE | `downloadSubmissionForOwner`, `streamAttachment`, no transaction during storage/copy |
+| Owner submission page and stored learner names | grade | PARTIAL | COMPLETE | `listSubmissionsForOwner` → `EnrollmentService` → `UserAccountService` |
+| Grade/regrade, precise version, exact decimal and feedback validation | grade | PARTIAL | COMPLETE | `gradeSubmission`, strict `AssignmentRequests` BigDecimal parsing and Unicode-whitespace rejection |
+| Learner grade/feedback visibility | grade | COMPLETE | COMPLETE | `LearnerSubmissionResponse`; null before grade and visible only to admitted self |
+| AU06 stored learner-name read | grade | MISSING | COMPLETE | `UserAccountService.learnerDisplayNames`; role/status independent, immutable, page bounded |
+| CO07 ownership/enrollment-filtered learner-name read | grade | MISSING | COMPLETE | `EnrollmentService.learnerDisplayNames`; includes LEFT and excludes nonmembers |
+| CT27 payload, flush-before-publication and successful grade/regrade | event | COMPLETE | COMPLETE | `AssignmentGradedEvent`, locked grade producer and real after-commit/rollback tests |
+| Assessment-owned reminder discovery | event | MISSING | COMPLETE | `findReminderCandidates`, exclusive/inclusive window and strict keyset order |
+| Locked current notification state handoff | event | MISSING | COMPLETE | `lockNotificationState`, active read-write transaction, `FOR SHARE`, current submitters |
+| Restricted runtime database consumer | all | MISSING | COMPLETE | CT17-P6 r15; executable matrix, real restricted-role consumer and PostgreSQL containment |
+| OpenAPI status, wire types and documentation synchronization | all | PARTIAL | COMPLETE | seven AS09 operation statuses/descriptions; existing assessment/grading types, setup/testing/deployment docs |
+
+**Bounded upstream accounting.** AU06 #53 adds only its approved stored-name
+projection (estimated 5–8% of its registration/login/profile/session/account-handoff
+responsibilities). CO07 #173 adds only an owner-admitted, at-most-100-ID enrollment
+filter/name facade (estimated 10–15% compared with join/leave/rejoin, membership,
+My Courses and stored-status filtering). These are cumulative functional estimates
+per Issue, not file/line percentages. Both reuse existing repositories, with no
+new REST operation, schema, directory or dependency. No other upstream Issue is
+implemented. Course remains the sole direct Auth learner-name consumer.
+
+**Implementation choices and exclusions.** No unresolved technical contract needed
+replacement. Learner pages scan Assessment-owned published candidates in bounded
+100-row chunks and cache each bound Lesson's CT03 result in the same read snapshot;
+filtering precedes counting and paging. This avoids cross-module SQL or an unapproved
+new structural interface. Cost is proportional to published Assignment candidates
+and distinct Lessons in that Course, while name lookup remains output-page bounded.
+The ADR012 Assessment-owned producer reads ship here; Interaction notification
+consumers/schedulers, unrelated reporting, frontend screens, timed quizzes and
+Adaptive orchestration remain separately owned. CT17 r15 is a dated consumer matrix
+extension inside the existing ceiling; it grants no actual production privilege.
+
+**Confirmed findings and remediation.**
+
+| ID | Severity | Failure trigger and correction | Regression evidence |
+|---|---|---|---|
+| AS09-F01 | P1 | Learner/submission/grading URLs hit default-deny despite implemented handlers; add exact authenticated bindings, leaving role decisions to CT03 | Real Tomcat success, role/media/UUID/page precedence and unsupported-method checks |
+| AS09-F02 | P2 | Learner list queried nonexistent `lessons.course_id` and reached into Course tables; use Assessment candidates and public Course gates before paging | Real PostgreSQL learner list and unit hidden-Lesson/page/count oracle |
+| AS09-F03 | P2 | Name seam always returned empty; implement the approved Course→Auth chain with historical enrollment semantics | Auth/Course unit tests and real cross-module stored-name/status/role tests |
+| AS09-F04 | P1 | Current runtime role could not insert/read/update/lock full Submission rows; ship r15 without identity UPDATE, DELETE or DDL | Actual service SQL under restricted PostgreSQL SET ROLE plus deployment containment harness |
+| AS09-F05 | P2 | PUT form parsing / GET `@RequestParam` resolution could touch multipart before admission; exclude exact routes from form filtering and parse URL query only | Malformed/oversized denied uploads, hostile GET and encoded unread-body socket oracle |
+| AS09-F06 | P2 | Detail/upload called redundant Course+Lesson gates; select the strongest gate from stored Assignment context and preserve Course concealment for missing rows | Unit gate selection and real HTTP Course/Lesson/Assignment/LEFT/role concealment matrix |
+| AS09-F07 | P2 | JSON float nodes could round a long grade fraction to an allowed decimal; feedback validation admitted Unicode-only whitespace; service grade shape preceded Submission scope | BigDecimal tree parsing, Unicode-space validation and resource-before-shape regressions |
+| AS09-F08 | P2 | Assessment's approved current notification-state/discovery producer handoffs were absent | Real cursor/window/read-only rejection and shared-lock-vs-edit tests |
+| AS09-F09 | P3 | OpenAPI still said learner/submission/grade operations unimplemented; grading view-model comment incorrectly said grades immutable | Description/status-only OpenAPI semantic diff, exact wire types and TypeScript check |
+
+The final audit covers retained authoring, entities/repositories, all REST operations,
+real Course/Auth/storage callers, clock/lock ordering, transaction outcomes, streaming,
+configuration, privilege ceiling, event producers and every new upstream addition.
+It finds no remaining confirmed actionable in-scope implementation defect. This is
+an author self-audit, not an independent review. Corrupted historical-row repair and
+real production risk/configuration acceptance are excluded.
+
+**Executed verification (isolated local environment).** Java 25.0.4.1, repository
+Maven wrapper, Docker Desktop 29.8.1, disposable hardened PostgreSQL 17.11 with all
+nine Flyway migrations and the exact Compose-pinned MinIO server/client digests.
+FileStorage uses an isolated bucket-scoped application identity; no production
+resources or credentials are used. Fault injection and SET ROLE are test-only.
+
+```bash
+# backend/: focused unit tests and real database/storage/HTTP tests
+./mvnw -q '-Dtest=SubmissionServiceTest,EnrollmentServiceTest,AuthServiceTest$LearnerNames,AuthServiceTest$PublicInstructorNames,AuthServiceTest$UserSummaries' '-Dit.test=FileStorageIntegrationTest#as09*,AuthorizationIntegrationTest$AssignmentAuthoringEndpoints' verify
+# repository root:
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+bash -n infrastructure/vm/deploy.sh infrastructure/vm/tests/test-runtime-real-backend-privileges.sh infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+npm --prefix frontend run typecheck
+# backend/: final additional Unicode-space assertion, same 50 AS09 unit cases
+./mvnw -q -Dtest=SubmissionServiceTest test
+git diff --check
+```
+
+Final Maven result: **PASS — 87 unit tests and 14 integration tests, zero failures,
+errors or skips**. The integration set includes HTTP concealment and a paused download
+with only one pool connection. Matrix contract and full PostgreSQL containment
+(including V006→V009, drift, PUBLIC/inherited permissions and failure containment)
+passed. TypeScript passed. A duplicate-key-rejecting OpenAPI semantic probe found
+only 14 approved description/status changes, 946 resolved internal references and
+no schema changes. An initial sandbox-only Mockito attach failure was environmental;
+unsandboxed focused execution works. Intermediate test/setup failures were corrected;
+only final executed results establish delivery evidence.
+
+**Unexecuted checks and remaining gates.** The separate Docker-packaged
+`test-runtime-real-backend-privileges.sh` has AS09 r15 consumer assertions and passed
+shell syntax checking; its whole unrelated-consumer/upgrade suite was not rerun.
+Restricted-role AS09 application SQL is instead executed in the approved real
+PostgreSQL/MinIO integration suite. No frontend runtime behavior changed, so no
+browser/UI/E2E suite was needed. Unaffected adapter/full-repository/release suites
+and hosted CI were not awaited or claimed. Independent Auth/Course/Assessment/
+storage/infrastructure CODEOWNER review, required CI, protected integration,
+functional QA acceptance and actual notification-consumer integration remain gates.
+Operator-recorded upload/ingress/tmpfs settings, production privilege provisioning,
+hostile-download residual-risk acceptance, release and deployment remain separate.
+
+**Attribution.** Original contributor commit remains unchanged. Contributor metadata
+is `minhtan29042006 <tan.buikhmt0429@hcmut.edu.vn>`. Follow-up work retains the actual
+configured identity `Nguyen Chi Thanh <ctnguyen20072006@gmail.com>` under
+CONTRIBUTING's truthful-attribution rule; original-contributor consent to substitute
+follow-up metadata was not established. The Leader's task explicitly permits this
+fallback. Authenticated GitHub pusher is `chi-thanh-nguyen`. Codex inspected,
+implemented, tested and self-audited these additions; no human review or contributor
+consent is fabricated.
+
+
 **Post-PR231 integration update — 10 November 2026:** ADR008, including CP-030 r2,
 is merged; ADR009's two r2 approvals remain pending #233 protected integration.
 Batch 4 is **8/8 technically approved**. [ADR009 section 10](decisions/009-ct17-final-runtime-recovery.md#10-post-pr231-integration-and-azure-evidence--10-november-2026)

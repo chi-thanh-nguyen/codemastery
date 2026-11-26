@@ -1544,6 +1544,30 @@ class AuthServiceTest {
         }
     }
 
+    @Nested
+    class LearnerNames {
+        @Test void historicalNamesIgnoreAccountStatusAndRoleAndRemainImmutable() {
+            UUID locked = UUID.randomUUID(), missing = UUID.randomUUID();
+            when(users.findById(missing)).thenReturn(Optional.empty());
+            when(users.findById(USER_ID)).thenReturn(Optional.of(account(Role.ADMIN, AccountStatus.ACTIVE)));
+            when(users.findById(locked)).thenReturn(Optional.of(new User(locked, "locked@example.test",
+                    passwordHash, "Stored name", Role.INSTRUCTOR, AccountStatus.LOCKED)));
+            var names = new UserAccountService(users, () -> { throw new AssertionError("No current actor read"); })
+                    .learnerDisplayNames(Set.of(USER_ID, locked, missing));
+            assertEquals(Map.of(USER_ID, "Unit Learner", locked, "Stored name"), names);
+            assertThrows(UnsupportedOperationException.class, () -> names.put(missing, "invented"));
+        }
+        @Test void emptyAndPageBoundAndStorageFailure() {
+            var service = new UserAccountService(users, () -> null);
+            assertEquals(Map.of(), service.learnerDisplayNames(Set.of()));
+            var ids = java.util.stream.IntStream.range(0, 101).mapToObj(i -> UUID.randomUUID()).collect(java.util.stream.Collectors.toSet());
+            assertThrows(IllegalArgumentException.class, () -> service.learnerDisplayNames(ids));
+            verifyNoInteractions(users);
+            when(users.findById(USER_ID)).thenThrow(new DataAccessResourceFailureException("Synthetic storage failure"));
+            assertThrows(DataAccessResourceFailureException.class, () -> service.learnerDisplayNames(Set.of(USER_ID)));
+        }
+    }
+
     /** CT01-USER-SUMMARIES-2026-11-15-r2 (ADR012 section 3.4), consumed by IN10's audit read. */
     @Nested
     class UserSummaries {

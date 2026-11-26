@@ -1,24 +1,41 @@
 package com.codemastery.modules.assessment.api.controller;
 
 import com.codemastery.common.api.PageResponse;
-import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.modules.assessment.api.dto.AssignmentRequests;
+import com.codemastery.modules.assessment.api.dto.AssignmentRequests.GradeSubmissionRequest;
 import com.codemastery.modules.assessment.api.dto.AssignmentRequests.PublicationRequest;
 import com.codemastery.modules.assessment.api.dto.AssignmentRequests.WriteAssignmentRequest;
+import com.codemastery.modules.assessment.api.dto.AssignmentResponses.LearnerAssignmentResponse;
+import com.codemastery.modules.assessment.api.dto.AssignmentResponses.LearnerAssignmentSummaryResponse;
+import com.codemastery.modules.assessment.api.dto.AssignmentResponses.LearnerSubmissionResponse;
 import com.codemastery.modules.assessment.api.dto.AssignmentResponses.OwnedAssignmentResponse;
+import com.codemastery.modules.assessment.api.dto.AssignmentResponses.SubmissionSummaryResponse;
 import com.codemastery.modules.assessment.application.service.AssignmentService;
+import com.codemastery.modules.assessment.application.service.AssignmentService.LearnerAssignmentSummaryView;
 import com.codemastery.modules.assessment.application.service.AssignmentService.OwnedAssignmentView;
+import com.codemastery.modules.assessment.application.service.SubmissionService;
+import com.codemastery.modules.assessment.application.service.SubmissionService.FilePart;
+import com.codemastery.modules.assessment.application.service.SubmissionService.SubmissionFile;
+import com.codemastery.modules.assessment.application.service.SubmissionService.SubmissionOutcome;
+import com.codemastery.modules.assessment.application.service.SubmissionService.SubmissionSummaryView;
+import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.Part;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.InvalidMediaTypeException;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageConverter;
@@ -33,21 +50,16 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.MultipartHttpServletRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
 
 /**
- * CT10.rest Instructor assignment authoring and owner read endpoints (ADR010 §§12, 14;
- * OpenAPI b5CreateAssignment, b5ListOwnedAssignments, b5ReadOwnedAssignment,
- * b5ReplaceAssignment, b5SetAssignmentPublication).
- *
- * <p>Precedence follows ADR010 §14 stage by stage:
- * 1. 401 authentication (security filter chain),
- * 2. 415 request media type (POST/PUT) and 400 malformed path UUID or query parameter,
- * 3. CT03 403/404 role/ownership and assignment-in-course 404 before reading the request body,
- * 4. 400 closed JSON body shape and field validation,
- * 7. locked READ COMMITTED write and committed representation.
+ * CT10.rest assignment and submission REST boundary (ADR010 §§11, 12, 14).
+ * Multipart endpoints receive {@link MultipartHttpServletRequest} lazily and never read parts
+ * before stage-3 admission in {@link SubmissionService}.
  */
 @RestController
 @RequestMapping("/api/courses/{courseId}")
@@ -59,9 +71,16 @@ public class AssignmentController {
     private static final Set<String> PAGE_PARAMETERS = Set.of("page", "size");
 
     private final AssignmentService assignmentService;
+    private final SubmissionService submissionService;
 
     public AssignmentController(AssignmentService assignmentService) {
+        this(assignmentService, null);
+    }
+
+    @Autowired
+    public AssignmentController(AssignmentService assignmentService, SubmissionService submissionService) {
         this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService");
+        this.submissionService = submissionService;
     }
 
     @PostMapping("/assignments")
@@ -83,9 +102,9 @@ public class AssignmentController {
     @GetMapping("/owned-assignments")
     public ResponseEntity<PageResponse<OwnedAssignmentResponse>> listOwned(
             @PathVariable String courseId,
-            @RequestParam MultiValueMap<String, String> params) {
+            HttpServletRequest http) {
         UUID course = id(courseId);
-        int[] paging = page(params);
+        int[] paging = page(query(http));
         PageResponse<OwnedAssignmentView> result = assignmentService.listOwned(course, paging[0], paging[1]);
         return response(HttpStatus.OK, new PageResponse<>(
                 result.content().stream().map(OwnedAssignmentResponse::from).toList(),
@@ -143,12 +162,219 @@ public class AssignmentController {
                 assignmentService.setPublication(course, assignment, request.publicationStatus())));
     }
 
+    @GetMapping("/assignments")
+    public ResponseEntity<PageResponse<LearnerAssignmentSummaryResponse>> listForLearner(
+            @PathVariable String courseId,
+            HttpServletRequest http) {
+        UUID course = id(courseId);
+        int[] paging = page(query(http));
+        PageResponse<LearnerAssignmentSummaryView> result =
+                assignmentService.listForLearner(course, paging[0], paging[1]);
+        return response(HttpStatus.OK, new PageResponse<>(
+                result.content().stream().map(LearnerAssignmentSummaryResponse::from).toList(),
+                result.page(),
+                result.size(),
+                result.totalElements(),
+                result.totalPages()));
+    }
+
+    @GetMapping("/assignments/{assignmentId}")
+    public ResponseEntity<LearnerAssignmentResponse> readForLearner(
+            @PathVariable String courseId,
+            @PathVariable String assignmentId,
+            HttpServletRequest http) {
+        noQuery(http);
+        UUID course = id(courseId);
+        UUID assignment = id(assignmentId);
+        return response(HttpStatus.OK,
+                LearnerAssignmentResponse.from(assignmentService.readForLearner(course, assignment)));
+    }
+
+    @PutMapping(path = "/assignments/{assignmentId}/submission", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<LearnerSubmissionResponse> submitOrReplace(
+            @PathVariable String courseId,
+            @PathVariable String assignmentId,
+            MultipartHttpServletRequest request,
+            @RequestHeader(name = HttpHeaders.CONTENT_TYPE, required = false) String contentType)
+            throws HttpMediaTypeNotSupportedException {
+        requireMultipart(contentType);
+        noQuery(request);
+        UUID course = id(courseId);
+        UUID assignment = id(assignmentId);
+        SubmissionOutcome outcome = submissions().submitOrReplace(course, assignment, () -> filePart(request));
+        HttpStatus status = outcome.created() ? HttpStatus.CREATED : HttpStatus.OK;
+        return response(status, LearnerSubmissionResponse.from(outcome.submission()));
+    }
+
+    @GetMapping("/assignments/{assignmentId}/submission/file")
+    public void downloadOwnSubmission(
+            @PathVariable String courseId,
+            @PathVariable String assignmentId,
+            HttpServletRequest request,
+            HttpServletResponse response) throws IOException {
+        noQuery(request);
+        UUID course = id(courseId);
+        UUID assignment = id(assignmentId);
+        try (SubmissionFile file = submissions().downloadOwnSubmission(course, assignment)) {
+            streamAttachment(file, response);
+        } catch (IOException | RuntimeException failure) {
+            if (!response.isCommitted()) {
+                response.reset();
+            }
+            throw failure;
+        }
+    }
+
+    @GetMapping("/owned-assignments/{assignmentId}/submissions")
+    public ResponseEntity<PageResponse<SubmissionSummaryResponse>> listSubmissions(
+            @PathVariable String courseId,
+            @PathVariable String assignmentId,
+            HttpServletRequest http) {
+        UUID course = id(courseId);
+        UUID assignment = id(assignmentId);
+        int[] paging = page(query(http));
+        PageResponse<SubmissionSummaryView> result =
+                submissions().listSubmissionsForOwner(course, assignment, paging[0], paging[1]);
+        return response(HttpStatus.OK, new PageResponse<>(
+                result.content().stream().map(SubmissionSummaryResponse::from).toList(),
+                result.page(),
+                result.size(),
+                result.totalElements(),
+                result.totalPages()));
+    }
+
+    @GetMapping("/owned-assignments/{assignmentId}/submissions/{submissionId}/file")
+    public void downloadSubmission(
+            @PathVariable String courseId,
+            @PathVariable String assignmentId,
+            @PathVariable String submissionId,
+            HttpServletRequest request,
+            HttpServletResponse response) throws IOException {
+        noQuery(request);
+        UUID course = id(courseId);
+        UUID assignment = id(assignmentId);
+        UUID submission = id(submissionId);
+        try (SubmissionFile file = submissions().downloadSubmissionForOwner(course, assignment, submission)) {
+            streamAttachment(file, response);
+        } catch (IOException | RuntimeException failure) {
+            if (!response.isCommitted()) {
+                response.reset();
+            }
+            throw failure;
+        }
+    }
+
+    @PutMapping("/owned-assignments/{assignmentId}/submissions/{submissionId}/grade")
+    public ResponseEntity<SubmissionSummaryResponse> gradeSubmission(
+            @PathVariable String courseId,
+            @PathVariable String assignmentId,
+            @PathVariable String submissionId,
+            HttpServletRequest http,
+            @RequestHeader(name = HttpHeaders.CONTENT_TYPE, required = false) String contentType)
+            throws HttpMediaTypeNotSupportedException {
+        AssignmentRequests.requireJson(contentType);
+        noQuery(http);
+        UUID course = id(courseId);
+        UUID assignment = id(assignmentId);
+        UUID submission = id(submissionId);
+        submissions().requireOwnedSubmission(course, assignment, submission);
+        GradeSubmissionRequest request = AssignmentRequests.parseGrade(readBody(http))
+                .orElseThrow(AssignmentRequests::invalid);
+        return response(HttpStatus.OK, SubmissionSummaryResponse.from(
+                submissions().gradeSubmission(course, assignment, submission, request.toInput())));
+    }
+
+    private SubmissionService submissions() {
+        return Objects.requireNonNull(submissionService, "submissionService");
+    }
+
+    private static void streamAttachment(SubmissionFile file, HttpServletResponse response) throws IOException {
+        response.setContentType(file.mediaType());
+        response.setContentLengthLong(file.contentLength());
+        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, disposition(file.originalFilename()));
+        response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store");
+        response.setHeader("X-Content-Type-Options", "nosniff");
+        response.setStatus(HttpStatus.OK.value());
+        file.content().transferTo(response.getOutputStream());
+    }
+
+    private static String disposition(String filename) {
+        StringBuilder ascii = new StringBuilder();
+        filename.codePoints().forEach(c -> ascii.append(c < 128 && c != '"' && c != '\\' ? (char) c : '_'));
+        StringBuilder encoded = new StringBuilder();
+        for (byte b : filename.getBytes(StandardCharsets.UTF_8)) {
+            int c = b & 255;
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                    || "!#$&+-.^_`|~".indexOf(c) >= 0) {
+                encoded.append((char) c);
+            } else {
+                encoded.append("%%%02X".formatted(c));
+            }
+        }
+        return "attachment; filename=\"" + ascii + "\"; filename*=UTF-8''" + encoded;
+    }
+
+    private static FilePart filePart(MultipartHttpServletRequest request) {
+        List<Part> parts;
+        try {
+            parts = List.copyOf(request.getParts());
+        } catch (MaxUploadSizeExceededException tooLarge) {
+            throw tooLarge;
+        } catch (IllegalStateException tooLarge) {
+            throw new MaxUploadSizeExceededException(-1);
+        } catch (ServletException | IOException | MultipartException malformed) {
+            throw AssignmentRequests.invalid();
+        }
+        if (parts.size() != 1 || !"file".equals(parts.getFirst().getName())) {
+            throw AssignmentRequests.invalid();
+        }
+        Part file = parts.getFirst();
+        if (file.getSubmittedFileName() == null) {
+            throw AssignmentRequests.invalid();
+        }
+        try {
+            return new FilePart(file.getSubmittedFileName(), file.getSize(), file.getInputStream());
+        } catch (IOException malformed) {
+            throw AssignmentRequests.invalid();
+        }
+    }
+
+    private static void requireMultipart(String contentType) throws HttpMediaTypeNotSupportedException {
+        MediaType type;
+        try {
+            type = contentType == null ? null : MediaType.parseMediaType(contentType);
+        } catch (InvalidMediaTypeException invalid) {
+            throw new HttpMediaTypeNotSupportedException("Invalid Content-Type");
+        }
+        if (type == null || !MediaType.MULTIPART_FORM_DATA.isCompatibleWith(type)) {
+            throw new HttpMediaTypeNotSupportedException(type, List.of(MediaType.MULTIPART_FORM_DATA));
+        }
+    }
+
     private static byte[] readBody(HttpServletRequest http) {
         try {
             return http.getInputStream().readAllBytes();
         } catch (IOException ioFailure) {
             throw new UncheckedIOException(ioFailure);
         }
+    }
+
+    /** Parse only the URL query: Servlet getParameter* can eagerly parse a multipart GET body. */
+    private static MultiValueMap<String, String> query(HttpServletRequest http) {
+        var params = new org.springframework.util.LinkedMultiValueMap<String, String>();
+        String raw = http.getQueryString();
+        if (raw == null || raw.isEmpty()) return params;
+        for (String pair : raw.split("&", -1)) {
+            String[] parts = pair.split("=", 2);
+            if (parts.length != 2) throw AssignmentRequests.invalid();
+            try {
+                params.add(java.net.URLDecoder.decode(parts[0], StandardCharsets.UTF_8),
+                        java.net.URLDecoder.decode(parts[1], StandardCharsets.UTF_8));
+            } catch (IllegalArgumentException malformed) {
+                throw AssignmentRequests.invalid();
+            }
+        }
+        return params;
     }
 
     private static int[] page(MultiValueMap<String, String> params) {
@@ -194,11 +420,11 @@ public class AssignmentController {
         return ResponseEntity.status(status).cacheControl(CacheControl.noStore()).body(body);
     }
 
-    /** Assignment responses, including MVC error advice, are never cached (AuthenticationNoStore). */
+    /** Assignment and submission responses, including MVC error advice, are never cached. */
     @ControllerAdvice
     public static class AssignmentCacheAdvice implements ResponseBodyAdvice<Object> {
         private static final Pattern ASSIGNMENT_PATH = Pattern.compile(
-                "/api/courses/[^/]+/(assignments|owned-assignments(/[^/]+(/publication)?)?)");
+                "/api/courses/[^/]+/(assignments(/[^/]+(/submission(/file)?)?)?|owned-assignments(/[^/]+(/publication|/submissions(/[^/]+(/file|/grade))?)?)?)");
 
         @Override
         public boolean supports(MethodParameter returnType, Class<? extends HttpMessageConverter<?>> converterType) {
