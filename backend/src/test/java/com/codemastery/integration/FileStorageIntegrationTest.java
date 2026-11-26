@@ -1910,9 +1910,9 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
             assertEquals(f.base.lesson, discovered.lessonId()); assertTrue(discovered.submittedLearnerIds().isEmpty());
             var cursor = new com.codemastery.modules.assessment.application.service.AssignmentService.ReminderCursor(deadline, f.assignment);
             assertTrue(assignmentService.findReminderCandidates(f.now, deadline, cursor, 20).stream().noneMatch(c -> c.assignmentId().equals(f.assignment)));
-            assertThrows(org.springframework.transaction.IllegalTransactionStateException.class, () -> assignmentService.lockNotificationState(f.assignment));
+            assertThrowsExactly(IllegalStateException.class, () -> assignmentService.lockNotificationState(f.assignment));
             var readOnly = new org.springframework.transaction.support.TransactionTemplate(materialTransactions); readOnly.setReadOnly(true);
-            assertThrows(IllegalStateException.class, () -> readOnly.execute(tx -> assignmentService.lockNotificationState(f.assignment)));
+            assertThrowsExactly(IllegalStateException.class, () -> readOnly.execute(tx -> assignmentService.lockNotificationState(f.assignment)));
             CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1), attempting = new CountDownLatch(1);
             var admitted = workers.submit(() -> new org.springframework.transaction.support.TransactionTemplate(materialTransactions).execute(tx -> {
                 var state = assignmentService.lockNotificationState(f.assignment).orElseThrow(); locked.countDown();
@@ -2103,6 +2103,52 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                 assertEquals(1, another.get(3, TimeUnit.SECONDS)); release.countDown();
                 assertArrayEquals(PDF_A, streaming.get(5, TimeUnit.SECONDS));
             } finally { release.countDown(); pool.setMaximumPoolSize(maximum); pool.setConnectionTimeout(timeout); }
+        }
+    }
+
+    @Test void as09NotificationStateRefreshesPreloadedEntityAndHoldsCallerSharedLock() throws Exception {
+        try (var f = new AssignmentFixture(); var workers = Executors.newSingleThreadExecutor()) {
+            var tx = new org.springframework.transaction.support.TransactionTemplate(materialTransactions);
+            tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+            tx.executeWithoutResult(status -> {
+                String callerTransaction = materialJdbc.queryForObject("SELECT pg_current_xact_id()::text", String.class);
+                assertEquals("AS09", assignmentRows.findInCourse(f.assignment, f.base.course).orElseThrow().title());
+                try {
+                    workers.submit(() -> {
+                        f.owner();
+                        assignmentService.replace(f.base.course, f.assignment, new com.codemastery.modules.assessment.application.service.AssignmentService.AssignmentInput("Current", "Instructions", f.now.plusSeconds(7200), null));
+                        f.learner();
+                        assignmentConsumer(storage, tickingClock(f.now)).submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("current.pdf", PDF_A));
+                        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+                    }).get(8, TimeUnit.SECONDS);
+                } catch (Exception e) { throw new IllegalStateException(e); }
+                var current = assignmentService.lockNotificationState(f.assignment).orElseThrow();
+                assertEquals(callerTransaction, materialJdbc.queryForObject("SELECT pg_current_xact_id()::text", String.class));
+                assertEquals("Current", current.assignmentTitle()); assertNull(current.lessonId());
+                assertEquals(f.now.plusSeconds(7200), current.deadlineAt());
+                assertEquals(java.util.Set.of(f.base.learner), current.submittedLearnerIds());
+                assertThrows(UnsupportedOperationException.class, () -> current.submittedLearnerIds().clear());
+                try {
+                    String sqlState = workers.submit(() -> {
+                        try (var c = java.sql.DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())) {
+                            c.setAutoCommit(false);
+                            try (var statement = c.createStatement()) {
+                                statement.execute("SET LOCAL lock_timeout='300ms'");
+                                statement.execute("SELECT id FROM assignments WHERE id='" + f.assignment + "' FOR UPDATE");
+                                return "UNEXPECTED_LOCK_ACQUIRED";
+                            } catch (java.sql.SQLException blocked) { return blocked.getSQLState(); }
+                            finally { c.rollback(); }
+                        }
+                    }).get(5, TimeUnit.SECONDS);
+                    assertEquals("55P03", sqlState);
+                } catch (Exception e) { throw new IllegalStateException(e); }
+            });
+            // The caller completed: the former shared lock must no longer block a writer.
+            tx.executeWithoutResult(status -> {
+                materialJdbc.execute("SET LOCAL lock_timeout='300ms'");
+                assertEquals(f.assignment, materialJdbc.queryForObject(
+                        "SELECT id FROM assignments WHERE id=? FOR UPDATE", UUID.class, f.assignment));
+            });
         }
     }
 

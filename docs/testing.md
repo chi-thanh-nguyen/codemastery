@@ -1,5 +1,73 @@
 # Testing
 
+## AS09 targeted P3 remediation — 27 November 2026
+
+**Authority and baseline.** The Project Leader explicitly authorized independent
+finding validation, targeted remediation, tests, commit and push to existing
+PR #297 (`feat/as09-assignment-submissions`). Initial/reviewed HEAD is
+`21bb06cd963f3b8e00d1b8583981f24b9e0bcfd3`; live main and merge-base are
+`3f1831198982b712bfdaa91381e447d39978d550`. No intervening PR commits were found.
+This record is remediation-agent verification with OpenAI Codex assistance;
+independent acceptance remains pending.
+
+**Confirmed AS09-R01 / P3.** ADR012 §3.3,
+`CT10-REMINDER-READ-2026-11-15-r2`, requires `IllegalStateException` without an
+active read-write transaction. The Spring `MANDATORY` interceptor instead threw
+`IllegalTransactionStateException` before the explicit guard. Changing the existing
+integration oracle to `assertThrowsExactly(IllegalStateException.class, ...)` and
+running it against the unchanged production service reproduced **one assertion
+failure, zero errors/skips**, through the actual Spring-managed bean.
+
+**Correction.** Remove only the method's `MANDATORY` annotation and unused import;
+retain its active/read-only guard and document why it owns the exception contract.
+There is no class-level transaction annotation. The method opens no transaction:
+the existing repository `FOR SHARE`, entity refresh and subsequent submitter query
+remain in the caller's transaction. No authorization, SQL, lock order, persistence,
+consumer, dependency, migration or technical-contract change is made.
+
+**Executed commands**, from `backend/` with Java 25.0.4.1 and disposable hardened
+PostgreSQL 17.11 / pinned MinIO using the existing integration foundation:
+
+```bash
+# Corrected oracle, unchanged production code: expected reproduction failure.
+./mvnw -q '-Dtest=SubmissionServiceTest#noSuchTest' -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=FileStorageIntegrationTest#as09NotificationProducerDiscoveryAndSharedLockAdmission' verify
+# Remediated code: PASS, 2 unit cases + 2 integration tests, no failures/errors/skips.
+./mvnw -q '-Dtest=SubmissionServiceTest#notificationAdmissionRejectsInvalidTransactionBeforeRepositoryAccess' '-Dit.test=FileStorageIntegrationTest#as09NotificationProducerDiscoveryAndSharedLockAdmission+as09NotificationStateRefreshesPreloadedEntityAndHoldsCallerSharedLock' verify
+# Repository root: PASS.
+git diff --check
+```
+
+The two parameterized unit cases use the real annotation-driven Spring interceptor
+and transaction manager: absent/read-only transaction rejection has the exact Java
+exception, zero repository/Course access and no JDBC work or transaction creation
+by admission. Real integration tests exercise the autowired service's absent,
+read-only and valid caller-owned transactions; discovery bounds/cursor, hidden
+Assignment exclusion and a competing publication edit remain covered. The retained
+reviewer current-state probe is adapted from the supplied test-only patch, with
+additional caller transaction-ID equality and post-completion lock release checks.
+It preloads an old entity, commits title/Lesson/deadline/submission changes from
+another connection, verifies current fields/submitters and immutability, and proves
+that a competing `FOR UPDATE` gets SQLSTATE `55P03` until the caller completes.
+
+**Focused self-audit.** AS09-R01 and F08's remaining exception discrepancy are
+remediated in author verification. Using the supplied independent review's
+29-unit inventory, unchanged units 1–26/28–29 retain their baseline evidence;
+unit 27 now meets the missing obligation. The resulting author assessment is
+**29/29**, pending Final Narrow Delta-focused Independent Review. This does not
+claim independent closure or repeat comprehensive verification. The earlier
+25/25 inventory and closure statements below are historical author claims; the
+independent review corrected them to 28/29 at `21bb06cd` before this remediation.
+
+**Omissions and gates.** The 110 prior passing executions, full backend suite,
+browser/E2E, unrelated upstream/provider/runtime-privilege suites and release
+qualification were not rerun: their production paths are unchanged and the focused
+set exercises the affected proxy, guard and real lock boundaries. Hosted CI was
+not awaited. Independent delta review, applicable human/CODEOWNER approval,
+required CI, QA, notification-consumer integration, protected integration and
+release/deployment authority remain separate; no merge, Issue closure, approval,
+production grant or deployment is performed.
+
+
 ## AS09 full-scope author verification — 27 November 2026
 
 **Scope and authority.** The Project Leader's explicit “CodeMastery — AS09 Full-Scope

@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.util.Set;
 import java.util.UUID;
@@ -140,8 +139,10 @@ public class AssignmentService {
                 .map(this::reminderCandidate).toList();
     }
 
-    /** CT27 listener/reminder admission: first row lock in the caller's read-write transaction. */
-    @Transactional(propagation = Propagation.MANDATORY)
+    /**
+     * CT27 listener/reminder admission: first row lock in the caller's read-write transaction.
+     * The explicit guard owns ADR012's IllegalStateException contract; do not start a transaction here.
+     */
     public Optional<ReminderCandidate> lockNotificationState(UUID assignmentId) {
         requireId(assignmentId);
         if (!TransactionSynchronizationManager.isActualTransactionActive()

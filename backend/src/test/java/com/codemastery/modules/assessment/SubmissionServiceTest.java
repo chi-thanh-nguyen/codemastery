@@ -762,4 +762,36 @@ class SubmissionServiceTest {
                 }
         }
         }
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void notificationAdmissionRejectsInvalidTransactionBeforeRepositoryAccess(boolean readOnly) throws Exception {
+        var source = mock(javax.sql.DataSource.class);
+        var connection = mock(java.sql.Connection.class);
+        when(source.getConnection()).thenReturn(connection);
+        when(connection.getAutoCommit()).thenReturn(true);
+        var manager = new org.springframework.jdbc.datasource.DataSourceTransactionManager(source);
+        var proxy = new org.springframework.aop.framework.ProxyFactory(service);
+        proxy.addAdvice(new org.springframework.transaction.interceptor.TransactionInterceptor(
+                manager, new org.springframework.transaction.annotation.AnnotationTransactionAttributeSource()));
+        var bean = (AssignmentService) proxy.getProxy();
+        Runnable rejected = () -> {
+            org.junit.jupiter.api.Assertions.assertThrowsExactly(IllegalStateException.class,
+                    () -> bean.lockNotificationState(assignmentId));
+            verifyNoInteractions(repository, access);
+        };
+        if (readOnly) {
+            var tx = new org.springframework.transaction.support.TransactionTemplate(manager);
+            tx.setReadOnly(true);
+            tx.executeWithoutResult(status -> {
+                // Ignore caller-owned begin; admission must perform no JDBC work or nested begin.
+                org.mockito.Mockito.clearInvocations(source, connection);
+                rejected.run();
+                verifyNoInteractions(source, connection);
+            });
+        } else {
+            rejected.run();
+            verifyNoInteractions(source, connection);
+        }
+    }
+
 }
