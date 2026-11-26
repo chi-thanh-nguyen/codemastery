@@ -57,10 +57,9 @@ public class QuizAttemptController {
     private final AttemptService attempts;
     private final ObjectMapper strictMapper;
 
-    public QuizAttemptController(AttemptService attempts, ObjectMapper objectMapper) {
+    public QuizAttemptController(AttemptService attempts) {
         this.attempts = Objects.requireNonNull(attempts, "attempts");
-        this.strictMapper = Objects.requireNonNull(objectMapper, "objectMapper")
-                .copy()
+        this.strictMapper = new ObjectMapper()
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
                 .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT);
