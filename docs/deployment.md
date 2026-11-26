@@ -2176,6 +2176,29 @@ real-backend tests provision only disposable local or CI PostgreSQL containers.
 Provisioning this revision on any shared database or VM remains a separately authorized Leader
 operation. This change does not provision, deploy, alter credentials or mutate a real VM or database.
 
+### CT17-P6-PRIVILEGES-2026-11-25-r13 — IN07 notifications (25 November 2026)
+
+**Authority.** Project Leader authorization for PR #292, within the
+[ADR012 §19.2 ceiling](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers).
+This extends the effective r12 matrix by replacing only the previously denied V006
+`notifications` row. The reviewed relation inventory and schema are unchanged.
+
+| Relation | Runtime privilege | Implemented consumer | Ceiling |
+| --- | --- | --- | --- |
+| `notifications` (interaction) | SELECT, INSERT; UPDATE (is_read) | IN07 CT11 internal idempotent insertion, owner-scoped list and unread count, mark-read and mark-all-read | Exactly the ADR012 §19.2 row |
+
+The adapter uses `INSERT ... ON CONFLICT (id) DO NOTHING` and targeted
+`UPDATE ... SET is_read = true`. UPDATE on `id`, `user_id`, `message`, and
+`created_at`, DELETE, TRUNCATE, DDL, and grant options remain prohibited.
+`verify_role_separation` checks the exact matrix and probes the notification
+read, targeted update and denials. The matrix contract, PostgreSQL containment,
+and real-backend runtime tests cover the extension. See the
+[IN07 verification record](testing.md#in07-notifications--25-november-2026).
+
+Infrastructure and independent CODEOWNER review, required CI, and protected
+integration apply. Provisioning the revision on any shared database or VM
+requires separate Project Leader authorization.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,

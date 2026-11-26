@@ -7570,6 +7570,28 @@ no rule suppression, tolerance change or removed assertion. Focused browser veri
 and the 8 harness lifecycle tests pass for this follow-up; the earlier full
 matrix and runtime-source evidence remain applicable to the identical application.
 
+
+## IN07 notifications — 25 November 2026
+
+PR #292 implements CT11.create and CT11.read
+([ADR012 §4](decisions/012-batch-07-contract-approvals.md#4-ct11-notification-core)).
+Test placement follows
+[CT14-IN07-PLACEMENT-2026-11-25-r1](repository-structure.md#in07-test-placement--25-november-2026)
+and the runtime matrix follows
+[CT17-P6-PRIVILEGES-2026-11-25-r13](deployment.md#ct17-p6-privileges-2026-11-25-r13--in07-notifications-25-november-2026).
+
+| Executed check | Result and IN07 evidence |
+| --- | --- |
+| Focused Maven Wrapper `verify` with `NotificationServiceTest`, `NotificationRepositoryIntegrationTest` and `AuthorizationIntegrationTest$NotificationEndpoints` | Build succeeded: 14 unit tests and 14 integration cases, zero failures, errors or skips. PostgreSQL 17.11 with V001–V009. The repository cases cover actual INSERT, duplicate collapse and counts, missing-recipient rollback after an earlier successful INSERT, simultaneous creators with opposite input order, and service execution under exactly the r13 notification privileges. The HTTP cases cover all four routes for all three active roles, 401 before validation (including locked accounts and revoked sessions), 400 for malformed input, indistinguishable 404s, no-store, response shapes, stable order, distant empty pages with exact totals, ownership, persistence, and ignored bodies. |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | PASS. The 27-relation matrix matches the existing revisions and the one r13 row. |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | PASS. The disposable PostgreSQL runtime role can read, insert idempotently and update only `is_read`. Re-key, recipient, message and timestamp updates, DELETE and TRUNCATE all return SQLSTATE 42501. Existing containment and upgrade checks also pass. |
+| Backend Dockerfile build and `bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | PASS with the locally built image and disposable databases. The four HTTP operations execute under the provisioned runtime role. SQL fixtures use the runtime-role INSERT, and the HTTP assertions verify the committed mark-read and mark-all-read state and foreign-row isolation. The existing Flyway upgrade cases also pass. |
+| OpenAPI, shell syntax and whitespace checks | PASS. The four operation bindings, schemas, authentication, statuses and no-store headers match. Other OpenAPI operations and schema definitions are unchanged. |
+
+This covers the IN07 portions of B7-O01, B7-O04, B7-O12 and B7-O18. Producer,
+reminder and browser cases belong to their implementing Issues. This is
+remediation-author verification. Independent review, CI and protected
+integration are separate gates. No shared environment was used.
 ## CI package-index remediation qualification — 25 November 2026
 
 Leader-authorized investigation and narrowly scoped remediation on
