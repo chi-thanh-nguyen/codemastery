@@ -8526,6 +8526,10 @@ existing commit, signature or original contribution attribution is rewritten.
 
 ### Targeted IR296-01/02/03 remediation-author qualification — 26 November 2026
 
+> Historical first-round author record at `10bcc9c`. The later independent review
+> verified IR296-01/02 but left IR296-03 PARTIALLY_FIXED (IR296-D01/D02). Current
+> second-round evidence and author dispositions are recorded below.
+
 The full-scope independent review of `031dbff` issued **REQUEST_CHANGES**, with
 three P2 defects. Those findings remain valid historical results. This follow-up
 changes qualification fixtures, release smoke generation and affected test support;
@@ -8612,3 +8616,107 @@ AI assistance: OpenAI Codex authored this targeted remediation and its author-si
 qualification under the explicit Leader task. New commits use the verified
 maintainer identity Nguyen Chi Thanh / `nguyenchithanh.me@gmail.com`; authenticated
 GitHub identity is `chi-thanh-nguyen`. The original three commits are preserved.
+
+### Second-round IR296-D01/D02 author qualification — 26 November 2026
+
+**Review history.** The full-scope review of `031dbff` issued REQUEST_CHANGES
+for IR296-01/02/03. The first author remediation ended at
+`10bcc9c6b751c54c8e0e36ccfa16072bc237d30c` (six PR commits, 37 files,
++3553/-101; main/merge-base `cc6cb54ddedf226966a51c9614fc5fc5756267bb`).
+The subsequent independent narrow-delta review independently VERIFIED_FIXED
+IR296-01 and IR296-02, but assessed IR296-03 as PARTIALLY_FIXED and confirmed
+P2 findings IR296-D01 (late physical commit) and IR296-D02 (suppressed cleanup
+failure). The preceding first-round author claims are historical, not independent
+closure. This second round changes only this integration test and testing records.
+
+**D01 mechanism and correction.** With Spring 7.0.9's actual
+`JpaTransactionManager` and Hibernate 7.4.5.Final, returning from a
+`TransactionTemplate` callback precedes Spring beforeCommit/beforeCompletion,
+JPA commit, Hibernate completion/flush and physical JDBC commit. Checking a flag
+in the action callback cannot cancel that later commit. Each worker now owns a
+test-local `JpaTransactionManager` using the application's existing
+EntityManagerFactory, DataSource, JpaDialect and execution listeners. Its doCommit
+runs after Spring synchronizations, explicitly flushes outside the coordination
+lock, and then arbitrates admission under the same short lock as cleanup.
+
+The assignment to ADMITTED is the commit-admission linearization point. Cleanup
+sets stopping and marks PENDING units CANCELLED under that lock. If cancellation
+wins, the callback or doCommit throws `WorkerCancelled`; Spring executes physical
+rollback. No action result is returned as a successful cancelled transaction.
+If admission wins, cleanup cannot revoke it: JPA/Hibernate/JDBC completion runs
+outside the lock and may commit or fail. ADMITTED is permission to attempt commit,
+not proof of a successful or irreversible commit. Actual afterCompletion status
+is recorded separately. Missing/UNKNOWN completion, failed commit/rollback/resource
+cleanup, or a CANCELLED unit that did not roll back makes cleanup qualification
+fail, even when Future.cancel has hidden the worker exception. Failures after the
+callback, including afterCommit, are retained. An action exception replaced by a
+rollback exception remains attached for diagnostics.
+
+The deterministic advisory-lock regression runs actual AttemptService.start,
+checks one pending Attempt and two pending Answers inside its transaction, and
+blocks real JDBC after the old callback check. The test observes that worker's
+PostgreSQL lock wait before starting cleanup. It observes cancellation winning
+before releasing the controlled blocker. beforeCommit and beforeCompletion cases
+both end CANCELLED/ROLLED_BACK with zero committed Attempts/Answers. The admitted
+case ends ADMITTED/COMMITTED with one Attempt/two Answers despite a cancelled
+Future. Two additional faults prove that an admitted commit failure rolls back
+and fails qualification, while an afterCommit failure reports committed data and
+also fails qualification. Neither is misclassified as successful cancellation.
+
+**D02 correction and faults.** Expected-primary qualification checks the exact
+expected failure family and rejects suppressed exceptions on the original/cause
+chain, preserving the original throwable and its cleanup diagnostics. Four
+permanent real-cleanup fault cases delegate physical blocker rollback and then
+throw SQLException (SQLState IR296); assertion, timeout, SQL setup and interruption
+must each be rejected as failed qualification. A fifth case injects both rollback
+and close reporting failures after the real operations; both errors survive
+try-with-resources suppression. Cleanup always attempts blocker rollback, blocker
+close, task cancellation, executor shutdown and bounded termination, accumulating
+secondary errors rather than replacing the first. Resource release, rolled-back
+Enrollment mutation, zero partial data and subsequent root reacquisition are
+asserted on these fault paths too.
+
+**Executed verification** (backend directory, Temurin 25.0.4.1, disposable hardened
+PostgreSQL 17.11 Testcontainers, unchanged V001-V009):
+
+```bash
+./mvnw -B -q test-compile failsafe:integration-test failsafe:verify \
+  -Dit.test=AssessmentPersistenceIntegrationTest
+```
+
+| Source under test | Actual cases | Failures/errors/skips | Evidence |
+| --- | ---: | --- | --- |
+| Exact vulnerable helper plus supplied independent JDBC/cleanup harness | 54 | 2/0/0 | D01: stopping=true, cancelled=true, terminated=true, attempts=1, answers=2. D02: original qualification returns success despite cleanup SQLException. |
+| First corrected source with permanent regressions | 60 | 0/0/0 | All 52 retained cases plus eight new cases pass. |
+| Controlled mutations restoring the absent completion gate and ignored suppression | 60 | 7/0/0 | Both cancellation regressions and all five cleanup-fault regressions fail; complementary admitted commit still passes. These are deliberate red results, not qualifications. |
+| Final corrected source, including two completion-failure audit cases | 62 | 0/0/0 | All 52 retained plus ten new cases pass; actual testcase records inspected. |
+
+`git diff --check` passes. All original behavioral assertions remain: concurrent
+start/retake, manual/save/expiry, diagnostic winners, definition re-read, the
+one-second statement deadline and execution-scope wrong-thread refusal. Blocker
+release remains before cancellation/termination waiting. Existing 8-second
+statement, 6-second lock and 10-second transaction budgets, 5-second/4-second
+blocker setup limits, 10-second termination limit, interruption preservation,
+worker security-context cleanup and PID-scoped observation remain test-local.
+The new race qualification has a 15-second successful-execution budget and a
+12-second bounded join around the helper's 10-second termination deadline. It
+checks no worker transaction, Course/advisory lock or borrowed Hikari connection,
+probes advisory reacquisition and performs a subsequent valid Course-root operation.
+The admission lock is never held during JDBC, flush or commit. No sleeps are used.
+
+**Current dispositions.** IR296-01/02 remain independently VERIFIED_FIXED within
+the previously reviewed scope; AS08.contract-sync retains that bounded independent
+verification. IR296-D01/D02 and the remaining IR296-03 obligations are now
+FIXED_AUTHOR_VERIFIED. AS08.focused-test-source is AUTHOR_VERIFIED pending final
+independent narrow-delta closure. This does not claim independent 18/18 acceptance.
+No production implementation, migration, grant, containment or release-tooling
+source changes in this round; their unchanged historical tests are not rerun.
+No CI wait or gate bypass. AS12, AS16, AS18, AD13, AD08 and AD10, whole-unit QA04,
+SD04, operational qualification, integrated exposure restrictions, bounded
+Assessment-foundation merge conditions and reserved Leader decisions all remain.
+No merge, approval, Issue closure or deployment is performed.
+
+AI assistance: OpenAI Codex implemented, tested and audited this second-round
+remediation under the explicit Leader task. Commit attribution uses Nguyen Chi
+Thanh and the GitHub noreply address for the authenticated maintainer account
+`chi-thanh-nguyen` (account ID 212181152); no other contributor is impersonated.

@@ -29,6 +29,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.orm.jpa.JpaTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.IllegalTransactionStateException;
@@ -1114,13 +1118,32 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
             }
         }
 
+        enum CommitAdmission { PENDING, CANCELLED, ADMITTED }
+
+        final class WorkerTransaction {
+            volatile CommitAdmission admission = CommitAdmission.PENDING;
+            volatile Integer completion;
+            Throwable actionFailure;
+        }
+
+        static final class WorkerCancelled extends RuntimeException {
+            WorkerCancelled() { super("AS08 cleanup won before commit admission"); }
+        }
+
         /** Test-only budgets and ownership. No ExecutorService.close(): it can wait forever. */
         final class AttemptWorkers implements AutoCloseable {
             final ExecutorService executor;
             final List<java.util.concurrent.Future<?>> tasks = new java.util.concurrent.CopyOnWriteArrayList<>();
             final Set<Integer> backendPids = new java.util.concurrent.CopyOnWriteArraySet<>();
             final java.util.concurrent.atomic.AtomicBoolean stopping = new java.util.concurrent.atomic.AtomicBoolean();
+            final Object admissionLock = new Object();
+            final List<WorkerTransaction> transactions = new java.util.concurrent.CopyOnWriteArrayList<>();
+            final Set<Throwable> completionFailures = new java.util.concurrent.CopyOnWriteArraySet<>();
+            // Test seam runs after admission, outside the coordination lock.
+            Runnable afterCommitAdmission = () -> {};
             java.sql.Connection blocker;
+            boolean closed;
+            IllegalStateException cleanupFailure;
 
             AttemptWorkers(int size) { executor = Executors.newFixedThreadPool(size); }
 
@@ -1145,28 +1168,99 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
             }
 
             <T> T inTransaction(java.util.concurrent.Callable<T> action) {
-                TransactionTemplate tx = new TransactionTemplate(transactionManager);
+                assertFalse(TransactionSynchronizationManager.isActualTransactionActive(),
+                        "AttemptWorkers must own the physical transaction");
+                assertEquals(JpaTransactionManager.class, transactionManager.getClass(),
+                        "Requalify test coordination if the application transaction manager changes");
+                var configured = (JpaTransactionManager) transactionManager;
+                var outcome = new WorkerTransaction();
+                var manager = new JpaTransactionManager(configured.getEntityManagerFactory()) {
+                    @Override protected void doCommit(DefaultTransactionStatus status) {
+                        try {
+                            // Spring has already run every beforeCommit/beforeCompletion callback.
+                            // Flush pending ORM writes before admission; never wait for JDBC under the lock.
+                            entityManager.flush();
+                            synchronized (admissionLock) {
+                                if (stopping.get() || Thread.currentThread().isInterrupted()) {
+                                    outcome.admission = CommitAdmission.CANCELLED;
+                                    // A plain RuntimeException makes Spring perform real rollback.
+                                    throw new WorkerCancelled();
+                                }
+                                outcome.admission = CommitAdmission.ADMITTED; // Linearization point.
+                            }
+                            afterCommitAdmission.run();
+                            super.doCommit(status);
+                        } catch (WorkerCancelled cancelled) {
+                            throw cancelled;
+                        } catch (RuntimeException | Error failure) {
+                            completionFailures.add(failure);
+                            throw failure;
+                        }
+                    }
+
+                    @Override protected void doRollback(DefaultTransactionStatus status) {
+                        try { super.doRollback(status); }
+                        catch (RuntimeException | Error failure) {
+                            completionFailures.add(failure);
+                            throw failure;
+                        }
+                    }
+
+                    @Override protected void doCleanupAfterCompletion(Object transaction) {
+                        try { super.doCleanupAfterCompletion(transaction); }
+                        catch (RuntimeException | Error failure) {
+                            completionFailures.add(failure);
+                            throw failure;
+                        }
+                    }
+                };
+                manager.setDataSource(configured.getDataSource());
+                manager.setJpaDialect(configured.getJpaDialect());
+                manager.setTransactionExecutionListeners(configured.getTransactionExecutionListeners());
+                TransactionTemplate tx = new TransactionTemplate(manager);
                 tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
                 tx.setTimeout(10);
-                return tx.execute(status -> {
-                    jdbc.execute("SET LOCAL statement_timeout='8000ms'");
-                    jdbc.execute("SET LOCAL lock_timeout='6000ms'");
-                    backendPids.add(jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
-                    try {
-                        T value = action.call();
-                        // JDBC cancellation need not honor Thread.interrupt(). Refuse a late commit
-                        // after cleanup starts, including a worker woken by the blocker rollback.
-                        if (stopping.get() || Thread.currentThread().isInterrupted()) status.setRollbackOnly();
-                        return value;
-                    } catch (RuntimeException | Error failure) {
-                        throw failure;
-                    } catch (InterruptedException failure) {
-                        Thread.currentThread().interrupt();
-                        throw new RuntimeException(failure);
-                    } catch (Exception failure) {
-                        throw new RuntimeException(failure);
+                try {
+                    return tx.execute(status -> {
+                        assertTrue(status.isNewTransaction());
+                        transactions.add(outcome);
+                        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                            @Override public void afterCompletion(int completion) { outcome.completion = completion; }
+                        });
+                        jdbc.execute("SET LOCAL statement_timeout='8000ms'");
+                        jdbc.execute("SET LOCAL lock_timeout='6000ms'");
+                        backendPids.add(jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                        try {
+                            T value = action.call();
+                            // Early rollback is useful, but commit admission also covers later synchronizations.
+                            synchronized (admissionLock) {
+                                if (stopping.get() || Thread.currentThread().isInterrupted()) {
+                                    outcome.admission = CommitAdmission.CANCELLED;
+                                    throw new WorkerCancelled();
+                                }
+                            }
+                            return value;
+                        } catch (RuntimeException | Error failure) {
+                            outcome.actionFailure = failure;
+                            throw failure;
+                        } catch (InterruptedException failure) {
+                            Thread.currentThread().interrupt();
+                            outcome.actionFailure = new RuntimeException(failure);
+                            throw (RuntimeException) outcome.actionFailure;
+                        } catch (Exception failure) {
+                            outcome.actionFailure = new RuntimeException(failure);
+                            throw (RuntimeException) outcome.actionFailure;
+                        }
+                    });
+                } catch (RuntimeException | Error failure) {
+                    // Also retain failures after the callback (including afterCommit), even if a Future is cancelled.
+                    if (outcome.actionFailure == null && !(failure instanceof WorkerCancelled)) completionFailures.add(failure);
+                    // TransactionTemplate may replace an action failure if rollback also throws.
+                    if (outcome.actionFailure != null && outcome.actionFailure != failure) {
+                        failure.addSuppressed(outcome.actionFailure);
                     }
-                });
+                    throw failure;
+                }
             }
 
             <T> java.util.concurrent.Future<T> submitWithoutTransaction(java.util.concurrent.Callable<T> action) {
@@ -1185,31 +1279,55 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                                         + "AND cardinality(pg_blocking_pids(pid))>0", Integer.class, pid) == 1));
             }
 
-            @Override public void close() {
+            @Override public synchronized void close() {
+                if (closed) {
+                    if (cleanupFailure != null) throw cleanupFailure;
+                    return;
+                }
                 boolean interrupted = Thread.interrupted();
-                stopping.set(true);
+                List<Throwable> failures = new ArrayList<>();
                 try {
-                    if (blocker != null) {
-                        try { blocker.rollback(); }
-                        finally { blocker.close(); }
+                    synchronized (admissionLock) {
+                        stopping.set(true); // Linearizes against admission, never against a database wait.
+                        transactions.forEach(outcome -> {
+                            if (outcome.admission == CommitAdmission.PENDING) outcome.admission = CommitAdmission.CANCELLED;
+                        });
                     }
-                } catch (java.sql.SQLException failure) {
-                    throw new IllegalStateException("Failed to release AS08 blocker", failure);
-                } finally {
+                    // Always attempt both operations: close must not mask a rollback failure.
+                    if (blocker != null) {
+                        try { blocker.rollback(); } catch (Throwable failure) { failures.add(failure); }
+                        try { blocker.close(); } catch (Throwable failure) { failures.add(failure); }
+                    }
                     // Release the physical root before cancelling/waiting for any worker.
-                    tasks.forEach(task -> task.cancel(true));
-                    executor.shutdownNow();
+                    for (var task : tasks) {
+                        try { task.cancel(true); } catch (Throwable failure) { failures.add(failure); }
+                    }
+                    try { executor.shutdownNow(); } catch (Throwable failure) { failures.add(failure); }
                     interrupted |= Thread.interrupted();
                     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-                    try {
-                        while (!executor.isTerminated() && System.nanoTime() < deadline) {
-                            try { executor.awaitTermination(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS); }
-                            catch (InterruptedException failure) { interrupted = true; }
-                        }
-                        assertTrue(executor.isTerminated(), "AS08 workers exceeded the cleanup deadline");
-                    } finally {
-                        if (interrupted) Thread.currentThread().interrupt();
+                    while (!executor.isTerminated() && System.nanoTime() < deadline) {
+                        try { executor.awaitTermination(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS); }
+                        catch (InterruptedException failure) { interrupted = true; }
+                        catch (Throwable failure) { failures.add(failure); break; }
                     }
+                    if (!executor.isTerminated()) failures.add(new IllegalStateException("AS08 workers exceeded the cleanup deadline"));
+                    failures.addAll(completionFailures);
+                    for (var outcome : transactions) {
+                        if (outcome.completion == null || outcome.completion == TransactionSynchronization.STATUS_UNKNOWN
+                                || (outcome.admission == CommitAdmission.CANCELLED
+                                    && outcome.completion != TransactionSynchronization.STATUS_ROLLED_BACK)) {
+                            failures.add(new IllegalStateException("Unqualified AS08 completion: admission="
+                                    + outcome.admission + ", completion=" + outcome.completion));
+                        }
+                    }
+                    if (!failures.isEmpty()) {
+                        cleanupFailure = new IllegalStateException("AS08 cleanup failed", failures.getFirst());
+                        failures.stream().skip(1).forEach(cleanupFailure::addSuppressed);
+                        throw cleanupFailure;
+                    }
+                } finally {
+                    closed = true;
+                    if (interrupted) Thread.currentThread().interrupt();
                 }
             }
         }
@@ -1217,7 +1335,20 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
         @org.junit.jupiter.params.ParameterizedTest
         @org.junit.jupiter.params.provider.ValueSource(strings={"assertion", "timeout", "setup", "interruption"})
         void failureBeforeBlockerCommitHasBoundedCleanupAndNoPartialAttempt(String path) throws Exception {
-            var workers = new AttemptWorkers(1);
+            qualifyFailurePath(path, new AttemptWorkers(1), false);
+        }
+
+        void requireExpectedFailure(Class<? extends Throwable> expected, Throwable failure) {
+            if (!expected.isInstance(failure)) throw new AssertionError("Unexpected AS08 primary failure", failure);
+            var seen = Collections.newSetFromMap(new java.util.IdentityHashMap<Throwable, Boolean>());
+            for (Throwable current = failure; current != null && seen.add(current); current = current.getCause()) {
+                if (current.getSuppressed().length != 0) {
+                    throw new AssertionError("Expected AS08 failure concealed cleanup failure", failure);
+                }
+            }
+        }
+
+        void qualifyFailurePath(String path, AttemptWorkers workers, boolean injectRollbackFailure) throws Exception {
             long started = System.nanoTime();
             try {
                 var failure = assertThrows(Throwable.class, () -> {
@@ -1228,6 +1359,9 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                         // Leave an uncommitted mutation behind as well as the physical row lock.
                         try (var statement = workers.blocker.prepareStatement("UPDATE enrollments SET status='left' WHERE user_id=?")) {
                             statement.setObject(1, learner); statement.executeUpdate();
+                        }
+                        if (injectRollbackFailure) {
+                            workers.blocker = rollbackThenFail(workers.blocker, false);
                         }
                         switch (path) {
                             case "timeout" -> {
@@ -1254,28 +1388,222 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                     case "setup" -> java.sql.SQLException.class;
                     default -> org.opentest4j.AssertionFailedError.class;
                 };
-                assertTrue(expected.isInstance(failure), () -> "Unexpected failure: " + failure);
+                requireExpectedFailure(expected, failure);
                 assertEquals(path.equals("interruption"), Thread.currentThread().isInterrupted());
             } finally {
                 // The test runner must not inherit the deliberately injected interruption.
                 Thread.interrupted();
             }
             assertTrue(System.nanoTime() - started < TimeUnit.SECONDS.toNanos(15));
+            assertWorkerResourcesReleased(workers);
+            assertEquals("active", jdbc.queryForObject("SELECT status FROM enrollments WHERE user_id=? AND course_id=?", String.class, learner, courseId));
+            assertNoCommittedAttempt();
+            asLearner();
+            assertTrue(at(now).start(courseId, quizId).created()); // Reacquires the same root.
+        }
+
+        java.sql.Connection rollbackThenFail(java.sql.Connection physical, boolean failClose) {
+            return (java.sql.Connection) java.lang.reflect.Proxy.newProxyInstance(
+                    java.sql.Connection.class.getClassLoader(), new Class<?>[]{java.sql.Connection.class},
+                    (proxy, method, arguments) -> {
+                        try {
+                            Object value = method.invoke(physical, arguments);
+                            if (method.getName().equals("rollback")) throw new SQLException("Injected after physical rollback", "IR296");
+                            if (failClose && method.getName().equals("close")) throw new SQLException("Injected after physical close", "IR296");
+                            return value;
+                        } catch (java.lang.reflect.InvocationTargetException wrapped) { throw wrapped.getCause(); }
+                    });
+        }
+
+        void assertWorkerResourcesReleased(AttemptWorkers workers) throws Exception {
             assertTrue(workers.executor.isTerminated());
-            assertTrue(workers.blocker.isClosed());
+            if (workers.blocker != null) assertTrue(workers.blocker.isClosed());
             assertFalse(workers.backendPids.isEmpty());
             for (int pid : workers.backendPids) {
                 assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE pid=? "
                         + "AND (xact_start IS NOT NULL OR wait_event_type='Lock')", Integer.class, pid));
-                assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM pg_locks WHERE pid=? AND relation='courses'::regclass", Integer.class, pid));
+                assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM pg_locks WHERE pid=? "
+                        + "AND (relation='courses'::regclass OR locktype='advisory')", Integer.class, pid));
             }
-            assertEquals("active", jdbc.queryForObject("SELECT status FROM enrollments WHERE user_id=? AND course_id=?", String.class, learner, courseId));
-            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM attempts WHERE quiz_id=?", Integer.class, quizId));
-            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM attempt_answers WHERE question_id IN (?,?)", Integer.class, q1, q2));
             assertEquals(0, dataSource.unwrap(com.zaxxer.hikari.HikariDataSource.class)
                     .getHikariPoolMXBean().getActiveConnections());
+        }
+
+        void assertNoCommittedAttempt() {
+            // JdbcTemplate obtains independent autocommit reads on the test thread.
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM attempts WHERE quiz_id=?", Integer.class, quizId));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM attempt_answers WHERE question_id IN (?,?)", Integer.class, q1, q2));
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(strings={"assertion", "timeout", "setup", "interruption"})
+        void cleanupFailureCannotQualifyAsAnExpectedPrimaryFailure(String path) throws Exception {
+            var workers = new AttemptWorkers(1);
+            var rejected = assertThrows(AssertionError.class, () -> qualifyFailurePath(path, workers, true));
+            assertEquals("Expected AS08 failure concealed cleanup failure", rejected.getMessage());
+            Throwable primary = rejected.getCause();
+            assertEquals(1, primary.getSuppressed().length);
+            var cleanup = primary.getSuppressed()[0];
+            assertEquals("AS08 cleanup failed", cleanup.getMessage());
+            assertEquals("Injected after physical rollback", cleanup.getCause().getMessage());
+            assertEquals("IR296", ((SQLException) cleanup.getCause()).getSQLState());
+            assertWorkerResourcesReleased(workers);
+            assertNoCommittedAttempt();
+            assertEquals("active", jdbc.queryForObject("SELECT status FROM enrollments WHERE user_id=? AND course_id=?", String.class, learner, courseId));
             asLearner();
-            assertTrue(at(now).start(courseId, quizId).created()); // Reacquires the same root.
+            assertTrue(at(now).start(courseId, quizId).created());
+        }
+
+        @Test void rollbackAndCloseFailuresBothSurviveCleanupAndExpectedPrimaryQualification() throws Exception {
+            var workers = new AttemptWorkers(1);
+            var primary = assertThrows(org.opentest4j.AssertionFailedError.class, () -> {
+                try (workers) {
+                    workers.blockCourseRoot();
+                    workers.blocker = rollbackThenFail(workers.blocker, true);
+                    workers.submit(() -> { asLearner(); return at(now).start(courseId, quizId); });
+                    workers.awaitRootWait();
+                    org.junit.jupiter.api.Assertions.fail("Expected primary with two cleanup faults");
+                }
+            });
+            assertEquals(1, primary.getSuppressed().length);
+            Throwable cleanup = primary.getSuppressed()[0];
+            assertEquals("Injected after physical rollback", cleanup.getCause().getMessage());
+            assertEquals(1, cleanup.getSuppressed().length);
+            assertEquals("Injected after physical close", cleanup.getSuppressed()[0].getMessage());
+            var rejected = assertThrows(AssertionError.class,
+                    () -> requireExpectedFailure(org.opentest4j.AssertionFailedError.class, primary));
+            assertTrue(rejected.getCause() == primary);
+            assertWorkerResourcesReleased(workers);
+            assertNoCommittedAttempt();
+            asLearner();
+            assertTrue(at(now).start(courseId, quizId).created());
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(strings={"beforeCommit", "beforeCompletion", "commitAdmitted", "commitFailure", "afterCommitFailure"})
+        void jdbcCompletionWaitClassifiesCancellationAndCommitAdmission(String phase) throws Exception {
+            var workers = new AttemptWorkers(1);
+            var reachedCompletion = new java.util.concurrent.CountDownLatch(1);
+            var cleanupFailure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            Thread closer = new Thread(() -> {
+                try { workers.close(); } catch (Throwable failure) { cleanupFailure.set(failure); }
+            }, "as08-completion-cleanup");
+            boolean commitWins = phase.equals("commitAdmitted") || phase.equals("afterCommitFailure");
+            boolean admissionWins = commitWins || phase.equals("commitFailure");
+            boolean completionFails = phase.equals("commitFailure") || phase.equals("afterCommitFailure");
+            long started = System.nanoTime();
+            // This session lock deliberately blocks real JDBC after the old callback stopping check.
+            try (var physicalBlocker = dataSource.getConnection()) {
+                try (var statement = physicalBlocker.createStatement()) {
+                    statement.setQueryTimeout(5);
+                    statement.execute("SELECT pg_advisory_lock(296, 3)");
+                }
+                Runnable jdbcWait = () -> {
+                    // Actual AttemptService.start writes are visible inside the still-pending transaction.
+                    assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM attempts WHERE quiz_id=?", Integer.class, quizId));
+                    assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM attempt_answers WHERE question_id IN (?,?)", Integer.class, q1, q2));
+                    reachedCompletion.countDown();
+                    jdbc.execute("SELECT pg_advisory_xact_lock(296, 3)");
+                };
+                Throwable primaryFailure = null;
+                try {
+                    if (admissionWins) workers.afterCommitAdmission = () -> {
+                        jdbcWait.run();
+                        if (phase.equals("commitFailure")) throw new IllegalStateException("Injected completion failure");
+                    };
+                    var task = workers.submit(() -> {
+                        asLearner();
+                        var value = at(now).start(courseId, quizId);
+                        assertTrue(value.created());
+                        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                            @Override public void beforeCommit(boolean readOnly) {
+                                if (phase.equals("beforeCommit")) jdbcWait.run();
+                            }
+                            @Override public void beforeCompletion() {
+                                if (phase.equals("beforeCompletion")) jdbcWait.run();
+                            }
+                            @Override public void afterCommit() {
+                                if (phase.equals("afterCommitFailure")) throw new IllegalStateException("Injected completion failure");
+                            }
+                        });
+                        return value;
+                    });
+                    assertTrue(reachedCompletion.await(5, TimeUnit.SECONDS));
+                    workers.awaitRootWait();
+                    assertNoCommittedAttempt();
+                    assertEquals(admissionWins ? CommitAdmission.ADMITTED : CommitAdmission.PENDING,
+                            workers.transactions.getFirst().admission);
+                    closer.start();
+                    org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(3))
+                            .until(() -> workers.stopping.get() && task.isCancelled());
+                    assertEquals(admissionWins ? CommitAdmission.ADMITTED : CommitAdmission.CANCELLED,
+                            workers.transactions.getFirst().admission);
+                    try (var statement = physicalBlocker.createStatement()) {
+                        statement.setQueryTimeout(5);
+                        try (var unlocked = statement.executeQuery("SELECT pg_advisory_unlock(296, 3)")) {
+                            assertTrue(unlocked.next()); assertTrue(unlocked.getBoolean(1));
+                        }
+                    }
+                    closer.join(12000);
+                    assertFalse(closer.isAlive(), "AS08 cleanup did not terminate");
+                    if (completionFails) {
+                        assertTrue(cleanupFailure.get() instanceof IllegalStateException);
+                        assertEquals("AS08 cleanup failed", cleanupFailure.get().getMessage());
+                        assertEquals("Injected completion failure", cleanupFailure.get().getCause().getMessage());
+                    } else assertNull(cleanupFailure.get(), () -> "Cleanup failed: " + cleanupFailure.get());
+                    var outcome = workers.transactions.getFirst();
+                    assertEquals(commitWins ? TransactionSynchronization.STATUS_COMMITTED : TransactionSynchronization.STATUS_ROLLED_BACK,
+                            outcome.completion);
+                    System.out.println("AS08_COMPLETION phase=" + phase + " admission=" + outcome.admission
+                            + " completion=" + outcome.completion + " cancelled=" + task.isCancelled()
+                            + " cleanupFailed=" + (cleanupFailure.get() != null)
+                            + " attempts=" + jdbc.queryForObject("SELECT count(*) FROM attempts WHERE quiz_id=?", Integer.class, quizId));
+                } catch (Exception | Error failure) {
+                    primaryFailure = failure;
+                    throw failure;
+                } finally {
+                    // Release before waiting, and retain every cleanup error if an assertion already failed.
+                    List<Throwable> secondary = new ArrayList<>();
+                    try (var statement = physicalBlocker.createStatement()) {
+                        statement.setQueryTimeout(5);
+                        statement.execute("SELECT pg_advisory_unlock_all()");
+                    } catch (Throwable failure) { secondary.add(failure); }
+                    try {
+                        if (closer.getState() == Thread.State.NEW) workers.close();
+                        else { closer.join(12000); assertFalse(closer.isAlive()); }
+                    } catch (Throwable failure) {
+                        if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
+                        secondary.add(failure);
+                    }
+                    if (primaryFailure != null) {
+                        if (cleanupFailure.get() != null) secondary.add(cleanupFailure.get());
+                        secondary.forEach(primaryFailure::addSuppressed);
+                    } else if (!secondary.isEmpty()) {
+                        var failure = new IllegalStateException("AS08 race resource cleanup failed", secondary.getFirst());
+                        secondary.stream().skip(1).forEach(failure::addSuppressed);
+                        throw failure;
+                    }
+                }
+            }
+            assertTrue(System.nanoTime() - started < TimeUnit.SECONDS.toNanos(15));
+            assertWorkerResourcesReleased(workers);
+            // Also prove that the blocker session returned to the pool without an advisory lock.
+            try (var probe = dataSource.getConnection(); var statement = probe.createStatement()) {
+                statement.setQueryTimeout(5);
+                try (var result = statement.executeQuery("SELECT pg_try_advisory_xact_lock(296, 3)")) {
+                    assertTrue(result.next()); assertTrue(result.getBoolean(1));
+                }
+            }
+            if (commitWins) {
+                assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM attempts WHERE quiz_id=?", Integer.class, quizId));
+                assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM attempt_answers WHERE question_id IN (?,?)", Integer.class, q1, q2));
+                asLearner();
+                assertFalse(at(now).start(courseId, quizId).created());
+            } else {
+                assertNoCommittedAttempt();
+                asLearner();
+                assertTrue(at(now).start(courseId, quizId).created()); // Root is available to a subsequent valid operation.
+            }
         }
 
         @Test void concurrentStartsAreIdempotentAndOnlyCommittedRetakesAdvanceTheNumber() throws Exception {
