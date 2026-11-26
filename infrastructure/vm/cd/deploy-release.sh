@@ -75,7 +75,7 @@ case "${OPERATION}" in
 esac
 
 # 1. Assets.
-small=(release.json release.sigstore.json SHA256SUMS expected-images.containerd.txt expected-images.graphdriver.txt
+small=(release.json release.sigstore.json expected-images.containerd.txt expected-images.graphdriver.txt
        admission.json admission.sigstore.json)
 if [[ -z "${PACKAGE}" ]]; then
   PACKAGE="${work}/package"; mkdir -p "${PACKAGE}"
@@ -107,16 +107,31 @@ python3 -I - "${PACKAGE}" <<'PY' || fail "a downloaded file does not match relea
 import hashlib, json, os, sys
 pkg = sys.argv[1]
 files = json.load(open(os.path.join(pkg, "release.json")))["files"]
+def digest(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
 for name in sorted(os.listdir(pkg)):
     if name in ("release.json", "release.sigstore.json"):
         continue
+    if name == "SHA256SUMS":
+        # release.py leaves SHA256SUMS (and release.json) out of the file map; accept it
+        # only when it lists exactly the mapped files plus release.json, with their hashes.
+        expected = dict(files, **{"release.json": digest(os.path.join(pkg, "release.json"))})
+        listed = {}
+        for line in open(os.path.join(pkg, name), encoding="utf-8").read().splitlines():
+            parts = line.split()
+            if len(parts) != 2 or parts[1] in listed:
+                sys.exit("malformed SHA256SUMS")
+            listed[parts[1]] = parts[0]
+        if listed != expected:
+            sys.exit("SHA256SUMS disagrees with release.json")
+        continue
     if name not in files:
         sys.exit("unexpected file " + name)
-    h = hashlib.sha256()
-    with open(os.path.join(pkg, name), "rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            h.update(block)
-    if h.hexdigest() != files[name]:
+    if digest(os.path.join(pkg, name)) != files[name]:
         sys.exit(name + " differs")
 PY
 git -C "${REPO}" cat-file -e "${REL_TOOLING}^{commit}" 2>/dev/null || git -C "${REPO}" fetch -q origin "${REL_TOOLING}" \
@@ -141,7 +156,7 @@ transport upload "${work}/tooling-${TOOLING_SHA}.tar" >/dev/null
 transport ops install-tooling "${TOOLING_SHA}" "${TOOLING_TREE}" >/dev/null
 transport upload "${work}/source-${SOURCE_REV}.tar" >/dev/null
 if [[ "${OPERATION}" != deploy ]]; then
-  upload=(release.json SHA256SUMS expected-images.containerd.txt expected-images.graphdriver.txt admission.json)
+  upload=(release.json expected-images.containerd.txt expected-images.graphdriver.txt admission.json)
   if [[ "${OPERATION}" == prepare ]]; then
     upload+=(mc-source.tar.gz "$(json_get "${PACKAGE}/release.json" archive.name)")
   fi

@@ -3,7 +3,7 @@
   "info": {
     "title": "CodeMastery bounded Interim contracts",
     "version": "0.1.0",
-    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the fourteen CO06 CT21.authoring Course/Chapter/Lesson and Learner Lesson operations (#172, materials excluded), the eight AD07 CT05 skill-graph operations (#165), the five AS05 CT23.questions operations (#156) and the seven AS06 CT23.composition/publication operations (#157); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
+    "description": "Scoped REST contracts. Selected Auth, public Course catalogue/detail and CT22.membership operations are implemented in PR #101, the two AU07 password-recovery operations in PR #239, the six CO08 CT22.progress/resume operations (#174), and the fourteen CO06 CT21.authoring Course/Chapter/Lesson and Learner Lesson operations (#172, materials excluded), the eight AD07 CT05 skill-graph operations (#165), the five AS05 CT23.questions operations (#156) and the seven AS06 CT23.composition/publication operations (#157), the five AS09 CT10.rest owner Assignment authoring/read operations (#160, learner assignment/submission and grading operations excluded), and the CT31.read audit-log operation (IN10 #184), and the AD11 CT07-PRACTICE-RECOMMENDATION practice-recommendation read (#168); see docs/testing.md for executed evidence. FE07-2026-10-27-r1 is newly technically approved under explicit Leader delegation, pending protected integration. Existing effective approvals and remaining deferred slices are preserved in ADR001/ADR002; implementation does not establish protected merge or independent QA acceptance. ADR014 (16 November 2026, DELEGATED_APPROVED, implemented in the hybrid-authentication PR): login also starts a PostgreSQL refresh session and sets the HttpOnly refresh cookie; POST /api/auth/refresh rotates it and POST /api/auth/logout revokes it; every access JWT carries the session's sid claim."
   },
   "x-implementation-status": "SELECTED_OPERATIONS_IMPLEMENTED_IN_PR_101",
   "x-approval-reference": "../decisions/002-interim-delegated-contracts.md",
@@ -3096,7 +3096,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Implemented JSON result; independent review, protected integration and operational acceptance remain separate.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3126,7 +3126,7 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -3174,7 +3174,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Implemented JSON result; independent review, protected integration and operational acceptance remain separate.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3204,7 +3204,7 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -3261,7 +3261,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Approved JSON result; operation NOT IMPLEMENTED by this documentation PR.",
+            "description": "Implemented JSON result; independent review, protected integration and operational acceptance remain separate.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -3291,7 +3291,7 @@
             "$ref": "#/components/responses/Batch2Unavailable"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/006-batch-02-contract-approvals.md",
         "parameters": [
           {
@@ -4958,7 +4958,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; multipart parts title and file only. Admission precedes reading the part; PDF only by extension and leading bytes; store then commit inside the existing Course configuration guard. Creates a hidden file material; no key, filename or URL in JSON. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; multipart parts title and file only. Admission precedes reading the part; PDF only by extension and leading bytes; store then commit inside the existing Course configuration guard. Creates a hidden file material; no key, filename or URL in JSON. ADR010 is normative. Backend implementation is delivered in PR #291; owner review, protected integration and operational acceptance remain separate.",
         "security": [
           {
             "bearerAuth": []
@@ -5022,7 +5022,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -5047,7 +5047,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; replaces the trimmed nonblank title of a file material only. Course guard. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; replaces the trimmed nonblank title of a file material only. Course guard. ADR010 is normative. Backend implementation is delivered in PR #291; owner review, protected integration and operational acceptance remain separate.",
         "security": [
           {
             "bearerAuth": []
@@ -5117,7 +5117,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -5137,7 +5137,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; multipart part file only. New object key; the superseded object is deleted only after a confirmed commit and the new object only when the transaction provably did not commit; an unknown commit outcome is 500 and keeps both (ADR010 §5). ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; multipart part file only. New object key; the superseded object is deleted only after a confirmed commit and the new object only when the transaction provably did not commit; an unknown commit outcome is 500 and keeps both (ADR010 §5). ADR010 is normative. Backend implementation is delivered in PR #291; owner review, protected integration and operational acceptance remain separate.",
         "security": [
           {
             "bearerAuth": []
@@ -5210,7 +5210,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -5235,7 +5235,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; explicit hidden or published for a file material. Course guard; no cascade. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; explicit hidden or published for a file material. Course guard; no cascade. ADR010 is normative. Backend implementation is delivered in PR #291; owner review, protected integration and operational acceptance remain separate.",
         "security": [
           {
             "bearerAuth": []
@@ -5305,7 +5305,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -5325,7 +5325,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Admitted Learner (published Course, Lesson and material; ACTIVE/COMPLETED membership) or owning Instructor preview, through the CT03 material read predicate. Streams through the backend; no pre-signed URL; no database transaction or connection is held while the body is written. Missing object for an existing row is 500. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Admitted Learner (published Course, Lesson and material; ACTIVE/COMPLETED membership) or owning Instructor preview, through the CT03 material read predicate. Streams through the backend; no pre-signed URL; no database transaction or connection is held while the body is written. Missing object for an existing row is 500. ADR010 is normative. Backend implementation is delivered in PR #291; owner review, protected integration and operational acceptance remain separate.",
         "security": [
           {
             "bearerAuth": []
@@ -5397,7 +5397,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_291",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -5407,7 +5407,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor (Lesson ownership when lessonId is set); creates a hidden Assignment. Deadline is an RFC 3339 instant with at most microsecond precision. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor (Lesson ownership when lessonId is set); creates a hidden Assignment. Deadline is an RFC 3339 instant with at most microsecond precision whose UTC instant lies in years 0000-9999 (the response renders it in UTC); anything else is 400. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 415/path 400 precede Stage 3 CT03 ownership 403/404, which precedes strict JSON body 400, and the insert runs in a READ COMMITTED transaction without the Course-root guard (ADR010 §10: assignments do not affect adaptive invariants). Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -5426,7 +5426,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under the AS09 (#160) owner slice.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -5459,7 +5459,6 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -5804,7 +5803,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; hidden and published, ordered by title COLLATE C then UUID, with submission and graded counts. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; hidden and published, ordered by title COLLATE C then UUID, with submission and graded counts. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 path/query 400 precedes Stage 3 CT03 ownership 403/404, and the snapshot runs in a read-only REPEATABLE READ transaction. Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -5842,7 +5841,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under the AS09 (#160) owner slice.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -5872,7 +5871,6 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -5882,7 +5880,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; hidden or published Assignment. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; hidden or published Assignment. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 path 400 precedes Stage 3 CT03 ownership 403/404 and same-Course Assignment lookup in a read-only REPEATABLE READ snapshot. Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -5910,7 +5908,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only snapshot; implemented under the AS09 (#160) owner slice.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -5940,7 +5938,6 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       },
       "put": {
@@ -5948,7 +5945,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; full replacement of title, instructions, deadlineAt and lessonId. Locks the Assignment row; affects only later admissions. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; full replacement of title, instructions, deadlineAt and lessonId. deadlineAt follows the create rule (at most microsecond precision; UTC instant in years 0000-9999, else 400). Locks the Assignment row; affects only later admissions. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 415/path 400 precede Stage 3 CT03 ownership 403/404 and the same-Course Assignment row lock (FOR UPDATE) in a READ COMMITTED transaction without the Course-root guard (ADR010 §10) before strict JSON body 400 and targeted column updates within ADR012 §19.2. Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -5976,7 +5973,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under the AS09 (#160) owner slice.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -6009,7 +6006,6 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -6029,7 +6025,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; explicit hidden or published. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; explicit hidden or published. Implemented under the AS09 (#160) owner slice in the Assessment module: ADR010 §14 Stage 2 415/path 400 precede Stage 3 CT03 ownership 403/404 and the same-Course Assignment row lock (FOR UPDATE) in a READ COMMITTED transaction without the Course-root guard (ADR010 §10) before strict JSON body 400 and targeted publicationStatus update within ADR012 §19.2. Runtime database grants are CT17-P6-PRIVILEGES-2026-11-25-r12 (docs/deployment.md); provisioning on any real host, independent review, CI and protected integration remain gated. ADR010 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -6057,7 +6053,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome; implemented under the AS09 (#160) owner slice.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -6090,7 +6086,6 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -6491,7 +6486,7 @@
         "tags": [
           "Batch 8 contracts"
         ],
-        "description": "Self Learner. Mastery-based practice recommendation for one published Lesson (ADR013 §19, CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1; Leader decision E02 option a). Admission as /adaptive-guidance (CT03 learner Course access, ACTIVE/COMPLETED membership); the Lesson must be a currently published Lesson of that Course, else 404. recommendation is null unless the Course's stored adaptiveEnabled is true, the Lesson has mapped skills and at least one published practice Quiz of uniform difficulty covers only those skills. The governing skill is the Lesson skill with the easiest CT07.difficulty target (unknown/weak easy, learning medium, mastered hard; ties by skill name order); the Quiz is chosen at that level, else by the CT07.difficulty fallback order, then by title and id. Advisory only: never blocks or reorders access, writes nothing, and does not change quiz capture, evidence or mastery. ADR013 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner. Mastery-based practice recommendation for one published Lesson (ADR013 §19, CT07-PRACTICE-RECOMMENDATION-2026-11-15-r1; Leader decision E02 option a). Admission as /adaptive-guidance (CT03 learner Course access, ACTIVE/COMPLETED membership); the Lesson must be a currently published Lesson of that Course, else 404. recommendation is null unless the Course's stored adaptiveEnabled is true, the Lesson has mapped skills and at least one published practice Quiz of uniform difficulty covers only those skills. The governing skill is the Lesson skill with the easiest CT07.difficulty target (unknown/weak easy, learning medium, mastered hard; ties by skill name order); the Quiz is chosen at that level, else by the CT07.difficulty fallback order, then by title and id. Advisory only: never blocks or reorders access, writes nothing, and does not change quiz capture, evidence or mastery. Implemented under AD11 (#168) behind an authentication-only route rule (the Learner role is CT03's decision inside CT33 readLearnerState, after the 400 checks): one read-only REPEATABLE READ snapshot over CO15's readLearnerState, Adaptive's skills, mappings and stored mastery, and AS07's readPracticeQuizProfiles. ADR013 is normative; owner review, protected integration and deployment are not claimed.",
         "security": [
           {
             "bearerAuth": []
@@ -6519,7 +6514,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Read-only REPEATABLE READ snapshot; implemented under AD11 (#168).",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -6549,7 +6544,6 @@
             "$ref": "#/components/responses/B6Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/013-batch-08-contract-approvals.md"
       }
     },
@@ -7016,7 +7010,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Any authenticated active account; own notifications only, newest first (createdAt desc, then id desc); unreadOnly filters unread rows. Message-only rows (CT11-READ-FIELDS r1) rendered as plain text. Read-only REPEATABLE READ. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Any authenticated active account; own notifications only, newest first (createdAt desc, then id desc); unreadOnly filters unread rows. Message-only rows (CT11-READ-FIELDS r1) rendered as plain text. Read-only REPEATABLE READ. CT11-READ-2026-11-15-r1. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7053,7 +7047,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7077,7 +7071,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       }
     },
@@ -7087,7 +7081,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Any authenticated active account; count of own unread notifications. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Any authenticated active account; count of own unread notifications. CT11-READ-2026-11-15-r1. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7096,7 +7090,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7117,7 +7111,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       }
     },
@@ -7127,7 +7121,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Marks one own notification read; idempotent; no body is needed and any body is ignored. A missing or foreign notification is the same 404. There is no mark-unread or delete. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Marks one own notification read; idempotent; no body is needed and any body is ignored. A missing or foreign notification is the same 404. There is no mark-unread or delete. CT11-READ-2026-11-15-r1. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7146,7 +7140,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7173,7 +7167,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       }
     },
@@ -7183,7 +7177,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Marks every own unread notification read in one statement and returns how many changed; no body is needed. CT11-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Marks every own unread notification read in one statement and returns how many changed; no body is needed and any body is ignored. CT11-READ-2026-11-15-r1. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7192,7 +7186,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7213,7 +7207,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       }
     },
@@ -7524,7 +7518,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Administrator only (any other role 403 before resource lookup). Optional AND filters; occurredFrom inclusive and occurredTo exclusive (RFC 3339, at most microsecond precision, from before to). Ordered occurredAt desc, then id desc. CT31-READ-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Administrator only (any other role 403 before resource lookup). Optional AND filters; occurredFrom inclusive and occurredTo exclusive (RFC 3339, at most microsecond precision, from before to). Ordered occurredAt desc, then id desc. CT31-READ-2026-11-15-r1. Implemented under IN10 (#184) in the Admin module: the route rule requires authentication only, malformed query values are 400 before the role 403 (ADR012 §12 stage order), and the Administrator check precedes any lookup; independent review, CI and protected integration remain gated. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7615,7 +7609,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7642,7 +7636,6 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       }
     },
@@ -9525,7 +9518,7 @@
           "publicationStatus",
           "materialType"
         ],
-        "description": "Relational metadata only; no object key, filename or delivery URL. CT09 payload/delivery remains unapproved."
+        "description": "Relational metadata only; no object key, filename or delivery URL. CT09 backend payload/delivery is implemented in PR #291; operational exposure remains separately gated."
       },
       "RelationalMaterial": {
         "oneOf": [

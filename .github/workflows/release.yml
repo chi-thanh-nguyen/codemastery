@@ -10,7 +10,8 @@ run-name: >-
 # admission -> release promotion. Implementation: infrastructure/release/.
 #
 # - stage=candidate (manual, from main): builds the five linux/amd64 candidates
-#   from a revision on main whose required checks passed, qualifies the exact
+#   from a revision on main whose required checks' latest authenticated
+#   evaluation passed (ADR015 D2, amendment A2), qualifies the exact
 #   images, scans them, packages the evidence, attests the package (GitHub
 #   artifact attestation, Sigstore) and stores it in a DRAFT release.
 # - stage=promote (manual, from main; ADR015 A1): the security admission and the
@@ -157,6 +158,7 @@ jobs:
     permissions:
       contents: write        # draft release only
       checks: read           # required checks of the source revision
+      actions: read          # GitHub's workflow run and job records that authenticate them
       pull-requests: read    # the merged pull request of the source revision
       id-token: write        # Sigstore signing identity for the attestation
       attestations: write
@@ -187,8 +189,23 @@ jobs:
           [[ -z "$INPUT_BASELINE" || "$INPUT_BASELINE" =~ ^[0-9a-f]{40}$ ]] || { echo "compatibility_baseline must be a full SHA." >&2; exit 1; }
           [[ "$INPUT_ORIGIN" =~ ^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] || { echo "public_origin is malformed." >&2; exit 1; }
           git merge-base --is-ancestor "$rev" origin/main || { echo "The revision is not on main." >&2; exit 1; }
+          # ADR015 D2 (A2): the latest valid evaluation of every required check must have
+          # passed, authenticated against GitHub's workflow run and job records. The first
+          # reads decide; the merged pull request head's and the revision's check runs and,
+          # last, the workflow runs are read again, and any change under a required name
+          # refuses the revision. The second workflow-run read is the evidence cutoff.
           gh api "repos/$GITHUB_REPOSITORY/rules/branches/main" > "$RUNNER_TEMP/rules.json"
+          git ls-tree --name-only "$rev" .github/workflows/ > "$RUNNER_TEMP/workflow-files.txt"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$rev&per_page=100" > "$RUNNER_TEMP/workflow-runs.json"
           gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$rev/check-runs?per_page=100&filter=all" > "$RUNNER_TEMP/check-runs.json"
+          mkdir -p "$RUNNER_TEMP/jobs"
+          python3 -c 'import json,sys; [print(r["id"], r["run_attempt"]) for p in json.load(open(sys.argv[1])) for r in p["workflow_runs"]]' \
+            "$RUNNER_TEMP/workflow-runs.json" > "$RUNNER_TEMP/run-attempts.txt"
+          while read -r run attempt; do
+            [[ "$run" =~ ^[0-9]+$ && "$attempt" =~ ^[0-9]+$ ]] || { echo "Malformed workflow run record." >&2; exit 1; }
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$run/attempts/$attempt/jobs?per_page=100" > "$RUNNER_TEMP/jobs/$run.attempt.json"
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?filter=all&per_page=100" > "$RUNNER_TEMP/jobs/$run.all.json"
+          done < "$RUNNER_TEMP/run-attempts.txt"
           # GitHub reports the CodeQL code-scanning check only on pull requests:
           # also read the merged pull request whose merge commit is the revision.
           gh api "repos/$GITHUB_REPOSITORY/commits/$rev/pulls" > "$RUNNER_TEMP/pulls.json"
@@ -197,11 +214,18 @@ jobs:
           if [[ -n "$head" ]]; then
             gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?per_page=100&filter=all" > "$RUNNER_TEMP/pr-check-runs.json"
             pr_args=(--pulls "$RUNNER_TEMP/pulls.json" --pr-head "$head" --pr-check-runs "$RUNNER_TEMP/pr-check-runs.json"
+                     --pr-check-runs-after "$RUNNER_TEMP/pr-check-runs-after.json"
                      --revision-tree "$(git rev-parse "$rev^{tree}")"
                      --pr-head-tree "$(gh api "repos/$GITHUB_REPOSITORY/commits/$head" --jq .commit.tree.sha)")
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?per_page=100&filter=all" > "$RUNNER_TEMP/pr-check-runs-after.json"
           fi
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$rev/check-runs?per_page=100&filter=all" > "$RUNNER_TEMP/check-runs-after.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$rev&per_page=100" > "$RUNNER_TEMP/workflow-runs-after.json"
           python3 infrastructure/release/release.py evaluate-checks --revision "$rev" --rules "$RUNNER_TEMP/rules.json" \
-            --check-runs "$RUNNER_TEMP/check-runs.json" "${pr_args[@]}" > "$RUNNER_TEMP/source-checks.json"
+            --check-runs "$RUNNER_TEMP/check-runs.json" --check-runs-after "$RUNNER_TEMP/check-runs-after.json" \
+            --workflow-files "$RUNNER_TEMP/workflow-files.txt" \
+            --workflow-runs "$RUNNER_TEMP/workflow-runs.json" --workflow-runs-after "$RUNNER_TEMP/workflow-runs-after.json" \
+            --jobs-dir "$RUNNER_TEMP/jobs" "${pr_args[@]}" > "$RUNNER_TEMP/source-checks.json"
           echo "revision=$rev" >> "$GITHUB_OUTPUT"
           echo "tag=candidate-${rev:0:12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
           git worktree add --detach "$GITHUB_WORKSPACE/source" "$rev"

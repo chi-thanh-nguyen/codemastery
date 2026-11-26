@@ -93,8 +93,9 @@ for f in "$MIGRATIONS"/V*.sql; do
 done
 echo "  applied $n migrations"
 # The violation report is sorted and capped at 25 lines; assert an early, stable entry
-# (r4 adds lesson_progress INSERT columns, which push users.email beyond the cap).
-expect_failure "migrated tables before hardening (no runtime grants yet)" "column privilege INSERT on public.enrollments.course_id: expected true" verify_runtime_privileges complete
+# (r4 adds lesson_progress INSERT columns, which push users.email beyond the cap; r12 adds
+# assignments, chapters, courses and lessons INSERT columns, which push enrollments beyond it).
+expect_failure "migrated tables before hardening (no runtime grants yet)" "column privilege INSERT on public.assignments.course_id: expected true" verify_runtime_privileges complete
 harden_after_migration
 verify_role_separation >/dev/null
 echo "  verify_role_separation: PASS (exact matrix)"
@@ -108,6 +109,18 @@ INSERT INTO public.chapters VALUES ('00000000-0000-0000-0000-0000000000d1','0000
 INSERT INTO public.lessons VALUES ('00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-0000000000d1','L',NULL,1,'published');
 INSERT INTO public.learning_materials VALUES ('00000000-0000-0000-0000-0000000000f1','00000000-0000-0000-0000-0000000000e1','M','file','published',NULL,'k','f.pdf',NULL);
 SQL
+probe "notifications: r13 ordered read, idempotent INSERT and is_read-only UPDATE" ok "
+BEGIN;
+INSERT INTO public.notifications (id, user_id, message, is_read, created_at)
+VALUES ('00000000-0000-0000-0000-0000000013a1', '00000000-0000-0000-0000-0000000000a1', 'Notice', false, now())
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.notifications (id, user_id, message, is_read, created_at)
+VALUES ('00000000-0000-0000-0000-0000000013a1', '00000000-0000-0000-0000-0000000000a1', 'Duplicate', false, now())
+ON CONFLICT (id) DO NOTHING;
+SELECT id, user_id, message, is_read, created_at FROM public.notifications
+WHERE user_id='00000000-0000-0000-0000-0000000000a1' ORDER BY created_at DESC, id DESC LIMIT 20 OFFSET 0;
+UPDATE public.notifications SET is_read=true WHERE user_id='00000000-0000-0000-0000-0000000000a1' AND is_read=false;
+ROLLBACK;"
 probe "users: SELECT (login, JWT account check, names)"      ok "SELECT * FROM public.users;"
 probe "users: INSERT (registration)"                         ok "INSERT INTO public.users VALUES (gen_random_uuid(),'l@example.test','h','L','learner','active');"
 probe "courses/chapters/lessons: catalogue and syllabus"     ok "SELECT * FROM public.courses c JOIN public.chapters ch ON ch.course_id=c.id JOIN public.lessons l ON l.chapter_id=ch.id;"
@@ -124,6 +137,25 @@ probe "enrollments/lesson_progress: CO08 r4 completion and visit" ok "INSERT INT
 # initializes mastery_skipped; the V002 check still forbids a skip without completion.
 probe "lesson_progress: INSERT may set completed+skipped (accepted)" ok "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c2','active',NULL,NULL); INSERT INTO public.lesson_progress VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000e1',true,true);"
 probe "lesson_progress: skip without completion (check constraint)" 23514 "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c2','active',NULL,NULL); INSERT INTO public.lesson_progress VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000b3','00000000-0000-0000-0000-0000000000e1',false,true);"
+# r11: the same two statements as EnrollmentRepositoryImpl.markMasterySkipped, including a repeated
+# conflict and the completed=false predicate. Every probe rolls back; no shared database is targeted.
+for initial in absent incomplete manual; do
+  co15_sql="INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000011b1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c1','active',NULL,NULL);"
+  if [[ "$initial" != absent ]]; then
+    completed=false; [[ "$initial" != manual ]] || completed=true
+    co15_sql+="INSERT INTO public.lesson_progress VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000011b1','00000000-0000-0000-0000-0000000000e1',$completed,false);"
+  fi
+  co15_sql+="SELECT id FROM public.courses WHERE id='00000000-0000-0000-0000-0000000000c1' FOR UPDATE;
+SELECT id FROM public.enrollments WHERE id='00000000-0000-0000-0000-0000000011b1' FOR UPDATE;
+SELECT id FROM public.lesson_progress WHERE enrollment_id='00000000-0000-0000-0000-0000000011b1' ORDER BY lesson_id FOR UPDATE;"
+  for repeat in 1 2; do
+    co15_sql+="INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000011b1','00000000-0000-0000-0000-0000000000e1',true,true) ON CONFLICT (enrollment_id,lesson_id) DO NOTHING;
+UPDATE public.lesson_progress SET completed=true, mastery_skipped=true WHERE enrollment_id='00000000-0000-0000-0000-0000000011b1' AND lesson_id='00000000-0000-0000-0000-0000000000e1' AND completed=false;"
+  done
+  want_skipped=true; [[ "$initial" != manual ]] || want_skipped=false
+  co15_sql+="DO \$\$ BEGIN IF (SELECT count(*)=1 AND bool_and(completed AND mastery_skipped=$want_skipped) FROM public.lesson_progress WHERE enrollment_id='00000000-0000-0000-0000-0000000011b1') IS NOT TRUE THEN RAISE EXCEPTION 'CO15 flags or idempotency failed'; END IF; END \$\$;"
+  probe "lesson_progress: CO15 r11 $initial and idempotency" ok "$co15_sql"
+done
 probe "skills/skill_prerequisites/lesson_skills: AD07 r5 graph commands" ok "SELECT id FROM public.courses WHERE id='00000000-0000-0000-0000-0000000000c1' FOR UPDATE; INSERT INTO public.skills VALUES ('00000000-0000-0000-0000-0000000005a1','00000000-0000-0000-0000-0000000000c1','A',NULL),('00000000-0000-0000-0000-0000000005a2','00000000-0000-0000-0000-0000000000c1','B','d'); UPDATE public.skills SET name='A2', description=NULL WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND id='00000000-0000-0000-0000-0000000005a1'; INSERT INTO public.skill_prerequisites VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000c1','00000000-0000-0000-0000-0000000005a1','00000000-0000-0000-0000-0000000005a2'); INSERT INTO public.lesson_skills VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-0000000005a1'); SELECT id, course_id, name, description FROM public.skills WHERE course_id='00000000-0000-0000-0000-0000000000c1'; SELECT id, skill_id, prerequisite_skill_id FROM public.skill_prerequisites WHERE course_id='00000000-0000-0000-0000-0000000000c1'; SELECT id, lesson_id, skill_id FROM public.lesson_skills WHERE skill_id IN ('00000000-0000-0000-0000-0000000005a1'); DELETE FROM public.lesson_skills WHERE lesson_id='00000000-0000-0000-0000-0000000000e1' AND skill_id='00000000-0000-0000-0000-0000000005a1'; DELETE FROM public.skill_prerequisites WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND skill_id='00000000-0000-0000-0000-0000000005a1' AND prerequisite_skill_id='00000000-0000-0000-0000-0000000005a2'; DELETE FROM public.skills WHERE course_id='00000000-0000-0000-0000-0000000000c1' AND id IN ('00000000-0000-0000-0000-0000000005a1','00000000-0000-0000-0000-0000000005a2');"
 probe "lesson_skills: mapping a missing Lesson (FK)"           23503 "INSERT INTO public.skills VALUES ('00000000-0000-0000-0000-0000000005a3','00000000-0000-0000-0000-0000000000c1','C',NULL); INSERT INTO public.lesson_skills VALUES (gen_random_uuid(),gen_random_uuid(),'00000000-0000-0000-0000-0000000005a3');"
 admin <<'SQL'
@@ -142,6 +174,51 @@ SQL
 probe "quizzes: deleting a quiz an attempt references (FK)"   23503 "DELETE FROM public.quiz_questions WHERE quiz_id='00000000-0000-0000-0000-0000000005b3'; DELETE FROM public.quizzes WHERE id='00000000-0000-0000-0000-0000000005b3';"
 probe "learner_skill_masteries/path_recommendations: AD06 r8 writes" ok "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000008a1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c1','active',NULL,NULL); INSERT INTO public.learner_skill_masteries (id, user_id, skill_id, state) VALUES ('00000000-0000-0000-0000-0000000008b1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000005b1','learning') ON CONFLICT (user_id, skill_id) DO UPDATE SET state = EXCLUDED.state; INSERT INTO public.learner_skill_masteries (id, user_id, skill_id, state) VALUES ('00000000-0000-0000-0000-0000000008b2','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000005b1','mastered') ON CONFLICT (user_id, skill_id) DO UPDATE SET state = EXCLUDED.state; INSERT INTO public.path_recommendations (id, enrollment_id, lesson_id, recommendation_type, reason, recommended_at) VALUES ('00000000-0000-0000-0000-0000000008c1','00000000-0000-0000-0000-0000000008a1','00000000-0000-0000-0000-0000000000e1','continue','Continue with the next lesson in the course order.','2026-11-23T01:00:00.123456Z'); INSERT INTO public.path_recommendations (id, enrollment_id, lesson_id, recommendation_type, reason, recommended_at) VALUES ('00000000-0000-0000-0000-0000000008c2','00000000-0000-0000-0000-0000000008a1','00000000-0000-0000-0000-0000000000e1','skip','Tested out: you have mastered every skill in this lesson (\"Questioned\").','2026-11-23T01:00:00.123456Z');"
 probe "path_recommendations: reusing a history id (PK)"        23505 "INSERT INTO public.enrollments VALUES ('00000000-0000-0000-0000-0000000008a1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000c1','active',NULL,NULL); INSERT INTO public.path_recommendations (id, enrollment_id, lesson_id, recommendation_type, reason, recommended_at) VALUES ('00000000-0000-0000-0000-0000000008c1','00000000-0000-0000-0000-0000000008a1','00000000-0000-0000-0000-0000000000e1','continue','r','2026-11-23T01:00:00Z'); INSERT INTO public.path_recommendations (id, enrollment_id, lesson_id, recommendation_type, reason, recommended_at) VALUES ('00000000-0000-0000-0000-0000000008c1','00000000-0000-0000-0000-0000000008a1','00000000-0000-0000-0000-0000000000e1','remedial','r2','2026-11-23T01:00:01Z');"
+probe "audit_logs: IN10 r10 record and filtered read" ok "INSERT INTO public.audit_logs (action, actor_id, occurred_at, target_reference, target_type, id) VALUES ('user_locked','00000000-0000-0000-0000-0000000000a1','2026-11-24T01:00:00.123456Z','00000000-0000-0000-0000-0000000000c1','user','00000000-0000-0000-0000-00000000a0a1'); SELECT a.id, a.action, a.actor_id, a.occurred_at, a.target_reference, a.target_type FROM public.audit_logs a WHERE a.actor_id='00000000-0000-0000-0000-0000000000a1' AND a.action='user_locked' AND a.target_type='user' AND a.target_reference='00000000-0000-0000-0000-0000000000c1' AND a.occurred_at>='2026-11-24T00:00:00Z' AND a.occurred_at<'2026-11-25T00:00:00Z' ORDER BY a.occurred_at DESC, a.id DESC OFFSET 0 ROWS FETCH FIRST 20 ROWS ONLY; SELECT count(a.id) FROM public.audit_logs a WHERE a.actor_id='00000000-0000-0000-0000-0000000000a1';"
+probe "audit_logs: reusing an audit id (PK)"                 23505 "INSERT INTO public.audit_logs (action, actor_id, occurred_at, target_reference, target_type, id) VALUES ('user_locked','00000000-0000-0000-0000-0000000000a1',now(),'r','user','00000000-0000-0000-0000-00000000a0a2'); INSERT INTO public.audit_logs (action, actor_id, occurred_at, target_reference, target_type, id) VALUES ('course_hidden','00000000-0000-0000-0000-0000000000a1',now(),'r','course','00000000-0000-0000-0000-00000000a0a2');"
+probe "audit_logs: an actor without an account (FK)"        23503 "INSERT INTO public.audit_logs (action, actor_id, occurred_at, target_reference, target_type, id) VALUES ('user_locked',gen_random_uuid(),now(),'r','user',gen_random_uuid());"
+# r12: the CO06 authoring SQL (CourseRepositoryImpl, CourseContentRepositoryImpl), every statement as issued.
+probe "courses/chapters/lessons: CO06 r12 authoring" ok "INSERT INTO public.courses (id, instructor_id, title, description, prerequisite_description, publication_status, adaptive_enabled, adaptive_settings) VALUES ('00000000-0000-0000-0000-0000000012c1','00000000-0000-0000-0000-0000000000a1','New','D',NULL,'hidden',false,CAST(NULL AS jsonb));
+SELECT id FROM public.courses WHERE id = '00000000-0000-0000-0000-0000000012c1' FOR UPDATE;
+SELECT id FROM public.courses WHERE id = '00000000-0000-0000-0000-0000000012c1' FOR UPDATE NOWAIT;
+UPDATE public.courses SET title = 'T', description = 'D2', prerequisite_description = 'P' WHERE id = '00000000-0000-0000-0000-0000000012c1';
+INSERT INTO public.chapters (id, course_id, title, position) SELECT '00000000-0000-0000-0000-0000000012d1', '00000000-0000-0000-0000-0000000012c1', 'A', next_position FROM (SELECT COALESCE(max(position), 0)::bigint + 1 AS next_position FROM public.chapters WHERE course_id = '00000000-0000-0000-0000-0000000012c1') next WHERE next_position <= 2147483647 RETURNING position;
+INSERT INTO public.chapters (id, course_id, title, position) SELECT '00000000-0000-0000-0000-0000000012d2', '00000000-0000-0000-0000-0000000012c1', 'B', next_position FROM (SELECT COALESCE(max(position), 0)::bigint + 1 AS next_position FROM public.chapters WHERE course_id = '00000000-0000-0000-0000-0000000012c1') next WHERE next_position <= 2147483647 RETURNING position;
+UPDATE public.chapters SET title = 'A2' WHERE id = '00000000-0000-0000-0000-0000000012d1' AND course_id = '00000000-0000-0000-0000-0000000012c1';
+SELECT id FROM public.chapters WHERE course_id = '00000000-0000-0000-0000-0000000012c1';
+SET CONSTRAINTS public.uq_chapters_course_position DEFERRED;
+UPDATE public.chapters SET position = 1 WHERE id = '00000000-0000-0000-0000-0000000012d2' AND course_id = '00000000-0000-0000-0000-0000000012c1';
+UPDATE public.chapters SET position = 2 WHERE id = '00000000-0000-0000-0000-0000000012d1' AND course_id = '00000000-0000-0000-0000-0000000012c1';
+SET CONSTRAINTS public.uq_chapters_course_position IMMEDIATE;
+INSERT INTO public.lessons (id, chapter_id, title, content_markdown, position, publication_status) SELECT '00000000-0000-0000-0000-0000000012e1', '00000000-0000-0000-0000-0000000012d1', 'L1', 'Body', next_position, 'hidden' FROM (SELECT COALESCE(max(position), 0)::bigint + 1 AS next_position FROM public.lessons WHERE chapter_id = '00000000-0000-0000-0000-0000000012d1') next WHERE next_position <= 2147483647 RETURNING position;
+INSERT INTO public.lessons (id, chapter_id, title, content_markdown, position, publication_status) SELECT '00000000-0000-0000-0000-0000000012e2', '00000000-0000-0000-0000-0000000012d1', 'L2', NULL, next_position, 'hidden' FROM (SELECT COALESCE(max(position), 0)::bigint + 1 AS next_position FROM public.lessons WHERE chapter_id = '00000000-0000-0000-0000-0000000012d1') next WHERE next_position <= 2147483647 RETURNING position;
+UPDATE public.lessons SET title = 'L1b', content_markdown = 'Body 2' WHERE id = '00000000-0000-0000-0000-0000000012e1' AND chapter_id = '00000000-0000-0000-0000-0000000012d1';
+SELECT id FROM public.lessons WHERE chapter_id = '00000000-0000-0000-0000-0000000012d1';
+SET CONSTRAINTS public.uq_lessons_chapter_position DEFERRED;
+UPDATE public.lessons SET position = 1 WHERE id = '00000000-0000-0000-0000-0000000012e2' AND chapter_id = '00000000-0000-0000-0000-0000000012d1';
+UPDATE public.lessons SET position = 2 WHERE id = '00000000-0000-0000-0000-0000000012e1' AND chapter_id = '00000000-0000-0000-0000-0000000012d1';
+SET CONSTRAINTS public.uq_lessons_chapter_position IMMEDIATE;
+UPDATE public.lessons SET publication_status = 'published' WHERE id = '00000000-0000-0000-0000-0000000012e1' AND chapter_id = '00000000-0000-0000-0000-0000000012d1';
+UPDATE public.courses SET publication_status = 'published' WHERE id = '00000000-0000-0000-0000-0000000012c1';
+DO \$\$ BEGIN IF (SELECT string_agg(l.title || '@' || ch.title || '.' || ch.position || '.' || l.position, ',' ORDER BY ch.position, l.position) FROM public.lessons l JOIN public.chapters ch ON ch.id = l.chapter_id WHERE ch.course_id = '00000000-0000-0000-0000-0000000012c1') IS DISTINCT FROM 'L2@A2.2.1,L1b@A2.2.2' THEN RAISE EXCEPTION 'CO06 reorder failed'; END IF; END \$\$;"
+probe "chapters: a duplicate sibling position (deferred unique)" 23505 "INSERT INTO public.chapters VALUES ('00000000-0000-0000-0000-0000000012d3','00000000-0000-0000-0000-0000000000c1','X',1);"
+admin <<'SQL'
+INSERT INTO public.users VALUES ('00000000-0000-0000-0000-0000000012b1','l1@example.test','x','L1','learner','active'), ('00000000-0000-0000-0000-0000000012b2','l2@example.test','x','L2','learner','active');
+INSERT INTO public.assignments VALUES ('00000000-0000-0000-0000-0000000012a2','00000000-0000-0000-0000-0000000000c1',NULL,'Fixture','I',now(),'published');
+INSERT INTO public.submissions VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000012a2','00000000-0000-0000-0000-0000000012b1','submissions/a','a.pdf',now(),NULL,NULL,NULL),
+                                      (gen_random_uuid(),'00000000-0000-0000-0000-0000000012a2','00000000-0000-0000-0000-0000000012b2','submissions/b','b.zip',now(),90,'ok',now());
+SQL
+# r12: the AS09 owner SQL (AssignmentJpaRepository, AssignmentRepositoryImpl, SubmissionJpaRepository).
+probe "assignments/submissions: AS09 r12 owner authoring and counts" ok "insert into assignments (course_id, deadline_at, instructions, lesson_id, publication_status, title, id) values ('00000000-0000-0000-0000-0000000000c1', '9999-12-31 23:59:59.999999+00', 'I', '00000000-0000-0000-0000-0000000000e1', 'hidden', 'A', '00000000-0000-0000-0000-0000000012a1');
+select count(a1_0.id) > 0 from assignments a1_0 where a1_0.id = '00000000-0000-0000-0000-0000000012a1' and a1_0.course_id = '00000000-0000-0000-0000-0000000000c1';
+SELECT * FROM public.assignments WHERE id = '00000000-0000-0000-0000-0000000012a1' AND course_id = '00000000-0000-0000-0000-0000000000c1' FOR UPDATE;
+update assignments set lesson_id = NULL, title = 'B', instructions = 'I2', deadline_at = now() where id = '00000000-0000-0000-0000-0000000012a1' and course_id = '00000000-0000-0000-0000-0000000000c1';
+update assignments set publication_status = 'published' where id = '00000000-0000-0000-0000-0000000012a1' and course_id = '00000000-0000-0000-0000-0000000000c1';
+select count(a1_0.id) from assignments a1_0 where a1_0.course_id = '00000000-0000-0000-0000-0000000000c1';
+SELECT * FROM public.assignments WHERE course_id = '00000000-0000-0000-0000-0000000000c1' ORDER BY title COLLATE \"C\", id LIMIT 20 OFFSET 0;
+select s1_0.assignment_id, count(s1_0.id), count(s1_0.graded_at) from submissions s1_0 where s1_0.assignment_id in ('00000000-0000-0000-0000-0000000012a1', '00000000-0000-0000-0000-0000000012a2') group by s1_0.assignment_id;
+DO \$\$ BEGIN IF (SELECT count(s.id) || '/' || count(s.graded_at) FROM public.submissions s WHERE s.assignment_id = '00000000-0000-0000-0000-0000000012a2') IS DISTINCT FROM '2/1' THEN RAISE EXCEPTION 'AS09 submission counts failed'; END IF; END \$\$;"
+probe "assignments: a Lesson that does not exist (FK)"          23503 "insert into assignments (course_id, deadline_at, instructions, lesson_id, publication_status, title, id) values ('00000000-0000-0000-0000-0000000000c1', now(), 'I', gen_random_uuid(), 'hidden', 'A', gen_random_uuid());"
 echo "== everything else is denied"
 probe "users: change role"                                   42501 "UPDATE public.users SET role='admin';"
 probe "users: change email"                                  42501 "UPDATE public.users SET email='x@example.test';"
@@ -155,17 +232,23 @@ probe "refresh_sessions: rewrite the creation time"           42501 "UPDATE publ
 probe "refresh_tokens: rewrite digest, expiry or session"     42501 "UPDATE public.refresh_tokens SET token_digest=token_digest, expires_at=expires_at, session_id=session_id;"
 probe "refresh_sessions/tokens: TRUNCATE"                     42501 "TRUNCATE public.refresh_tokens, public.refresh_sessions;"
 probe "users: delete"                                        42501 "DELETE FROM public.users;"
-probe "courses: change publication"                          42501 "UPDATE public.courses SET publication_status='hidden';"
+probe "courses: rewrite adaptive configuration (no consumer)"  42501 "UPDATE public.courses SET adaptive_enabled=true, adaptive_settings=NULL;"
+probe "courses: delete"                                       42501 "DELETE FROM public.courses;"
 probe "courses: change instructor ownership"                 42501 "UPDATE public.courses SET instructor_id=instructor_id;"
-probe "courses: insert"                                      42501 "INSERT INTO public.courses SELECT * FROM public.courses WHERE false;"
 probe "courses: re-key a referenced Course (FK NO ACTION)"   23503 "UPDATE public.courses SET id=gen_random_uuid() WHERE id='00000000-0000-0000-0000-0000000000c1';"
-probe "chapters/lessons: modify structure"                   42501 "UPDATE public.lessons SET publication_status='published';"
-probe "learning_materials: read payload/object keys"         42501 "SELECT object_key, text_content FROM public.learning_materials;"
-probe "learning_materials: SELECT *"                         42501 "SELECT * FROM public.learning_materials;"
+probe "chapters: move to another Course or re-key"            42501 "UPDATE public.chapters SET course_id=course_id, id=id;"
+probe "lessons: move to another Chapter or re-key"            42501 "UPDATE public.lessons SET chapter_id=chapter_id, id=id;"
+probe "chapters/lessons: delete"                              42501 "DELETE FROM public.lessons;"
+probe "chapters/lessons/courses: TRUNCATE"                    42501 "TRUNCATE public.lessons, public.chapters, public.courses CASCADE;"
+probe "learning_materials: CO06 owner tree and CO03 lesson read (r12)" ok "SELECT m.id, m.lesson_id, m.title, m.material_type, m.publication_status, m.text_content, m.object_key, m.original_filename, m.external_video_url FROM public.learning_materials m JOIN public.lessons l ON l.id = m.lesson_id JOIN public.chapters ch ON ch.id = l.chapter_id WHERE ch.course_id = '00000000-0000-0000-0000-0000000000c1' ORDER BY ch.position ASC, l.position ASC, m.id ASC;"
+probe "learning_materials: CO09 payload update (r14)"          ok "UPDATE public.learning_materials SET title=title, object_key=object_key;"
+probe "learning_materials: CO09 create (r14)"                 ok "INSERT INTO public.learning_materials SELECT * FROM public.learning_materials WHERE false;"
+probe "learning_materials: immutable id/ancestry/type"       42501 "UPDATE public.learning_materials SET id=id, lesson_id=lesson_id, material_type=material_type;"
+probe "learning_materials: delete or TRUNCATE"                42501 "DELETE FROM public.learning_materials;"
 probe "enrollments: reassign learner/Course"                 42501 "UPDATE public.enrollments SET user_id=user_id;"
 probe "enrollments: reassign Course or re-key"                42501 "UPDATE public.enrollments SET course_id=course_id, id=id;"
 probe "enrollments: delete history"                          42501 "DELETE FROM public.enrollments;"
-probe "lesson_progress: update mastery-skip flag (CT22.atomic)" 42501 "UPDATE public.lesson_progress SET mastery_skipped=true;"
+probe "lesson_progress: re-key a progress row"               42501 "UPDATE public.lesson_progress SET id=id;"
 probe "lesson_progress: re-target a progress row"            42501 "UPDATE public.lesson_progress SET enrollment_id=enrollment_id, lesson_id=lesson_id;"
 probe "lesson_progress: delete history"                      42501 "DELETE FROM public.lesson_progress;"
 probe "lesson_progress: TRUNCATE"                            42501 "TRUNCATE public.lesson_progress;"
@@ -184,6 +267,11 @@ probe "attempt_answers: read captured selections"             42501 "SELECT sele
 probe "attempts: rewrite scores"                             42501 "UPDATE public.attempts SET score_percentage=100;"
 probe "attempt_answers: delete"                              42501 "DELETE FROM public.attempt_answers;"
 probe "submissions: self-grade"                              42501 "UPDATE public.submissions SET grade_percentage=100;"
+probe "submissions: read files, learners or feedback"         42501 "SELECT object_key, user_id, feedback FROM public.submissions;"
+probe "submissions: create (learner submission not implemented)" 42501 "INSERT INTO public.submissions SELECT * FROM public.submissions WHERE false;"
+probe "assignments: move to another Course or re-key"         42501 "UPDATE public.assignments SET course_id=course_id, id=id;"
+probe "assignments/submissions: delete"                       42501 "DELETE FROM public.assignments;"
+probe "assignments/submissions: TRUNCATE"                     42501 "TRUNCATE public.submissions, public.assignments;"
 probe "learner_skill_masteries: re-key or re-target a row"     42501 "UPDATE public.learner_skill_masteries SET id=id, user_id=user_id, skill_id=skill_id;"
 probe "learner_skill_masteries: read row identifiers"          42501 "SELECT id FROM public.learner_skill_masteries;"
 probe "learner_skill_masteries: delete"                        42501 "DELETE FROM public.learner_skill_masteries;"
@@ -191,9 +279,15 @@ probe "path_recommendations: read (r8 grants INSERT only)"    42501 "SELECT 1 FR
 probe "path_recommendations: rewrite history"                 42501 "UPDATE public.path_recommendations SET reason=reason, recommended_at=recommended_at;"
 probe "path_recommendations: erase history"                   42501 "DELETE FROM public.path_recommendations;"
 probe "learner_skill_masteries/path_recommendations: TRUNCATE" 42501 "TRUNCATE public.path_recommendations, public.learner_skill_masteries;"
-probe "notifications: read"                                  42501 "SELECT 1 FROM public.notifications;"
+probe "notifications: re-key"                                42501 "UPDATE public.notifications SET id=id WHERE false;"
+probe "notifications: change recipient"                      42501 "UPDATE public.notifications SET user_id=user_id WHERE false;"
+probe "notifications: rewrite message"                       42501 "UPDATE public.notifications SET message=message WHERE false;"
+probe "notifications: rewrite creation time"                 42501 "UPDATE public.notifications SET created_at=created_at WHERE false;"
+probe "notifications: erase"                                 42501 "DELETE FROM public.notifications WHERE false;"
+probe "notifications: TRUNCATE"                              42501 "TRUNCATE public.notifications;"
+probe "audit_logs: rewrite (r10 grants SELECT, INSERT only)"  42501 "UPDATE public.audit_logs SET action=action, occurred_at=occurred_at;"
 probe "audit_logs: erase"                                    42501 "DELETE FROM public.audit_logs;"
-probe "audit_logs: forge"                                    42501 "INSERT INTO public.audit_logs VALUES (gen_random_uuid(),'00000000-0000-0000-0000-0000000000a1','x','x','x',now());"
+probe "audit_logs: TRUNCATE"                                 42501 "TRUNCATE public.audit_logs;"
 probe "flyway_schema_history: read"                          42501 "SELECT 1 FROM public.flyway_schema_history;"
 probe "any table: TRUNCATE"                                  42501 "TRUNCATE public.enrollments;"
 probe "DDL in public"                                        42501 "CREATE TABLE public.x (id int);"
@@ -205,10 +299,10 @@ provision_db_roles >/dev/null; harden_after_migration; verify_role_separation >/
 echo "  ACLs identical after a second provision + harden + verify"
 
 echo "== drift and escalation fail closed"
-admin <<<"GRANT UPDATE, DELETE ON public.users TO $APP; GRANT UPDATE (title) ON public.courses TO $APP; GRANT SELECT ON public.submissions TO $APP;"
+admin <<<"GRANT UPDATE, DELETE ON public.users TO $APP; GRANT UPDATE (instructor_id) ON public.courses TO $APP; GRANT SELECT ON public.submissions TO $APP;"
 expect_failure "owner-granted excess before reconciliation" "table privilege UPDATE on public.users: expected false" verify_runtime_privileges complete
 drift="$(harden_after_migration)"
-[[ "$drift" == *"excess: column privilege UPDATE on public.courses.title: expected false"* && "$drift" == *"excess: table privilege DELETE on public.users: expected false"* ]] \
+[[ "$drift" == *"excess: column privilege UPDATE on public.courses.instructor_id: expected false"* && "$drift" == *"excess: table privilege DELETE on public.users: expected false"* ]] \
   || { echo "drift was not reported: $drift" >&2; exit 1; }
 verify_runtime_privileges complete >/dev/null
 echo "  owner-granted excess (table and column level) reported, revoked and re-verified"
@@ -375,7 +469,7 @@ provision_db_roles >/dev/null
 verify_runtime_privileges present >/dev/null
 probe "r4 before V009: Enrollment lock and resume pointer"      ok "SELECT id FROM public.enrollments WHERE false FOR UPDATE; UPDATE public.enrollments SET resume_lesson_id=NULL WHERE false;"
 probe "r4 before V009: progress read, insert and completion"    ok "SELECT 1 FROM public.lesson_progress; INSERT INTO public.lesson_progress SELECT * FROM public.lesson_progress WHERE false; UPDATE public.lesson_progress SET completed=true WHERE false;"
-probe "r4 before V009: mastery-skip flag stays denied"          42501 "UPDATE public.lesson_progress SET mastery_skipped=true WHERE false;"
+probe "r11 before V009: mastery-skip column exists in V002"    ok "UPDATE public.lesson_progress SET mastery_skipped=true WHERE false;"
 expect_failure "complete verification before V009" "columns differ from the reviewed matrix on public.enrollments" verify_runtime_privileges complete
 before="$(acl_snapshot)"
 provision_db_roles >/dev/null
@@ -455,7 +549,7 @@ admin <<<"SET client_min_messages = warning; INSERT INTO public.flyway_schema_hi
 provision_db_roles >/dev/null
 verify_runtime_privileges present >/dev/null
 probe "r9 on V006: Enrollment resume pointer before V007-V009"   ok "SELECT id FROM public.enrollments WHERE false FOR UPDATE; UPDATE public.enrollments SET resume_lesson_id=NULL WHERE false;"
-probe "r9 on V006: mastery-skip flag stays denied"               42501 "UPDATE public.lesson_progress SET mastery_skipped=true WHERE false;"
+probe "r11 on V006: mastery-skip column exists in V002"         ok "UPDATE public.lesson_progress SET mastery_skipped=true WHERE false;"
 expect_failure "complete verification on V006" "missing reviewed table public.password_reset_tokens" verify_runtime_privileges complete
 admin <<<"DELETE FROM public.flyway_schema_history WHERE version='004';"
 expect_failure "V006 history with a gap (no 004)" "PostgreSQL role provisioning failed" provision_db_roles

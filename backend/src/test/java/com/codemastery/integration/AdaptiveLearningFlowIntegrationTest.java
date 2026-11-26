@@ -2,6 +2,19 @@ package com.codemastery.integration;
 
 import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.ResourceNotFoundException;
+import com.codemastery.modules.adaptive.application.decision.AdaptiveDecisionEngine;
+import com.codemastery.modules.adaptive.application.decision.AdaptiveDecisionEngine.DecisionContext;
+import com.codemastery.modules.adaptive.application.decision.AdaptiveDecisionEngine.LessonInput;
+import com.codemastery.modules.adaptive.application.decision.AdaptiveDecisionService;
+import com.codemastery.modules.adaptive.application.event.RecommendationCreatedEvent;
+import com.codemastery.modules.adaptive.application.event.RecommendationCreatedEvent.CreatedRecommendation;
+import com.codemastery.modules.adaptive.application.recommendation.RecommendationReasonBuilder;
+import com.codemastery.modules.adaptive.application.recommendation.RecommendationService;
+import com.codemastery.modules.adaptive.domain.model.AdaptiveDecision;
+import com.codemastery.modules.adaptive.domain.model.AdaptiveDecision.Recommendation;
+import com.codemastery.modules.adaptive.domain.model.MasteryState;
+import com.codemastery.modules.adaptive.domain.model.PathRecommendation;
+import com.codemastery.modules.adaptive.domain.model.RecommendationType;
 import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService;
 import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService.GraphSnapshot;
 import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService.MappingReference;
@@ -43,8 +56,12 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.aop.support.AopUtils;
+import org.springframework.beans.BeanUtils;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Import;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -60,10 +77,13 @@ import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.UnexpectedRollbackException;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 import org.springframework.web.filter.DelegatingFilterProxy;
@@ -78,14 +98,22 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -96,6 +124,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import java.util.UUID;
 
@@ -126,10 +155,24 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppC
  * ADR005 §§3.1, 4.1) in the same snapshot or under the held Course root; CO06 Lesson creation and
  * mapping serialize on that root. Question writers and enablement are other Issues' participants.
  *
+ * <p>AD14 (ADR011 §§7, 9, B6-R09; ADR012 §9.4 CT29): recommendation history rows and the
+ * recommendation-created event of one run commit or roll back with the caller's unit, the event
+ * reaches an after-commit subscriber only after commit, a failing subscriber cannot undo the
+ * committed history, and de-duplication and the strictly-later clock hold across committed runs.
+ * The quiz listener orchestration (AD13) and the history reads (AD16) are not implemented; these
+ * cases read committed history with SQL as those callers would.
+ *
+ * <p>AD11 practice recommendation (ADR013 §§19.3, 19.4, 19.8 B8-P01–P09): the production
+ * {@code GET /api/courses/{courseId}/lessons/{lessonId}/practice-recommendation} through the security
+ * chain over real Course admission (CT33 {@code readLearnerState}), Adaptive skills, mappings and
+ * stored mastery (AD16 read) and Assessment's practice quiz profiles (AS07), in one read-only
+ * REPEATABLE READ snapshot that writes nothing and needs only runtime-matrix SELECT grants.
+ *
  * <p>The context is closed after this class so its connection pool does not count against
  * PostgreSQL's connection limit while later suites run.
  */
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Import(AdaptiveLearningFlowIntegrationTest.RecommendationEventProbe.class)
 class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     private static final UUID OWNER = id("owner"), OTHER = id("other"), LEARNER = id("learner"), ADMIN = id("admin");
     private static final UUID COURSE = id("course"), SECOND = id("second"), HIDDEN = id("hidden");
@@ -142,6 +185,10 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     private static final ThreadLocal<Runnable> BEFORE_QUESTION_PAGE = new ThreadLocal<>();
     /** Runs once on the listing thread immediately before its ordered quiz page query is prepared. */
     private static final ThreadLocal<Runnable> BEFORE_QUIZ_PAGE = new ThreadLocal<>();
+    /** Runs once on the request thread immediately before the AD16 mastery state query is prepared. */
+    private static final ThreadLocal<Runnable> BEFORE_MASTERY_READ = new ThreadLocal<>();
+    /** Records Hibernate-prepared SQL on the current thread while set. */
+    private static final ThreadLocal<List<String>> RECORDED_SQL = new ThreadLocal<>();
     private static final JsonMapper JSON = JsonMapper.builder().build();
 
     @Autowired CourseManagementService service;
@@ -160,6 +207,9 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     @Autowired DataSource dataSource;
     @Autowired PlatformTransactionManager transactions;
     @PersistenceContext EntityManager entityManager;
+    @Autowired RecommendationService recommendationService;
+    @Autowired AdaptiveDecisionService adaptiveDecisionService;
+    @Autowired RecommendationEventProbe recommendationEvents;
 
     private final ExecutorService workers = Executors.newFixedThreadPool(4);
     private MockMvc mvc;
@@ -186,6 +236,13 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
             if (pageChange != null && sql.contains("from questions") && sql.contains("order by")) {
                 BEFORE_QUESTION_PAGE.remove();
                 pageChange.run();
+            }
+            List<String> recorded = RECORDED_SQL.get();
+            if (recorded != null) recorded.add(sql);
+            Runnable masteryChange = BEFORE_MASTERY_READ.get();
+            if (masteryChange != null && sql.contains("FROM public.learner_skill_masteries")) {
+                BEFORE_MASTERY_READ.remove();
+                masteryChange.run();
             }
             Runnable quizPageChange = BEFORE_QUIZ_PAGE.get();
             if (quizPageChange != null && sql.contains("FROM public.quizzes") && sql.contains("ORDER BY title COLLATE")) {
@@ -218,9 +275,14 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         BEFORE_PREREQUISITES.remove();
         BEFORE_QUESTION_PAGE.remove();
         BEFORE_QUIZ_PAGE.remove();
+        BEFORE_MASTERY_READ.remove();
+        RECORDED_SQL.remove();
         for (UUID course : jdbc.queryForList("SELECT id FROM public.courses WHERE instructor_id IN (?,?)", UUID.class, OWNER, OTHER)) {
             purgeAssessmentAndGraph(course);
         }
+        recommendationEvents.reset();
+        jdbc.update("DELETE FROM public.path_recommendations WHERE enrollment_id IN (SELECT id FROM public.enrollments "
+                + "WHERE user_id IN (?,?,?,?) OR course_id IN (?,?,?))", OWNER, OTHER, LEARNER, ADMIN, COURSE, SECOND, HIDDEN);
         jdbc.update("DELETE FROM public.lesson_progress WHERE enrollment_id IN (SELECT id FROM public.enrollments WHERE user_id IN (?,?,?,?))",
                 OWNER, OTHER, LEARNER, ADMIN);
         jdbc.update("DELETE FROM public.enrollments WHERE user_id IN (?,?,?,?)", OWNER, OTHER, LEARNER, ADMIN);
@@ -1996,6 +2058,565 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
             if (cause instanceof SQLException sql) return sql.getSQLState();
         }
         return "none: " + Arrays.toString(failure.getStackTrace());
+    }
+
+    // AD14: recommendation history and the CT29 recommendation-created event (ADR011 §§7, 9; ADR012 §9.4).
+
+    @Test void aRunsHistoryRowsCommitWithTheUnitAndItsSingleEventIsDeliveredOnlyAfterCommit() {
+        HistoryFixture fixture = historyFixture();
+        MutableClock clock = new MutableClock(Instant.parse("2026-11-24T08:00:00.123456789Z"));
+        // B6-R01 shape: S1, S2 Mastered, S3 Unknown, nothing completed -> skip L1, skip L2, continue L3.
+        AdaptiveDecision decision = new AdaptiveDecisionEngine().decide(fixture.context(Map.of(
+                fixture.s1(), MasteryState.MASTERED, fixture.s2(), MasteryState.MASTERED, fixture.s3(), MasteryState.UNKNOWN)));
+
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            decisions(clock).recordAndPublish(fixture.context(Map.of()), fixture.enrollment(), decision,
+                    currentGuidance(fixture.enrollment()), latestInstant(fixture.enrollment()));
+            assertTrue(recommendationEvents.received().isEmpty(), "Delivered before the unit committed");
+        });
+
+        Instant runInstant = Instant.parse("2026-11-24T08:00:00.123456Z");
+        List<PathRecommendation> history = committedHistory(fixture.enrollment());
+        // ADR011 §9 order: one instant, continue before skip, then skips by lowercase target UUID (random here).
+        List<UUID> skipOrder = Stream.of(fixture.l1(), fixture.l2()).sorted(Comparator.comparing(UUID::toString)).toList();
+        assertEquals(List.of(fixture.l3(), skipOrder.get(0), skipOrder.get(1)),
+                history.stream().map(PathRecommendation::lessonId).toList());
+        assertEquals(List.of(RecommendationType.CONTINUE, RecommendationType.SKIP, RecommendationType.SKIP),
+                history.stream().map(PathRecommendation::recommendationType).toList());
+        Map<UUID, String> expectedReasons = Map.of(fixture.l3(), RecommendationReasonBuilder.continueInCourseOrder(),
+                fixture.l1(), "Tested out: you have mastered every skill in this lesson (\"Skill one\").",
+                fixture.l2(), "Tested out: you have mastered every skill in this lesson (\"Skill two\").");
+        history.forEach(row -> assertEquals(expectedReasons.get(row.lessonId()), row.reason()));
+        assertTrue(history.stream().allMatch(row -> row.recommendedAt().equals(runInstant)));
+
+        RecommendationCreatedEvent event = onlyRecommendationEvent();
+        assertEquals(COURSE, event.courseId());
+        assertEquals(LEARNER, event.learnerId());
+        assertEquals(fixture.enrollment(), event.enrollmentId());
+        assertEquals(runInstant, event.recommendedAt());
+        Map<UUID, PathRecommendation> byId = new LinkedHashMap<>();
+        history.forEach(row -> byId.put(row.id(), row));
+        assertEquals(List.of(fixture.l1(), fixture.l2(), fixture.l3()),
+                event.recommendations().stream().map(CreatedRecommendation::targetLessonId).toList());
+        for (CreatedRecommendation created : event.recommendations()) {
+            PathRecommendation row = byId.get(created.recommendationId());
+            assertNotNull(row, "Event names a row that was not committed");
+            assertEquals(row.recommendationType().getCode(), created.type());
+            assertEquals(row.lessonId(), created.targetLessonId());
+            assertEquals(row.reason(), created.reason());
+        }
+    }
+
+    @Test void aRolledBackUnitLeavesNoHistoryAndNeverDeliversItsEvent() {
+        HistoryFixture fixture = historyFixture();
+
+        new TransactionTemplate(transactions).executeWithoutResult(status -> {
+            decisions(new MutableClock(Instant.parse("2026-11-24T08:00:00Z"))).recordAndPublish(fixture.context(Map.of()),
+                    fixture.enrollment(), decisionOf(skipDraft(fixture.l1()), continueDraft(fixture.l2())),
+                    Optional.empty(), Optional.empty());
+            assertEquals(2, history(fixture.enrollment()).size(), "The unit sees its own inserts");
+            status.setRollbackOnly();
+        });
+
+        assertTrue(committedHistory(fixture.enrollment()).isEmpty());
+        assertTrue(recommendationEvents.received().isEmpty());
+    }
+
+    @Test void aFailingAfterCommitSubscriberCannotRollBackTheCommittedHistory() {
+        HistoryFixture fixture = historyFixture();
+        recommendationEvents.failWith(new IllegalStateException("notification delivery failed"));
+
+        new TransactionTemplate(transactions).executeWithoutResult(status ->
+                decisions(new MutableClock(Instant.parse("2026-11-24T08:00:00Z"))).recordAndPublish(fixture.context(Map.of()),
+                        fixture.enrollment(), decisionOf(remedialDraft(fixture.l1())), Optional.empty(), Optional.empty()));
+
+        assertEquals(1, committedHistory(fixture.enrollment()).size());
+        assertEquals(1, recommendationEvents.received().size(), "The subscriber ran after commit and failed");
+    }
+
+    @Test void unchangedGuidanceIsNotReinsertedAndEveryInsertingRunNeedsAStrictlyLaterInstant() {
+        HistoryFixture fixture = historyFixture();
+        Instant t1 = Instant.parse("2026-11-24T08:00:00.000001Z");
+        MutableClock clock = new MutableClock(t1);
+        AdaptiveDecision first = decisionOf(continueDraft(fixture.l1()));
+
+        runInUnit(fixture, clock, first);
+        UUID firstRow = committedHistory(fixture.enrollment()).getFirst().id();
+
+        // B6-R09: same type, target and reason as the current recommendation -> no row and no event.
+        clock.set(t1.plusSeconds(60));
+        runInUnit(fixture, clock, first);
+        assertEquals(List.of(firstRow), committedHistory(fixture.enrollment()).stream().map(PathRecommendation::id).toList());
+        assertEquals(1, recommendationEvents.received().size());
+
+        // A run that would insert with an unadvanced clock fails and rolls back every row of the run.
+        clock.set(t1);
+        AdaptiveDecision changed = decisionOf(skipDraft(fixture.l2()), continueDraft(fixture.l3()));
+        assertThrows(IllegalStateException.class, () -> runInUnit(fixture, clock, changed));
+        assertEquals(List.of(firstRow), committedHistory(fixture.enrollment()).stream().map(PathRecommendation::id).toList());
+        assertEquals(1, recommendationEvents.received().size());
+
+        // With an advanced clock the change inserts one run; its continue row is now current whatever the UUIDs.
+        Instant t2 = t1.plusNanos(1_000);
+        clock.set(t2);
+        runInUnit(fixture, clock, changed);
+        List<PathRecommendation> history = committedHistory(fixture.enrollment());
+        assertEquals(List.of(fixture.l3(), fixture.l2(), fixture.l1()), history.stream().map(PathRecommendation::lessonId).toList());
+        assertEquals(List.of(t2, t2, t1), history.stream().map(PathRecommendation::recommendedAt).toList());
+        PathRecommendation current = new TransactionTemplate(transactions).execute(status ->
+                currentGuidance(fixture.enrollment()).orElseThrow());
+        assertEquals(history.getFirst().id(), current.id());
+        assertEquals(2, recommendationEvents.received().size());
+        assertEquals(List.of("skip", "continue"), recommendationEvents.received().getLast().recommendations().stream()
+                .map(CreatedRecommendation::type).toList());
+    }
+
+    @Test void historyIsWrittenOnlyInsideTheCallersTransaction() {
+        HistoryFixture fixture = historyFixture();
+
+        assertThrows(IllegalTransactionStateException.class, () -> adaptiveDecisionService.recordAndPublish(
+                fixture.context(Map.of()), fixture.enrollment(), decisionOf(continueDraft(fixture.l1())),
+                Optional.empty(), Optional.empty()));
+        assertThrows(IllegalTransactionStateException.class, () -> recommendationService.appendSelected(
+                fixture.enrollment(), Instant.parse("2026-11-24T08:00:00Z"), List.of(continueDraft(fixture.l1()))));
+
+        assertTrue(committedHistory(fixture.enrollment()).isEmpty());
+        assertTrue(recommendationEvents.received().isEmpty());
+    }
+
+    @Test void aPersistenceFailureRollsBackTheEarlierRowsOfTheRunAndPublishesNothing() {
+        HistoryFixture fixture = historyFixture();
+        UUID missingLesson = UUID.randomUUID();
+
+        assertThrows(DataIntegrityViolationException.class, () -> runInUnit(fixture,
+                new MutableClock(Instant.parse("2026-11-24T08:00:00Z")),
+                decisionOf(skipDraft(fixture.l1()), continueDraft(missingLesson))));
+
+        assertTrue(committedHistory(fixture.enrollment()).isEmpty());
+        assertTrue(recommendationEvents.received().isEmpty());
+    }
+
+    // AD11: practice recommendation REST (ADR013 §19.4; B8-P01–P09 through the production stack).
+
+    @Test void b8TheRecommendationFollowsStoredMasteryAndTheUniformPublishedPracticeBankOverHttp() throws Exception {
+        PracticeFixture f = practiceFixture();
+        mastery(f.loops(), "mastered");
+        UUID arraysEasy = question(f.arrays(), "easy"), arraysEasy2 = question(f.arrays(), "easy");
+        UUID loopsEasy = question(f.loops(), "easy"), arraysHard = question(f.arrays(), "hard");
+        UUID stringsEasy = question(f.strings(), "easy"), stringsHard = question(f.strings(), "hard");
+        UUID alpha = practiceQuiz(COURSE, "Alpha easy", "practice", "published", loopsEasy, arraysEasy2);
+        practiceQuiz(COURSE, "Bravo easy", "practice", "published", arraysEasy);
+        // B8-P03 exclusions, each ordered before the winner by title.
+        practiceQuiz(COURSE, "Aardvark mixed", "practice", "published", arraysEasy, arraysHard);
+        practiceQuiz(COURSE, "Aaa hidden", "practice", "hidden", arraysEasy);
+        practiceQuiz(COURSE, "Aab test", "test", "published", arraysEasy);
+        practiceQuiz(COURSE, "Aab diagnostic", "diagnostic", "published", arraysEasy);
+        practiceQuiz(COURSE, "Aac other skill", "practice", "published", arraysEasy, stringsEasy);
+        practiceQuiz(COURSE, "Aad empty", "practice", "published");
+        UUID foreignSkill = skillRow(SECOND, "Arrays");
+        practiceQuiz(SECOND, "Aae other course", "practice", "published", question(foreignSkill, "easy"));
+        String learner = bearer(LEARNER);
+
+        // B8-P01/P02: Loops Mastered (Hard) and Arrays without a row (Unknown, Easy); the easier target governs.
+        JsonNode body = practiceJson(practice(COURSE, f.l1(), learner));
+        assertEquals(Set.of("courseId", "lessonId", "adaptiveEnabled", "recommendation"), fieldNames(body));
+        assertEquals(COURSE.toString(), body.get("courseId").asString());
+        assertEquals(f.l1().toString(), body.get("lessonId").asString());
+        assertTrue(body.get("adaptiveEnabled").asBoolean());
+        assertRecommended(body.get("recommendation"), alpha, "Alpha easy", "easy", "easy", false, f.arrays(), "Arrays",
+                "unknown", "Recommended practice: Easy, because your skill \"Arrays\" is not yet assessed.");
+
+        // B8-P04: Learning targets Medium; with only Easy and Hard uniform Quizzes the fallback is Easy.
+        mastery(f.strings(), "learning");
+        UUID stringsEasyQuiz = practiceQuiz(COURSE, "Strings easy", "practice", "published", stringsEasy);
+        practiceQuiz(COURSE, "Strings hard", "practice", "published", stringsHard);
+        assertRecommended(practiceJson(practice(COURSE, f.l2(), learner)).get("recommendation"), stringsEasyQuiz,
+                "Strings easy", "easy", "medium", true, f.strings(), "Strings", "learning",
+                "Recommended practice: Easy, because your skill \"Strings\" is Learning and no Medium practice quiz is "
+                        + "available for this lesson.");
+
+        // Recomputed on read from the stored rows: Arrays Mastered, Loops Learning -> Loops (Medium) governs.
+        mastery(f.arrays(), "mastered");
+        jdbc.update("UPDATE public.learner_skill_masteries SET state = 'learning' WHERE user_id = ? AND skill_id = ?",
+                LEARNER, f.loops());
+        UUID loopsMedium = practiceQuiz(COURSE, "Loops medium", "practice", "published", question(f.loops(), "medium"));
+        assertRecommended(practiceJson(practice(COURSE, f.l1(), learner)).get("recommendation"), loopsMedium,
+                "Loops medium", "medium", "medium", false, f.loops(), "Loops", "learning",
+                "Recommended practice: Medium, because your skill \"Loops\" is Learning.");
+
+        // B8-P06: a Lesson without mapped skills, then a disabled Course, has no recommendation.
+        JsonNode unmapped = practiceJson(practice(COURSE, f.unmapped(), learner));
+        assertTrue(unmapped.get("adaptiveEnabled").asBoolean());
+        assertTrue(unmapped.has("recommendation") && unmapped.get("recommendation").isNull());
+        jdbc.update("UPDATE public.courses SET adaptive_enabled = false WHERE id = ?", COURSE);
+        JsonNode disabled = practiceJson(practice(COURSE, f.l1(), learner));
+        assertFalse(disabled.get("adaptiveEnabled").asBoolean());
+        assertTrue(disabled.has("recommendation") && disabled.get("recommendation").isNull());
+    }
+
+    @Test void b8P07AdmissionAndUnavailableLessonsFollowTheContractOrderWithoutReadingMasteryOrAssessment() throws Exception {
+        PracticeFixture f = practiceFixture();
+        UUID quiz = practiceQuiz(COURSE, "Alpha easy", "practice", "published", question(f.arrays(), "easy"));
+        UUID otherCourseLesson = lesson(chapter(SECOND, 1), 1);
+        UUID hiddenCourseLesson = lesson(chapter(HIDDEN, 1), 1);
+        String learner = bearer(LEARNER), owner = bearer(OWNER), admin = bearer(ADMIN);
+        String path = "/api/courses/" + COURSE + "/lessons/" + f.l1() + "/practice-recommendation";
+
+        // Positive control: an admitted request's recorded SQL does include the mastery and profile reads.
+        List<String> admittedSql = new ArrayList<>();
+        RECORDED_SQL.set(admittedSql);
+        try {
+            practiceJson(practice(COURSE, f.l1(), learner));
+        } finally {
+            RECORDED_SQL.remove();
+        }
+        assertTrue(admittedSql.stream().anyMatch(sql -> sql.contains("learner_skill_masteries")), admittedSql::toString);
+        assertTrue(admittedSql.stream().anyMatch(sql -> sql.contains("quiz_questions")), admittedSql::toString);
+
+        List<Object[]> cases = List.of(
+                new Object[] {null, path, 401},
+                new Object[] {"Bearer not-a-token", path, 401},
+                new Object[] {learner, "/api/courses/not-a-uuid/lessons/" + f.l1() + "/practice-recommendation", 400},
+                new Object[] {learner, "/api/courses/" + COURSE + "/lessons/" + f.l1() + "x/practice-recommendation", 400},
+                new Object[] {owner, "/api/courses/not-a-uuid/lessons/" + f.l1() + "/practice-recommendation", 400},
+                new Object[] {learner, path + "?page=0", 400},
+                new Object[] {owner, path, 403},
+                new Object[] {admin, path, 403},
+                new Object[] {learner, "/api/courses/" + SECOND + "/lessons/" + otherCourseLesson + "/practice-recommendation", 403},
+                new Object[] {learner, "/api/courses/" + HIDDEN + "/lessons/" + hiddenCourseLesson + "/practice-recommendation", 404},
+                new Object[] {learner, "/api/courses/" + UUID.randomUUID() + "/lessons/" + f.l1() + "/practice-recommendation", 404},
+                new Object[] {learner, "/api/courses/" + COURSE + "/lessons/" + f.hidden() + "/practice-recommendation", 404},
+                new Object[] {learner, "/api/courses/" + COURSE + "/lessons/" + otherCourseLesson + "/practice-recommendation", 404},
+                new Object[] {learner, "/api/courses/" + COURSE + "/lessons/" + UUID.randomUUID() + "/practice-recommendation", 404});
+        for (Object[] c : cases) {
+            List<String> statements = new ArrayList<>();
+            RECORDED_SQL.set(statements);
+            MvcResult result;
+            try {
+                result = call(new Operation(HttpMethod.GET, (String) c[1], null), (String) c[0]);
+            } finally {
+                RECORDED_SQL.remove();
+            }
+            assertProblem(result, (int) c[2], null);
+            assertEquals("no-store", result.getResponse().getHeader("Cache-Control"), (String) c[1]);
+            assertFalse(result.getResponse().getContentAsString().contains(quiz.toString()));
+            assertTrue(statements.stream().noneMatch(sql -> sql.contains("learner_skill_masteries") || sql.contains("quiz")),
+                    () -> c[1] + " read mastery or Assessment data: " + statements);
+        }
+
+        // A LEFT membership is CT03 stage 4 (403), exactly as for /adaptive-guidance.
+        jdbc.update("UPDATE public.enrollments SET status = 'left' WHERE user_id = ? AND course_id = ?", LEARNER, COURSE);
+        assertProblem(practice(COURSE, f.l1(), learner), 403, null);
+        jdbc.update("UPDATE public.enrollments SET status = 'completed' WHERE user_id = ? AND course_id = ?", LEARNER, COURSE);
+        assertEquals(quiz.toString(), practiceJson(practice(COURSE, f.l1(), learner)).get("recommendation").get("quizId").asString(),
+                "a COMPLETED membership is admitted");
+    }
+
+    @Test void b8P08TheRecommendationWritesNothingPublishesNothingAndRunsInTheCallersReadOnlySnapshot() throws Exception {
+        PracticeFixture f = practiceFixture();
+        mastery(f.loops(), "weak");
+        practiceQuiz(COURSE, "Alpha easy", "practice", "published", question(f.loops(), "easy"));
+        String before = mutableState();
+
+        practiceJson(practice(COURSE, f.l1(), bearer(LEARNER)));
+        practiceJson(practice(COURSE, f.unmapped(), bearer(LEARNER)));
+        assertEquals(before.replaceAll("refresh_sessions=\\d+", ""), mutableState().replaceAll("refresh_sessions=\\d+", ""));
+        assertTrue(recommendationEvents.received().isEmpty(), "no recommendation event");
+
+        List<String> facts = outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(status -> as(LEARNER, Role.LEARNER, () -> {
+            assertEquals("Alpha easy", recommendationService.readPracticeRecommendation(COURSE, f.l1()).recommendation().quizTitle());
+            return List.of(String.valueOf(jdbc.queryForObject("SELECT pg_current_xact_id_if_assigned()", Object.class)),
+                    jdbc.queryForObject("SHOW transaction_isolation", String.class),
+                    jdbc.queryForObject("SHOW transaction_read_only", String.class));
+        }));
+        assertEquals(List.of("null", "repeatable read", "on"), facts, "no transaction id was assigned: nothing was written");
+
+        // Its own unit is the same kind of snapshot; a read-write or READ COMMITTED caller is refused (500 path).
+        assertThrows(IllegalStateException.class, () -> outer(TransactionDefinition.ISOLATION_READ_COMMITTED, false)
+                .execute(status -> as(LEARNER, Role.LEARNER, () -> recommendationService.readPracticeRecommendation(COURSE, f.l1()))));
+    }
+
+    @Test void b8TheRecommendationIsOneSnapshotEvenWhenAWriterCommitsBetweenItsReads() throws Exception {
+        PracticeFixture f = practiceFixture();
+        mastery(f.loops(), "mastered");
+        UUID arraysEasy = question(f.arrays(), "easy");
+        UUID alpha = practiceQuiz(COURSE, "Alpha easy", "practice", "published", arraysEasy);
+        UUID late = practiceQuiz(COURSE, "Aaa late", "practice", "hidden", arraysEasy);
+        String learner = bearer(LEARNER);
+        AtomicInteger hooks = new AtomicInteger();
+        BEFORE_MASTERY_READ.set(() -> {
+            hooks.incrementAndGet();
+            commitSqlElsewhere("INSERT INTO public.learner_skill_masteries (id,user_id,skill_id,state) VALUES (?,?,?,'mastered')",
+                    UUID.randomUUID(), LEARNER, f.arrays());
+            commitSqlElsewhere("UPDATE public.quizzes SET publication_status = 'published' WHERE id = ?", late);
+        });
+
+        assertRecommended(practiceJson(practice(COURSE, f.l1(), learner)).get("recommendation"), alpha, "Alpha easy", "easy",
+                "easy", false, f.arrays(), "Arrays", "unknown",
+                "Recommended practice: Easy, because your skill \"Arrays\" is not yet assessed.");
+        assertEquals(1, hooks.get(), "the writer committed between the admission and the mastery read");
+
+        assertRecommended(practiceJson(practice(COURSE, f.l1(), learner)).get("recommendation"), late, "Aaa late", "easy",
+                "hard", true, f.arrays(), "Arrays", "mastered",
+                "Recommended practice: Easy, because your skill \"Arrays\" is Mastered and no Hard practice quiz is "
+                        + "available for this lesson.");
+    }
+
+    @Test void b8AProviderFailureIsASafeNoStoreServerError() throws Exception {
+        PracticeFixture f = practiceFixture();
+        BEFORE_MASTERY_READ.set(() -> { throw new IllegalStateException("leaked-diagnostic-" + f.loops()); });
+
+        MvcResult result = practice(COURSE, f.l1(), bearer(LEARNER));
+
+        assertProblem(result, 500, null);
+        assertEquals("no-store", result.getResponse().getHeader("Cache-Control"));
+        assertFalse(result.getResponse().getContentAsString().contains("leaked-diagnostic"));
+        assertFalse(result.getResponse().getContentAsString().contains(f.loops().toString()));
+    }
+
+    @Test void b8TheWholeCompositionNeedsOnlyTheRuntimeMatrixSelectGrants() throws Exception {
+        PracticeFixture f = practiceFixture();
+        mastery(f.arrays(), "learning");
+        UUID medium = practiceQuiz(COURSE, "Arrays medium", "practice", "published", question(f.arrays(), "medium"));
+        String role = "ad11_select_" + UUID.randomUUID().toString().replace("-", "");
+        jdbc.execute("CREATE ROLE " + role + " NOLOGIN");
+        try {
+            jdbc.execute("GRANT USAGE ON SCHEMA public TO " + role);
+            // CT17-P6 matrix SELECT rows of the relations this read touches (CT03's snapshot included); masteries
+            // (r8) and learning_materials are column-limited exactly as in the matrix.
+            jdbc.execute("GRANT SELECT ON public.users, public.courses, public.chapters, public.lessons, public.enrollments, "
+                    + "public.lesson_progress, public.skills, public.lesson_skills, public.quizzes, public.quiz_questions, "
+                    + "public.questions TO " + role);
+            jdbc.execute("GRANT SELECT (user_id, skill_id, state) ON public.learner_skill_masteries TO " + role);
+            jdbc.execute("GRANT SELECT (id, lesson_id, publication_status) ON public.learning_materials TO " + role);
+
+            String choice = outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(status -> {
+                status.setRollbackOnly(); // the denied probe below aborts the transaction
+                jdbc.execute("SET LOCAL ROLE " + role);
+                String quizId = as(LEARNER, Role.LEARNER,
+                        () -> recommendationService.readPracticeRecommendation(COURSE, f.l1()).recommendation().quizId().toString());
+                assertEquals(role, jdbc.queryForObject("SELECT current_user", String.class));
+                assertThrows(DataAccessException.class, () -> jdbc.queryForList("SELECT id FROM public.learner_skill_masteries"));
+                return quizId;
+            });
+            assertEquals(medium.toString(), choice);
+        } finally {
+            jdbc.execute("DROP OWNED BY " + role);
+            jdbc.execute("DROP ROLE " + role);
+        }
+    }
+
+    /** COURSE adaptive with L1 (Loops, Arrays), L2 (Strings), an unmapped L3 and a hidden mapped Lesson; LEARNER active. */
+    private record PracticeFixture(UUID l1, UUID l2, UUID unmapped, UUID hidden, UUID loops, UUID arrays, UUID strings) { }
+
+    private PracticeFixture practiceFixture() {
+        jdbc.update("UPDATE public.courses SET adaptive_enabled = true, adaptive_settings = '{}'::jsonb WHERE id = ?", COURSE);
+        UUID chapter = chapter(COURSE, 1);
+        UUID l1 = lesson(chapter, 1), l2 = lesson(chapter, 2), unmapped = lesson(chapter, 3), hidden = hiddenLesson(chapter, 4);
+        UUID loops = skillRow(COURSE, "Loops"), arrays = skillRow(COURSE, "Arrays"), strings = skillRow(COURSE, "Strings");
+        for (UUID[] pair : List.of(new UUID[] {l1, loops}, new UUID[] {l1, arrays}, new UUID[] {l2, strings},
+                new UUID[] {hidden, loops})) {
+            jdbc.update("INSERT INTO public.lesson_skills (id,lesson_id,skill_id) VALUES (?,?,?)", UUID.randomUUID(), pair[0], pair[1]);
+        }
+        jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status) VALUES (?,?,?,'active')",
+                UUID.randomUUID(), LEARNER, COURSE);
+        return new PracticeFixture(l1, l2, unmapped, hidden, loops, arrays, strings);
+    }
+
+    private void mastery(UUID skill, String state) {
+        jdbc.update("INSERT INTO public.learner_skill_masteries (id,user_id,skill_id,state) VALUES (?,?,?,?)",
+                UUID.randomUUID(), LEARNER, skill, state);
+    }
+
+    private UUID question(UUID skill, String difficulty) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.questions (id,skill_id,prompt,kind,difficulty,options,correct_options) "
+                + "VALUES (?,?,'Pick one','true_false',?,ARRAY['True','False'],ARRAY[true,false])", id, skill, difficulty);
+        return id;
+    }
+
+    private UUID practiceQuiz(UUID course, String title, String kind, String status, UUID... questions) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.quizzes (id,course_id,title,kind,time_limit_seconds,publication_status) "
+                + "VALUES (?,?,?,?,60,?)", id, course, title, kind, status);
+        for (int i = 0; i < questions.length; i++) {
+            jdbc.update("INSERT INTO public.quiz_questions (id,quiz_id,question_id,position) VALUES (?,?,?,?)",
+                    UUID.randomUUID(), id, questions[i], i + 1);
+        }
+        return id;
+    }
+
+    private MvcResult practice(UUID course, UUID lesson, String authorization) throws Exception {
+        return call(new Operation(HttpMethod.GET, "/api/courses/" + course + "/lessons/" + lesson + "/practice-recommendation",
+                null), authorization);
+    }
+
+    private static JsonNode practiceJson(MvcResult result) throws Exception {
+        JsonNode body = json(result, 200);
+        assertEquals("no-store", result.getResponse().getHeader("Cache-Control"));
+        return body;
+    }
+
+    private static Set<String> fieldNames(JsonNode node) {
+        Set<String> names = new java.util.TreeSet<>();
+        node.propertyNames().forEach(names::add);
+        return names;
+    }
+
+    private static void assertRecommended(JsonNode node, UUID quiz, String title, String difficulty, String target,
+            boolean fallback, UUID skill, String skillName, String state, String reason) {
+        assertEquals(Set.of("quizId", "quizTitle", "difficulty", "targetDifficulty", "fallback", "skillId", "skillName",
+                "skillState", "reason"), fieldNames(node));
+        assertEquals(quiz.toString(), node.get("quizId").asString());
+        assertEquals(title, node.get("quizTitle").asString());
+        assertEquals(difficulty, node.get("difficulty").asString());
+        assertEquals(target, node.get("targetDifficulty").asString());
+        assertEquals(fallback, node.get("fallback").asBoolean());
+        assertEquals(skill.toString(), node.get("skillId").asString());
+        assertEquals(skillName, node.get("skillName").asString());
+        assertEquals(state, node.get("skillState").asString());
+        assertEquals(reason, node.get("reason").asString());
+    }
+
+    /** Every row a write by this read could touch, as one comparable text. */
+    private String mutableState() {
+        return jdbc.queryForObject("SELECT concat_ws(';', "
+                + "(SELECT 'masteries=' || coalesce(string_agg(user_id || ':' || skill_id || ':' || state, ',' ORDER BY skill_id), '') "
+                + "FROM public.learner_skill_masteries), "
+                + "(SELECT 'history=' || count(*) FROM public.path_recommendations), "
+                + "(SELECT 'progress=' || coalesce(string_agg(lesson_id || ':' || completed || ':' || mastery_skipped, ',' ORDER BY lesson_id), '') "
+                + "FROM public.lesson_progress), "
+                + "(SELECT 'enrollments=' || coalesce(string_agg(id || ':' || status || ':' || coalesce(resume_lesson_id::text, '-') "
+                + "|| ':' || coalesce(last_visited_at::text, '-'), ',' ORDER BY id), '') FROM public.enrollments), "
+                + "(SELECT 'attempts=' || count(*) FROM public.attempts), "
+                + "(SELECT 'quizzes=' || coalesce(string_agg(id || ':' || publication_status, ',' ORDER BY id), '') FROM public.quizzes), "
+                + "(SELECT 'members=' || count(*) FROM public.quiz_questions), "
+                + "(SELECT 'refresh_sessions=' || count(*) FROM public.refresh_sessions))", String.class);
+    }
+
+    /** One published Course with three published Lessons, L1-L3 mapped (in the context only) to S1-S3. */
+    private record HistoryFixture(UUID enrollment, UUID l1, UUID l2, UUID l3, UUID s1, UUID s2, UUID s3) {
+        DecisionContext context(Map<UUID, MasteryState> states) {
+            Map<UUID, MasteryState> mastery = new LinkedHashMap<>(Map.of(
+                    s1, MasteryState.UNKNOWN, s2, MasteryState.UNKNOWN, s3, MasteryState.UNKNOWN));
+            mastery.putAll(states);
+            return new DecisionContext(COURSE, LEARNER,
+                    List.of(new LessonInput(l1, false, Set.of(s1)), new LessonInput(l2, false, Set.of(s2)),
+                            new LessonInput(l3, false, Set.of(s3))),
+                    mastery, List.of(), Map.of(s1, "Skill one", s2, "Skill two", s3, "Skill three"));
+        }
+    }
+
+    private HistoryFixture historyFixture() {
+        UUID chapter = chapter(COURSE, 1);
+        UUID l1 = lesson(chapter, 1), l2 = lesson(chapter, 2), l3 = lesson(chapter, 3);
+        UUID enrollmentId = UUID.randomUUID();
+        jdbc.update("INSERT INTO public.enrollments (id,user_id,course_id,status) VALUES (?,?,?,'active')",
+                enrollmentId, LEARNER, COURSE);
+        return new HistoryFixture(enrollmentId, l1, l2, l3, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+    }
+
+    /** One submission-like unit: history inputs read under the caller's transaction, then recorded. */
+    private void runInUnit(HistoryFixture fixture, Clock clock, AdaptiveDecision decision) {
+        new TransactionTemplate(transactions).executeWithoutResult(status ->
+                decisions(clock).recordAndPublish(fixture.context(Map.of()), fixture.enrollment(), decision,
+                        currentGuidance(fixture.enrollment()), latestInstant(fixture.enrollment())));
+    }
+
+    /** The production service wired to the real history service and publisher, with a test clock (ADR011 §9). */
+    private AdaptiveDecisionService decisions(Clock clock) {
+        try {
+            return BeanUtils.instantiateClass(AdaptiveDecisionService.class.getDeclaredConstructor(
+                    RecommendationService.class, ApplicationEventPublisher.class, Clock.class),
+                    recommendationService, context, clock);
+        } catch (NoSuchMethodException missing) {
+            throw new AssertionError(missing);
+        }
+    }
+
+    private static AdaptiveDecision decisionOf(Recommendation... drafts) {
+        return new AdaptiveDecision(Arrays.stream(drafts).filter(draft -> draft.type() == RecommendationType.SKIP)
+                .map(Recommendation::targetLessonId).toList(), List.of(drafts));
+    }
+
+    private static Recommendation skipDraft(UUID lesson) {
+        return new Recommendation(RecommendationType.SKIP, lesson,
+                "Tested out: you have mastered every skill in this lesson (\"Skill one\").");
+    }
+
+    private static Recommendation continueDraft(UUID lesson) {
+        return new Recommendation(RecommendationType.CONTINUE, lesson, RecommendationReasonBuilder.continueInCourseOrder());
+    }
+
+    private static Recommendation remedialDraft(UUID lesson) {
+        return new Recommendation(RecommendationType.REMEDIAL, lesson, RecommendationReasonBuilder.remedial("Skill two", "Skill one"));
+    }
+
+    /** ADR011 §7 current row, read as AD13/AD16 would; two rows sharing the greatest instant are an integrity failure. */
+    private Optional<PathRecommendation> currentGuidance(UUID enrollmentId) {
+        List<PathRecommendation> rows = history(enrollmentId).stream()
+                .filter(row -> row.recommendationType() != RecommendationType.SKIP).limit(2).toList();
+        if (rows.size() == 2 && rows.get(0).recommendedAt().equals(rows.get(1).recommendedAt())) {
+            throw new IllegalStateException("Two current recommendations share one instant");
+        }
+        return rows.stream().findFirst();
+    }
+
+    private Optional<Instant> latestInstant(UUID enrollmentId) {
+        return history(enrollmentId).stream().map(PathRecommendation::recommendedAt).findFirst();
+    }
+
+    /** History in ADR011 §9 order, on the current (possibly transactional) connection. */
+    private List<PathRecommendation> history(UUID enrollmentId) {
+        return jdbc.query("SELECT id, enrollment_id, lesson_id, recommendation_type, reason, recommended_at "
+                        + "FROM public.path_recommendations WHERE enrollment_id = ? ORDER BY recommended_at DESC, "
+                        + "CASE WHEN recommendation_type = 'skip' THEN 1 ELSE 0 END, lesson_id::text",
+                (row, n) -> new PathRecommendation(row.getObject("id", UUID.class), row.getObject("enrollment_id", UUID.class),
+                        row.getObject("lesson_id", UUID.class),
+                        RecommendationType.valueOf(row.getString("recommendation_type").toUpperCase(java.util.Locale.ROOT)),
+                        row.getString("reason"), row.getObject("recommended_at", OffsetDateTime.class).toInstant()),
+                enrollmentId);
+    }
+
+    /** Independent committed read on a fresh connection. */
+    private List<PathRecommendation> committedHistory(UUID enrollmentId) {
+        assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+        return history(enrollmentId);
+    }
+
+    private RecommendationCreatedEvent onlyRecommendationEvent() {
+        assertEquals(1, recommendationEvents.received().size());
+        return recommendationEvents.received().getFirst();
+    }
+
+    /**
+     * Test-scoped after-commit subscriber with the phase IN15 uses (ADR012 §8); it only observes
+     * delivery and can be told to fail.
+     */
+    static class RecommendationEventProbe {
+        private final List<RecommendationCreatedEvent> received = new CopyOnWriteArrayList<>();
+        private volatile RuntimeException failure;
+
+        @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+        void onRecommendationCreated(RecommendationCreatedEvent event) {
+            received.add(event);
+            RuntimeException configured = failure;
+            if (configured != null) throw configured;
+        }
+
+        List<RecommendationCreatedEvent> received() { return received; }
+        void failWith(RuntimeException exception) { failure = exception; }
+        void reset() { received.clear(); failure = null; }
+    }
+
+    /** Settable UTC test clock, local to one test (ADR008 §6). */
+    private static final class MutableClock extends Clock {
+        private final AtomicReference<Instant> now;
+        MutableClock(Instant start) { now = new AtomicReference<>(start); }
+        void set(Instant instant) { now.set(instant); }
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return now.get(); }
     }
 
     private UUID chapter(UUID course, int position) {

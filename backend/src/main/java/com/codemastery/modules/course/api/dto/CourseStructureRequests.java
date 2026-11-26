@@ -1,6 +1,7 @@
 package com.codemastery.modules.course.api.dto;
 
 import com.codemastery.common.exception.BusinessRuleException;
+import com.codemastery.modules.course.domain.model.MaterialType;
 import tools.jackson.databind.JsonNode;
 
 import java.util.ArrayList;
@@ -14,6 +15,29 @@ public final class CourseStructureRequests {
     private CourseStructureRequests() {}
 
     public record LessonWrite(String title, String contentMarkdown) {}
+
+    /** OpenAPI RelationalMaterialWrite: TextMaterialWrite or VideoMaterialWrite; the field of the other type is null. */
+    public record MaterialWrite(String title, MaterialType materialType, String textContent, String externalVideoUrl) {}
+
+    /** CO09: exactly one of the two closed shapes; text rules and the CT37.embed URL check are the service's. */
+    public static Optional<MaterialWrite> relationalMaterialWrite(String json) {
+        var text = CourseRequest.object(json, Set.of("title", "materialType", "textContent"))
+                .filter(input -> input.get("title").isString() && input.get("materialType").isString()
+                        && "text".equals(input.get("materialType").asString()) && input.get("textContent").isString())
+                .map(input -> new MaterialWrite(input.get("title").asString(), MaterialType.TEXT,
+                        input.get("textContent").asString(), null));
+        if (text.isPresent()) return text;
+        return CourseRequest.object(json, Set.of("title", "materialType", "externalVideoUrl"))
+                .filter(input -> input.get("title").isString() && input.get("materialType").isString()
+                        && "external_video".equals(input.get("materialType").asString()) && input.get("externalVideoUrl").isString())
+                .map(input -> new MaterialWrite(input.get("title").asString(), MaterialType.EXTERNAL_VIDEO,
+                        null, input.get("externalVideoUrl").asString()));
+    }
+
+    /** B5FileMaterialTitleWrite has the same closed {@code {title}} shape as ChapterWrite. */
+    public static Optional<String> fileMaterialTitle(String json) {
+        return chapterTitle(json);
+    }
 
     public static Optional<String> chapterTitle(String json) {
         return CourseRequest.object(json, Set.of("title")).map(input -> input.get("title"))

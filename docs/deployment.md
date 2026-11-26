@@ -1931,6 +1931,303 @@ a gap and a failed migration. Read-only evaluation on the VM on 23 November 2026
 v0.1.0-rc.1's `deploy.sh` (r4) the update of the deployed V006 database is refused by the
 Phase 5 plan gate before any change; with r9 it is an upgrade with V007–V009 pending.
 
+### CT17-P6-PRIVILEGES-2026-11-24-r10 — IN10 audit recording and read (within the ADR012 §19.2 ceiling, 24 November 2026)
+
+Prepared for IN10 ([#184](https://github.com/chi-thanh-nguyen/codemastery/issues/184),
+[PR #276](https://github.com/chi-thanh-nguyen/codemastery/pull/276)) under the Project Leader's
+explicit instruction of 24 November 2026 to complete IN10 on PR #276, including the runtime privileges
+its implemented SQL needs, inside the approved ceiling. It follows the extension procedure above and
+stays inside the DELEGATED_APPROVED `CT17-P6-PLAN-2026-11-15-r2` ceiling
+([ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)):
+the implemented consumer (`AuditLogRepositoryImpl` and `AuditLogJpaRepository`, used by
+`AuditLogService` for CT31.actions/CT31.consistency recording and the CT31.read operation
+`GET /api/admin/audit-logs`), `RUNTIME_PRIVILEGE_MATRIX` and the CI tests change together, and every
+privilege below is exercised by that consumer's SQL. r9 changed no row; this is the next dated
+revision. No migration is involved. No approval beyond that ceiling is claimed; this is not personal
+Leader review.
+
+The r1–r9 records above are unchanged history. The effective matrix is r1 plus r2–r8, with the row
+below replacing the r1 `audit_logs` row (none); no other privilege, role elevation or change is
+introduced. The row equals its ceiling row.
+
+| Relation (owner) | Runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `audit_logs` (admin) | SELECT, INSERT | `append`: one row per audited change, inside the caller's transaction; `search`: the filtered, ordered page and its count | r10 within ceiling (CT31, ADR012 §7) |
+
+Least privilege exercised by the consumer:
+
+| Operation | SQL | Privilege |
+| --- | --- | --- |
+| Record one audited change | `insert into audit_logs (action, actor_id, occurred_at, target_reference, target_type, id) values (?, ?, ?, ?, ?, ?)` (Hibernate `persist` with an assigned identifier, executed by `flush` before `record` returns) | INSERT; a reused identifier fails with 23505 |
+| Read a page | `select … from audit_logs where <optional AND filters> order by occurred_at desc, id desc offset ? rows fetch first ? rows only`, and `select count(…) from audit_logs where …` when the page does not reveal the total | SELECT |
+| Actor display names | CT01.user-summaries reads `users` by identifier | existing `users` SELECT (r1) |
+| Foreign key to `users` (`actor_id`) | checked by PostgreSQL with the table owner's rights | none |
+
+The runtime role still cannot do any of the following (CT31: rows are append-only):
+
+- update any audit column (no UPDATE privilege on `audit_logs`);
+- delete or truncate audit rows.
+
+A compromised runtime role could read the whole audit log and append rows naming any existing user
+as actor, which the approved recording inherently requires; that only Administrators record and read,
+and that `actor_id` is the authenticated Administrator, stay application invariants (ADR012 §§7.1,
+7.3), and V006's primary key, foreign key and text check stay authoritative.
+
+The following stay synchronized with this record:
+
+- `RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh` (27 relations, V001–V009), with
+  `verify_role_separation` probing the audit rewrite and erase denials;
+- `test-deploy-privilege-matrix-contract.sh`, which pins r1 history and the r2–r8 and r10 rows;
+- `test-postgres-privilege-matrix-containment.sh`: the recording and read SQL under the provisioned
+  runtime role on the real schema, the reused-identifier (23505) and unknown-actor (23503) refusals and
+  the rewrite, erase and truncate denials (42501);
+- `test-runtime-real-backend-privileges.sh`: the real backend's audit read under the runtime role
+  (Administrator page with actor names and both time bounds, Learner 403, malformed query 400, no row
+  written by the read);
+- `AuditLogRepositoryIntegrationTest` runs the adapter's insert and read under a transaction-scoped role
+  holding exactly this row and shows that the role cannot update or delete audit rows.
+
+No HTTP operation records an audit row yet: the audited Administrator mutations are IN11, IN20 and
+IN21, which add their own real-backend cases (and their own `users`, `courses`, `lessons`,
+`discussion_posts` and `content_reports` revisions) when they are implemented.
+
+Remaining gates: owning-module (Admin @tihh647-ui), `@tihh647-ui` infrastructure and independent
+Leader CODEOWNER review; protected integration of PR #276; these grants on any shared or production
+database (Leader-reserved). This revision executes no provisioning on any real database.
+
+### CT17-P6-PRIVILEGES-2026-11-24-r11 — CO15 atomic progress (within the ADR012 §19.2 ceiling, 24 November 2026)
+
+The Project Leader explicitly authorized this minimal extension in **“CodeMastery — PR #285:
+Complete CO15, Add AD11 Course Read, Remediate Findings”**, 24 November 2026, with Course owner
+@TamiaoNguyen's consent. Scope: CO15 [#178](https://github.com/chi-thanh-nguyen/codemastery/issues/178)
+on [PR #285](https://github.com/chi-thanh-nguyen/codemastery/pull/285), the bounded CT33 Course read
+for AD11 [#168](https://github.com/chi-thanh-nguyen/codemastery/issues/168), supporting tests and
+this runtime revision. This is explicit implementation and matrix-extension authorization within
+the effective `CT17-P6-PLAN-2026-11-15-r2` ceiling
+([ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)),
+not an independent CODEOWNER review, deployment authorization or runtime acceptance.
+
+r10 was the latest recorded revision when this work began. Records r1–r10 remain authentic history;
+the row below replaces only r4's `lesson_progress` row. All other effective rows, migration-column
+deferrals and containment restrictions remain unchanged. No Flyway migration changes.
+
+| Relation (owner) | Runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `lesson_progress` (course) | SELECT, INSERT; UPDATE (completed, mastery_skipped) | `EnrollmentRepositoryImpl.markMasterySkipped`: insert absent progress or upgrade an existing incomplete row; Course participant locks/reads and CT33 learner snapshot | r11, explicitly Leader-authorized within ceiling, CT22-ATOMIC-2026-11-12-r1 (ADR011 §3) |
+
+The sole added privilege is **UPDATE (mastery_skipped)**. Existing SELECT/INSERT and UPDATE
+(completed) remain unchanged. The actual consumer uses:
+
+```sql
+INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped)
+VALUES (?,?,?,true,true) ON CONFLICT (enrollment_id,lesson_id) DO NOTHING;
+-- Only when the INSERT affected zero rows:
+UPDATE public.lesson_progress SET completed=true, mastery_skipped=true
+WHERE enrollment_id=? AND lesson_id=? AND completed=false;
+```
+
+Before those statements, the Course root is already held; the participant locks Enrollment then
+existing progress in Lesson UUID order. It iterates the published set in Chapter/Lesson canonical
+order. An absent row becomes true/true, an incomplete row becomes true/true, a completed row stays
+unchanged, including a manual true/false row. It never clears either flag, and repeats add no row.
+Enrollment reconciliation uses the existing UPDATE (status). No mastery table is read by Course.
+`readLearnerState(UUID courseId)` joins the caller's read-only REPEATABLE READ snapshot, applies
+CT03 before Course business reads, then reads only self Enrollment, published placements/progress
+and stored adaptive fields; it requires no root marker and no additional privileges.
+
+**Least-privilege limits.** No table-wide UPDATE, DELETE, TRUNCATE, DDL, grant option or UPDATE of
+progress identifiers/ancestry is granted. `verify_role_separation` now probes identifier/ancestry
+rewrite and erase denials; the exact ACL comparison still checks every column. Column grants can
+permit a compromised role to alter both flags of arbitrary progress rows: same-Course binding,
+manual-label preservation and monotonicity are application invariants, with V002's
+`mastery_skipped implies completed` check as a database invariant. Narrowing INSERT or UPDATE
+further would prevent the approved SQL; triggers, schema changes and new database role policies
+are excluded. These grants apply to existing V002 columns even on an admitted V006/V008 predecessor;
+only V009's `enrollments.last_visited_at` remains deferred under r9.
+
+**Synchronized evidence surfaces.** `RUNTIME_PRIVILEGE_MATRIX`, the matrix-contract test (r11's
+single row and unchanged r1–r10), the PostgreSQL containment test (absent/incomplete/manual rows,
+repeat, constraint failure and identifier/erase/TRUNCATE denials), and
+`EnrollmentIntegrationTest` (actual Spring participant SQL with exactly the Course subset of
+r11, pre-r11 42501, rollback and read-only snapshot tests) ship together. Execution results and
+commands are recorded in [testing.md](testing.md#co15-atomic-lessonprogress-participant-verification--24-november-2026).
+The containment test provisions only disposable local/CI PostgreSQL containers. No HTTP path
+currently invokes CO15 or this new internal Course read, so the existing real-backend HTTP suite
+establishes regression compatibility only, not full Assessment → Adaptive → Course integration.
+
+**Retained gates.** Independent Course/infrastructure/Leader CODEOWNER review, required CI and
+protected integration; AD13/AS12/QA04 real event/orchestration acceptance. Provisioning this
+revision on any shared database or VM remains a separately authorized Leader operation. This
+change does not provision, deploy, alter credentials or mutate a real VM/database.
+
+### CT17-P6-PRIVILEGES-2026-11-25-r12 — CO06 authoring and AS09 owner assignments (within the ADR012 §19.2 ceiling, 25 November 2026)
+
+The Project Leader explicitly authorized this extension in **"CodeMastery — PR #273: Independent
+Finding Verification & Autonomous Remediation"**, 25 November 2026 (finding U1). The instruction
+authorizes a dated revision inside the effective `CT17-P6-PLAN-2026-11-15-r2` ceiling
+([ADR012 §19.2](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers)),
+granting only privileges that the implemented SQL exercises and that real PostgreSQL proves. It is not
+an independent CODEOWNER, owning-module or infrastructure review, deployment authorization or runtime
+acceptance.
+
+Scope:
+
+- **AS09 owner slice** ([#160](https://github.com/chi-thanh-nguyen/codemastery/issues/160)), whose
+  consumer ships in [PR #273](https://github.com/chi-thanh-nguyen/codemastery/pull/273):
+  `AssignmentService`, `AssignmentRepositoryImpl`, `AssignmentJpaRepository` and
+  `SubmissionJpaRepository`.
+- **CO06 Instructor authoring** ([PR #265](https://github.com/chi-thanh-nguyen/codemastery/pull/265),
+  on `main` since `75cdb8b`): `CourseManagementService`, `CourseStructureService`,
+  `CourseRepositoryImpl` and `CourseContentRepositoryImpl`. CO06 merged without its own revision. The
+  r7 record already noted that deployed Course authoring needs one. PR #273's FE15/FE14 screens are the
+  first UI over these operations, so the revision ships with them.
+
+r11 was the latest recorded revision when this work began. Records r1–r11 remain authentic history.
+The rows below replace r1's `courses`, `chapters`, `lessons`, `learning_materials` (column SELECT
+for access snapshots), `assignments` (none) and `submissions` (none) rows. All other effective rows, the migration-column deferral (r4/r9) and the containment
+restrictions are unchanged. No Flyway migration changes.
+
+| Relation (owner) | Runtime privilege | Consumer and operation | Status / basis |
+| --- | --- | --- | --- |
+| `courses` (course) | SELECT, INSERT; UPDATE (id, title, description, prerequisite_description, publication_status) | CO06 create, metadata replacement and publication; existing reads; root locks | r12 within ceiling (CT21.authoring); UPDATE (id) is r1's unchanged lock enabler |
+| `chapters` (course) | SELECT, INSERT; UPDATE (title, position) | CO06 append, rename and sibling reorder | r12 equals ceiling row (CT21.authoring, reorder) |
+| `lessons` (course) | SELECT, INSERT; UPDATE (title, content_markdown, position, publication_status) | CO06 append, content replacement, reorder and publication | r12 equals ceiling row (CT21.authoring) |
+| `learning_materials` (course) | SELECT | CO06 owner Course and Lesson reads (every material of the tree, hidden ones included); the same column list serves the CO03.content Learner Lesson read | r12 within ceiling (CT21.authoring; SELECT is the ceiling's read) |
+| `assignments` (assessment) | SELECT, INSERT; UPDATE (lesson_id, title, instructions, deadline_at, publication_status) | AS09 create, owner list and read, definition replacement, publication, the `FOR UPDATE` row lock | r12 equals ceiling row (CT10.rest, ADR010 §10) |
+| `submissions` (assessment) | SELECT (id, assignment_id, graded_at) | AS09 owner submission and graded counts | r12 within ceiling (CT10.rest owner counts) |
+
+Least privilege exercised by the consumers:
+
+| Operation | SQL (as issued) | Privilege |
+| --- | --- | --- |
+| Course root lock (every CO06 write; settings use `NOWAIT`) | `SELECT id FROM public.courses WHERE id = ? FOR UPDATE [NOWAIT]` | SELECT plus any column UPDATE (r1) |
+| Create a Course | `INSERT INTO public.courses (id, instructor_id, title, description, prerequisite_description, publication_status, adaptive_enabled, adaptive_settings) VALUES (…)` | INSERT |
+| Replace Course metadata | `UPDATE public.courses SET title = ?, description = ?, prerequisite_description = ? WHERE id = ?` | UPDATE on those three columns |
+| Course or Lesson publication (no cascade) | `UPDATE public.courses SET publication_status = ? WHERE id = ?`; `UPDATE public.lessons SET publication_status = ? WHERE id = ? AND chapter_id = ?`; a real change then reconciles joined completion with the existing r4 Enrollment UPDATE (status) | UPDATE (publication_status) on each |
+| Append a Chapter or Lesson | `INSERT INTO public.chapters (id, course_id, title, position) SELECT …, next_position FROM (SELECT COALESCE(max(position), 0)::bigint + 1 …) … RETURNING position`; the same shape for `lessons` | SELECT, INSERT |
+| Rename a Chapter; replace a Lesson | `UPDATE public.chapters SET title = ? WHERE id = ? AND course_id = ?`; `UPDATE public.lessons SET title = ?, content_markdown = ? WHERE id = ? AND chapter_id = ?` | UPDATE on those columns |
+| Reorder siblings (ADR006 §5) | `SET CONSTRAINTS public.uq_chapters_course_position DEFERRED`; `UPDATE public.chapters SET position = ? WHERE id = ? AND course_id = ?` for 1..N; `SET CONSTRAINTS … IMMEDIATE` (the same for Lessons) | UPDATE (position); `SET CONSTRAINTS` needs no grant |
+| Create an Assignment | Hibernate `persist` with an assigned identifier: `insert into assignments (course_id, deadline_at, instructions, lesson_id, publication_status, title, id) values (…)` | INSERT |
+| Assignment row lock (replace, publication) | `SELECT * FROM public.assignments WHERE id = ? AND course_id = ? FOR UPDATE`, then an entity refresh | SELECT plus any column UPDATE |
+| Replace or publish an Assignment | `update assignments set lesson_id = ?, title = ?, instructions = ?, deadline_at = ? where id = ? and course_id = ?`; `update assignments set publication_status = ? where id = ? and course_id = ?` | UPDATE on those columns |
+| Owner list and read | `select count(a1_0.id) …`; `SELECT * FROM public.assignments WHERE course_id = ? ORDER BY title COLLATE "C", id LIMIT ? OFFSET ?` | SELECT |
+| Submission counts | `select s1_0.assignment_id, count(s1_0.id), count(s1_0.graded_at) from submissions s1_0 where s1_0.assignment_id in (…) group by s1_0.assignment_id` | SELECT (id, assignment_id, graded_at); removing `id` fails with 42501 |
+| Owner Course read (every CO06 response) and owner or Learner Lesson read | `SELECT m.id, m.lesson_id, m.title, m.material_type, m.publication_status, m.text_content, m.object_key, m.original_filename, m.external_video_url FROM public.learning_materials m JOIN public.lessons l … JOIN public.chapters ch … WHERE ch.course_id = ? ORDER BY …` (`CourseContentRepositoryImpl.MATERIAL_COLUMNS`) | SELECT on all nine columns; with only r1's three columns `GET /api/instructor/courses/{id}` and every authoring response failed with 42501 (500) under the runtime role |
+| Foreign keys (`chapters.course_id`, `lessons.chapter_id`, `assignments.course_id`/`lesson_id`) | checked by PostgreSQL with the table owner's rights | none (no REFERENCES) |
+
+Deliberately not granted, because no HTTP operation reaches the SQL: `courses` UPDATE (adaptive_enabled,
+adaptive_settings) (`CourseManagementService.writeAdaptiveConfiguration` has no caller), every
+`learning_materials` write (CT09), and every `submissions` write or wider read (Learner submission
+and grading, AS10/AS11). Those consumers add their own revisions within the ceiling when they are
+implemented.
+
+The runtime role still cannot do any of the following:
+
+- re-own a Course (no UPDATE on `courses.instructor_id`), rewrite its adaptive configuration, or delete
+  or truncate Courses, Chapters or Lessons;
+- move a Chapter to another Course or a Lesson to another Chapter (no UPDATE on `chapters.course_id`
+  or `lessons.chapter_id`), or re-key either;
+- move an Assignment to another Course (no UPDATE on `assignments.course_id`), re-key, delete or
+  truncate it;
+- create, update, delete or truncate learning materials;
+- read a submission's learner, object key, file name, grade or feedback, or create, update, delete or
+  truncate submissions.
+
+A compromised runtime role could create Courses naming any existing user as Instructor, and could
+rewrite the metadata, structure and publication of any Course and any Assignment. It can now also read
+material payload columns, including `object_key` and `original_filename`, which r1 kept unreadable.
+The CO06 SQL selects them, although its responses never expose them. An object key does not grant
+storage access without the MinIO credentials. Narrowing the Course module's material reads so that this
+column-level containment returns is a Course-module change, outside this revision. The approved owner
+operations inherently require that. Ownership (`instructor_id` equals the authenticated Instructor),
+Course scoping, same-Course Lesson binding and the publication rules stay application invariants.
+V002 and V004 keys, checks and the deferrable sibling-position uniqueness stay authoritative.
+
+**Synchronized evidence surfaces.** These change together with this record:
+
+- `RUNTIME_PRIVILEGE_MATRIX` in `infrastructure/vm/deploy.sh` (27 relations, V001–V009).
+  `verify_role_separation` now probes Course re-ownership, adaptive-setting, structure delete and move,
+  material write and delete, Assignment move and delete, and submission file and grade denials. It no
+  longer expects Course publication or material payload reads to be denied.
+- `test-deploy-privilege-matrix-contract.sh` pins r12's six rows, checks them against the ceiling's
+  "Never granted" column, and keeps r1–r11 unchanged.
+- `test-postgres-privilege-matrix-containment.sh` runs the CO06 and AS09 SQL above under the
+  provisioned runtime role on the real schema: deferred reorder, the 23505 sibling refusal, the 23503
+  Lesson foreign key, and owner counts over admin-inserted submissions. It also checks the denials above
+  (42501).
+- `test-runtime-real-backend-privileges.sh` runs the CO06 authoring and AS09 owner operations over HTTP
+  under the runtime role, plus the owner and Learner Lesson reads. Before the `learning_materials` row
+  was added, this test found the 500 on the first metadata replacement.
+- `AssessmentPersistenceIntegrationTest` runs the AS09 adapter under a transaction-scoped role holding
+  exactly the r12 `assignments` and `submissions` rows. That includes the `FOR UPDATE` lock that blocks
+  a concurrent submission insert (55P03).
+
+Execution results are recorded in
+[testing.md](testing.md#pr-273-u1u6-remediation-verification--25-november-2026). The containment and
+real-backend tests provision only disposable local or CI PostgreSQL containers.
+
+**Retained gates.** These remain open:
+
+- Owning-module review: Course (@TamiaoNguyen) for the CO06 rows, Assessment (@minhtan29042006) for
+  the AS09 rows.
+- `@tihh647-ui` infrastructure review and independent Leader CODEOWNER review.
+- Required CI and protected integration of PR #273.
+
+Provisioning this revision on any shared database or VM remains a separately authorized Leader
+operation. This change does not provision, deploy, alter credentials or mutate a real VM or database.
+
+### CT17-P6-PRIVILEGES-2026-11-25-r13 — IN07 notifications (25 November 2026)
+
+**Authority.** Project Leader authorization for PR #292, within the
+[ADR012 §19.2 ceiling](decisions/012-batch-07-contract-approvals.md#192-ct17-p6-plan-2026-11-15-r2--least-privilege-ceiling-for-batch-27-consumers).
+This extends the effective r12 matrix by replacing only the previously denied V006
+`notifications` row. The reviewed relation inventory and schema are unchanged.
+
+| Relation | Runtime privilege | Implemented consumer | Ceiling |
+| --- | --- | --- | --- |
+| `notifications` (interaction) | SELECT, INSERT; UPDATE (is_read) | IN07 CT11 internal idempotent insertion, owner-scoped list and unread count, mark-read and mark-all-read | Exactly the ADR012 §19.2 row |
+
+The adapter uses `INSERT ... ON CONFLICT (id) DO NOTHING` and targeted
+`UPDATE ... SET is_read = true`. UPDATE on `id`, `user_id`, `message`, and
+`created_at`, DELETE, TRUNCATE, DDL, and grant options remain prohibited.
+`verify_role_separation` checks the exact matrix and probes the notification
+read, targeted update and denials. The matrix contract, PostgreSQL containment,
+and real-backend runtime tests cover the extension. See the
+[IN07 verification record](testing.md#in07-notifications--25-november-2026).
+
+Infrastructure and independent CODEOWNER review, required CI, and protected
+integration apply. Provisioning the revision on any shared database or VM
+requires separate Project Leader authorization.
+
+### CT17-P6-PRIVILEGES-2026-11-26-r14 — CO09 learning materials (within ADR012 §19.2, 26 November 2026)
+
+The Project Leader explicitly authorizes CO09 implementation and its consumer-specific
+runtime privilege extension in PR #291. This revision replaces only the effective
+r13 matrix's material row (unchanged since r12); all other effective rows and historical records remain unchanged. It grants no real
+host privilege and does not authorize provisioning, exposure or deployment.
+
+| Relation | Runtime privileges | Implemented consumer | Ceiling |
+|---|---|---|---|
+| `learning_materials` (course) | SELECT, INSERT; UPDATE (title, publication_status, text_content, external_video_url, object_key, original_filename) | `LearningMaterialService` uses existing `CourseContentRepositoryImpl` insert, content replacement and publication SQL for text, canonical external video and protected PDF materials | Exactly ADR012 §19.2's material row |
+
+The INSERT writes all nine existing V002 columns. Content replacement writes only
+its six payload/metadata columns; publication writes only publication_status. No
+UPDATE of id, lesson_id or material_type, DELETE, DDL, grant option or future-object
+grant is permitted. No migration is needed. `deploy.sh`, matrix-contract and isolated
+PostgreSQL qualification synchronize this row with actual consumer execution.
+
+Operational gates remain: independent infrastructure/Leader review, protected
+integration, explicit operator upload limit, tmpfs budget, ingress framing margin,
+and qualification of the release's private storage identity. Local disposable tests
+are not operational acceptance or authorization to grant on a shared database.
+
+Sequencing authorization: the Project Leader's 26 November 2026 PR #291 integration
+task renumbers CO09's previously reviewed `CT17-P6-PRIVILEGES-2026-11-25-r13`
+candidate solely because IN07 consumed r13 first in merged PR #292. The IN07 r13
+record and its authorization remain intact. This r14 record is based on effective
+r13; it changes no privilege beyond the already authorized CO09 material extension.
+The previous independent review is historical evidence, not approval of this merge.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -4482,7 +4779,8 @@ the CO08 r4 rows for `enrollments` and `lesson_progress` inside it; since 22 Nov
 AD07 r5 rows for `skills`, `skill_prerequisites` and `lesson_skills` inside it; since 22 November 2026,
 the AS05 r6 rows for `questions`, `quiz_questions` and `attempt_answers` inside it, and the AS06 r7 rows
 for `quizzes`, `quiz_questions` and `attempts` inside it; since 23 November 2026, the AD06 r8 rows for
-`learner_skill_masteries` and `path_recommendations` inside it), and the extension procedure above
+`learner_skill_masteries` and `path_recommendations` inside it; since 24 November 2026, the IN10 r10 row
+for `audit_logs` inside it, followed by CO15 r11's `lesson_progress` replacement), and the extension procedure above
 still applies unchanged: each implemented consumer adds its own dated revision,
 `RUNTIME_PRIVILEGE_MATRIX` and CI tests together, never beyond the ceiling. Nothing is
 granted, and provisioning on any real database remains Leader-reserved.
@@ -4498,7 +4796,7 @@ the operator's view. It approves nothing beyond ADR015 and changes no earlier re
 
 | Stage | How | Result |
 | --- | --- | --- |
-| 1. Candidate | Actions → **Release** → *Run workflow* on `main`, `stage=candidate`; optional `revision` (full SHA on `main`, default the dispatched commit), `public_origin` (default `https://codemastery.app`) and `compatibility_baseline` | Every required check of `main` must be green on the revision. Five linux/amd64 candidates are built, reloaded from their archive, qualified (MinIO initializer suite with the minimal server, backend trust store and runtime privileges, byte-clean PostgreSQL, image hardening, `deploy.sh` preflight/load/provision smoke and update-guard refusals), scanned (Trivy default and comprehensive, SPDX SBOMs), packaged, attested and stored as the draft release `candidate-<12-hex>-<run>-<attempt>`, titled “NOT ADMITTED” |
+| 1. Candidate | Actions → **Release** → *Run workflow* on `main`, `stage=candidate`; optional `revision` (full SHA on `main`, default the dispatched commit), `public_origin` (default `https://codemastery.app`) and `compatibility_baseline` | The latest authenticated evaluation of every required check of `main` must have passed on the revision ([ADR015 D2, amendment A2](decisions/015-release-pipeline.md#11-amendment-a2--latest-authenticated-ci-evaluation-24-november-2026)): a verified re-run replaces an earlier failure, a newer failure or unfinished run refuses, and every superseded result stays in the manifest. Five linux/amd64 candidates are built, reloaded from their archive, qualified (MinIO initializer suite with the minimal server, backend trust store and runtime privileges, byte-clean PostgreSQL, image hardening, `deploy.sh` preflight/load/provision smoke and update-guard refusals), scanned (Trivy default and comprehensive, SPDX SBOMs), packaged, attested and stored as the draft release `candidate-<12-hex>-<run>-<attempt>`, titled “NOT ADMITTED” |
 | 2. Security admission (ADR015 A1; no pull request) | The admission authority (`chi-thanh-nguyen`) dispatches **Release** on `main` with `stage=promote`, `candidate=<tag>`, `candidate_manifest_sha256=<SHA-256 of the reviewed release-candidate.json>`, `version=v<x.y.z>`, `accepted_findings=<n>` and an optional `note`; reads the `Admission request` job summary; approves the run's pending `release-admission` deployment | Only a first-attempt dispatch from `main` by the authority's account (login and ID, three GitHub views agreeing), approved by that account in the protected environment (required reviewer, `main` only, no administrator bypass; rules and approval read back, fail closed), naming the attested manifest digest and the exact finding count (CRITICAL/HIGH refused unless `accept_critical_or_high`), produces `admission.json`, attested before any candidate image runs ([A1](decisions/015-release-pipeline.md#10-amendment-a1--authenticated-admission-without-a-pull-request-per-candidate-23-november-2026)) |
 | 3. Promotion | Automatic in the same run after the admission | Candidate attestation and package verified; the admission re-derived and bound to this run; images retagged to `codemastery.invalid/*:release` and saved; identities must not change; `deploy.sh` accepts the archive for both image stores; every row of a fresh rescan must be an admitted candidate finding at the same installed version and no higher severity, with no loss of scan coverage; the smoke runs on the release archive; the attested package is stored as the draft release `v<x.y.z>` |
 | 4. Publication | Not automated | Un-drafting, tagging or making binaries public is a Leader decision that first needs the F1/F5 licensing determination ([D9](decisions/015-release-pipeline.md#d9--storage-retention-and-publication)) |
@@ -4968,3 +5266,364 @@ remains QA01/QA07/DP03 evidence. This record, the implementation and its tests w
 produced through AI-assisted development (Anthropic Claude Code) under the Leader's task;
 OpenSSH, OpenSSL, GitHub Actions, the Azure CLI (optional gate) and acme.sh (existing)
 are the tools used; no AI service or runtime technology is added to CodeMastery.
+
+## Phase 5 one-time setup executed — 23 November 2026
+
+**Authority.** In this session the Project Leader @chi-thanh-nguyen, after merging PR #274
+(main `84d10a3202ef96b0230eff6c22db060a08bcc02d`), explicitly authorized two setup
+steps: **bootstrap of the VM** and **creation of the recovery keys and MinIO escrow**.
+Production deployment and the TLS staging challenge were **not** authorized and did not
+run. This record supersedes the "nothing was bootstrapped" sentence above only for the
+items below; every other statement keeps its date.
+
+### Executed
+
+| Step | Result |
+| --- | --- |
+| Workstation recovery keys (`recovery.py init-workstation`, Homebrew OpenSSL 3.6.5) | `~/CodeMasteryRecovery` (0700); RSA-3072 recipient key, encrypted PKCS#8; passphrase in the login Keychain (service `codemastery-recovery-recipient`); recipient key SHA-256 `21f9b726debb479ed4aee79852b597a4b5b4a6d2e4875d1e3c3a1e88f576c1b6`; an encrypt/decrypt round trip through the Keychain passphrase passed |
+| Deployment identity key | ED25519 `SHA256:aoS/YF4Pm2dWhGb32AP739pN7xGTVlu2kmUuC4PNPDQ`, private key on the Leader's workstation only (not yet a GitHub secret) |
+| `bootstrap.sh --apply --wait-timeout 300` (Leader-chosen readiness deadline) | Tooling `84d10a32…` installed with its verified git tree; `/usr/local/sbin/codemastery-ops`, the forced-command gate and `/usr/local/lib/codemastery/authorize.py`; user `cmdeploy` (locked password, forced command, sudoers rule validated by `visudo`); `/etc/codemastery/deploy/ops.conf`; recipient certificate; producer signing key generated on the VM (root 0400), public key SHA-256 `e0aa1ec505c5446117ee2de5555fe0104b58ed1037a4edfbc6218bda34bfe016`; capture and renewal timers installed **disabled** |
+| Producer key pin | `recovery.py trust-producer` with that fingerprint; the VM key's fingerprint was re-read independently over SSH and matched |
+| MinIO escrow | `~/CodeMasteryRecovery/escrow/minio.json` (0600 in a 0700 directory) built on the VM from the runtime env file and streamed to the file; no value was printed |
+| Restore images | The captured preview images loaded on the workstation from the verified 061102e3 package (`SHA256SUMS` OK) under `codemastery-restore/{postgres,minio,minio-init}:061102e3` with the VM's identities `4cec267a…`, `70a39ea8…`, `85371a3d…`; `codemastery.invalid/*` local images untouched |
+| Workstation `config.json` | Operator transport (`azureuser`, pinned host key), producer fingerprint, restore test with the images above, the escrow and helper `ubuntu:24.04` |
+
+Read back afterwards: the four application containers still running as before;
+`vm-transport.sh check` (operator) OK; `codemastery-ops status` reports no hold, no
+capture and no ADR017 deployment; `tls-check` OK, 69 days left, served equals installed,
+with the documented former-hostname acme.sh finding; both timers `disabled`.
+
+### Still open
+
+- **Release candidate.** On 23 November `release.py evaluate-checks` refused `84d10a32…`
+  under the D2 rule then in force: its required `VM runtime privileges with the real
+  backend` job failed in attempt 1 of run 45194866405 and passed when the run was
+  re-run. [ADR015 amendment A2](decisions/015-release-pipeline.md#11-amendment-a2--latest-authenticated-ci-evaluation-24-november-2026)
+  (PR #275, not yet on `main`) lets the latest authenticated evaluation decide; a
+  read-only evaluation under A2 on 24 November accepts the revision (A2.9). No candidate
+  has been dispatched from it (checked 24 November).
+- Security admission and promotion of that candidate; production deployment
+  (`plan` → `prepare` → publish → `deploy`); TLS staging qualification, a measured capture
+  and timer enablement; the GitHub `production` environment, `VM_SSH_PRIVATE_KEY` and its
+  two reference variables; runner SSH reachability (NSG); an Azure storage account; an
+  offline copy of the recipient key and passphrase.
+
+## DP01 CI package-index remediation — 25 November 2026
+
+Leader-authorized investigation of CI VM failures on `main` and PR #290, based
+on freshly fetched `main` `1e4c54be01c78b14aa4734eb6e6e50426dbe3fe6` and PR head
+`a5d250623b2fd32843f57cb8a0d79a2244260e62`. Authority remains requirements,
+approved architecture/structure, effective CT17/ADR009 runtime policy and
+ADR015 qualification; this record grants no exception, acceptance or deployment.
+
+### Cause and decision
+
+**Alpine: CONFIRMED_REPOSITORY_REMEDIATION_REQUIRED.** The release target
+requests `libexpat=2.10.0-r0` from the pinned base's official Alpine v3.24
+repositories. A fresh x86_64 APK probe on the exact base
+`nginxinc/nginx-unprivileged@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03`
+reproduced exit 4: installed `libexpat-2.9.0-r0`, needed by fontconfig's
+`so:libexpat.so.1`, cannot satisfy that exact world constraint. The signed current
+index offers 2.11.0-r0, not 2.10.0-r0. Fontconfig requires the ABI, not 2.9.0.
+
+[Alpine's package record](https://pkgs.alpinelinux.org/package/v3.24/main/x86_64/libexpat)
+and [aports commit e3335f476c69ffe92817447e265ce2f18323e4ae](https://gitlab.alpinelinux.org/alpine/aports/-/commit/e3335f476c69ffe92817447e265ce2f18323e4ae)
+identify the 25 November 12:55:11 UTC security upgrade. Its APKBUILD retains
+2.10.0's fixes for CVE-2026-113351, CVE-2026-115506, CVE-2026-117610 and
+CVE-2026-118370, and adds CVE-2026-124317, CVE-2026-128241 and CVE-2026-134703.
+The package still provides `so:libexpat.so.1` (1.14.0). This corroborates the
+3 November hardening record's two HIGH and two other findings on 2.9.0;
+returning to that inherited package would regress security.
+An independent scan of the exact inherited base with the current 25 November
+database reports all four of those libexpat advisories as HIGH, each fixed in
+2.10.0-r0. This is severity drift from the historical two-HIGH/two-other record,
+not a rewrite of that earlier result. None appears on the rebuilt frontend.
+
+The old official APK URL still returned HTTP 200 during this investigation.
+The confirmed defect is index unavailability for the exact pin, not permanent
+deletion of the old APK. Index replacement is strongly supported by the upstream
+record, current signed index, last observed successful build at 12:10 UTC and
+first observed APK failure at 13:11 UTC. Historical index bytes and each runner's
+CDN edge are unavailable, so exact propagation timing is not asserted.
+
+Raise only the release libexpat pin to 2.11.0-r0 and assert that installed
+revision in the existing ingress build regression. Keep both base digests,
+all other reviewed packages, Nginx 1.30.7/module pins, signing-key hash,
+signature/TLS verification, UID 101, immutable configuration and CA policy.
+Both frontend targets resolve their other exact pins. No unbounded upgrade,
+repository switch, retry-based APK workaround or security suppression is used.
+Re-pinning a whole base or adding snapshot infrastructure would expand the
+change without addressing an additional verified defect. Explicitly downloading
+the old APK would retain 2.10.0's now-fixed security issues and is rejected.
+
+**Maven, initial disposition: CONFIRMED_TRANSIENT_EXTERNAL_FAILURE_NO_CODE_CHANGE.**
+The [continuation below](#maven-bootstrap-reliability--25-november-2026) supersedes
+that decision after PR #293 exposed another recurrence. The main VM
+runtime job and E2E job, and PR #290's first ingress attempt, each record four
+HTTP 429 responses from Maven Central for the 3.9.16 tarball, with existing
+5/15/30-second pauses. The pinned JDK image has no curl/wget/unzip; the wrapper
+therefore selects tar.gz and its Java downloader. Host setup-java Maven caches
+are not mounted into these Docker stages; separate fresh runners repeat the
+bootstrap. No shared Docker cache is configured for these jobs. A bounded HEAD
+probe returned 200 and a clean amd64 backend build bootstrapped successfully;
+PR #290's unchanged backend also passed its runtime job at 14:00:33 UTC.
+These are recurring external rate-limit episodes, not evidence that the URL or
+application code is invalid. Existing bounded retries cannot guarantee recovery.
+No rate-limit stress test was performed. More retries, an unqualified mirror or
+shared cache would introduce additional policy/integrity concerns without a
+demonstrated need after recovery; no immediate Maven change is justified.
+At this observation cutoff, the host Wrapper properties had no
+`distributionSha256Sum`. The 26 November follow-up records the later policy.
+
+### Incident evidence (UTC, 25 November)
+
+| Run / attempt | Job | Execution / result |
+| --- | --- | --- |
+| [45586646767 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45586646767) | 139109839768 ingress | Main d8c6588, 09:34–09:36, success |
+| [45598582352 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45598582352) | 139151114692 ingress | PR #290 dc834fe, 10:49–10:51, success |
+| [45599953034 / 1, 2](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45599953034) | 139155927742, 139157037899 runtime | Main c5b9ac0, 10:58–10:59 and 11:00–11:01, Maven 429; ingress attempt 1 cancelled, not a failed/passed execution |
+| [45609807176 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45609807176/attempts/1) | 139190071527 ingress | 12:01–12:02, Maven 429 |
+| [45610936317 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45610936317/attempts/1) | 139193941685 ingress (carried as 139230203152 in attempt 2) | Other feature, execution 12:08–12:10, success |
+| [45609807176 / 2–7](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45609807176) | 139229013535, 139229776237, 139230332607, 139231927814, 139241870992, 139253549420 | Each full job log inspected; 13:11, 13:12, 13:13, 13:16, 13:33, 13:52 starts, same APK failure |
+| [45628708222 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45628708222) | 139255765615 ingress | Main 1e4c54b, 13:56, same APK failure |
+| [45628708308 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45628708308) | 139255769488 E2E | Main 1e4c54b, Maven 429 in backend build; browser tests not reached |
+| [45628968044 / 1–3](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45628968044) | 139256697100, 139269183011, 139269461087 ingress | PR #290 a5d2506; APK failure persists at 13:58, 14:17, 14:18 |
+| [45632313771 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45632313771) | 139268485681 ingress | PR #291 b2b1d1f, 14:16–14:17, same APK failure |
+
+All seven attempts of 45609807176 checked out synthetic merge
+`95fe14ec0a994c36db5b1ea1b1481562e53fea42`, merging 353a394 into c5b9ac0.
+Latest PR #290 ingress checked out `df44d3a7c6826673ac83b0697ae136fae7e23da9`,
+merging a5d2506 into 1e4c54b; main checked out 1e4c54b itself. Logs identify
+Ubuntu 24.04.5, runner image 20261116.133.1, runner 2.338.2. Rerun job lists
+can carry forward successful jobs: copied successes are not new executions.
+
+The six supplied revisions d8c6588, dc834fe, c5b9ac0, 353a394, 1e4c54b and
+a5d2506 all have frontend Dockerfile blob eb02aac9854d68303676577ae86b2ed34c870868.
+The complete PR #290 diff changes three Course Java production files, three
+test files and testing documentation only. The recent main feature commits
+change neither Dockerfile nor workflow. APK resolution runs independently of
+Course code; Maven fails before source COPY/compilation. CO12 and those recent
+features do not cause either observed failure. This does not qualify their
+application behavior or independent acceptance.
+
+### Security qualification and remaining gates
+
+See [the executed test record](testing.md#ci-package-index-remediation-qualification--25-november-2026).
+Clean builds use linux/amd64 emulation on an arm64 Docker Desktop host, no cached
+RUN steps; later regression builds may reuse layers. The final exported artifacts
+were scanned again after the regression rebuilds using ADR015's digest-pinned
+Trivy 0.76.2, database updated 2026-11-25T13:07:24.554567818Z, downloaded
+14:33:43 UTC, default and comprehensive modes, all severities, no ignore rules.
+
+| Artifact | Configuration SHA-256 in scanned archive | Findings in each mode |
+| --- | --- | --- |
+| Release frontend | 059814518ee7684b8038eed5794f4731671cdb24f081320ae5150a3f9981586a | 0 |
+| Local frontend | b2a330ede3449334fc0502a63accad88b9f717f65b70dc158cc7cc621a402ba0 | 0 |
+| Unchanged backend | 0830a9c8320e324509337cc5e8a6041431b8f3f544b6449a34e3f7dcfefe9f78 | 0 CRITICAL/HIGH; 29 MEDIUM, 5 LOW, each without a scanner-listed fix |
+
+The backend residuals include Ubuntu libexpat1, dash, tar, GnuTLS, util-linux,
+systemd, login/passwd and gpgv; no Java dependency finding. Zero frontend results
+do not qualify the backend or accept residual risks. Scans cover the merged
+filesystem, not an assertion that inherited layers contain no old package bytes.
+No feature branch, shared environment, deployment, release or merge was modified.
+Independent review, protected CI and any later release admission remain required.
+After protected integration, affected PRs should update from main and rerun CI;
+this investigation performs none of those integration actions.
+
+## Maven bootstrap reliability — 25 November 2026
+
+**CONFIRMED_RECURRING_EXTERNAL_FAILURE_RELIABILITY_HARDENING_REQUIRED.**
+[PR #293's first ingress run](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45638610536/job/139290718324)
+built both frontend targets and then failed on `codemastery-ci/backend:ingress-test`.
+Maven Central returned HTTP 429 at 0.777, 6.511, 22.25 and 52.96 seconds. The
+ingress checks after the image builds were skipped. Independent E2E and runtime
+jobs also exhausted the same bootstrap retries on 24 and 25 November, as did
+[one release rehearsal](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45302491334/job/138140130489).
+The rerun of main E2E succeeded. That measured recovery did not stop the next
+fresh runner from repeating the separate distribution request. GitHub logs do
+not identify the service's throttling key or runner egress policy.
+
+| Consumer | Distribution and cache behavior |
+| --- | --- |
+| Host development and `CI Backend` | Unix or Windows Wrapper 3.3.4; Apache Maven 3.9.16 ZIP, with Unix TAR.GZ fallback when unzip is absent. The wrapper can reuse an extracted installation. `setup-java` restores a host Maven cache scoped to the workflow's branch and dependency key. |
+| VM runtime privileges and HTTPS ingress | Separate runners and local Docker builders. Each image build uses the same offline Maven bootstrap stage. The ingress job builds the frontend targets first. |
+| Java trust-store verification | Targets the pinned JDK stage directly. It compiles the verifier with networking disabled and consumes no Maven files. |
+| Playwright E2E | Browser job uses the backend Dockerfile unless an existing backend image is supplied. Its checkout-local Docker cache and npm cache are separate from host Maven and release. |
+| Release candidate and rehearsal | Use the same Dockerfile via `release.sh` with `--platform linux/amd64`. Source checks, image export/reload, scanning, manifest and attestation gates still apply. |
+| Local Compose or standalone Docker build | Uses the same offline bootstrap, with content-addressed OCI layers and ordinary local BuildKit reuse. Deployment consumes its previously qualified release archive. |
+
+The Maven source is the [Docker Official Image](https://hub.docker.com/_/maven)
+`docker.io/library/maven:3.9.16-eclipse-temurin-25@sha256:93b8a14ea2f412782e4e842651273b4d903e35cc496284f178fbbe2d67d00976`.
+The amd64 and arm64 Maven distribution trees matched. The Dockerfile copies the
+Maven directory into the existing pinned JDK and removes the image's `ref`
+directory. It checks the URL, checks the full remaining tree against an independently
+derived SHA-512 with `RUN --network=none`, then prints the verified Maven version.
+Compilation runs once. The JRE stage receives the application JAR and the existing
+trust-store verification bind. Maven and the donor image's entrypoint, JDK, packages
+and configuration outside the verified tree do not enter the runtime image.
+
+The tree checksum is derived by downloading the TAR.GZ and separately checking
+SHA-512 against the [Apache release catalog](https://releases.apache.org/catalog/maven)
+and [Apache archive](https://archive.apache.org/dist/maven/maven-3/3.9.16/binaries/).
+Extract the verified archive into a clean directory with `tar -xzf ARCHIVE
+--strip-components=1 -C DIRECTORY`. Use GNU tar in the pinned JDK image and run
+`tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner --format=gnu
+-C DIRECTORY -cf /tmp/maven-tree.tar .`, then `sha512sum /tmp/maven-tree.tar`.
+The digest covers names, bytes, types and modes, with normalized ownership and
+timestamps. When updating Maven, verify both platform images against the new
+Apache tree, then update the Wrapper URL, OCI index, expected tree digest and
+regression expectations together. The ZIP archive has a different published checksum. Host wrapper
+checksums and extracted host cache verification require separate cross-platform
+work. Neither release nor Docker builds use that cache.
+
+Cold builders pull the pinned registry layers. A warm local builder can reuse the
+verified stage across application-source changes. A missing registry layer fails
+the build if it cannot be fetched. A changed Maven URL invalidates the verification
+step and a stale or mismatched pin fails before execution. A corrupt distribution
+fails its digest check. CI does not share exported cache entries or executable
+artifacts across pull requests and release. An untrusted pull request can change its
+own Dockerfile and checksums, so protected source review and release provenance
+remain the controls for trusted builds. No new workflow credentials are needed.
+
+Keeping or increasing bootstrap retries would leave fresh runners requesting the
+same Maven Central tarball. A checksum-verified CDN fallback reduces dependence
+on one endpoint but still transfers the archive and introduces retry and source
+selection code. Host or BuildKit cache export requires additional consumer wiring,
+cache scope and cold-start handling. The pinned distribution removes this download
+from every Docker consumer with zero direct distribution requests, including cold
+builds, at the cost of Docker Hub layer pulls and reviewing the pinned OCI image on
+Maven upgrades. Maven project dependencies, registry pulls, npm and package
+repositories remain external dependencies.
+
+The hosted [cache scope rules](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache)
+permit a pull request to restore eligible base-branch caches and scope its new
+entries to its merge ref. Restore prefixes can select older entries. A key match
+does not verify the bytes. These rules are not used as artifact trust guarantees.
+The pinned amd64 donor manifest describes nine compressed layers totaling about
+168 MiB, compared with an 8.8 MiB Maven TAR.GZ. Actual registry transfer depends
+on the builder's existing blobs. The reliability gain is zero Maven Central
+distribution calls and fewer independent Maven bootstrap outcomes, with cold
+transfer cost moved to the registry.
+
+The bounded CI review also found a separate registry HTTP 500 on a Chainguard
+manifest lookup and deterministic Java compilation errors after successful
+bootstrap. PR #291's release rehearsal stopped on the old libexpat pin. The
+sample did not establish recurring 503, unexpected 404, connection timeout,
+reset, npm, Nginx or other APK retrieval failures that justify additional
+repository changes. Future exact-pin retirement still requires a reviewed pin
+change. An immutable Alpine snapshot is outside this remediation.
+
+The Maven change is a separate commit in PR #293. At the decision point, its
+required ingress job was failing on Maven and main still had the retired
+libexpat pin. A separate main-based PR would fail on that pin. The combined PR
+lets reviewers assess both changes on the same CI merge checkout. After protected
+integration, PRs #290 and #291 can update from main and run their own checks.
+
+### Maven bootstrap self-review follow-up
+
+The required `VM HTTPS ingress` job now runs the offline integrity fixtures
+after its image builds. The fixtures reuse the builder and may reuse its
+already fetched OCI blobs. Every fixture reruns the verifier and checks the
+output of that verifier step, including the digest result and Maven version on
+success. The suite also requires failures to come from the verifier itself.
+
+The Docker URL check accepts the supported portable configuration of the
+checked-in Unix and Windows wrappers: one exact `distributionUrl=` key,
+the reviewed Apache ZIP URL, and a final LF or CRLF. Surrounding value
+whitespace is permitted. Ambiguous keys and malformed declarations are
+rejected. Wrapper repository overrides and its extracted host installations
+remain host behavior. They do not choose the Docker build distribution.
+
+Alpine v3.24 still indexes `libexpat=2.11.0-r0` at this review and its security
+database records the fixes for the two successive revisions. The release image
+uses its `libexpat.so.1` through fontconfig. The libexpat project tracks
+[unfixed issues](https://github.com/libexpat/libexpat/issues/1160), including
+[CVE-2025-66382](https://github.com/libexpat/libexpat/issues/1076). The scan is
+limited to its advisory data. Application reachability for that upstream issue
+was not established and remains part of release risk assessment.
+
+## PR #293 CI reliability follow-up — 26 November 2026
+
+The [initial inspection of CI VM run 45663373135](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45663373135)
+found six successful jobs and one failed ingress job in each of attempts 1
+and 2. Their checkout was the PR merge commit
+ff0c388707848e73b53860b133615e5c6d4057d4, with PR head 4c9fd4a and main
+1e4c54be. Both failures followed successful distribution verification and
+occurred while resolving the Spring Boot 4.1.1 parent POM from Maven Central.
+[Attempt 3](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45663373135/job/139636899469)
+passed all seven jobs, and the ingress job ran the 18 substantive tests and
+11 harness controls. The earlier [94118b6 failure](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45653036519/job/139342280667)
+hit the same dependency. These outcomes bound the observation to those jobs.
+
+Docker packaging uses the native Maven 3.9.16 / Resolver 1.9.27 HTTP
+transport. Its existing 429/503 retry count is three. Docker now sets the
+Resolver 1.x connector properties for a 15-second initial wait and a
+60-second per-response retry limit. A numeric or HTTP-date Retry-After of 60
+seconds or less sets the wait, and a past date or negative number retries
+immediately. A missing or unparseable value gives delays of 15, 30 and 45
+seconds. The package lifecycle is invoked once. The change applies to Docker, Compose,
+E2E, both VM backend-image consumers and off-host release construction. The
+Java trust-store verifier uses the pinned JDK directly.
+
+The Docker build uses ordinary builder layer reuse. Source changes rebuild
+the package layer and a fresh runner must still resolve project dependencies
+and plugins. Separating a go-offline prefetch would introduce a second
+resolution path and require proving complete plugin/profile coverage. A
+builder-local Maven mount would help reused builders with source changes but
+would start empty in the affected hosted jobs. No cross-job or cross-run
+Docker dependency cache, mirror or new registry was introduced. Host
+setup-java restores a project repository cache and a separate Wrapper
+distribution cache. The host verification cache is outside the release
+candidate build path.
+
+Apache Maven's separate ZIP and TAR.GZ have verified Apache SHA-512 checksums
+and detached signatures from key 84789D24DF77A32433CE1F079EB80E92EB2135B1.
+The host Wrapper checks the corresponding SHA-256 before extraction and
+publishes the installation in a cache namespace bound to its archive pin.
+The extracted cache retains the same local trust boundary on warm runs.
+See [the archive and signatures](https://archive.apache.org/dist/maven/maven-3/3.9.16/binaries/).
+
+The explicit MinIO test-image pull can retry the Docker daemon's HTTP
+500/502/503/504 report twice, after 5 and 10 seconds, using the original
+digest and platform on every attempt. The recovery and release builds can
+still fail while resolving a registry manifest or fetching content. These
+builds and their test suites retain their existing failure propagation.
+Alpine package availability still depends on the live signed index carrying
+the reviewed revisions.
+
+These changes concern CI and off-host build behavior. The runtime targets,
+artifact admission procedure and protected release and deployment controls
+continue to use ADR009, ADR015 and ADR017.
+
+### Host Wrapper pin enforcement — 26 November 2026
+
+The independent review of `5bf8a62` found that the host Wrapper archive pins
+could disappear without a failure (IR293-SEC-01). Both scripts checked a pin
+only when one was present. With both values blank or absent they took
+upstream's unpinned path, and both reused an installation already present in
+their unpinned cache namespace. The Unix script also let a later duplicate override
+an earlier pin, ignored a malformed TAR.GZ pin while installing the ZIP, and
+read a missing pin from an inherited shell variable. The positive Backend run
+and the Docker verifier could not detect this. The committed pins match
+Apache's archives, and no unverified Maven was observed in CI.
+
+Both scripts now read both pins from the properties file before they choose an
+installation. They require one exact declaration of each, with 64 lowercase
+hexadecimal characters, and treat case, spacing and separator variants of a
+name as further declarations. Archive verification always runs before
+extraction. Upstream's unpinned mode and mvnd distributions are therefore
+unsupported. The cache identity, staging, publication and warm-reuse trust model
+are unchanged. The Backend job runs
+`infrastructure/vm/tests/test-maven-wrapper-pins.sh` before Java setup. It
+exercises the committed scripts against a synthetic distribution from a local
+file mirror, with no shared Maven cache. The Backend step does not enforce OS
+network isolation. Its PowerShell extraction-order observation and durable
+sensitivity controls are recorded in the
+[targeted follow-up](testing.md#pr-293-powershell-extraction-order-regression-remediation--26-november-2026). Native Windows PowerShell 5.1 and
+`cmd.exe` execution has not been qualified. Evidence is in
+[testing.md](testing.md#pr-293-host-wrapper-pin-remediation-ir293-sec-01--26-november-2026).
+
+The Retry-After description above was corrected in the same follow-up
+(IR293-R2-01). The earlier text described every valid header as governing the
+wait; Resolver 1.9.27 retries immediately for a negative number or past date.
+The Docker retry properties are unchanged.

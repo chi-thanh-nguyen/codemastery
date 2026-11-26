@@ -249,6 +249,8 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
     const theme = useTheme();
     const wide = useMediaQuery(theme.breakpoints.up('lg'));
     const desktop = useMediaQuery(theme.breakpoints.up('md'));
+    // Full role sets use the existing compact spacing; brand, labels and utilities retain their sizes.
+    const denseNavigation = navItems.length >= 4;
     const bar = useRef<HTMLDivElement>(null), header = useRef<HTMLElement>(null);
     const [reach, setReach] = useState<number | null>(null);
     const measure = useCallback(() => {
@@ -290,8 +292,8 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
     return <Box component="header" ref={header} data-canvas-reach={reach !== null ? '' : undefined} data-reach-for={reach !== null ? selectedNavId : undefined}
         data-reach-x={reach ?? undefined}
         sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: roles.bg.frame, color: 'common.white', [theme.breakpoints.up('md')]: cut }}>
-        <Box ref={bar} sx={{ position: 'relative', display: 'flex', alignItems: 'center', gap: { xs: 1, md: 2 },
-            height: { xs: presentationTokens.topBarHeightCompact, sm: presentationTokens.topBarHeight }, px: { xs: 1.5, sm: 2.5, md: 3 },
+        <Box ref={bar} sx={{ position: 'relative', display: 'flex', alignItems: 'center', gap: { xs: 1, md: denseNavigation ? 1 : 2 },
+            height: { xs: presentationTokens.topBarHeightCompact, sm: presentationTokens.topBarHeight }, px: { xs: 1.5, sm: 2.5, md: denseNavigation ? 1.5 : 3 },
             maxWidth: 1600, mx: 'auto', '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': focusRingOnChrome }}>
             {onMenuToggle && <IconButton aria-label="Toggle navigation" aria-expanded={!!menuOpen} onClick={onMenuToggle}
                 sx={{ display: { md: 'none' }, color: 'common.white', '&:hover': { bgcolor: roles.chrome.raised } }}><PresentationIcon name="menu" /></IconButton>}
@@ -300,8 +302,8 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
                     onClick={(event: MouseEvent) => { if (!onBrandSelect || !isPlainClick(event)) return; event.preventDefault(); onBrandSelect(); }}
                     sx={{ borderRadius: `${radius.sm}px`, p: .5 }}>{brand}</ButtonBase> : brand}
             </Box>
-            {navItems.length > 0 && <Box component="nav" aria-label="Main navigation" sx={{ display: { xs: 'none', md: 'flex' }, flex: 1, justifyContent: 'center', minWidth: 0 }}>
-                <Box component="ul" sx={{ display: 'flex', gap: .5, m: 0, p: 0, listStyle: 'none' }}>
+            {navItems.length > 0 && <Box component="nav" aria-label="Main navigation" sx={{ display: { xs: 'none', md: 'flex' }, flex: '1 0 auto', justifyContent: 'center', minWidth: 'max-content' }}>
+                <Box component="ul" sx={{ display: 'flex', gap: denseNavigation ? 0 : .5, m: 0, p: 0, listStyle: 'none' }}>
                     {navItems.map((item) => <Box component="li" key={item.id}>
                         <TopNavItem item={item} current={item.id === selectedNavId} iconOnly={!wide && item.id !== selectedNavId && !!item.icon} onSelect={onNavSelect} />
                     </Box>)}
@@ -309,7 +311,8 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
             </Box>}
             {navItems.length === 0 && <Box sx={{ flex: 1 }} />}
             {search && <Box sx={{ flex: '0 1 320px', minWidth: 0, display: { xs: 'none', md: 'block' } }}>{search}</Box>}
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: .5, sm: 1 }, flexShrink: 0, ml: { xs: 'auto', md: 0 } }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: .5, sm: denseNavigation ? .5 : 1 }, flex: '0 1 auto', minWidth: 0, ml: { xs: 'auto', md: 0 },
+                ...(denseNavigation ? { '& [data-account-menu]': { gap: .5, pr: 1 } } : {}) }}>
                 {/* Brand → navigation → [utilities] → Theme → session actions (DESIGN.md › Top bar, D13-3): the Theme
                     button sits right before the account menu, or before Sign in and Create account for visitors. */}
                 {utilities}{desktop && <ThemeControl />}{actions}
@@ -327,7 +330,7 @@ function TopNavItem({ item, current, iconOnly, onSelect }: { item: NavItem; curr
             if (item.href) event.preventDefault();
             onSelect(item.id);
         }}
-        sx={{ position: 'relative', height: 44, px: iconOnly ? 1.25 : 2, gap: 1, borderRadius: `${radius.pill}px`, fontSize: '0.9375rem', fontWeight: current ? 600 : 500,
+        sx={{ position: 'relative', height: 44, minWidth: 44, px: iconOnly ? 1.5 : 2, gap: 1, borderRadius: `${radius.pill}px`, fontSize: '0.9375rem', fontWeight: current ? 600 : 500,
             color: current ? 'common.white' : roles.chrome.muted, whiteSpace: 'nowrap', transition: `background-color ${motion.fast}ms, color ${motion.fast}ms`,
             '&:hover': { bgcolor: roles.chrome.raised, color: 'common.white' }, '& svg': { fontSize: 20 } }}>
         {item.icon}
@@ -349,14 +352,15 @@ export function AccountMenu({ displayName, role, renderItems }: AccountMenuProps
     const [anchor, setAnchor] = useState<HTMLElement | null>(null);
     const initial = Array.from(displayName.trim())[0]?.toUpperCase() ?? '?';
     return <>
-        <ButtonBase aria-haspopup="menu" aria-expanded={!!anchor} aria-label={`Account menu, ${displayName}, ${role}`}
+        <ButtonBase data-account-menu aria-haspopup="menu" aria-expanded={!!anchor} aria-label={`Account menu, ${displayName}, ${role}`}
             onClick={(event) => setAnchor(event.currentTarget)}
-            sx={{ display: 'flex', alignItems: 'center', gap: 1.25, height: 52, pl: .75, pr: { xs: .75, md: 1.5 }, borderRadius: `${radius.pill}px`, color: 'common.white',
+            sx={{ display: 'flex', alignItems: 'center', gap: 1.25, minWidth: 0, maxWidth: '100%', height: 52, pl: .75, pr: { xs: .75, md: 1.5 }, borderRadius: `${radius.pill}px`, color: 'common.white',
                 '&:hover': { bgcolor: roles.chrome.raised } }}>
             <Monogram name={displayName} initial={initial} tone="brand" />
-            <Box sx={{ display: { xs: 'none', md: 'block' }, textAlign: 'left', minWidth: 0, maxWidth: 180 }}>
-                <Typography component="span" sx={{ display: 'block', fontSize: '0.9375rem', fontWeight: 600, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</Typography>
-                <Typography component="span" sx={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: roles.chrome.muted, lineHeight: 1.3 }}>{role}</Typography>
+            <Box sx={{ display: { xs: 'none', md: 'block' }, textAlign: 'left', width: 180, minWidth: 'min-content', maxWidth: 180, flex: '1 1 auto' }}>
+                {/* The role supplies the minimum width; a long name may use the existing ellipsis. */}
+                <Typography component="span" sx={{ display: 'block', width: 0, minWidth: '100%', fontSize: '0.9375rem', fontWeight: 600, lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{displayName}</Typography>
+                <Typography component="span" sx={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, color: roles.chrome.muted, lineHeight: 1.3, whiteSpace: 'nowrap' }}>{role}</Typography>
             </Box>
             <PresentationIcon name="chevron-down" sx={{ fontSize: 18, display: { xs: 'none', md: 'block' } }} />
         </ButtonBase>

@@ -71,4 +71,24 @@ public interface QuizJpaRepository extends JpaRepository<QuizEntity, UUID> {
     @Modifying(flushAutomatically = true)
     @Query("DELETE FROM QuizQuestionEntity qq WHERE qq.quiz_id = :quizId")
     void deleteMembership(@Param("quizId") UUID quizId);
+
+    @Query("""
+            SELECT DISTINCT q.id, q.title, quest.difficulty
+            FROM QuizEntity q, QuizQuestionEntity qq, QuestionEntity quest
+            WHERE q.course_id = :courseId
+              AND q.publication_status = 'published'
+              AND q.kind = 'practice'
+              AND qq.quiz_id = q.id
+              AND quest.id = qq.question_id
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM QuizQuestionEntity qq2, QuestionEntity quest2
+                  WHERE qq2.quiz_id = q.id
+                    AND quest2.id = qq2.question_id
+                    AND quest2.skill_id NOT IN :skillIds
+              )
+            ORDER BY q.id, quest.difficulty
+            """)
+    List<Object[]> findPublishedPracticeQuizDifficultyRows(@Param("courseId") UUID courseId,
+                                                           @Param("skillIds") Collection<UUID> skillIds);
 }

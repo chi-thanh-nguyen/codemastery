@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
-import { BrowserRouter, useNavigate } from 'react-router';
+import { BrowserRouter, matchRoutes, Route, Routes, useNavigate } from 'react-router';
+import { currentSection, isDestinationLive, notificationsAvailable, roleNavigation, roleStartPath, ROUTE_PATHS, WORKSPACE_ROUTES } from './routePaths';
+import type { UserRole } from '../features/auth/types/authTypes';
+import { ProtectedRoute } from './guards/ProtectedRoute';
+import type { RouteObject } from 'react-router';
 import type { NavigateFunction } from 'react-router';
 import { ThemeProvider } from '@mui/material';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppRouter } from './index';
+import { useNavigationGuard } from '../layouts/DashboardLayout';
 import { AuthProvider } from '../app/providers/AuthProvider';
 import type { AuthContextValue } from '../app/providers/AuthProvider';
 import { useAuth } from '../features/auth/hooks/useAuth';
@@ -27,7 +32,13 @@ const detail = { ...course, prerequisiteDescription: null, syllabus: [] };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 function Probe() { auth = useAuth(); navigate = useNavigate(); return null; }
 beforeEach(() => {
-    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T10:00:00Z')); vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080'); fetcher = vi.fn((url: string, _init?: RequestInit) => Promise.resolve(json(new URL(url).pathname.startsWith('/api/courses/') ? detail : page))); vi.stubGlobal('fetch', fetcher);
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T10:00:00Z')); vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080');
+    fetcher = vi.fn((url: string, _init?: RequestInit) => {
+        const pathname = new URL(url).pathname;
+        if (pathname === '/api/instructor/courses') return Promise.resolve(json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }));
+        return Promise.resolve(json(pathname.startsWith('/api/courses/') ? detail : page));
+    });
+    vi.stubGlobal('fetch', fetcher);
     window.history.replaceState(null, '', '/'); localStorage.clear(); sessionStorage.clear(); host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); window.history.replaceState(null, '', '/'); vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); localStorage.clear(); sessionStorage.clear(); });
@@ -96,9 +107,8 @@ describe('real declarative routing and Profile', () => {
         await formLogin(); expect(location.pathname).toBe('/profile'); expect(location.search + location.hash).toBe(''); // Consumed once: a second read falls back to the Learner's start page, never /profile again.
         expect(auth.consumeReturn()).toBe('/home'); expect(host.querySelector('dl')?.textContent).toContain('Person A');
     });
-    // Leader instruction, 7 November 2026: a Learner's default destination is Learner home; other roles keep the
-    // CT16 /courses fallback. A caller-supplied return target is still never authority.
-    it.each([['Learner', '/home'], ['Instructor', '/courses'], ['Administrator', '/courses']])('login sends a %s to %s for arbitrary supplied return targets', async (role, start) => {
+    // CT16.routes: Learner starts at /home, Instructor at /teach once Teaching home is routed, Administrator at /courses.
+    it.each([['Learner', '/home'], ['Instructor', '/teach'], ['Administrator', '/courses']])('login sends a %s to %s for arbitrary supplied return targets', async (role, start) => {
         await mount('/login?returnTo=/api/secrets'); await formLogin('Person A', role); expect(location.pathname).toBe(start); expect(location.search + location.hash).toBe('');
     });
     it.each(['Learner', 'Instructor', 'Administrator'])('shows exactly the validated three fields for %s without any Profile request', async (role) => {
@@ -207,8 +217,13 @@ it('serves the public landing page at / with public navigation and no request', 
     await click('Catalogue'); expect(location.pathname).toBe('/courses');
     expect(host.querySelector('header a[aria-label="CodeMastery home"]')?.getAttribute('href')).toBe('/');
 });
-it.each([['Learner', '/home'], ['Instructor', '/courses'], ['Administrator', '/courses']])('sends a signed-in %s from / to %s and points the logo there', async (role, start) => {
-    fetcher.mockImplementation((url: string) => Promise.resolve(json(new URL(url).pathname === '/api/me/courses' ? membershipPage() : page)));
+it.each([['Learner', '/home'], ['Instructor', '/teach'], ['Administrator', '/courses']])('sends a signed-in %s from / to %s and points the logo there', async (role, start) => {
+    fetcher.mockImplementation((url: string) => {
+        const pathname = new URL(url).pathname;
+        if (pathname === '/api/me/courses') return Promise.resolve(json(membershipPage()));
+        if (pathname === '/api/instructor/courses') return Promise.resolve(json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }));
+        return Promise.resolve(json(page));
+    });
     await mount('/courses'); await login('Role test', role); await go('/');
     expect(location.pathname).toBe(start);
     expect(host.querySelector('header a[aria-label="CodeMastery home"]')?.getAttribute('href')).toBe(start);
@@ -364,7 +379,7 @@ describe('FE34 theme preference across routes and the session', () => {
         expect(createAccount(after)).toHaveLength(1);
         expect(after.querySelector('[role="radiogroup"]')).not.toBeNull();
     });
-    it('sends a restored session from the landing restore view to its start page with the theme unchanged', async () => {
+    it.each([['Learner', '/home'], ['Instructor', '/teach'], ['Administrator', '/courses']])('sends a restored %s from the landing restore view to %s with the theme unchanged', async (role, start) => {
         vi.stubGlobal('matchMedia', desktopMedia);
         localStorage.setItem('codemastery.theme', 'dark');
         let resolve!: (response: Response) => void;
@@ -372,8 +387,8 @@ describe('FE34 theme preference across routes and the session', () => {
         window.history.replaceState(null, '', '/');
         await act(async () => root.render(<App />));
         expect(host.textContent).toContain('Restoring your session…');
-        await act(async () => resolve(json(loginResponse('Person A', 'Instructor'))));
-        expect(location.pathname).toBe('/courses');
+        await act(async () => resolve(json(loginResponse('Person A', role))));
+        expect(location.pathname).toBe(start);
         expect(host.querySelectorAll('button[aria-label^="Theme:"]')).toHaveLength(1);
         expect(document.documentElement.dataset.colorScheme).toBe('dark');
     });
@@ -394,7 +409,7 @@ describe('FE34 theme preference across routes and the session', () => {
         expect(location.pathname).toBe('/login');
         expect(document.documentElement.dataset.colorScheme).toBe('dark');
         await formLogin('Person B', 'Instructor');
-        expect(location.pathname).toBe('/courses');
+        expect(location.pathname).toBe('/teach');
         expect(themeButton()?.getAttribute('aria-label')).toBe('Theme: Dark');
         await chooseTheme('Light');
         await signOutFromMenu();
@@ -802,5 +817,293 @@ describe('FE06 password recovery routes (CT02, CT16.routes)', () => {
         expect(host.querySelector('form [role="status"]')).toBeNull();
         expect(host.querySelector('[aria-busy="true"] [role="status"]')).toBeNull();
         expect(host.querySelector('main span[role="status"]')?.textContent).toBe('Sending the reset link…');
+    });
+});
+
+describe('FE32 Instructor navigation and parent-aware active section (CT16.routes)', () => {
+    it('shows Teaching and Catalogue for Instructors and keeps Teaching active across /teach subroutes', async () => {
+        await mount('/courses');
+        await login('Teacher', 'Instructor');
+        expect([...host.querySelectorAll('header nav a')].map((link) => link.textContent)).toEqual(['Teaching', 'Catalogue']);
+        await go('/teach');
+        expect(host.querySelector('main h1')?.textContent).toBe('Teaching');
+        expect(host.querySelector('header nav [aria-current="page"]')?.textContent).toBe('Teaching');
+        await go('/teach/courses/new');
+        expect(host.querySelector('main h1')?.textContent).toBe('Create course');
+        expect(host.querySelector('header nav [aria-current="page"]')?.textContent).toBe('Teaching');
+    });
+
+    it.each(['Learner', 'Administrator'] as const)('denies %s on /teach and /teach/courses/new without issuing Instructor API calls', async (role) => {
+        await mount('/courses');
+        await login('Other', role);
+        expect(host.querySelector('header a[href="/teach"]')).toBeNull();
+        fetcher.mockClear();
+        await go('/teach');
+        expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
+        await go('/teach/courses/new');
+        expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
+        expect(fetcher).not.toHaveBeenCalled();
+    });
+});
+
+
+// Full future activation is a test fixture only. These routes are never passed to AppRouter.
+const learnerPaths = ['/home', '/my-courses', '/courses/:courseId/learn', '/courses/:courseId/lessons/:lessonId',
+    '/courses/:courseId/diagnostic', '/courses/:courseId/mastery', '/courses/:courseId/assessments',
+    '/courses/:courseId/quizzes/:quizId', '/courses/:courseId/quizzes/:quizId/attempt', '/courses/:courseId/quizzes/:quizId/history',
+    '/courses/:courseId/attempts/:attemptId', '/courses/:courseId/assignments/:assignmentId'];
+const instructorPaths = ['/teach', '/teach/courses/new', '/teach/courses/:courseId', '/teach/courses/:courseId/content',
+    '/teach/courses/:courseId/settings', '/teach/courses/:courseId/lessons/:lessonId', '/teach/courses/:courseId/skills',
+    '/teach/courses/:courseId/assessments', '/teach/courses/:courseId/quizzes/:quizId', '/teach/courses/:courseId/assignments/:assignmentId',
+    '/teach/courses/:courseId/qa', '/teach/courses/:courseId/learners', '/teach/courses/:courseId/learners/:learnerId',
+    '/teach/grading', '/teach/grading/:submissionId', '/teach/learners'];
+const adminPaths = ['/admin', '/admin/users', '/admin/courses', '/admin/reports', '/admin/audit'];
+const activatedRoutes: RouteObject[] = [
+    { path: '/courses' }, { path: '/courses/:courseId' },
+    ...([['Learner', learnerPaths], ['Instructor', instructorPaths], ['Administrator', adminPaths]] as const)
+        .map(([role, paths]) => ({ handle: { roles: [role] }, children: paths.map((path) => ({ path })) })),
+    { path: '/notifications', handle: { roles: ['Learner', 'Instructor'] } },
+];
+const concrete = (path: string) => path.replace(/:[A-Za-z]+/g, '00000000-0000-4000-8000-000000000001');
+describe('FE32 complete model and actual route activation', () => {
+    it.each([
+        ['Learner', ['Home', 'Catalogue', 'My courses']],
+        ['Instructor', ['Teaching', 'Grading', 'Learners', 'Catalogue']],
+        ['Administrator', ['Overview', 'Users', 'Courses', 'Reports', 'Audit log', 'Catalogue']],
+    ] as const)('keeps the approved %s order, icons and isolation when all destinations are delivered', (role, labels) => {
+        const items = roleNavigation(role, activatedRoutes);
+        expect(items.map(({ label }) => label)).toEqual(labels);
+        expect(items.every(({ icon, id, href }) => !!icon && id === href)).toBe(true);
+        expect(items.some(({ href }) => href === '/notifications')).toBe(false);
+    });
+    it.each([
+        ['Learner', ['Home', 'Catalogue', 'My courses']], ['Instructor', ['Teaching', 'Catalogue']], ['Administrator', ['Catalogue']],
+    ] as const)('filters %s against the actual delivered route tree', (role, labels) => {
+        expect(roleNavigation(role).map(({ label }) => label)).toEqual(labels);
+        expect(notificationsAvailable(role)).toBe(false);
+        expect(roleNavigation(undefined).map(({ label }) => label)).toEqual(['Catalogue']);
+    });
+    it('activates future start pages by registration alone, while constants and preview do not activate them', () => {
+        expect(roleStartPath('Instructor', [])).toBe('/courses');
+        expect(roleStartPath('Administrator')).toBe('/courses');
+        expect(roleStartPath('Instructor', activatedRoutes)).toBe('/teach');
+        expect(roleStartPath('Administrator', activatedRoutes)).toBe('/admin');
+        expect(roleStartPath('Learner', [])).toBe('/home');
+        expect(ROUTE_PATHS.ADMIN).toBe('/admin');
+        expect(isDestinationLive('/admin', 'Administrator')).toBe(false);
+        expect(roleStartPath('Administrator', [{ path: '/admin', handle: { roles: ['Instructor'] } }])).toBe('/courses');
+        expect(roleNavigation('Administrator', [{ path: '/admin/users', handle: { roles: ['Administrator'] } }]).map(({ label }) => label)).toEqual(['Users']);
+    });
+    it.each(['Learner', 'Instructor', 'Administrator'] as const)('keeps the bell utility activation separate for %s', (role) => {
+        expect(notificationsAvailable(role, activatedRoutes)).toBe(role !== 'Administrator');
+        expect(currentSection('/notifications?unread=true#top', role, activatedRoutes)).toBe(role !== 'Administrator' ? '/notifications' : undefined);
+    });
+    it.each([
+        ...learnerPaths.map((path) => [path, 'Learner', path === '/home' ? '/home' : '/my-courses']),
+        ...instructorPaths.map((path) => [path, 'Instructor', path.startsWith('/teach/grading') ? '/teach/grading' : path === '/teach/learners' ? path : '/teach']),
+        ...adminPaths.map((path) => [path, 'Administrator', path]),
+        ['/courses', 'Learner', '/courses'], ['/courses/:courseId', 'Learner', '/courses'], ['/courses/:courseId', 'Instructor', '/courses'],
+    ])('maps the approved %s screen to exactly %s / %s', (path, role, expected) => {
+        const url = concrete(path);
+        expect(currentSection(url, role as UserRole, activatedRoutes)).toBe(expected);
+        expect(currentSection(`${url.toUpperCase()}/?view=one#details`, role as UserRole, activatedRoutes)).toBe(expected);
+    });
+    it.each(['/teach/courses-extra', '/teach/courses', '/teach/grading-extra', '/admin/users-extra', '/admin/unknown',
+        '/courses/one/lessons', '/courses/one/learn/extra', '/courses/one/quizzes/two/unknown', '/courses/one/unknown', '/homepage', '/my-courses-extra'])
+    ('never marks unknown or segment-prefix path %s current', (path) => {
+        for (const role of ['Learner', 'Instructor', 'Administrator'] as const) expect(currentSection(path, role, activatedRoutes)).toBeUndefined();
+    });
+    it.each(['/TEACH/', '/%74each', '/teach/courses/a%2Fb/settings/', '/courses/a%2Fb', '/%63ourses/one', '/courses/%ZZ'])
+    ('uses router-equivalent matching for %s', (path) => {
+        const role = path.toLowerCase().includes('teach') || path.includes('%74') ? 'Instructor' : 'Learner';
+        expect(isDestinationLive(path, role)).toBe(matchRoutes(WORKSPACE_ROUTES, path) !== null);
+        expect(currentSection(path, role)).toBe(role === 'Instructor' ? '/teach' : '/courses');
+    });
+    it('never leaks an active item to another role or highlights an inactive feature', () => {
+        for (const role of ['Learner', 'Administrator'] as const) expect(currentSection('/teach/courses/one', role)).toBeUndefined();
+        expect(currentSection('/courses/one/learn', 'Learner')).toBeUndefined();
+        expect(currentSection('/teach/grading', 'Instructor')).toBeUndefined();
+        expect(currentSection('/admin', 'Administrator')).toBeUndefined();
+        expect(currentSection('/courses/one')).toBe('/courses');
+        expect(currentSection('/home')).toBeUndefined();
+    });
+    it.each(['/admin', '/admin/users', '/admin/courses', '/admin/reports', '/admin/audit', '/teach/grading', '/teach/grading/one', '/teach/learners', '/teach/courses/one/learners', '/notifications'])
+    ('leaves inactive %s unregistered for anonymous visitors and every authenticated role', async (path) => {
+        await mount(path);
+        expect(location.pathname).toBe(path); expect(host.querySelector('main h1')?.textContent).toBe('Page not found');
+        for (const role of ['Learner', 'Instructor', 'Administrator']) {
+            await login('Role fixture', role); fetcher.mockClear(); await go(path);
+            expect(location.pathname).toBe(path); expect(host.querySelector('main h1')?.textContent).toBe('Page not found');
+            expect(host.querySelectorAll('header nav [aria-current]')).toHaveLength(0); expect(fetcher).not.toHaveBeenCalled();
+        }
+    });
+    it('replaces all menu and active state on session role replacement, without privilege inheritance', async () => {
+        await mount('/courses'); await login('A', 'Learner'); await go('/home');
+        expect(host.querySelector('header nav [aria-current]')?.textContent).toBe('Home');
+        await login('B', 'Instructor');
+        expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
+        expect([...host.querySelectorAll('header nav a')].map((n) => n.textContent)).toEqual(['Teaching', 'Catalogue']);
+        expect(host.querySelector('header nav [aria-current]')).toBeNull();
+        await login('C', 'Administrator');
+        expect([...host.querySelectorAll('header nav a')].map((n) => n.textContent)).toEqual(['Catalogue']);
+        expect(host.querySelector('header a[aria-label="CodeMastery home"]')?.getAttribute('href')).toBe('/courses');
+    });
+    it.each(['Learner', 'Instructor', 'Administrator'])('a pending Profile return wins once for %s sign-in', async (role) => {
+        await mount('/PROFILE/?returnTo=https://outside.test#ignored'); await formLogin('A', role);
+        expect(location.pathname).toBe('/profile'); expect(auth.consumeReturn()).toBe(roleStartPath(role as UserRole));
+    });
+    it('the landing redirect consumes a pending Profile return once, including StrictMode', async () => {
+        window.history.replaceState(null, '', '/courses');
+        await act(async () => root.render(<StrictMode><ThemeProvider theme={appTheme}><BrowserRouter><AuthProvider><Probe /><AppRouter /></AuthProvider></BrowserRouter></ThemeProvider></StrictMode>));
+        await login('A', 'Instructor'); auth.rememberProfile();
+        await go('/');
+        expect(location.pathname).toBe('/profile'); expect(auth.consumeReturn()).toBe('/teach');
+    });
+    it('the logo exposes the pending Profile target and consumes it only when followed', async () => {
+        await mount('/courses'); await login('A', 'Instructor'); auth.rememberProfile(); await go('/teach');
+        const brand = host.querySelector<HTMLAnchorElement>('header a[aria-label="CodeMastery home"]')!;
+        expect(brand.getAttribute('href')).toBe('/profile');
+        await act(async () => brand.click());
+        expect(location.pathname).toBe('/profile'); expect(auth.consumeReturn()).toBe('/teach');
+    });
+});
+
+describe('FE32 registered role guard composition (test-only Administrator screen)', () => {
+    const mounted = vi.fn();
+    function PersonalScreen() { useEffect(() => { mounted(); }, []); return <h1>Delivered Administrator fixture</h1>; }
+    async function mountRegistered(restoring = false) {
+        mounted.mockClear(); window.history.replaceState(null, '', '/admin');
+        await act(async () => root.render(<ThemeProvider theme={appTheme}><BrowserRouter><AuthProvider refreshSessions={restoring}><Probe /><Routes>
+            <Route element={<ProtectedRoute roles={['Administrator']} />}><Route path="/admin" element={<PersonalScreen />} /></Route>
+            <Route path="/login" element={<h1>Sign in fixture</h1>} />
+            <Route path="*" element={<h1>Page not found fixture</h1>} />
+        </Routes></AuthProvider></BrowserRouter></ThemeProvider>));
+    }
+    it('redirects an anonymous registered visit with replace and captures no return', async () => {
+        await mountRegistered(); expect(location.pathname).toBe('/login'); expect(mounted).not.toHaveBeenCalled();
+        await login('A', 'Administrator'); expect(auth.consumeReturn()).toBe('/courses');
+    });
+    it.each(['Learner', 'Instructor'])('denies %s without mounting personal content or starting its effects', async (role) => {
+        await mountRegistered(); await login('Wrong role', role); fetcher.mockClear(); await go('/admin');
+        expect(host.textContent).toContain("You don't have access to this page"); expect(host.textContent).toContain('administrators');
+        expect(mounted).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
+    });
+    it('admits only the matching role and invalidates it on a session replacement', async () => {
+        await mountRegistered(); await login('Administrator', 'Administrator'); await go('/admin');
+        expect(mounted).toHaveBeenCalledTimes(1); await login('Instructor', 'Instructor');
+        expect(host.textContent).not.toContain('Delivered Administrator fixture'); expect(host.textContent).toContain("You don't have access");
+    });
+    it('waits through unresolved restoration and never registers unknown children as protected pages', async () => {
+        let resolve!: (value: Response) => void;
+        fetcher.mockImplementationOnce(() => new Promise<Response>((done) => { resolve = done; }));
+        await mountRegistered(true); expect(location.pathname).toBe('/admin'); expect(host.textContent).toContain('Restoring your session…');
+        expect(mounted).not.toHaveBeenCalled(); await act(async () => resolve(json(loginResponse('Admin', 'Administrator'))));
+        expect(location.pathname).toBe('/admin'); expect(mounted).toHaveBeenCalledTimes(1);
+        fetcher.mockClear(); await go('/admin/unknown'); expect(host.textContent).toContain('Page not found fixture'); expect(fetcher).not.toHaveBeenCalled();
+    });
+});
+
+
+describe('FE32 role groups cover every delivered Instructor screen', () => {
+    it.each(['/teach', '/teach/courses/new', '/teach/courses/one', '/teach/courses/one/content', '/teach/courses/one/skills',
+        '/teach/courses/one/assessments', '/teach/courses/one/settings', '/teach/courses/one/quizzes/one', '/teach/courses/one/assignments/one'])
+    ('denies both other roles on %s before any feature request', async (path) => {
+        await mount('/courses');
+        for (const role of ['Learner', 'Administrator']) {
+            await login('Other role', role); fetcher.mockClear(); await go(path);
+            expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
+            expect(host.querySelector('header nav [aria-current]')).toBeNull(); expect(fetcher).not.toHaveBeenCalled();
+        }
+    });
+});
+
+
+it('a cancelled editor logo navigation and a modified click never consume the pending Profile return', async () => {
+    let proceed: (() => void) | undefined;
+    function DirtyEditorFixture() {
+        useNavigationGuard((next) => { proceed = next; return true; });
+        return <h1>Dirty editor fixture</h1>;
+    }
+    window.history.replaceState(null, '', '/courses');
+    await act(async () => root.render(<ThemeProvider theme={appTheme}><BrowserRouter><AuthProvider><Probe />
+        <AppRouter catalogue={<DirtyEditorFixture />} /></AuthProvider></BrowserRouter></ThemeProvider>));
+    await login('Teacher', 'Instructor'); auth.rememberProfile(); await go('/courses?draft=1');
+    const brand = host.querySelector<HTMLAnchorElement>('header a[aria-label="CodeMastery home"]')!;
+    const modified = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+    await act(async () => { brand.dispatchEvent(modified); });
+    expect(modified.defaultPrevented).toBe(false); expect(proceed).toBeUndefined(); expect(auth.startPath).toBe('/profile');
+    await act(async () => brand.click());
+    expect(location.pathname).toBe('/courses'); expect(auth.startPath).toBe('/profile'); expect(proceed).toBeTypeOf('function');
+    await act(async () => proceed!());
+    expect(location.pathname).toBe('/profile'); expect(auth.startPath).toBe('/teach');
+});
+
+
+describe('B1-F02 navigation-scoped delayed heading focus', () => {
+    const deferredHeading = () => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((done) => { resolve = done; });
+        function Fixture() {
+            const [ready, setReady] = useState(false);
+            useEffect(() => { let alive = true; void promise.then(() => { if (alive) setReady(true); }); return () => { alive = false; }; }, []);
+            return <><input aria-label="Work in progress" />{ready && <h1>Delayed route heading</h1>}</>;
+        }
+        return { Fixture, resolve };
+    };
+    async function mountDeferred(strict = false) {
+        const state = deferredHeading();
+        window.history.replaceState(null, '', '/courses');
+        const app = <ThemeProvider theme={appTheme}><BrowserRouter><AuthProvider><Probe /><AppRouter catalogue={<state.Fixture />} /></AuthProvider></BrowserRouter></ThemeProvider>;
+        await act(async () => root.render(strict ? <StrictMode>{app}</StrictMode> : app));
+        return state;
+    }
+    it.each([false, true])('focuses the first delayed heading once, StrictMode=%s', async (strict) => {
+        const state = await mountDeferred(strict);
+        await act(async () => state.resolve());
+        const heading = host.querySelector('main h1')!;
+        expect(document.activeElement).toBe(heading);
+        const input = host.querySelector<HTMLInputElement>('input[aria-label="Work in progress"]')!;
+        input.focus();
+        await act(async () => { heading.append(document.createTextNode(' refreshed')); });
+        expect(document.activeElement).toBe(input);
+    });
+    it.each(['focusin', 'pointerdown', 'keydown', 'input'] as const)('respects user %s before the response', async (event) => {
+        const state = await mountDeferred();
+        const input = host.querySelector<HTMLInputElement>('input[aria-label="Work in progress"]')!;
+        if (event === 'focusin') input.focus();
+        else input.dispatchEvent(new Event(event, { bubbles: true }));
+        await act(async () => state.resolve());
+        expect(document.activeElement).not.toBe(host.querySelector('main h1'));
+        if (event === 'focusin') expect(document.activeElement).toBe(input);
+    });
+    it('cancels the intent on query-only navigation', async () => {
+        const state = await mountDeferred(); await go('/courses?q=next');
+        await act(async () => state.resolve());
+        expect(document.activeElement).not.toBe(host.querySelector('main h1'));
+    });
+    it('cannot focus a superseded route after navigation away', async () => {
+        const state = await mountDeferred(); await go('/missing');
+        const heading = host.querySelector('main h1'); expect(document.activeElement).toBe(heading);
+        await act(async () => state.resolve());
+        expect(host.textContent).not.toContain('Delayed route heading'); expect(document.activeElement).toBe(heading);
+    });
+    it('cancels a pending intent when an installed session is replaced', async () => {
+        const state = await mountDeferred(); await login('First session', 'Instructor');
+        await act(async () => state.resolve());
+        expect(document.activeElement).not.toBe(host.querySelector('main h1'));
+    });
+    it('focuses the actual owned Course heading when its GET completes', async () => {
+        let resolve!: (value: Response) => void;
+        fetcher.mockImplementation((url: string) => {
+            const path = new URL(url).pathname;
+            if (path === `/api/instructor/courses/${id}`) return new Promise<Response>((done) => { resolve = done; });
+            if (path.endsWith('/skill-graph')) return Promise.resolve(json({ courseId: id, skills: [], prerequisites: [], mappings: [] }));
+            return Promise.resolve(json(page));
+        });
+        await mount('/courses'); await login('Instructor', 'Instructor'); await go(`/teach/courses/${id}`);
+        expect(host.querySelector('main h1')).toBeNull();
+        await act(async () => resolve(json({ id, title: 'Delayed owned Course', description: 'Synthetic course', publicationStatus: 'hidden', prerequisiteDescription: null, chapters: [] })));
+        expect(host.querySelector('main h1')?.textContent).toBe('Delayed owned Course');
+        expect(document.activeElement).toBe(host.querySelector('main h1'));
     });
 });
