@@ -447,6 +447,44 @@ or progress decisions, adaptive behavior, Spring contexts or PostgreSQL. Later
 dataset-dependent, behavioral and integration consumers retain separate approval
 and execution checkpoints.
 
+### FT02 structural fixture verification — 26 November 2026
+
+[SkillGraphTest.StructuralFixtures](../backend/src/test/java/com/codemastery/modules/adaptive/skillgraph/SkillGraphTest.java)
+is the authorized FT02 structural consumer of
+[SkillGraphFixtures](../backend/src/test/java/com/codemastery/support/fixtures/SkillGraphFixtures.java).
+It consumes the AD01 `Skill`, `SkillPrerequisite` and `LessonSkill` records and,
+separately, AD07's immutable
+`SkillGraph(UUID, List<Skill>, List<SkillPrerequisite>, List<LessonSkill>)`
+under `CT05-REPRESENTATION-2026-11-08-r1` (ADR005 §4.1).
+
+The 14 cases check every caller field, course-qualified prerequisite direction,
+lesson mapping identity, factory/builder equivalence, nullable descriptions,
+reference-only construction without defaults or fixture validation, builder reuse,
+graph reference forwarding, defensive collection copying and immutability, valid
+empty drafts, and explicit null forwarding to production container validation.
+Local UUID sentinels are not seed identities or approved scenario datasets.
+The existing `Representation` group owns graph-invariant oracles; fixtures do not
+duplicate that validation or establish Course lesson ancestry.
+
+Executed by Codex in an isolated PR #295 checkout based on
+`677a6df15f257dd7162f1979f7ec77326ab4a201`, with the FT02 completion changes,
+host Java 25.0.4.1, Boot 4.1.1 and Surefire 3.5.6. From `backend/`:
+
+```sh
+./mvnw -B test -Dtest='SkillGraphTest$StructuralFixtures'
+./mvnw -B test -Dtest='SkillGraphTest$StructuralFixtures,SkillGraphTest$Representation'
+```
+
+**PASS:** the focused run executed 14 structural tests; the final run executed
+24 tests (14 structural and 10 existing representation cases), all with zero failures,
+errors or skips, confirmed in Surefire XML. Application and test compilation also
+passed. The additional representation run checks compatibility with the consumed
+container; it is not new FT02 behavioral coverage. No Docker, Spring context or database
+was used by these cases. This is implementation-author structural verification,
+not independent acceptance, CT05 behavioral/concurrency qualification, CT15 datasets,
+CT36 evaluation, QA03, or production Adaptive flow verification. Those gates and
+required CI/protected integration remain separate.
+
 ## Integration-Test Lifecycle
 
 [AbstractIntegrationTest](../backend/src/test/java/com/codemastery/integration/AbstractIntegrationTest.java)
@@ -1026,9 +1064,10 @@ test-count or coverage-percentage claim is made for them.
   evaluation, listener, settings, mastery-update and placement
   tests (the decision suites hold the AD11 oracles,
   [record](#ad11-adaptive-decision-rules-verification--25-november-2026));
-  `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`,
-  `SkillGraphFixtures` and the three adaptive scenario JSON files. They wait for
-  their features and approved contracts.
+  `MasteryProgressTransactionIntegrationTest`; `ScenarioLoader`, `TestClockConfig`
+  and the three adaptive scenario JSON files. `SkillGraphFixtures` has the bounded
+  [FT02 structural verification](#ft02-structural-fixture-verification--26-november-2026)
+  above; the remaining scaffolds wait for their features and approved contracts.
 - **E2E.** The Playwright suite runs locally with Docker and in the required `E2E`
   check of the `CI E2E` workflow ([CI](#ci)), on all five projects against a disposable
   stack. It covers the implemented learner flows and the Instructor course, skill-graph
