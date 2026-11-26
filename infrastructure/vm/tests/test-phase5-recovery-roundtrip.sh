@@ -15,7 +15,7 @@ export CODEMASTERY_OPENSSL="${CODEMASTERY_OPENSSL:-openssl}"
 OPENSSL="${CODEMASTERY_OPENSSL}"
 "${OPENSSL}" version | grep -q '^OpenSSL 3\.' || { echo "OpenSSL 3 is required (CODEMASTERY_OPENSSL)." >&2; exit 1; }
 PY="${PYTHON:-python3}"
-project="cmrt$(printf '%s' "${GITHUB_RUN_ID:-local}$$" | cksum | cut -c1-8)"
+project="cmrt$(printf '%s' "${GITHUB_RUN_ID:-local}$$" | cksum | awk '{print $1}')"
 network="${project}_default"
 PG_IMAGE="${PG_IMAGE:-postgres:17.11-bookworm}"
 # The release's minimal MinIO server (no baked MINIO_* settings, UID 65532), built from its pinned source.

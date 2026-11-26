@@ -9,7 +9,7 @@
 # unsafe uploads, and tooling installation bound to an exact git tree.
 # Run from the repository root:  bash infrastructure/vm/tests/test-phase5-ssh-gates.sh
 set -Eeuo pipefail
-name="cm-sshgate-$(printf '%s' "${GITHUB_RUN_ID:-local}$$" | cksum | cut -c1-8)"
+name="cm-sshgate-$(printf '%s' "${GITHUB_RUN_ID:-local}$$" | cksum | awk '{print $1}')"
 image="codemastery-test/sshgate:${name}"
 work="$(mktemp -d)"; chmod 700 "${work}"
 cleanup() { docker rm -f "${name}" >/dev/null 2>&1 || true; docker image rm "${image}" >/dev/null 2>&1 || true; rm -rf "${work}"; }

@@ -69,6 +69,25 @@ def release_inventory():
     return {"compatibility": {"migrations": {"inventory": out}}}
 
 
+class FixtureResourceNames(unittest.TestCase):
+    def test_use_the_decimal_checksum_field_for_docker_resource_names(self):
+        for script, variable, prefix in (
+            ("test-phase5-ssh-gates.sh", "name", "cm-sshgate-"),
+            ("test-phase5-recovery-roundtrip.sh", "project", "cmrt"),
+        ):
+            with open(os.path.join(ROOT, "infrastructure", "vm", "tests", script)) as source:
+                assignment = next(line for line in source if line.startswith(f"{variable}="))
+            for checksum in ("0", "3012082", "4294967295"):
+                with self.subTest(script=script, checksum=checksum):
+                    result = subprocess.check_output(
+                        ["bash", "-ec",
+                         'checksum="$1"; cksum() { cat >/dev/null; printf "%s 16\\n" "$checksum"; }; '
+                         + assignment + f'printf "%s" "${variable}"', "_", checksum],
+                        text=True,
+                    )
+                    self.assertEqual(result, prefix + checksum)
+
+
 class FlywayAndCompatibility(unittest.TestCase):
     def setUp(self):
         self.migrations = ops.release_migrations(release_inventory(), ROOT)
