@@ -95,6 +95,27 @@ public class SkillGraphService {
                 .toList();
     }
 
+    /**
+     * ADR007 §16: assertion-only companion for AttemptService after Course admission or inside its
+     * Course-root callback. No graph data, actor parameter or replacement for owner-only reads.
+     */
+    public void requireAssessmentSkillsInCourse(UUID courseId, java.util.Set<UUID> skillIds) {
+        requireId(courseId);
+        java.util.Set<UUID> ids = java.util.Set.copyOf(skillIds);
+        Integer isolation = org.springframework.transaction.support.TransactionSynchronizationManager
+                .getCurrentTransactionIsolationLevel();
+        boolean readOnly = org.springframework.transaction.support.TransactionSynchronizationManager
+                .isCurrentTransactionReadOnly();
+        if (!org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()
+                || !(readOnly && Integer.valueOf(TransactionDefinition.ISOLATION_REPEATABLE_READ).equals(isolation)
+                    || !readOnly && Integer.valueOf(TransactionDefinition.ISOLATION_READ_COMMITTED).equals(isolation))) {
+            throw new IllegalStateException("Assessment ancestry requires its admitted snapshot or held-root unit");
+        }
+        java.util.Set<UUID> courseSkills = skills.findSkills(courseId).stream()
+                .map(Skill::id).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        if (!courseSkills.containsAll(ids)) throw new IllegalStateException("Quiz evidence has a foreign Course skill");
+    }
+
     public SkillReference createSkill(UUID courseId, String name, String description) {
         requireId(courseId);
         String skillName = requireNonBlank(name, "Skill name");

@@ -4370,7 +4370,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Self Learner; no request body; fixed practice/test only. Return existing active attempt 200 without timer reset; create next committed number 201. Overdue unsubmitted or diagnostic exposure gate 409. Server UTC microsecond time, captured full membership/order/all-false masks. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner; no request body; fixed full membership. Practice/test retakes follow ADR007; diagnostics follow ADR011 §11: no attempt on another Course diagnostic and no submitted attempt on this diagnostic, with active same-quiz resume. Return existing active attempt 200 without timer reset; create next committed number 201. Overdue unsubmitted or diagnostic exposure gate 409. Server UTC microsecond time, captured full membership/order/all-false masks. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4446,7 +4446,7 @@
             }
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       },
       "get": {
@@ -4454,7 +4454,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Self Learner, current Course/Quiz visibility; all own attempts, descending attemptNumber. No key; submittedAt/score null together until submitted. GET never finalizes. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner, current Course/Quiz visibility; all own attempts, descending attemptNumber. No key; submittedAt/score null together until submitted. GET never finalizes. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4531,7 +4531,7 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -4541,7 +4541,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Self Learner current access; own captured active/overdue view or immutable result. No key, GET never finalizes. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner current access; own captured active/overdue view or immutable result. No key, GET never finalizes. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4608,7 +4608,7 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -4618,7 +4618,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Self Learner full answer replacement; root/Quiz/Attempt locks then server time strictly before expiry. No grade/event. Terminal/overdue 409. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner full answer replacement; root/Quiz/Attempt locks then server time strictly before expiry. No grade/event. Terminal/overdue 409. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4688,7 +4688,7 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -4708,7 +4708,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Self Learner full validated answers; strictly before expiry grade/persist atomically. Already submitted returns immutable result, ignores new selections. Overdue unsubmitted 409 accepts no late masks. No automatic mutation retry/event execution approval. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner full validated answers; strictly before expiry grade/persist atomically. Already submitted returns immutable result, ignores new selections. Overdue unsubmitted 409 accepts no late masks. No automatic mutation retry. ADR011 approves synchronous in-transaction event execution, but AS12 and AD13 code are not delivered in this PR. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4778,7 +4778,7 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -4798,7 +4798,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Self Learner current access; submitted only, active/overdue 409. Per-question correctness, no answer key. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner current access; submitted only, active/overdue 409. Per-question correctness, no answer key. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4868,7 +4868,7 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -4878,7 +4878,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner of admitted Course; submitted scoped Attempt including hidden Quiz. No learner impersonation/aggregate reporting; result omits keys. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner of admitted Course; submitted scoped Attempt including hidden Quiz. No learner impersonation/aggregate reporting; result omits keys. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4948,7 +4948,7 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -13637,7 +13637,7 @@
   "x-batch-03-contracts": {
     "decisionReference": "../decisions/007-batch-03-contract-approvals.md",
     "status": "DELEGATED_APPROVED",
-    "implementation": "NOT_IMPLEMENTED",
+    "implementation": "SELECTED_CT04_OPERATIONS_IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
     "checkpoints": [
       "CT23.questions",
       "CT23.composition",
@@ -13656,9 +13656,9 @@
     ],
     "retainedGates": [
       "Independent review, required CI and protected integration",
-      "Separate implementation authorization and actual artifacts/tests",
-      "CT08.execution/failure/verification-plan and CT22.atomic remain pending",
-      "CT25 diagnostic and CT28 notification binding remain pending",
+      "AS08 implementation authorized in PR #296; independent acceptance and downstream consumers remain separate",
+      "CT08.execution and CT22.atomic approved by ADR011; AS12 publication and AD13 runtime integration remain absent",
+      "CT25 approved in ADR011: Assessment start and quiz projection implemented in PR #296; AD10/AD13 initialization and guidance remain separate. CT28 approved in ADR012; no quiz-result Interaction consumer is implemented here",
       "Configuration values and scheduler/deadline/privilege qualification"
     ],
     "currentStateCorrection": "Current-state correction, 15 November 2026 (ADR012 §20 F7-15): PR #230 merged ADR007 as 3eeacc8 on 9 November 2026. The retained gate naming CT08.execution/failure/verification-plan and CT22.atomic as pending is historical: ADR011 approved them (PR #236, c80fda9). CT25 is approved in ADR011 and CT28 in ADR012 (PR #244, open). No approving review is recorded for these merges."

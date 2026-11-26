@@ -22,7 +22,47 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class AppConfigTest {
 
-    private final ApplicationContextRunner runner = new ApplicationContextRunner().withUserConfiguration(AppConfig.class);
+    private final ApplicationContextRunner runner = new ApplicationContextRunner().withUserConfiguration(AppConfig.class)
+            .withPropertyValues("app.quiz.auto-submit.enabled=false", "app.quiz.auto-submit.delay-ms=1000",
+                    "app.quiz.auto-submit.batch-size=2");
+
+    @Test
+    void quizExpiryInputsAreMandatoryEvenWhenSchedulingIsDisabled() {
+        new ApplicationContextRunner().withUserConfiguration(AppConfig.class)
+                .run(context -> assertNotNull(context.getStartupFailure()));
+        for (String property : List.of("enabled", "delay-ms", "batch-size")) {
+            for (String value : property.equals("enabled") ? List.of("", "yes", "1", "TRUE")
+                    : List.of("", "0", "-1", "1.0", "2147483648", "+1", "${UNSET}")) {
+                runner.withPropertyValues("app.quiz.auto-submit." + property + "=" + value)
+                        .run(context -> assertNotNull(context.getStartupFailure(), property + ":" + value));
+            }
+        }
+        runner.withPropertyValues("app.quiz.auto-submit.delay-ms=2147483647", "app.quiz.auto-submit.batch-size=2147483647")
+                .run(context -> assertEquals(Integer.MAX_VALUE,
+                        context.getBean(AppConfig.QuizExpirySettings.class).batchSize()));
+    }
+
+    @Test
+    void enabledQuizExpiryRegistersAndActuallyInvokesTheScheduledTask() throws Exception {
+        var attempts = org.mockito.Mockito.mock(com.codemastery.modules.assessment.domain.repository.AttemptRepository.class);
+        var service = org.mockito.Mockito.mock(com.codemastery.modules.assessment.application.service.AttemptService.class);
+        var invoked = new java.util.concurrent.CountDownLatch(1);
+        org.mockito.Mockito.when(attempts.findDueUnsubmitted(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.eq(2)))
+                .thenAnswer(call -> { invoked.countDown(); return List.of(); });
+        runner.withPropertyValues("app.quiz.auto-submit.enabled=true", "app.quiz.auto-submit.delay-ms=60000")
+                .withBean(com.codemastery.modules.assessment.application.scheduler.AttemptAutoSubmitScheduler.class,
+                        () -> new com.codemastery.modules.assessment.application.scheduler.AttemptAutoSubmitScheduler(attempts,service,60000,2,java.time.Clock.systemUTC()))
+                .run(context -> {
+                    assertNull(context.getStartupFailure());
+                    assertEquals(1, context.getBean(org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor.class)
+                            .getScheduledTasks().size());
+                    try { assertTrue(invoked.await(5,java.util.concurrent.TimeUnit.SECONDS)); }
+                    catch (InterruptedException failure) { Thread.currentThread().interrupt(); fail(failure); }
+                });
+        runner.run(context -> assertTrue(context.getBeansOfType(
+                org.springframework.scheduling.annotation.ScheduledAnnotationBeanPostProcessor.class).isEmpty()));
+    }
 
     static String ephemeralKey() {
         byte[] key = new byte[32];

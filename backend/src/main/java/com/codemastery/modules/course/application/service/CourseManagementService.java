@@ -132,6 +132,40 @@ public class CourseManagementService {
         return guarded(courseId, work, true);
     }
 
+    /** ADR007 §3.1: only AttemptService start/save/submit may supply Learner callbacks. */
+    public <T> T withLearnerAssessmentWrite(UUID courseId, Supplier<T> work) {
+        return assessmentWrite(courseId, work, true);
+    }
+
+    /** ADR007 §3.1: only AttemptService's persisted-overdue finalizer; no actor impersonation. */
+    public <T> T withAssessmentExpiryWrite(UUID courseId, Supplier<T> work) {
+        return assessmentWrite(courseId, work, false);
+    }
+
+    private <T> T assessmentWrite(UUID courseId, Supplier<T> work, boolean learner) {
+        requireId(courseId);
+        Objects.requireNonNull(work, "Assessment work must not be null");
+        return writeUnit.execute(status -> {
+            UUID held = requireCompatibleWriteUnit(courseId);
+            if (learner) access.requireLearnerCourseAccess(courseId);
+            try {
+                acquire(courseId, false);
+            } catch (ResourceNotFoundException missing) {
+                if (!learner) throw new IllegalStateException("Persisted Attempt has no Course root");
+                throw missing;
+            }
+            if (learner) access.requireLearnerCourseAccess(courseId);
+            if (held == null) {
+                claimRoot(courseId);
+                courses.markCourseRootHeld(courseId);
+                courses.discardCleanPersistenceState();
+            }
+            T result = work.get();
+            requireRootStillHeld(courseId);
+            return result;
+        });
+    }
+
     /**
      * ADR005 §7.1: the owner's immutable snapshot of the stored fields. A legacy Course may
      * return null settings only while disabled. No default or policy is supplied.

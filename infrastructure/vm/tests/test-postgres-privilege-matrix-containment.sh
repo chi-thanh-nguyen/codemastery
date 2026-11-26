@@ -261,10 +261,33 @@ probe "questions: TRUNCATE"                                   42501 "TRUNCATE pu
 probe "quizzes: move a quiz to another Course"               42501 "UPDATE public.quizzes SET course_id=course_id;"
 probe "quizzes/quiz_questions: TRUNCATE"                      42501 "TRUNCATE public.quiz_questions, public.quizzes;"
 probe "quiz_questions: rewrite membership in place"           42501 "UPDATE public.quiz_questions SET position=position, quiz_id=quiz_id;"
-probe "attempts: read owners, timing or scores"               42501 "SELECT user_id, started_at, expires_at, score_percentage FROM public.attempts;"
-probe "attempts: start an attempt (AS08 not implemented)"     42501 "INSERT INTO public.attempts SELECT * FROM public.attempts WHERE false;"
-probe "attempt_answers: read captured selections"             42501 "SELECT selected_options, is_correct FROM public.attempt_answers;"
-probe "attempts: rewrite scores"                             42501 "UPDATE public.attempts SET score_percentage=100;"
+probe "attempts: read owners, timing or scores"               ok "SELECT user_id, started_at, expires_at, score_percentage FROM public.attempts;"
+probe "attempts/answers: real capture INSERT and mutable answer writes (AS08)" ok "
+INSERT INTO public.attempts (id,user_id,quiz_id,attempt_number,started_at,expires_at)
+VALUES ('00000000-0000-0000-0000-0000000015a1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000005b3',2,now(),now()+interval '5 minutes');
+INSERT INTO public.attempt_answers (id,attempt_id,question_id,position,selected_options)
+VALUES ('00000000-0000-0000-0000-0000000015b1','00000000-0000-0000-0000-0000000015a1','00000000-0000-0000-0000-0000000005b2',1,ARRAY[false,false]);
+UPDATE public.attempt_answers SET selected_options=ARRAY[true,false], is_correct=true
+WHERE id='00000000-0000-0000-0000-0000000015b1';
+DO \$\$ BEGIN IF (SELECT count(*) FROM public.attempt_answers WHERE id='00000000-0000-0000-0000-0000000015b1'
+  AND selected_options=ARRAY[true,false] AND is_correct=true) <> 1 THEN RAISE EXCEPTION 'AS08 mutable answer write missing'; END IF; END \$\$;"
+probe "attempt_answers: read captured selections"             ok "SELECT selected_options, is_correct FROM public.attempt_answers;"
+# The controlled active fixture must be updated, not just a zero-row privilege probe.
+# V004 requires submitted_at and score_percentage to become non-null together.
+probe "attempts: write both terminal columns on the active fixture (AS08)" ok "
+UPDATE public.attempts SET submitted_at=expires_at, score_percentage=100
+WHERE id='00000000-0000-0000-0000-0000000006b1';
+DO \$\$ BEGIN IF (SELECT count(*) FROM public.attempts WHERE id='00000000-0000-0000-0000-0000000006b1'
+  AND submitted_at=expires_at AND score_percentage=100) <> 1 THEN RAISE EXCEPTION 'AS08 terminal write missing'; END IF; END \$\$;"
+probe "attempts: terminal probe rolled back its fixture (AS08)" ok "
+DO \$\$ BEGIN IF (SELECT count(*) FROM public.attempts WHERE id='00000000-0000-0000-0000-0000000006b1'
+  AND submitted_at IS NULL AND score_percentage IS NULL) <> 1
+  OR EXISTS (SELECT 1 FROM public.attempts WHERE id='00000000-0000-0000-0000-0000000015a1')
+  OR EXISTS (SELECT 1 FROM public.attempt_answers WHERE id='00000000-0000-0000-0000-0000000015b1')
+THEN RAISE EXCEPTION 'AS08 probe escaped rollback'; END IF; END \$\$;"
+probe "attempts: delete"                                    42501 "DELETE FROM public.attempts;"
+probe "attempts: immutable identity and timer"                42501 "UPDATE public.attempts SET user_id=user_id, quiz_id=quiz_id, attempt_number=attempt_number, started_at=started_at, expires_at=expires_at;"
+probe "attempt_answers: immutable capture"                   42501 "UPDATE public.attempt_answers SET attempt_id=attempt_id, question_id=question_id, position=position;"
 probe "attempt_answers: delete"                              42501 "DELETE FROM public.attempt_answers;"
 probe "submissions: self-grade"                              42501 "UPDATE public.submissions SET grade_percentage=100;"
 probe "submissions: read files, learners or feedback"         42501 "SELECT object_key, user_id, feedback FROM public.submissions;"

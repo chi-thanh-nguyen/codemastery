@@ -64,6 +64,15 @@ public class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/me/notifications/{notificationId}/read"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/me/notifications/read-all"));
 
+    private static final RequestMatcher ATTEMPT_OPERATIONS = new OrRequestMatcher(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}/quizzes/{quizId}/attempts"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/courses/{courseId}/quizzes/{quizId}/attempts"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}/result"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}/answers"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}/submission"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}/quizzes/{quizId}/owned-attempts/{attemptId}/result"));
+
     /** Adapts only Auth's validated principal, keeping infrastructure out of application consumers. */
     @Bean
     Supplier<CurrentIdentity> currentIdentity() {
@@ -103,7 +112,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .cors(cors -> cors.configurationSource(corsConfigurationSource(corsSettings)))
                 .headers(headers -> headers.addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
-                        NOTIFICATION_OPERATIONS, (request, response) -> response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store"))))
+                        new OrRequestMatcher(NOTIFICATION_OPERATIONS, ATTEMPT_OPERATIONS), (request, response) -> response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store"))))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(restSecurityErrorHandler)
                         .accessDeniedHandler(restSecurityErrorHandler))
@@ -168,6 +177,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/quizzes/{quizId}",
                                 "/api/courses/{courseId}/quizzes/{quizId}/publication").hasRole("INSTRUCTOR")
                         .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/quizzes/{quizId}").hasRole("INSTRUCTOR")
+                        // CT04/ADR007: exact Attempt methods; role before MVC, Course admission in application.
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/courses/{courseId}/quizzes/{quizId}/owned-attempts/{attemptId}/result").hasRole("INSTRUCTOR")
+                        .requestMatchers(ATTEMPT_OPERATIONS).hasRole("LEARNER")
                         // CT07-PRACTICE-RECOMMENDATION (ADR013 §19.4): self Learner. The chain decides only
                         // authentication: malformed UUIDs are 400 (order 2) before the role 403 (order 3),
                         // which CT03 inside CT33 readLearnerState decides before any lookup.

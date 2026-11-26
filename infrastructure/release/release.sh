@@ -316,6 +316,22 @@ PY
 }
 
 # ---------------------------------------------------------------------------
+# Synthetic smoke inputs only. Shared with isolated generator/preflight regressions.
+# The subshell confines umask and the credential helper to this generation step.
+write_smoke_env() (
+  local origin="$1" destination="$2"
+  umask 077
+  secret() { openssl rand -hex 16; }
+  {
+    printf 'POSTGRES_DB=codemastery\nPOSTGRES_USER=cm_bootstrap\nPOSTGRES_PASSWORD=%s\n' "$(secret)"
+    printf 'DB_NAME=codemastery\nDB_USER=cm_runtime\nDB_PASSWORD=%s\n' "$(secret)"
+    printf 'SPRING_FLYWAY_URL=jdbc:postgresql://postgres:5432/codemastery\nSPRING_FLYWAY_USER=cm_migrator\nSPRING_FLYWAY_PASSWORD=%s\n' "$(secret)"
+    printf 'MINIO_ROOT_USER=smoke-root\nMINIO_ROOT_PASSWORD=%s\nSTORAGE_ACCESS_KEY=smoke-app\nSTORAGE_SECRET_KEY=%s\n' "$(secret)" "$(secret)"
+    printf 'APP_QUIZ_AUTO_SUBMIT_ENABLED=false\nAPP_QUIZ_AUTO_SUBMIT_DELAY_MS=1000\nAPP_QUIZ_AUTO_SUBMIT_BATCH_SIZE=2\n'
+    printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=%s\n' "$(openssl rand -hex 32)" "$origin"
+  } > "$destination"
+)
+
 # Disposable-runner smoke: deploy.sh's real preflight, load and provision paths
 # on the exact archive, then its update guard. Refuses to run anywhere but a
 # fresh GitHub-hosted runner, because it creates /etc/codemastery and a
@@ -348,14 +364,7 @@ smoke() {
   sudo install -m 400 -o 101 -g 101 "$work/privkey.pem" "$tls/privkey.pem"
   sudo install -m 644 -o root -g root "$work/fullchain.pem" "$tls/fullchain.pem"
   rm -f "$work/privkey.pem"
-  secret() { openssl rand -hex 16; }
-  {
-    printf 'POSTGRES_DB=codemastery\nPOSTGRES_USER=cm_bootstrap\nPOSTGRES_PASSWORD=%s\n' "$(secret)"
-    printf 'DB_NAME=codemastery\nDB_USER=cm_runtime\nDB_PASSWORD=%s\n' "$(secret)"
-    printf 'SPRING_FLYWAY_URL=jdbc:postgresql://postgres:5432/codemastery\nSPRING_FLYWAY_USER=cm_migrator\nSPRING_FLYWAY_PASSWORD=%s\n' "$(secret)"
-    printf 'MINIO_ROOT_USER=smoke-root\nMINIO_ROOT_PASSWORD=%s\nSTORAGE_ACCESS_KEY=smoke-app\nSTORAGE_SECRET_KEY=%s\n' "$(secret)" "$(secret)"
-    printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=%s\n' "$(openssl rand -hex 32)" "$origin"
-  } > "$work/env"
+  write_smoke_env "$origin" "$work/env"
   sudo install -d -m 700 -o root -g root "$env_dir"
   sudo install -m 600 -o root -g root "$work/env" "$env_dir/.env"
   rm -f "$work/env"
@@ -791,6 +800,9 @@ draft_download() {
   done < <(release_api --paginate "repos/$repo/releases/$id/assets?per_page=100" --jq '.[] | [.id, .name, .size, (.digest // "")] | @tsv')
   log "Downloaded the candidate draft $tag."
 }
+
+# Allow isolated tests to call the same generator without entering a release stage.
+[[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
 case "${1:-}" in
   (candidate-package) shift; candidate_package "$@" ;;
