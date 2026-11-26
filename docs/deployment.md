@@ -5671,7 +5671,9 @@ The backend Dockerfile now resolves dependencies/plugins in the source-free
 `maven-dependencies` stage before copying `src`. Its Maven repository is an
 ordinary layer, not a cache mount. E2E, both backend-building VM jobs and Release
 rehearsal restore/export this stage as a standard BuildKit local cache using
-Actions cache. An isolated docker-container builder exports the cache, so the
+Actions cache. An isolated docker-container builder (BuildKit v0.35.1, pinned to OCI index
+`sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c`)
+exports the cache, so the
 runner's image-store configuration does not control export support; the existing
 Docker build consumers import it explicitly through
 `CODEMASTERY_MAVEN_LAYER_CACHE`. Local builds work without this optional tooling
@@ -5731,3 +5733,27 @@ actual offline verifier's output together with its exact status and execution
 sentinel, rather than parsing BuildKit progress. Both exact checksum rejection
 formats (with and without `sha512sum:`) are accepted; the digest, sentinel,
 execution-order and malformed-Dockerfile controls remain mandatory.
+
+### Executed integration and residual security boundary
+
+Disposable integration with PR #279 at
+`36be38f03cbb797c83be4e43a0dba758800ddc5b` ran all 20 FE14 project/case
+combinations with real storage: 14 passed, five existing browser-specific skips
+and one failure. The direct WebKit multipart test returns HTTP 201 and verifies
+one authoritative material row; Chromium/Firefox upload recovery, file
+replacement and downloaded bytes pass. The remaining WebKit full-authoring case
+fails *after* file operations at the unchanged page-overflow assertion:
+377-pixel document width versus a 360-pixel viewport (feature test line 120,
+shared assertion `auth-fixture.ts:142`). This is a frontend integration finding
+for the FE14 authoring branch, not another storage 500. It is retained without
+skipping or weakening the assertion or importing unrelated feature UI. Normal
+teardown and coordinator finalization confirm every owned resource absent.
+
+A fresh Trivy 0.76.1 database (updated 26 November, 13:14 UTC) reports zero
+findings for the rebuilt amd64 PostgreSQL image. Both rebuilt frontend targets
+have one MEDIUM finding on the unchanged `nginx=1.30.7-r1`:
+CVE-2026-132779, scanner-listed fix `1.30.8-r0`. No CRITICAL/HIGH findings or
+new libxml2 findings are reported. This is not a zero-finding or release-admitted
+frontend. A separately qualified Nginx/module security update or the effective
+release authority's exact-artifact disposition remains necessary; this CI
+availability repair does not apply a scanner exception or accept that risk.

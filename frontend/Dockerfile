@@ -191,7 +191,8 @@ RUN set -eu; \
 # pins no longer resolved; 23 November: libxml2 2.13.9-r3 and libxslt 1.1.43-r4
 # for HIGH findings, libcrypto3/libssl3 3.5.9-r1 for MEDIUM/LOW findings;
 # 25 November: libexpat 2.11.0-r0 replaces the unavailable 2.10.0-r0 pin,
-# preserving its fixes and adding the upstream 2.11.0 security fixes), which
+# preserving its fixes and adding the upstream 2.11.0 security fixes;
+# 26 November: libxml2 2.13.9-r5 replaces the retired r3, retaining its fixes), which
 # apk verifies against the signing keys in the pinned base. Unlike an unbounded
 # `apk upgrade`, the build fails if the index no longer offers one of these
 # versions; re-scan and update the list instead (docs/deployment.md, "DP01

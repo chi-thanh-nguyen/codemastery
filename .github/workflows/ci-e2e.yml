@@ -80,7 +80,8 @@ jobs:
             # This isolated builder exports a standard local cache, independently
             # of the runner's Docker image store. Ordinary consumers import it.
             builder="maven-cache-${GITHUB_JOB}"
-            docker buildx create --name "$builder" --driver docker-container
+            docker buildx create --name "$builder" --driver docker-container \
+              --driver-opt image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
             trap 'docker buildx rm "$builder" >/dev/null' EXIT
             docker buildx build --builder "$builder" --platform linux/amd64 \
               --target maven-dependencies --output type=cacheonly \

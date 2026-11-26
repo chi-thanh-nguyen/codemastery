@@ -36,10 +36,14 @@ const live = (key) => { if (!db[key] || !db[key].present) fail('Error: No such o
 const counter = path.join(dir, 'inspects');
 if (args[0] === 'context' && args[1] === 'show') console.log('stub-context');
 else if (args[0] === 'context') console.log('unix:///var/run/docker.sock');
-else if (args[0] === 'compose') console.log(JSON.stringify({ services: {
+else if (args[0] === 'compose') {
+    for (const key of ['APP_QUIZ_AUTO_SUBMIT_ENABLED', 'APP_QUIZ_AUTO_SUBMIT_DELAY_MS', 'APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE'])
+        if (!process.env[key]) fail('missing CT38 compose input ' + key);
+    console.log(JSON.stringify({ services: {
     minio: { image: 'fixture/minio@sha256:' + '1'.repeat(64), command: ['server', '/data'] },
     'minio-init': { image: 'fixture/mc@sha256:' + '2'.repeat(64), entrypoint: ['/bin/sh', '-ec'], command: ['echo "$$STORAGE_BUCKET"'] },
 } }));
+}
 else if (args[0] === 'info') console.log('stub-daemon');
 else if (args[0] === 'network' && args[1] === 'create') { db['net-' + id] = { kind: 'network', labels: labelsOf(), present: true }; save(); }
 else if (args[0] === 'network' && args[1] === 'inspect') { const key = db[id] ? id : 'net-' + id; const r = live(key); console.log(args.includes('{{.Id}}') ? key : JSON.stringify(r.labels)); }
@@ -68,6 +72,8 @@ else if (args[0] === 'build') {
 else if (args[0] === 'run') {
     if (process.env.JWT_SECRET) fs.writeFileSync(path.join(dir, 'secret'), process.env.JWT_SECRET);
     const name = args[args.indexOf('--name') + 1], postgres = name.endsWith('-postgres');
+    if (name.endsWith('-minio-init')) fs.writeFileSync(path.join(dir, 'storage-secret'), process.env.MINIO_ROOT_PASSWORD);
+    if (name.endsWith('-backend') && args.some((arg) => arg.startsWith('MINIO_ROOT_'))) fail('administrative credentials reached backend');
     db['ctr-' + name] = { kind: 'container', name, labels: labelsOf(), present: true,
         mounts: postgres ? [{ Type: 'volume', Name: '${ANON}', Destination: '/var/lib/postgresql/data' }] : [] };
     if (postgres) db['${ANON}'] = { kind: 'volume', labels: { 'com.docker.volume.anonymous': '' }, present: true };
@@ -92,6 +98,7 @@ else if (args[0] === 'inspect') {
 } else if (args[0] === 'logs') {
     if (mode === 'diagnostics-fail') fail('Error response from daemon: connection refused');
     const secret = fs.existsSync(path.join(dir, 'secret')) ? fs.readFileSync(path.join(dir, 'secret'), 'utf8') : 'none';
+    if (fs.existsSync(path.join(dir, 'storage-secret'))) console.log('storage diagnostic: ' + fs.readFileSync(path.join(dir, 'storage-secret'), 'utf8'));
     console.log('Flyway migration failed: relation already exists');
     console.log('jwt secret in a log line: ' + secret);
     process.stderr.write('APPLICATION FAILED TO START\\n');
@@ -127,7 +134,7 @@ before(() => {
 });
 beforeEach(() => {
     writeFileSync(join(stub, 'calls.log'), '');
-    for (const name of ['inspects', 'preview-stopped', 'resources.json', 'secret', 'hosts.log', 'build-progress']) rmSync(join(stub, name), { force: true });
+    for (const name of ['inspects', 'preview-stopped', 'resources.json', 'secret', 'hosts.log', 'build-progress', 'storage-secret']) rmSync(join(stub, name), { force: true });
 });
 after(() => { process.env = saved; rmSync(stub, { recursive: true, force: true }); });
 
@@ -335,6 +342,8 @@ describe('backend readiness detects a failed start and keeps its diagnostics', (
     test('the default stack initializes storage once, isolates root credentials and recovers it on failure', async () => {
         const { error, record } = await setupFailure('init-fails');
         assert.match(error.message, /Storage initializer failed \(exit 7\)/);
+        assert.ok(!error.message.includes(readFileSync(join(stub, 'storage-secret'), 'utf8')), 'administrative secret is redacted');
+        assert.match(error.message, /storage diagnostic: \[redacted\]/);
         const log = calls(), starts = log.filter((line) => line.startsWith('run -d --name '));
         assert.equal(starts.filter((line) => line.includes('-minio-init ')).length, 1, 'never replay initialization');
         assert.ok(!starts.some((line) => line.includes('-backend ')), 'backend cannot start after failed initialization');

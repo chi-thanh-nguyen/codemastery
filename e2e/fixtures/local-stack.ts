@@ -370,6 +370,11 @@ export default async function globalSetup() {
 
     let preview: ChildProcess | undefined;
     try {
+        // Shared by Compose rendering and backend launch: future CT38 consumers
+        // require all three even when the disposable scheduler is disabled.
+        const quizExpiryFixture = {
+            APP_QUIZ_AUTO_SUBMIT_ENABLED: 'false', APP_QUIZ_AUTO_SUBMIT_DELAY_MS: '1000', APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE: '2',
+        };
         const secrets = {
             POSTGRES_DB: 'codemastery_e2e', POSTGRES_USER: 'codemastery_e2e', POSTGRES_PASSWORD: randomBytes(24).toString('hex'),
             JWT_SECRET: randomBytes(32).toString('hex'),
@@ -411,7 +416,7 @@ export default async function globalSetup() {
         // Compose pins and bucket-scoped initializer, without its host ports or volumes.
         // Initialization runs once; its own `mc ready` is bounded at 120 seconds.
         const { stdout } = await run('docker', ['compose', '--env-file', '/dev/null', '-f', join(repo, 'infrastructure/docker-compose.yml'), 'config', '--format', 'json'], {
-            env: dockerEnv({ ...secrets, DB_NAME: secrets.POSTGRES_DB, DB_USER: secrets.POSTGRES_USER, DB_PASSWORD: secrets.POSTGRES_PASSWORD }),
+            env: dockerEnv({ ...quizExpiryFixture, ...secrets, DB_NAME: secrets.POSTGRES_DB, DB_USER: secrets.POSTGRES_USER, DB_PASSWORD: secrets.POSTGRES_PASSWORD }),
             timeout: 15_000, maxBuffer: 1024 * 1024,
         });
         const config = JSON.parse(stdout), storage = config.services.minio, initializer = config.services['minio-init'];
@@ -474,9 +479,9 @@ export default async function globalSetup() {
             '-e', 'STORAGE_ACCESS_KEY', '-e', 'STORAGE_SECRET_KEY', '-e', 'STORAGE_ENDPOINT=http://minio:9000',
             '-e', 'STORAGE_BUCKET=codemastery', '-e', 'STORAGE_REGION=us-east-1', '-e', 'STORAGE_PATH_STYLE_ACCESS=true',
             // Explicit disposable test values for ADR007 CT38 quiz-expiry consumers (PR #296).
-            '-e', 'APP_QUIZ_AUTO_SUBMIT_ENABLED=false', '-e', 'APP_QUIZ_AUTO_SUBMIT_DELAY_MS=1000', '-e', 'APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE=2',
+            ...Object.keys(quizExpiryFixture).flatMap((name) => ['-e', name]),
             '-e', `CORS_ALLOWED_ORIGINS=${baseUrl}`, '-e', 'SERVER_PORT=8080', backendImage],
-        { DB_NAME: secrets.POSTGRES_DB, DB_USER: secrets.POSTGRES_USER, DB_PASSWORD: secrets.POSTGRES_PASSWORD, JWT_SECRET: secrets.JWT_SECRET,
+        { ...quizExpiryFixture, DB_NAME: secrets.POSTGRES_DB, DB_USER: secrets.POSTGRES_USER, DB_PASSWORD: secrets.POSTGRES_PASSWORD, JWT_SECRET: secrets.JWT_SECRET,
             STORAGE_ACCESS_KEY: secrets.STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY: secrets.STORAGE_SECRET_KEY });
         created(backendIntent, backendId, 'started by this run');
         await recordAnonymousVolumes(inventoryFile, backendIntent, backendId, backend);

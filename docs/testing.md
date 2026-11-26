@@ -8787,3 +8787,63 @@ verification is separate from independent acceptance and protected integration.
 Backend full verification, active-PR integration journeys and hosted CI are still
 in progress at this initial-push checkpoint. The final PR report must supply
 those actual results and distinguish any residual scanner findings.
+
+### CT38 integration follow-up
+
+The disposable PR #296 integration exposed another consumer of its required
+configuration: rendering the entire local Compose model for the shared MinIO
+initializer also validates the backend's quiz-expiry variables. Backend launch
+arguments alone are insufficient. The fixture now supplies the same explicit
+case values to both Compose rendering and backend launch. The Docker double
+rejects their omission during Compose rendering, and initializer failure tests
+also observe redaction of administrative credentials and prohibit passing them
+to the backend. This changes no production default or feature branch.
+
+Initial PR #300 hosted ingress qualification independently reproduced the
+remaining *cold-cache* Central limit: job 140032235617 in run 45855378142 fails
+resolving the Boot parent after the bounded 90-second retry window, before it can
+export a dependency cache. Other jobs successfully export the same dependency
+stage. This is the documented first-build/service-availability boundary, not
+proof that cache persistence fixes a cold service outage. A later successful
+cached evaluation must be reported separately from that failed attempt.
+
+### Additional completed author checks
+
+- Full host Maven verification succeeds: 1,167 unit and 638 real PostgreSQL/MinIO
+  integration cases, zero failures/errors/skips. The backend runtime image retains
+  UID/GID 999, a root-owned mode-0444 JAR, no Maven/cache/observer directories and
+  no setuid/setgid files. This is author-side evidence, not release admission.
+- The expanded Maven bootstrap suite passes 32/32 on both amd64 and arm64.
+  CT38/redaction-enhanced local-stack controls pass 26/26 in Linux.
+- PR #294 `bec98bd0b740b746b4a069523d75175d05bf69fb` merges cleanly with the
+  remediation in a disposable worktree and passes frontend typecheck/build.
+- PR #295 `46fdc65e0e12826826ce24c570f0e143bddf33fa` merges cleanly and passes
+  all 70 SkillGraph unit cases. PR #297
+  `5af4f4b96ad56b57d5a3ad2c64e4479b54175ba1` merges cleanly and passes all
+  47 SubmissionService unit cases. These do not qualify all branch behavior.
+- PR #298 `69672e49eb528e45d633f345eeefc8d1035cefee` merges cleanly and its
+  lifecycle-managed Linux discovery lists 135 tests in two files and completes
+  recovery. Its adaptive journeys have not been executed in this integration.
+- PR #296 `4fa292386144d6ab5037058b81bef3065e7891af` focused verification
+  passes 98 unit and 62 real PostgreSQL integration cases. Its backend image
+  builds from the shared dependency cache without further Maven downloads.
+  After the Compose-input correction, its two-project Chromium E2E run passes
+  46 cases with two existing skips; all seven owned resources are removed and
+  coordinator finalization confirms recovery complete.
+- PR #279's real-storage integration: 14 passed, five existing project-specific
+  skips, one retained WebKit page-overflow failure (377 > 360) after successful
+  file operations. Direct WebKit upload returns 201. Its initial main merge
+  required only documentation conflict resolution; feature source was preserved.
+  No remote feature branch was modified. See the
+  [precise remaining boundary](deployment.md#executed-integration-and-residual-security-boundary).
+
+The scan findings described there are actual current-database results, not
+acceptance. Historical zero-finding scans do not replace this new scan.
+
+The final author-side self-audit checked the complete diff against main, unchanged
+required checks and runtime/security contracts, every backend Docker build
+consumer, cache input/ref boundaries, exact verifier status and sentinel controls,
+MinIO credentials/volume ownership and failure recovery, and integration with the
+recorded active revisions. It found no further implementation correction after
+the CT38 Compose-input fix and explicit BuildKit image pin. This is an author
+audit, not independent approval.
