@@ -2,7 +2,7 @@ import { ProductionLessonEditorPage } from '../features/instructor/course-manage
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import type { RouteObject } from 'react-router';
-import { WORKSPACE_ROUTES, ROUTE_PATHS, currentSection, roleNavigation } from './routePaths';
+import { WORKSPACE_ROUTES, ROUTE_PATHS, currentSection, roleNavigation, notificationsAvailable } from './routePaths';
 import type { WorkspaceHandle } from './routePaths';
 import { Link, matchRoutes, Navigate, Outlet, Route, Routes, useLocation, useNavigate, useParams } from 'react-router';
 import { Alert, Box, Button, ListItemIcon, MenuItem } from '@mui/material';
@@ -30,6 +30,10 @@ import { QuizEditor } from '../features/instructor/course-management/pages/QuizE
 import { AssignmentEditor } from '../features/instructor/course-management/pages/AssignmentEditorPage';
 import { useCourseEditorContext } from '../features/instructor/course-management/hooks/useCourseEditor';
 import { CourseSkillsSection } from '../features/instructor/skill-graph-editor/pages/SkillGraphEditorPage';
+
+import { NotificationBell } from '../features/interaction/components/NotificationBell';
+import { LiveNotificationsPage } from '../features/interaction/pages/NotificationsPage';
+import { useNotifications } from '../features/interaction/hooks/useNotifications';
 
 export { currentSection } from './routePaths';
 
@@ -93,15 +97,18 @@ function Workspace() {
     const auth = useAuth(), navigate = useNavigate(), location = useLocation();
     const role = auth.isAuthenticated ? auth.user?.role : undefined;
     const navItems = roleNavigation(role).map((item) => ({ ...item, icon: <PresentationIcon name={item.icon} /> }));
+    const notifications = useNotifications({ enabled: notificationsAvailable(role), open: currentSection(location.pathname, role) === ROUTE_PATHS.NOTIFICATIONS, routeKey: location.key });
     const brand = auth.isAuthenticated ? auth.startPath : ROUTE_PATHS.HOME;
     // Primary navigation and the home link ask a mounted editor with unsaved edits before leaving (S19).
     const shell = useShellNavigationRegistry();
     return <ShellNavigationContext.Provider value={shell}><DashboardLayout navItems={navItems} selectedNavId={currentSection(location.pathname, role)}
         onNavSelect={(path) => shell.attempt(() => navigate(path))}
+        headerUtilities={notificationsAvailable(role) ? <NotificationBell unread={notifications.unreadCount ?? 0} href={ROUTE_PATHS.NOTIFICATIONS}
+            current={currentSection(location.pathname, role) === ROUTE_PATHS.NOTIFICATIONS} onClick={(event) => { if (isPlainClick(event)) { event.preventDefault(); shell.attempt(() => navigate(ROUTE_PATHS.NOTIFICATIONS)); } }} /> : undefined}
         headerActions={<SessionNavigation />} brandHref={brand} onBrandSelect={() => shell.attempt(() => navigate(auth.isAuthenticated ? auth.consumeReturn() : brand))}
         // Like the header, the drawer shows no sign-in action while the restore runs (F2).
         drawerFooter={auth.isAuthenticated || auth.restoring ? undefined : <Button component={Link} to="/register" variant="contained" color="onChrome" fullWidth>Create account</Button>}>
-        <Outlet />
+        <Outlet context={notifications} />
     </DashboardLayout></ShellNavigationContext.Provider>;
 }
 function RouteFocus() {
@@ -244,6 +251,7 @@ export function AppRouter({ catalogue, preview }: { catalogue?: ReactNode; previ
         'learner-home': <LearnerHome key={auth.generation} />,
         'my-courses': <MyCoursesPage key={auth.generation} />,
         profile: <ProfilePage />,
+        notifications: <LiveNotificationsPage key={auth.generation} />,
         teaching: <TeachingHomePage key={auth.generation} />,
         'create-course': <CreateCoursePage key={auth.generation} />,
         'course-editor': <CourseEditorShell key={auth.generation} />,

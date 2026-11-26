@@ -10,6 +10,7 @@ import { AppRouter } from '../../../../routes';
 import { ApiError } from '../../../../shared/types/apiTypes';
 import * as api from '../api/instructorCourseApi';
 import * as graph from '../../skill-graph-editor/api/skillGraphApi';
+import * as notifications from '../../../interaction/api/notificationApi';
 import type { OwnedCourse, OwnedMaterial } from '../api/instructorCourseApi';
 import { FileDownloadButton, FileUploadField } from '../../../../shared/components/FileUploadField';
 vi.mock('../api/instructorCourseApi', async (original) => {
@@ -17,6 +18,7 @@ vi.mock('../api/instructorCourseApi', async (original) => {
     return Object.fromEntries(Object.entries(actual).map(([key, value]) => [key, typeof value === 'function' ? vi.fn() : value]));
 });
 vi.mock('../../skill-graph-editor/api/skillGraphApi', async (original) => ({ ...await original<object>(), getOwnedSkillGraph: vi.fn(), mapCourseLessonSkill: vi.fn(), unmapCourseLessonSkill: vi.fn() }));
+vi.mock('../../../interaction/api/notificationApi', async (original) => ({ ...await original<object>(), countUnreadNotifications: vi.fn(), listMyNotifications: vi.fn() }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const c = '00000000-0000-4000-8000-000000000001', l = '00000000-0000-4000-8000-000000000002', ch = '00000000-0000-4000-8000-000000000003', m = '00000000-0000-4000-8000-000000000004', skill = '00000000-0000-4000-8000-000000000005';
 const initial = (): OwnedCourse => ({ id: c, title: 'Course', description: 'Description', prerequisiteDescription: null, publicationStatus: 'hidden', chapters: [{ id: ch, title: 'Chapter', position: 1, lessons: [{ id: l, chapterId: ch, title: 'Lesson', contentMarkdown: '# Content', position: 1, publicationStatus: 'hidden', materials: [] }] }] });
@@ -38,6 +40,8 @@ beforeEach(() => {
     auth = { user: { id: skill, displayName: 'Instructor', role: 'Instructor' }, generation: 1, isAuthenticated: true, restoring: false, isCurrent: n => n === 1, login: vi.fn(), register: vi.fn(), logout: vi.fn(), rememberProfile: vi.fn(), startPath: '/teach', consumeReturn: () => '/teach' };
     vi.mocked(api.getOwnedCourse).mockImplementation(async () => structuredClone(course));
     vi.mocked(graph.getOwnedSkillGraph).mockImplementation(async () => ({ courseId: c, skills: [{ id: skill, name: 'Loops', description: null }], prerequisites: [], mappings: [] }));
+    vi.mocked(notifications.countUnreadNotifications).mockResolvedValue({ unreadCount: 2 });
+    vi.mocked(notifications.listMyNotifications).mockResolvedValue({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 });
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 describe('FE14 production authoring and reconciliation', () => {
@@ -54,6 +58,43 @@ describe('FE14 production authoring and reconciliation', () => {
     });
     it('asks before shell/back navigation with a draft and does not require mappings to save', async () => {
         await mount(); await type('Lesson title', 'Draft'); await click('Content'); expect(text()).toContain('Leave without saving?'); await click('Keep editing', modal()); expect(field('Lesson title').value).toBe('Draft'); expect(api.updateCourseLesson).not.toHaveBeenCalled();
+    });
+    it('FE14/FE28: the actual Lesson draft intercepts the bell while modified clicks stay native', async () => {
+        await mount(); await type('Lesson title', 'Private draft');
+        const bell = document.querySelector<HTMLAnchorElement>('header a[href="/notifications"]')!;
+        const modified = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
+        await act(async () => bell.dispatchEvent(modified));
+        expect(modified.defaultPrevented).toBe(false); expect(text()).not.toContain('Leave without saving?');
+        await act(async () => bell.click()); await flush();
+        expect(text()).toContain('Leave without saving?');
+        expect(notifications.listMyNotifications).not.toHaveBeenCalled();
+        await click('Keep editing', modal()); expect(field('Lesson title').value).toBe('Private draft');
+        expect(api.getOwnedCourse).toHaveBeenCalledTimes(1); expect(notifications.countUnreadNotifications).toHaveBeenCalledTimes(1);
+        await act(async () => bell.click()); await click('Leave', modal());
+        expect(document.querySelector('h1')?.textContent).toBe('Notifications');
+        expect(bell.getAttribute('aria-current')).toBe('page');
+        expect(notifications.listMyNotifications).toHaveBeenCalledTimes(1);
+        expect(notifications.countUnreadNotifications).toHaveBeenCalledTimes(2);
+        expect(api.getOwnedCourse).toHaveBeenCalledTimes(1); expect(api.updateCourseLesson).not.toHaveBeenCalled();
+        expect(text()).not.toContain('Private draft');
+    });
+    it('FE14/FE28: bell Keep editing retains a pending write and failed recovery permits deliberate navigation without replay', async () => {
+        let settle!: (value: api.OwnedLesson) => void;
+        vi.mocked(api.updateCourseLesson).mockImplementation(() => new Promise(resolve => { settle = resolve; }));
+        await mount(); await type('Lesson title', 'Acknowledged'); await click('Save changes');
+        const bell = document.querySelector<HTMLAnchorElement>('header a[href="/notifications"]')!;
+        await act(async () => bell.click()); await flush(); await click('Keep editing', modal());
+        expect(button('Save changes').disabled).toBe(true); expect(api.getOwnedCourse).toHaveBeenCalledTimes(1);
+        expect(notifications.listMyNotifications).not.toHaveBeenCalled();
+        lesson().title = 'Acknowledged'; vi.mocked(api.getOwnedCourse).mockRejectedValueOnce(new ApiError('network', 'offline'));
+        await act(async () => settle(structuredClone(lesson()))); await flush();
+        expect(text()).toContain("We couldn't load this course. The last loaded version is shown.");
+        expect(button('Save changes').disabled).toBe(true); expect(api.getOwnedCourse).toHaveBeenCalledTimes(2);
+        await act(async () => bell.click()); await flush();
+        expect(document.querySelector('h1')?.textContent).toBe('Notifications');
+        await click('Native back probe');
+        expect(field('Lesson title').value).toBe('Acknowledged'); expect(api.getOwnedCourse).toHaveBeenCalledTimes(3);
+        expect(api.updateCourseLesson).toHaveBeenCalledTimes(1); expect(notifications.listMyNotifications).toHaveBeenCalledTimes(1);
     });
     it('reconciles an unknown save without replay and preserves the draft when refresh fails', async () => {
         await mount(); vi.mocked(api.updateCourseLesson).mockRejectedValue(new ApiError('network', 'offline')); vi.mocked(api.getOwnedCourse).mockRejectedValue(new ApiError('network', 'offline'));
