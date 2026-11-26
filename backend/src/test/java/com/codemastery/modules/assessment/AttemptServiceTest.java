@@ -64,11 +64,16 @@ import com.codemastery.modules.assessment.application.service.AttemptService.Att
 import com.codemastery.modules.assessment.application.service.AttemptService.AttemptResult;
 import com.codemastery.modules.assessment.application.service.AttemptService.AttemptSummary;
 import com.codemastery.modules.assessment.application.service.AttemptService.AttemptView;
+import com.codemastery.modules.assessment.application.service.AttemptService.LatestSkillEvidence;
+import com.codemastery.modules.assessment.application.service.AttemptService.LearnerAttemptSummary;
+import com.codemastery.modules.assessment.application.service.AttemptService.SkillEvidence;
 import com.codemastery.modules.assessment.application.service.AttemptService.StartOutcome;
 import com.codemastery.modules.assessment.application.service.QuizGradingService;
 import com.codemastery.modules.assessment.domain.model.Attempt;
 import com.codemastery.modules.assessment.domain.model.AttemptAnswer;
 import com.codemastery.modules.assessment.domain.repository.AttemptRepository;
+import com.codemastery.modules.assessment.domain.repository.AttemptRepository.EvidenceCandidate;
+import com.codemastery.modules.assessment.domain.repository.AttemptRepository.OwnedLearnerAttemptRow;
 import com.codemastery.modules.auth.application.service.UserAccountService;
 import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
 import java.math.BigDecimal;
@@ -884,20 +889,30 @@ class TimedAttempts {
     @Test
     void assessmentCompanionAndGuardCallersStayInsideTheirApprovedAllowlist() throws Exception {
         var root = java.nio.file.Path.of("src", "main", "java");
-        java.util.Map<String,java.util.Set<String>> allowed = java.util.Map.of(
-                ".requireAssessmentSkillsInCourse(", java.util.Set.of("AttemptService.java"),
-                ".withLearnerAssessmentWrite(", java.util.Set.of("AttemptService.java"),
-                ".withAssessmentExpiryWrite(", java.util.Set.of("AttemptService.java"),
-                ".finalizeExpired(", java.util.Set.of("AttemptAutoSubmitScheduler.java"),
-                ".readLatestSkillEvidence(", java.util.Set.of("MasteryUpdateService.java"),
-                ".readMyLatestSkillEvidence(", java.util.Set.of("MasteryQueryService.java"),
-                ".readQuizOutcome(", java.util.Set.of("PlatformMetricsService.java", "AttemptService.java"),
-                ".readMyPlacementQuizId(", java.util.Set.of("PlacementDiagnosticService.java"));
+        java.util.Map<String,java.util.Set<String>> allowed = java.util.Map.ofEntries(
+                java.util.Map.entry(".requireAssessmentSkillsInCourse(", java.util.Set.of("AttemptService.java")),
+                java.util.Map.entry(".withLearnerAssessmentWrite(", java.util.Set.of("AttemptService.java")),
+                java.util.Map.entry(".withAssessmentExpiryWrite(", java.util.Set.of("AttemptService.java")),
+                java.util.Map.entry(".finalizeExpired(", java.util.Set.of("AttemptAutoSubmitScheduler.java")),
+                java.util.Map.entry(".readLatestSkillEvidence(", java.util.Set.of("MasteryUpdateService.java")),
+                java.util.Map.entry(".readMyLatestSkillEvidence(", java.util.Set.of("MasteryQueryService.java")),
+                java.util.Map.entry(".readOwnedLatestSkillEvidence(",
+                        java.util.Set.of("MasteryQueryService.java", "LearnerInsightsService.java")),
+                java.util.Map.entry(".listLearnerAttemptsForOwner(", java.util.Set.of("LearnerInsightsService.java")),
+                java.util.Map.entry(".readQuizOutcome(", java.util.Set.of("PlatformMetricsService.java", "AttemptService.java")),
+                java.util.Map.entry(".readMyPlacementQuizId(", java.util.Set.of("PlacementDiagnosticService.java")));
         try(var files=java.nio.file.Files.walk(root)) {
             for(var file:files.filter(path->path.toString().endsWith(".java")).toList()) {
                 String code=java.nio.file.Files.readString(file);
                 for(var entry:allowed.entrySet()) if(code.contains(entry.getKey())) {
                     assertTrue(entry.getValue().contains(file.getFileName().toString()), file+": "+entry.getKey());
+                }
+                if (file.startsWith(root.resolve("com/codemastery/modules/assessment/api"))) {
+                    for (String forbidden : List.of(
+                            "LatestSkillEvidence", "SkillEvidence", "LearnerAttemptSummary",
+                            "readOwnedLatestSkillEvidence", "listLearnerAttemptsForOwner")) {
+                        assertFalse(code.contains(forbidden), file + " exposes " + forbidden);
+                    }
                 }
             }
         }
@@ -993,4 +1008,188 @@ class TimedAttempts {
         }
     }
 }
+
+    @Nested
+    class Ct33OwnerInsightReads {
+
+        private AttemptRepository attemptRepo;
+        private QuizRepository quizRepo;
+        private CourseAccessService access;
+        private UserAccountService identities;
+        private AttemptService attemptService;
+
+        private final UUID targetLearner = UUID.fromString("00000000-0000-0000-0000-00000000e009");
+
+        @BeforeEach
+        void setUpOwnerReads() {
+            attemptRepo = mock(AttemptRepository.class);
+            quizRepo = mock(QuizRepository.class);
+            access = mock(CourseAccessService.class);
+            identities = mock(UserAccountService.class);
+            attemptService = new AttemptService(
+                    attemptRepo, quizRepo, new QuizGradingService(), access, identities,
+                    mock(CourseManagementService.class), mock(SkillGraphService.class));
+        }
+
+        @org.junit.jupiter.api.AfterEach
+        void clearSnapshot() {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(null);
+        }
+
+        private void enterSnapshot() {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
+                    org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        }
+
+        @Test
+        void declaresMandatoryRepeatableReadOnlyTransactionsAndExactRecordShapes() throws Exception {
+            for (var method : List.of(
+                    AttemptService.class.getMethod("readOwnedLatestSkillEvidence", UUID.class, UUID.class, java.util.Set.class),
+                    AttemptService.class.getMethod("listLearnerAttemptsForOwner", UUID.class, UUID.class, int.class, int.class))) {
+                var tx = method.getAnnotation(org.springframework.transaction.annotation.Transactional.class);
+                assertTrue(tx != null);
+                assertEquals(org.springframework.transaction.annotation.Propagation.MANDATORY, tx.propagation());
+                assertTrue(tx.readOnly());
+                assertEquals(org.springframework.transaction.annotation.Isolation.REPEATABLE_READ, tx.isolation());
+            }
+
+            assertEquals(List.of("attemptId", "quizId", "quizTitle", "quizKind",
+                            "attemptNumber", "submittedAt", "scorePercentage"),
+                    Arrays.stream(LearnerAttemptSummary.class.getRecordComponents())
+                            .map(java.lang.reflect.RecordComponent::getName).toList());
+        }
+
+        @Test
+        void rejectsMissingReadWriteOrNonRepeatableReadSnapshotsBeforeAdmissionOrQueries() {
+            assertThrows(IllegalStateException.class,
+                    () -> attemptService.readOwnedLatestSkillEvidence(COURSE, targetLearner, java.util.Set.of(SKILL)));
+            assertThrows(IllegalStateException.class,
+                    () -> attemptService.listLearnerAttemptsForOwner(COURSE, targetLearner, 0, 20));
+
+            enterSnapshot();
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            assertThrows(IllegalStateException.class,
+                    () -> attemptService.readOwnedLatestSkillEvidence(COURSE, targetLearner, java.util.Set.of(SKILL)));
+            assertThrows(IllegalStateException.class,
+                    () -> attemptService.listLearnerAttemptsForOwner(COURSE, targetLearner, 0, 20));
+
+            enterSnapshot();
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
+                    org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+            assertThrows(IllegalStateException.class,
+                    () -> attemptService.readOwnedLatestSkillEvidence(COURSE, targetLearner, java.util.Set.of(SKILL)));
+            assertThrows(IllegalStateException.class,
+                    () -> attemptService.listLearnerAttemptsForOwner(COURSE, targetLearner, 0, 20));
+
+            verifyNoInteractions(access, attemptRepo, quizRepo, identities);
+        }
+
+        @Test
+        void readOwnedLatestSkillEvidenceEnforcesOwnershipAndComputesSkillEvidence() {
+            enterSnapshot();
+            assertThrows(IllegalArgumentException.class,
+                    () -> attemptService.readOwnedLatestSkillEvidence(null, targetLearner, java.util.Set.of(SKILL)));
+            assertThrows(IllegalArgumentException.class,
+                    () -> attemptService.readOwnedLatestSkillEvidence(COURSE, null, java.util.Set.of(SKILL)));
+            assertThrows(NullPointerException.class,
+                    () -> attemptService.readOwnedLatestSkillEvidence(COURSE, targetLearner, null));
+
+            doThrow(new AccessDeniedException("Denied")).when(access).requireCourseOwnership(COURSE);
+            assertThrows(AccessDeniedException.class,
+                    () -> attemptService.readOwnedLatestSkillEvidence(COURSE, targetLearner, java.util.Set.of()));
+            verifyNoInteractions(attemptRepo, quizRepo);
+
+            org.mockito.Mockito.reset(access);
+            Instant started = Instant.parse("2026-11-26T10:00:00Z");
+            Instant submitted = Instant.parse("2026-11-26T10:05:00Z");
+            UUID attemptId = UUID.randomUUID();
+            Question q1 = new Question(Q1, SKILL, "Q1", "single_choice", "easy",
+                    new String[] {"A", "B"}, new Boolean[] {true, false});
+            Question q2 = new Question(Q2, SKILL, "Q2", "single_choice", "medium",
+                    new String[] {"A", "B"}, new Boolean[] {true, false});
+            Question q3 = new Question(Q3, SKILL, "Q3", "single_choice", "hard",
+                    new String[] {"A", "B"}, new Boolean[] {true, false});
+
+            when(attemptRepo.findLatestEvidenceCandidates(COURSE, targetLearner, java.util.Set.of(SKILL)))
+                    .thenReturn(List.of(new EvidenceCandidate(SKILL, attemptId, QUIZ)));
+            when(quizRepo.findInCourse(QUIZ, COURSE)).thenReturn(Optional.of(quiz("hidden")));
+            when(attemptRepo.findInQuizForLearner(attemptId, QUIZ, targetLearner)).thenReturn(Optional.of(
+                    new Attempt(attemptId, targetLearner, QUIZ, 2, started, started.plusSeconds(600),
+                            submitted, new BigDecimal("66.67"))));
+            when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ,
+                    List.of(new Member(1, q1), new Member(2, q2), new Member(3, q3))));
+            when(attemptRepo.findAnswersInPositionOrder(attemptId)).thenReturn(List.of(
+                    new AttemptAnswer(UUID.randomUUID(), attemptId, Q1, 1, new Boolean[] {true, false}, true),
+                    new AttemptAnswer(UUID.randomUUID(), attemptId, Q2, 2, new Boolean[] {false, true}, false),
+                    new AttemptAnswer(UUID.randomUUID(), attemptId, Q3, 3, new Boolean[] {true, false}, true)));
+
+            LatestSkillEvidence evidence =
+                    attemptService.readOwnedLatestSkillEvidence(COURSE, targetLearner, java.util.Set.of(SKILL));
+            assertEquals(COURSE, evidence.courseId());
+            assertEquals(targetLearner, evidence.learnerId());
+            assertEquals(new SkillEvidence(SKILL, attemptId, QUIZ, 2, started, submitted,
+                    2, 3, new BigDecimal("66.67")), evidence.bySkill().get(SKILL));
+            assertThrows(UnsupportedOperationException.class, () -> evidence.bySkill().clear());
+            verify(access).requireCourseOwnership(COURSE);
+        }
+
+        @Test
+        void listLearnerAttemptsForOwnerEnforcesPagingOwnershipAndStoredIntegrity() {
+            enterSnapshot();
+            assertThrows(IllegalArgumentException.class,
+                    () -> attemptService.listLearnerAttemptsForOwner(null, targetLearner, 0, 20));
+            assertThrows(IllegalArgumentException.class,
+                    () -> attemptService.listLearnerAttemptsForOwner(COURSE, null, 0, 20));
+            for (int[] badPage : List.of(new int[] {-1, 20}, new int[] {0, 0}, new int[] {0, 101})) {
+                BusinessRuleException err = assertThrows(BusinessRuleException.class,
+                        () -> attemptService.listLearnerAttemptsForOwner(
+                                COURSE, targetLearner, badPage[0], badPage[1]));
+                assertEquals(HttpStatus.BAD_REQUEST, err.getStatus());
+            }
+            verifyNoInteractions(access, attemptRepo);
+
+            doThrow(new ResourceNotFoundException("Hidden")).when(access).requireCourseOwnership(COURSE);
+            assertThrows(ResourceNotFoundException.class,
+                    () -> attemptService.listLearnerAttemptsForOwner(COURSE, targetLearner, 0, 20));
+            verifyNoInteractions(attemptRepo);
+
+            org.mockito.Mockito.reset(access);
+            when(attemptRepo.countSubmittedForLearnerInCourse(COURSE, targetLearner)).thenReturn(1L);
+            PageResponse<LearnerAttemptSummary> beyondEnd =
+                    attemptService.listLearnerAttemptsForOwner(COURSE, targetLearner, 1, 20);
+            assertTrue(beyondEnd.content().isEmpty());
+            assertEquals(1L, beyondEnd.totalElements());
+            verify(attemptRepo, never()).findSubmittedForLearnerInCourse(any(), any(), anyInt(), anyInt());
+
+            Instant submitted = Instant.parse("2026-11-26T10:05:00Z");
+            UUID attemptId = UUID.randomUUID();
+            when(attemptRepo.countSubmittedForLearnerInCourse(COURSE, targetLearner)).thenReturn(1L);
+            when(attemptRepo.findSubmittedForLearnerInCourse(COURSE, targetLearner, 0, 20))
+                    .thenReturn(List.of(new OwnedLearnerAttemptRow(
+                            attemptId, QUIZ, "Hidden Quiz", "diagnostic", 2, submitted, new BigDecimal("75.0"))));
+
+            PageResponse<LearnerAttemptSummary> page =
+                    attemptService.listLearnerAttemptsForOwner(COURSE, targetLearner, 0, 20);
+            assertEquals(List.of(new LearnerAttemptSummary(
+                    attemptId, QUIZ, "Hidden Quiz", "diagnostic", 2, submitted, new BigDecimal("75.00"))),
+                    page.content());
+
+            for (List<OwnedLearnerAttemptRow> corrupt : List.of(
+                    java.util.Collections.singletonList((OwnedLearnerAttemptRow) null),
+                    List.of(new OwnedLearnerAttemptRow(attemptId, QUIZ, "   ", "practice", 1, submitted, BigDecimal.ZERO)),
+                    List.of(new OwnedLearnerAttemptRow(attemptId, QUIZ, "Quiz", "exam", 1, submitted, BigDecimal.ZERO)),
+                    List.of(new OwnedLearnerAttemptRow(attemptId, QUIZ, "Quiz", "practice", 0, submitted, BigDecimal.ZERO)),
+                    List.of(new OwnedLearnerAttemptRow(attemptId, QUIZ, "Quiz", "practice", 1, null, BigDecimal.ZERO)),
+                    List.of(new OwnedLearnerAttemptRow(attemptId, QUIZ, "Quiz", "practice", 1, submitted, new BigDecimal("100.01")))
+            )) {
+                when(attemptRepo.findSubmittedForLearnerInCourse(COURSE, targetLearner, 0, 20)).thenReturn(corrupt);
+                assertThrows(IllegalStateException.class,
+                        () -> attemptService.listLearnerAttemptsForOwner(COURSE, targetLearner, 0, 20));
+            }
+        }
+    }
 }

@@ -6,12 +6,14 @@ import com.codemastery.modules.assessment.domain.repository.AttemptRepository;
 import com.codemastery.modules.assessment.infrastructure.persistence.entity.AttemptAnswerEntity;
 import com.codemastery.modules.assessment.infrastructure.persistence.entity.AttemptEntity;
 import jakarta.persistence.EntityManager;
-import java.time.Instant;
 import java.math.BigDecimal;
-import java.util.Set;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.stereotype.Repository;
 
@@ -100,6 +102,78 @@ public class AttemptRepositoryImpl implements AttemptRepository {
                 """, Object[].class).setParameter("course", courseId).setParameter("learners", learnerIds)
                 .getSingleResult();
         return new Outcome(((Number) row[0]).longValue(), (BigDecimal) row[1]);
+    }
+
+    @Override
+    public long countSubmittedForLearnerInCourse(UUID courseId, UUID learnerId) {
+        Objects.requireNonNull(courseId, "courseId");
+        Objects.requireNonNull(learnerId, "learnerId");
+        return ((Number) entityManager.createNativeQuery("""
+                SELECT count(*)
+                FROM public.attempts a JOIN public.quizzes q ON q.id = a.quiz_id
+                WHERE q.course_id = :course AND a.user_id = :learner AND a.submitted_at IS NOT NULL
+                """)
+                .setParameter("course", courseId)
+                .setParameter("learner", learnerId)
+                .getSingleResult()).longValue();
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public List<OwnedLearnerAttemptRow> findSubmittedForLearnerInCourse(
+            UUID courseId, UUID learnerId, int page, int size) {
+        Objects.requireNonNull(courseId, "courseId");
+        Objects.requireNonNull(learnerId, "learnerId");
+        long offset = (long) page * size;
+        List<Object[]> rows = entityManager.createNativeQuery("""
+                SELECT a.id, q.id, q.title, q.kind, a.attempt_number, a.submitted_at, a.score_percentage
+                FROM public.attempts a JOIN public.quizzes q ON q.id = a.quiz_id
+                WHERE q.course_id = :course AND a.user_id = :learner AND a.submitted_at IS NOT NULL
+                ORDER BY a.submitted_at DESC, CAST(a.id AS text) COLLATE "C" ASC
+                LIMIT :limit OFFSET :offset
+                """, Object[].class)
+                .setParameter("course", courseId)
+                .setParameter("learner", learnerId)
+                .setParameter("limit", size)
+                .setParameter("offset", offset)
+                .getResultList();
+        return rows.stream().map(row -> new OwnedLearnerAttemptRow(
+                (UUID) row[0],
+                (UUID) row[1],
+                (String) row[2],
+                (String) row[3],
+                ((Number) row[4]).intValue(),
+                toInstant(row[5]),
+                toBigDecimal(row[6]))).toList();
+    }
+
+    private static Instant toInstant(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Instant instant) {
+            return instant;
+        }
+        if (value instanceof Timestamp timestamp) {
+            return timestamp.toInstant();
+        }
+        if (value instanceof OffsetDateTime offsetDateTime) {
+            return offsetDateTime.toInstant();
+        }
+        throw new IllegalStateException("Unexpected timestamp value type: " + value.getClass().getName());
+    }
+
+    private static BigDecimal toBigDecimal(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof BigDecimal decimal) {
+            return decimal;
+        }
+        if (value instanceof Number number) {
+            return new BigDecimal(number.toString());
+        }
+        throw new IllegalStateException("Unexpected score value type: " + value.getClass().getName());
     }
 
     @Override

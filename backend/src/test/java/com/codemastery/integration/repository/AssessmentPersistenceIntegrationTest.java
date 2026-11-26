@@ -1953,6 +1953,119 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
             mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path).header("Authorization","Bearer "+learnerToken))
                     .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized());
         }
+
+        @Test void ownedSkillEvidenceAndAttemptListEnforceOwnershipHiddenQuizzesOrderPagingAndSnapshotIsolation()
+                throws Exception {
+            UUID otherInstructor = user("instructor");
+            UUID hiddenCourse = UUID.randomUUID();
+            jdbc.update("INSERT INTO courses (id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES (?,?,'Hidden AS16','Fixture','hidden',false)",
+                    hiddenCourse, owner);
+            try {
+                // Missing caller transaction is rejected by Spring @Transactional(MANDATORY).
+                asOwner();
+                assertThrows(IllegalTransactionStateException.class,
+                        () -> live.readOwnedLatestSkillEvidence(courseId, learner, Set.of(skillId)));
+                assertThrows(IllegalTransactionStateException.class,
+                        () -> live.listLearnerAttemptsForOwner(courseId, learner, 0, 20));
+
+                // CT03 ownership rules: Admin 403, non-owner 403 on published / 404 on hidden, Learner 403.
+                as(admin, com.codemastery.modules.auth.domain.model.Role.ADMIN);
+                assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                        () -> snapshot(() -> live.readOwnedLatestSkillEvidence(courseId, learner, Set.of(skillId))));
+                as(otherInstructor, com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR);
+                assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                        () -> snapshot(() -> live.listLearnerAttemptsForOwner(courseId, learner, 0, 20)));
+                assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,
+                        () -> snapshot(() -> live.readOwnedLatestSkillEvidence(hiddenCourse, learner, Set.of(skillId))));
+                asLearner();
+                assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                        () -> snapshot(() -> live.listLearnerAttemptsForOwner(courseId, learner, 0, 20)));
+
+                UUID hiddenQuiz = UUID.fromString("80000000-0000-4000-8000-00000000b901");
+                addQuiz(hiddenQuiz, "diagnostic");
+                jdbc.update("UPDATE quizzes SET title='Hidden Diag', publication_status='hidden' WHERE id=?", hiddenQuiz);
+
+                UUID lowSubmitted = UUID.fromString("00000000-0000-4000-8000-00000000c901");
+                UUID highSubmitted = UUID.fromString("ffffffff-0000-4000-8000-00000000c902");
+                UUID olderSubmitted = UUID.randomUUID();
+                UUID unsubmitted = UUID.randomUUID();
+
+                Instant t1 = now.plusSeconds(10);
+                Instant t2 = now.plusSeconds(20);
+                jdbc.update("INSERT INTO attempts VALUES (?,?,?,?,?,?,?,?)", olderSubmitted, learner, quizId, 1,
+                        java.time.OffsetDateTime.ofInstant(now, java.time.ZoneOffset.UTC),
+                        java.time.OffsetDateTime.ofInstant(now.plusSeconds(60), java.time.ZoneOffset.UTC),
+                        java.time.OffsetDateTime.ofInstant(t1, java.time.ZoneOffset.UTC), new BigDecimal("50.00"));
+                jdbc.update("INSERT INTO attempt_answers VALUES (?,?,?,1,ARRAY[true,false],true)", UUID.randomUUID(), olderSubmitted, q1);
+                jdbc.update("INSERT INTO attempt_answers VALUES (?,?,?,3,ARRAY[false,false],false)", UUID.randomUUID(), olderSubmitted, q2);
+
+                jdbc.update("INSERT INTO attempts VALUES (?,?,?,?,?,?,?,?)", highSubmitted, learner, quizId, 2,
+                        java.time.OffsetDateTime.ofInstant(now, java.time.ZoneOffset.UTC),
+                        java.time.OffsetDateTime.ofInstant(now.plusSeconds(60), java.time.ZoneOffset.UTC),
+                        java.time.OffsetDateTime.ofInstant(t2, java.time.ZoneOffset.UTC), new BigDecimal("100.00"));
+                jdbc.update("INSERT INTO attempt_answers VALUES (?,?,?,1,ARRAY[true,false],true)", UUID.randomUUID(), highSubmitted, q1);
+                jdbc.update("INSERT INTO attempt_answers VALUES (?,?,?,3,ARRAY[true,false],true)", UUID.randomUUID(), highSubmitted, q2);
+
+                jdbc.update("INSERT INTO attempts VALUES (?,?,?,?,?,?,?,?)", lowSubmitted, learner, hiddenQuiz, 1,
+                        java.time.OffsetDateTime.ofInstant(now, java.time.ZoneOffset.UTC),
+                        java.time.OffsetDateTime.ofInstant(now.plusSeconds(60), java.time.ZoneOffset.UTC),
+                        java.time.OffsetDateTime.ofInstant(t2, java.time.ZoneOffset.UTC), new BigDecimal("0.00"));
+                jdbc.update("INSERT INTO attempt_answers VALUES (?,?,?,1,ARRAY[false,false],false)", UUID.randomUUID(), lowSubmitted, q1);
+                jdbc.update("INSERT INTO attempt_answers VALUES (?,?,?,3,ARRAY[false,false],false)", UUID.randomUUID(), lowSubmitted, q2);
+
+                // Unsubmitted attempt must be ignored by both owner reads.
+                jdbc.update("INSERT INTO attempts (id,user_id,quiz_id,attempt_number,started_at,expires_at) VALUES (?,?,?,3,?,?)",
+                        unsubmitted, learner, quizId,
+                        java.time.OffsetDateTime.ofInstant(t2, java.time.ZoneOffset.UTC),
+                        java.time.OffsetDateTime.ofInstant(t2.plusSeconds(60), java.time.ZoneOffset.UTC));
+
+                asOwner();
+                try (var worker = new AttemptWorkers(1)) {
+                    TransactionTemplate rr = new TransactionTemplate(transactionManager);
+                    rr.setReadOnly(true);
+                    rr.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+                    rr.executeWithoutResult(status -> {
+                        var evidence = live.readOwnedLatestSkillEvidence(
+                                courseId, learner, Set.of(skillId, UUID.randomUUID()));
+                        assertEquals(Set.of(skillId), evidence.bySkill().keySet());
+                        // hiddenQuiz (8000...) beats quizId by CAST(quiz_id AS text) COLLATE "C".
+                        assertEquals(lowSubmitted, evidence.bySkill().get(skillId).attemptId());
+                        assertEquals(new BigDecimal("0.00"), evidence.bySkill().get(skillId).scorePercentage());
+
+                        var page0 = live.listLearnerAttemptsForOwner(courseId, learner, 0, 2);
+                        assertEquals(3L, page0.totalElements());
+                        assertEquals(2L, page0.totalPages());
+                        assertEquals(List.of(
+                                new com.codemastery.modules.assessment.application.service.AttemptService.LearnerAttemptSummary(
+                                        lowSubmitted, hiddenQuiz, "Hidden Diag", "diagnostic", 1, t2, new BigDecimal("0.00")),
+                                new com.codemastery.modules.assessment.application.service.AttemptService.LearnerAttemptSummary(
+                                        highSubmitted, quizId, "Timed quiz", "practice", 2, t2, new BigDecimal("100.00"))),
+                                page0.content());
+
+                        var page1 = live.listLearnerAttemptsForOwner(courseId, learner, 1, 2);
+                        assertEquals(List.of(
+                                new com.codemastery.modules.assessment.application.service.AttemptService.LearnerAttemptSummary(
+                                        olderSubmitted, quizId, "Timed quiz", "practice", 1, t1, new BigDecimal("50.00"))),
+                                page1.content());
+
+                        // Concurrent committed attempt remains invisible inside the active REPEATABLE READ snapshot.
+                        try {
+                            awaitWorker(worker.submit(() -> {
+                                terminal(quizId, 4, t1, t2.plusSeconds(30), true, true);
+                                return null;
+                            }), 10, TimeUnit.SECONDS);
+                        } catch (Exception e) {
+                            throw new IllegalStateException(e);
+                        }
+                        assertEquals(3L, live.listLearnerAttemptsForOwner(courseId, learner, 0, 20).totalElements());
+                    });
+                }
+                assertEquals(4L, snapshot(() -> live.listLearnerAttemptsForOwner(courseId, learner, 0, 20)).totalElements());
+            } finally {
+                jdbc.update("DELETE FROM courses WHERE id=?", hiddenCourse);
+                jdbc.update("DELETE FROM users WHERE id=?", otherInstructor);
+            }
+        }
     }
 
 }
