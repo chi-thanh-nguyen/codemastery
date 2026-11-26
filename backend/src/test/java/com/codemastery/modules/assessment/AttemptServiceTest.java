@@ -889,32 +889,98 @@ class TimedAttempts {
     @Test
     void assessmentCompanionAndGuardCallersStayInsideTheirApprovedAllowlist() throws Exception {
         var root = java.nio.file.Path.of("src", "main", "java");
+        String assessment = "com/codemastery/modules/assessment/";
+        String adaptive = "com/codemastery/modules/adaptive/application/";
         java.util.Map<String,java.util.Set<String>> allowed = java.util.Map.ofEntries(
-                java.util.Map.entry(".requireAssessmentSkillsInCourse(", java.util.Set.of("AttemptService.java")),
-                java.util.Map.entry(".withLearnerAssessmentWrite(", java.util.Set.of("AttemptService.java")),
-                java.util.Map.entry(".withAssessmentExpiryWrite(", java.util.Set.of("AttemptService.java")),
-                java.util.Map.entry(".finalizeExpired(", java.util.Set.of("AttemptAutoSubmitScheduler.java")),
-                java.util.Map.entry(".readLatestSkillEvidence(", java.util.Set.of("MasteryUpdateService.java")),
-                java.util.Map.entry(".readMyLatestSkillEvidence(", java.util.Set.of("MasteryQueryService.java")),
-                java.util.Map.entry(".readOwnedLatestSkillEvidence(",
-                        java.util.Set.of("MasteryQueryService.java", "LearnerInsightsService.java")),
-                java.util.Map.entry(".listLearnerAttemptsForOwner(", java.util.Set.of("LearnerInsightsService.java")),
-                java.util.Map.entry(".readQuizOutcome(", java.util.Set.of("PlatformMetricsService.java", "AttemptService.java")),
-                java.util.Map.entry(".readMyPlacementQuizId(", java.util.Set.of("PlacementDiagnosticService.java")));
-        try(var files=java.nio.file.Files.walk(root)) {
-            for(var file:files.filter(path->path.toString().endsWith(".java")).toList()) {
-                String code=java.nio.file.Files.readString(file);
-                for(var entry:allowed.entrySet()) if(code.contains(entry.getKey())) {
-                    assertTrue(entry.getValue().contains(file.getFileName().toString()), file+": "+entry.getKey());
+                java.util.Map.entry("requireAssessmentSkillsInCourse", java.util.Set.of(assessment + "application/service/AttemptService.java")),
+                java.util.Map.entry("withLearnerAssessmentWrite", java.util.Set.of(assessment + "application/service/AttemptService.java")),
+                java.util.Map.entry("withAssessmentExpiryWrite", java.util.Set.of(assessment + "application/service/AttemptService.java")),
+                java.util.Map.entry("finalizeExpired", java.util.Set.of(assessment + "application/scheduler/AttemptAutoSubmitScheduler.java")),
+                java.util.Map.entry("readLatestSkillEvidence", java.util.Set.of(adaptive + "mastery/MasteryUpdateService.java")),
+                java.util.Map.entry("readMyLatestSkillEvidence", java.util.Set.of(adaptive + "mastery/MasteryQueryService.java")),
+                java.util.Map.entry("readOwnedLatestSkillEvidence", java.util.Set.of(
+                        adaptive + "mastery/MasteryQueryService.java", adaptive + "mastery/LearnerInsightsService.java")),
+                java.util.Map.entry("listLearnerAttemptsForOwner", java.util.Set.of(adaptive + "mastery/LearnerInsightsService.java")),
+                java.util.Map.entry("readQuizOutcome", java.util.Set.of(
+                        "com/codemastery/modules/admin/application/reporting/PlatformMetricsService.java",
+                        assessment + "application/service/AttemptService.java")),
+                java.util.Map.entry("readMyPlacementQuizId", java.util.Set.of(adaptive + "mastery/PlacementDiagnosticService.java")));
+        try (var files = java.nio.file.Files.walk(root)) {
+            for (var file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                var scan = scanAssessmentCalls(java.nio.file.Files.readString(file));
+                String relative = root.relativize(file).toString().replace('\\', '/');
+                for (var entry : allowed.entrySet()) if (scan.calls().contains(entry.getKey())) {
+                    assertTrue(entry.getValue().contains(relative), file + ": " + entry.getKey());
                 }
-                if (file.startsWith(root.resolve("com/codemastery/modules/assessment/api"))) {
-                    for (String forbidden : List.of(
-                            "LatestSkillEvidence", "SkillEvidence", "LearnerAttemptSummary",
+                if (relative.startsWith(assessment + "api/")) {
+                    for (String forbidden : List.of("LatestSkillEvidence", "SkillEvidence", "LearnerAttemptSummary",
+                            "readLatestSkillEvidence", "readMyLatestSkillEvidence",
                             "readOwnedLatestSkillEvidence", "listLearnerAttemptsForOwner")) {
-                        assertFalse(code.contains(forbidden), file + " exposes " + forbidden);
+                        assertFalse(scan.identifiers().contains(forbidden), file + " exposes " + forbidden);
                     }
                 }
             }
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"readLatestSkillEvidence", "readMyLatestSkillEvidence",
+            "readOwnedLatestSkillEvidence", "listLearnerAttemptsForOwner"})
+    void evidenceAllowlistDetectsSpacedCallsUnqualifiedCallsAndMethodReferences(String method) throws Exception {
+        for (String statement : List.of("service . " + method + " (null);", method + " (null);",
+                "Object callback = service :: " + method + ";")) {
+            assertTrue(scanAssessmentCalls("class Caller { void run() { " + statement + " } }")
+                    .calls().contains(method), statement);
+        }
+        var nonCalls = scanAssessmentCalls("class Caller { String text = \"service." + method
+                + "(\"; /* service::" + method + " */ void run() { service." + method + "Extra(null); } }");
+        assertFalse(nonCalls.calls().contains(method));
+    }
+
+    private record AssessmentCalls(java.util.Set<String> calls, java.util.Set<String> identifiers) {}
+
+    /** Parse Java syntax, including references, without treating comments or strings as callers. */
+    private static AssessmentCalls scanAssessmentCalls(String source) throws Exception {
+        var compiler = javax.tools.ToolProvider.getSystemJavaCompiler();
+        org.junit.jupiter.api.Assertions.assertNotNull(compiler, "Allowlist requires the project's JDK");
+        var diagnostics = new javax.tools.DiagnosticCollector<javax.tools.JavaFileObject>();
+        var input = new javax.tools.SimpleJavaFileObject(java.net.URI.create("string:///Caller.java"),
+                javax.tools.JavaFileObject.Kind.SOURCE) {
+            @Override public CharSequence getCharContent(boolean ignoreEncodingErrors) { return source; }
+        };
+        try (var manager = compiler.getStandardFileManager(diagnostics, null, null)) {
+            var task = (com.sun.source.util.JavacTask) compiler.getTask(null, manager, diagnostics,
+                    List.of("-proc:none"), null, List.of(input));
+            java.util.Set<String> calls = new java.util.HashSet<>();
+            java.util.Set<String> identifiers = new java.util.HashSet<>();
+            var scanner = new com.sun.source.util.TreeScanner<Void, Void>() {
+                @Override public Void visitMethodInvocation(com.sun.source.tree.MethodInvocationTree node, Void unused) {
+                    if (node.getMethodSelect() instanceof com.sun.source.tree.MemberSelectTree member) {
+                        calls.add(member.getIdentifier().toString());
+                    } else if (node.getMethodSelect() instanceof com.sun.source.tree.IdentifierTree identifier) {
+                        calls.add(identifier.getName().toString());
+                    }
+                    return super.visitMethodInvocation(node, unused);
+                }
+                @Override public Void visitMemberReference(com.sun.source.tree.MemberReferenceTree node, Void unused) {
+                    calls.add(node.getName().toString());
+                    identifiers.add(node.getName().toString());
+                    return super.visitMemberReference(node, unused);
+                }
+                @Override public Void visitIdentifier(com.sun.source.tree.IdentifierTree node, Void unused) {
+                    identifiers.add(node.getName().toString());
+                    return super.visitIdentifier(node, unused);
+                }
+                @Override public Void visitMemberSelect(com.sun.source.tree.MemberSelectTree node, Void unused) {
+                    identifiers.add(node.getIdentifier().toString());
+                    return super.visitMemberSelect(node, unused);
+                }
+            };
+            task.parse().forEach(unit -> scanner.scan(unit, null));
+            assertFalse(diagnostics.getDiagnostics().stream().anyMatch(
+                    diagnostic -> diagnostic.getKind() == javax.tools.Diagnostic.Kind.ERROR),
+                    () -> "Invalid Java source: " + diagnostics.getDiagnostics());
+            return new AssessmentCalls(java.util.Set.copyOf(calls), java.util.Set.copyOf(identifiers));
         }
     }
 
