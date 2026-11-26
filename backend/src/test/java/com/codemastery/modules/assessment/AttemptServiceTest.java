@@ -53,6 +53,30 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.InOrder;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+import com.codemastery.modules.assessment.application.scheduler.AttemptAutoSubmitScheduler;
+import com.codemastery.modules.assessment.application.service.AttemptService;
+import com.codemastery.modules.assessment.application.service.AttemptService.AnswerInput;
+import com.codemastery.modules.assessment.application.service.AttemptService.AnswersInput;
+import com.codemastery.modules.assessment.application.service.AttemptService.AttemptRead;
+import com.codemastery.modules.assessment.application.service.AttemptService.AttemptResult;
+import com.codemastery.modules.assessment.application.service.AttemptService.AttemptSummary;
+import com.codemastery.modules.assessment.application.service.AttemptService.AttemptView;
+import com.codemastery.modules.assessment.application.service.AttemptService.StartOutcome;
+import com.codemastery.modules.assessment.application.service.QuizGradingService;
+import com.codemastery.modules.assessment.domain.model.Attempt;
+import com.codemastery.modules.assessment.domain.model.AttemptAnswer;
+import com.codemastery.modules.assessment.domain.repository.AttemptRepository;
+import com.codemastery.modules.auth.application.service.UserAccountService;
+import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import org.mockito.ArgumentCaptor;
 
 /**
  * ADR008 §5 placement for CT23 quiz authoring and publication (AS06; ADR007 §§5–7, B3-O01/O03).
@@ -602,4 +626,248 @@ class AttemptServiceTest {
         BusinessRuleException failure = assertThrows(BusinessRuleException.class, executable);
         assertEquals(HttpStatus.CONFLICT, failure.getStatus());
     }
+
+@Nested
+class TimedAttempts {
+
+    private AttemptRepository attemptRepo;
+    private QuizRepository quizRepo;
+    private CourseAccessService access;
+    private UserAccountService identities;
+    private MutableClock clock;
+    private AttemptService attemptService;
+
+    private final UUID learnerId = UUID.fromString("00000000-0000-0000-0000-00000000e001");
+
+    @BeforeEach
+    void setUpAttempts() {
+        attemptRepo = mock(AttemptRepository.class);
+        quizRepo = mock(QuizRepository.class);
+        access = mock(CourseAccessService.class);
+        identities = mock(UserAccountService.class);
+        clock = new MutableClock(Instant.parse("2026-11-26T10:00:00Z"));
+        attemptService = new AttemptService(
+                attemptRepo, quizRepo, new QuizGradingService(), access, identities, null, clock);
+        lenient().when(identities.requireCurrentIdentity())
+                .thenReturn(new CurrentIdentity(learnerId, UserAccountService.IdentityRole.LEARNER));
+    }
+
+    private List<Member> twoQuestions() {
+        Question q1 = new Question(Q1, SKILL, "1 + 1 = ?", "single_choice", "easy",
+                new String[] {"1", "2"}, new Boolean[] {false, true});
+        Question q2 = new Question(Q2, SKILL, "Select primes", "multiple_choice", "medium",
+                new String[] {"2", "3", "4"}, new Boolean[] {true, true, false});
+        return List.of(new Member(1, q1), new Member(3, q2)); // verifies non-contiguous positions
+    }
+
+    @Test
+    void startCreatesNewAttemptAndResumesExistingActiveAttemptWithoutResettingTimer() {
+        Quiz published = quiz("published");
+        when(quizRepo.findInCourse(QUIZ, COURSE)).thenReturn(Optional.of(published));
+        when(quizRepo.findInCourseForUpdate(QUIZ, COURSE)).thenReturn(Optional.of(published));
+        when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ, twoQuestions()));
+        when(attemptRepo.findUnsubmittedByQuizAndLearner(QUIZ, learnerId)).thenReturn(Optional.empty());
+        when(attemptRepo.findMaxAttemptNumber(QUIZ, learnerId)).thenReturn(2);
+        when(attemptRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        StartOutcome created = attemptService.start(COURSE, QUIZ);
+        assertTrue(created.created());
+        assertEquals(3, created.attempt().attemptNumber());
+        assertEquals(Instant.parse("2026-11-26T10:10:00Z"), created.attempt().expiresAt());
+        assertEquals("active", created.attempt().status());
+        assertEquals(List.of(false, false), created.attempt().questions().get(0).selectedOptions());
+        assertEquals(List.of(false, false, false), created.attempt().questions().get(1).selectedOptions());
+
+        clock.advanceSeconds(120);
+        Attempt activeRow = new Attempt(created.attempt().attemptId(), learnerId, QUIZ, 3,
+                created.attempt().startedAt(), created.attempt().expiresAt(), null, null);
+        when(attemptRepo.findUnsubmittedByQuizAndLearner(QUIZ, learnerId)).thenReturn(Optional.of(activeRow));
+        when(attemptRepo.findAnswersInPositionOrder(activeRow.id())).thenReturn(List.of(
+                new AttemptAnswer(UUID.randomUUID(), activeRow.id(), Q1, 1, new Boolean[] {false, false}, null),
+                new AttemptAnswer(UUID.randomUUID(), activeRow.id(), Q2, 3, new Boolean[] {false, false, false}, null)));
+
+        StartOutcome resumed = attemptService.start(COURSE, QUIZ);
+        assertFalse(resumed.created());
+        assertEquals(created.attempt().attemptId(), resumed.attempt().attemptId());
+        assertEquals(Instant.parse("2026-11-26T10:10:00Z"), resumed.attempt().expiresAt());
+    }
+
+    @Test
+    void startRejectsOverdueUnsubmittedAttemptAndDiagnosticQuizWith409() {
+        Quiz published = quiz("published");
+        when(quizRepo.findInCourse(QUIZ, COURSE)).thenReturn(Optional.of(published));
+        when(quizRepo.findInCourseForUpdate(QUIZ, COURSE)).thenReturn(Optional.of(published));
+        when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ, twoQuestions()));
+        Attempt overdue = new Attempt(UUID.randomUUID(), learnerId, QUIZ, 1,
+                Instant.parse("2026-11-26T09:50:00Z"), Instant.parse("2026-11-26T10:00:00Z"), null, null);
+        when(attemptRepo.findUnsubmittedByQuizAndLearner(QUIZ, learnerId)).thenReturn(Optional.of(overdue));
+
+        assertConflict(() -> attemptService.start(COURSE, QUIZ));
+
+        Quiz diagnostic = new Quiz(QUIZ, COURSE, "Diag", "diagnostic", 600, "published");
+        when(quizRepo.findInCourse(QUIZ, COURSE)).thenReturn(Optional.of(diagnostic));
+        assertConflict(() -> attemptService.start(COURSE, QUIZ));
+    }
+
+    @Test
+    void manualSubmitGradesExactMasksAndIsIdempotentOnRepeatedSubmit() {
+        UUID attemptId = UUID.randomUUID();
+        Instant startedAt = Instant.parse("2026-11-26T10:00:00Z");
+        Instant expiresAt = Instant.parse("2026-11-26T10:10:00Z");
+        clock.advanceSeconds(300);
+
+        Quiz published = quiz("published");
+        Attempt active = new Attempt(attemptId, learnerId, QUIZ, 1, startedAt, expiresAt, null, null);
+        AttemptAnswer a1 = new AttemptAnswer(UUID.randomUUID(), attemptId, Q1, 1, new Boolean[] {false, false}, null);
+        AttemptAnswer a2 = new AttemptAnswer(UUID.randomUUID(), attemptId, Q2, 3, new Boolean[] {false, false, false}, null);
+
+        when(quizRepo.findInCourseForUpdate(QUIZ, COURSE)).thenReturn(Optional.of(published));
+        when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ, twoQuestions()));
+        when(attemptRepo.findInQuizForUpdate(attemptId, QUIZ)).thenReturn(Optional.of(active));
+        when(attemptRepo.findAnswersInPositionOrderForUpdate(attemptId)).thenReturn(List.of(a1, a2));
+        when(attemptRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        AnswersInput submission = new AnswersInput(List.of(
+                new AnswerInput(Q2, List.of(true, false, false)),
+                new AnswerInput(Q1, List.of(false, true))));
+
+        AttemptResult result = attemptService.submit(COURSE, QUIZ, attemptId, submission);
+        assertEquals("submitted", result.status());
+        assertEquals(Instant.parse("2026-11-26T10:05:00Z"), result.submittedAt());
+        assertEquals(new BigDecimal("50.00"), result.scorePercentage());
+        assertTrue(result.answers().get(0).correct());
+        assertFalse(result.answers().get(1).correct());
+
+        Attempt submitted = new Attempt(attemptId, learnerId, QUIZ, 1, startedAt, expiresAt,
+                Instant.parse("2026-11-26T10:05:00Z"), new BigDecimal("50.00"));
+        AttemptAnswer g1 = new AttemptAnswer(a1.id(), attemptId, Q1, 1, new Boolean[] {false, true}, true);
+        AttemptAnswer g2 = new AttemptAnswer(a2.id(), attemptId, Q2, 3, new Boolean[] {true, false, false}, false);
+        when(attemptRepo.findInQuizForUpdate(attemptId, QUIZ)).thenReturn(Optional.of(submitted));
+        when(attemptRepo.findAnswersInPositionOrderForUpdate(attemptId)).thenReturn(List.of(g1, g2));
+
+        AttemptResult repeated = attemptService.submit(COURSE, QUIZ, attemptId, new AnswersInput(List.of(
+                new AnswerInput(Q1, List.of(true, false)),
+                new AnswerInput(Q2, List.of(true, true, false)))));
+        assertEquals(new BigDecimal("50.00"), repeated.scorePercentage());
+        verify(attemptRepo, times(1)).save(any());
+    }
+
+    @Test
+    void lateSaveAndSubmitAreRejectedAtExactExpiryBoundary() {
+        UUID attemptId = UUID.randomUUID();
+        Instant startedAt = Instant.parse("2026-11-26T10:00:00Z");
+        Instant expiresAt = Instant.parse("2026-11-26T10:10:00Z");
+        clock.advanceSeconds(600); // now == expiresAt -> expired
+
+        Attempt overdue = new Attempt(attemptId, learnerId, QUIZ, 1, startedAt, expiresAt, null, null);
+        when(quizRepo.findInCourseForUpdate(QUIZ, COURSE)).thenReturn(Optional.of(quiz("published")));
+        when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ, twoQuestions()));
+        when(attemptRepo.findInQuizForUpdate(attemptId, QUIZ)).thenReturn(Optional.of(overdue));
+        when(attemptRepo.findAnswersInPositionOrderForUpdate(attemptId)).thenReturn(List.of(
+                new AttemptAnswer(UUID.randomUUID(), attemptId, Q1, 1, new Boolean[] {false, false}, null),
+                new AttemptAnswer(UUID.randomUUID(), attemptId, Q2, 3, new Boolean[] {false, false, false}, null)));
+
+        AnswersInput input = new AnswersInput(List.of(
+                new AnswerInput(Q1, List.of(false, true)),
+                new AnswerInput(Q2, List.of(true, true, false))));
+
+        assertConflict(() -> attemptService.saveAnswers(COURSE, QUIZ, attemptId, input));
+        assertConflict(() -> attemptService.submit(COURSE, QUIZ, attemptId, input));
+        verify(attemptRepo, never()).save(any());
+    }
+
+    @Test
+    void finalizeExpiredUsesLogicalExpiresAtAndSchedulerContinuesOnFailure() {
+        UUID firstId = UUID.fromString("00000000-0000-0000-0000-00000000f001");
+        UUID secondId = UUID.fromString("00000000-0000-0000-0000-00000000f002");
+        Instant startedAt = Instant.parse("2026-11-26T09:50:00Z");
+        Instant expiresAt = Instant.parse("2026-11-26T10:00:00Z");
+        clock.advanceSeconds(180);
+
+        Attempt first = new Attempt(firstId, learnerId, QUIZ, 1, startedAt, expiresAt, null, null);
+        Attempt second = new Attempt(secondId, learnerId, QUIZ, 2, startedAt, expiresAt, null, null);
+        Quiz hiddenQuiz = quiz("hidden");
+
+        when(attemptRepo.findDueUnsubmitted(Instant.parse("2026-11-26T10:03:00Z"), null, null, 10))
+                .thenReturn(List.of(first, second));
+        when(attemptRepo.findById(firstId)).thenReturn(Optional.empty());
+        when(attemptRepo.findById(secondId)).thenReturn(Optional.of(second));
+        when(quizRepo.findById(QUIZ)).thenReturn(Optional.of(hiddenQuiz));
+        when(quizRepo.findInCourseForUpdate(QUIZ, COURSE)).thenReturn(Optional.of(hiddenQuiz));
+        when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ, twoQuestions()));
+        when(attemptRepo.findInQuizForUpdate(secondId, QUIZ)).thenReturn(Optional.of(second));
+        when(attemptRepo.findAnswersInPositionOrderForUpdate(secondId)).thenReturn(List.of(
+                new AttemptAnswer(UUID.randomUUID(), secondId, Q1, 1, new Boolean[] {false, true}, null),
+                new AttemptAnswer(UUID.randomUUID(), secondId, Q2, 3, new Boolean[] {true, true, false}, null)));
+        when(attemptRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        AttemptAutoSubmitScheduler scheduler =
+                new AttemptAutoSubmitScheduler(attemptRepo, attemptService, 5000, 10, clock);
+        assertEquals(2, scheduler.runPass());
+
+        ArgumentCaptor<Attempt> captor = ArgumentCaptor.forClass(Attempt.class);
+        verify(attemptRepo).save(captor.capture());
+        assertEquals(secondId, captor.getValue().id());
+        assertEquals(expiresAt, captor.getValue().submitted_at());
+        assertEquals(new BigDecimal("100.00"), captor.getValue().score_percentage());
+    }
+
+    @Test
+    void readResultRejectsUnsubmittedWith409AndHistoryShowsDerivedStatus() {
+        UUID attemptId = UUID.randomUUID();
+        Instant startedAt = Instant.parse("2026-11-26T10:00:00Z");
+        Instant expiresAt = Instant.parse("2026-11-26T10:10:00Z");
+        Attempt unsubmitted = new Attempt(attemptId, learnerId, QUIZ, 1, startedAt, expiresAt, null, null);
+
+        when(quizRepo.findInCourse(QUIZ, COURSE)).thenReturn(Optional.of(quiz("published")));
+        when(attemptRepo.findInQuizForLearner(attemptId, QUIZ, learnerId)).thenReturn(Optional.of(unsubmitted));
+
+        assertConflict(() -> attemptService.readResult(COURSE, QUIZ, attemptId));
+
+        clock.advanceSeconds(601);
+        when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ, twoQuestions()));
+        when(attemptRepo.findAnswersInPositionOrder(attemptId)).thenReturn(List.of(
+                new AttemptAnswer(UUID.randomUUID(), attemptId, Q1, 1, new Boolean[] {false, false}, null),
+                new AttemptAnswer(UUID.randomUUID(), attemptId, Q2, 3, new Boolean[] {false, false, false}, null)));
+        AttemptRead read = attemptService.read(COURSE, QUIZ, attemptId);
+        assertEquals("overdue", assertInstanceOf(AttemptView.class, read).status());
+
+        when(attemptRepo.countByQuizAndLearner(QUIZ, learnerId)).thenReturn(1L);
+        when(attemptRepo.findPageByQuizAndLearner(QUIZ, learnerId, 0, 20)).thenReturn(List.of(unsubmitted));
+        PageResponse<AttemptSummary> page = attemptService.history(COURSE, QUIZ, 0, 20);
+        assertEquals("overdue", page.content().getFirst().status());
+        assertNull(page.content().getFirst().submittedAt());
+        assertNull(page.content().getFirst().scorePercentage());
+
+        doThrow(new ResourceNotFoundException("Denied")).when(access).requireLearnerCourseAccess(COURSE);
+        assertThrows(ResourceNotFoundException.class, () -> attemptService.start(COURSE, QUIZ));
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant instant;
+
+        private MutableClock(Instant initial) {
+            this.instant = initial;
+        }
+
+        private void advanceSeconds(long seconds) {
+            this.instant = this.instant.plusSeconds(seconds);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
+        }
+    }
+}
 }
