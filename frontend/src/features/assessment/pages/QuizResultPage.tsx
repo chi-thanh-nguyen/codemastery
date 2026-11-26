@@ -9,6 +9,15 @@ import { PresentationIcon } from '../../../shared/components/PresentationIcon';
 import { CodeBlock } from '../../../shared/components/CodeBlock';
 import type { ReviewItemView, SkillChangeView } from '../types/assessmentTypes';
 import { radius, roles } from '../../../app/theme/theme';
+import { useEffect, useState } from 'react';
+import { Alert } from '@mui/material';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
+import { ErrorView, LoadingView, SystemStateView } from '../../../shared/components/StatusViews';
+import { useAuth } from '../../auth/hooks/useAuth';
+import { readAttemptResult } from '../api/quizApi';
+import { quizKindLabel } from '../types/assessmentTypes';
+import type { B3AttemptResult } from '../types/assessmentTypes';
+import { ApiError } from '../../../shared/types/apiTypes';
 
 export interface QuizResultPageProps {
     quizTitle: string;
@@ -71,4 +80,167 @@ export function QuizResultPage({ quizTitle, kindLabel, score, correct, total, at
             </Box>
         </Box>
     </Page>;
+}
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Live S12 Quiz Result: reads `?quizId=`, displays own selections + correctness only (answer keys withheld per ADR007 §11). */
+export function LiveQuizResultPage({ courseId, attemptId }: { courseId: string; attemptId: string }) {
+    const auth = useAuth();
+    const navigate = useNavigate();
+    const location = useLocation();
+    const [searchParams] = useSearchParams();
+    const quizId = searchParams.get('quizId');
+    const navState = location.state as { discardedNotice?: boolean; quizTitle?: string } | null;
+
+    const [result, setResult] = useState<B3AttemptResult | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [errorStatus, setErrorStatus] = useState<number | null>(null);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [revision, retry] = useState(0);
+
+    const validQuizId = quizId && uuidPattern.test(quizId) ? quizId : null;
+
+    useEffect(() => {
+        if (!validQuizId) {
+            setLoading(false);
+            return;
+        }
+        let alive = true;
+        const controller = new AbortController();
+        const gen = auth.generation;
+        setLoading(true);
+        setErrorStatus(null);
+        setErrorMessage(null);
+
+        readAttemptResult(courseId, validQuizId, attemptId, {
+            signal: controller.signal,
+            isCurrent: () => alive && auth.generation === gen,
+        })
+            .then((res) => {
+                if (alive && auth.generation === gen) setResult(res);
+            })
+            .catch((err: unknown) => {
+                if (!alive || auth.generation !== gen || (err instanceof ApiError && err.kind === 'cancelled')) return;
+                if (err instanceof ApiError) {
+                    setErrorStatus(err.status ?? null);
+                    setErrorMessage(err.message);
+                } else {
+                    setErrorMessage("Couldn't load this result.");
+                }
+            })
+            .finally(() => {
+                if (alive && auth.generation === gen) setLoading(false);
+            });
+
+        return () => {
+            alive = false;
+            controller.abort();
+        };
+    }, [courseId, validQuizId, attemptId, auth.generation, revision]);
+
+    if (!validQuizId) {
+        return (
+            <Page>
+                <SystemStateView
+                    icon="search"
+                    title="We can't show this result from this link"
+                    message="This link is missing the quiz identifier."
+                    actions={
+                        <Button component={Link} to={`/courses/${encodeURIComponent(courseId)}/assessments`} variant="contained">
+                            Go to assessments
+                        </Button>
+                    }
+                />
+            </Page>
+        );
+    }
+
+    if (loading) return <Page><LoadingView message="Loading quiz result…" /></Page>;
+
+    if (errorStatus === 409) {
+        return (
+            <Page>
+                <SystemStateView
+                    icon="clock"
+                    title="Result not ready yet"
+                    message="Your result isn't ready yet. Try again in a moment."
+                    actions={
+                        <Box sx={{ display: 'flex', gap: 1.5 }}>
+                            <Button variant="outlined" onClick={() => retry((r) => r + 1)}>Try again</Button>
+                            <Button component={Link} to={`/courses/${encodeURIComponent(courseId)}/quizzes/${encodeURIComponent(validQuizId)}/attempt?attemptId=${encodeURIComponent(attemptId)}`} variant="contained">
+                                Back to attempt
+                            </Button>
+                        </Box>
+                    }
+                />
+            </Page>
+        );
+    }
+
+    if (errorStatus === 404) {
+        return (
+            <Page>
+                <SystemStateView
+                    icon="search"
+                    title="Result not available"
+                    message="This attempt doesn't exist or isn't available."
+                    actions={<Button component={Link} to={`/courses/${encodeURIComponent(courseId)}/assessments`} variant="contained">Go to assessments</Button>}
+                />
+            </Page>
+        );
+    }
+
+    if (errorMessage || !result) {
+        return <Page><ErrorView title="Couldn't load result" message={errorMessage ?? 'Please try again.'} onRetry={() => retry((r) => r + 1)} /></Page>;
+    }
+
+    const autoSubmitted = result.submittedAt === result.expiresAt;
+    const correctCount = result.answers.filter((a) => a.correct).length;
+    const reviewItems: ReviewItemView[] = result.answers
+        .slice()
+        .sort((a, b) => a.position - b.position)
+        .map((ans) => ({
+            questionId: ans.questionId,
+            position: ans.position,
+            prompt: ans.prompt,
+            selectedLabels: ans.options.filter((_, idx) => ans.selectedOptions[idx]),
+            correct: ans.correct,
+        }));
+
+    const notice = (
+        <>
+            {navState?.discardedNotice && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                    This attempt was already submitted, so answers on this page that weren't saved couldn't be included.
+                </Alert>
+            )}
+            {autoSubmitted && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                    Submitted automatically when time ran out.
+                </Alert>
+            )}
+            <Typography variant="caption" sx={{ display: 'block', mb: 3, color: 'text.secondary' }}>
+                Mastery states reflect the latest submitted quiz evidence for each skill.
+            </Typography>
+        </>
+    );
+
+    return (
+        <QuizResultPage
+            quizTitle={navState?.quizTitle ?? 'Quiz result'}
+            kindLabel={quizKindLabel.test}
+            score={result.scorePercentage}
+            correct={correctCount}
+            total={result.answers.length}
+            attemptNumber={result.attemptNumber}
+            submittedAtLabel={new Date(result.submittedAt).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}
+            review={reviewItems}
+            notice={notice}
+            onBack={() => navigate(`/courses/${encodeURIComponent(courseId)}/learn`)}
+            onHistory={() => navigate(`/courses/${encodeURIComponent(courseId)}/quizzes/${encodeURIComponent(validQuizId)}/history`)}
+            onOpenMap={() => navigate(`/courses/${encodeURIComponent(courseId)}/mastery`)}
+            back={{ label: 'Assessments', href: `/courses/${encodeURIComponent(courseId)}/assessments` }}
+        />
+    );
 }
