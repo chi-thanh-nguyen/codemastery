@@ -113,6 +113,7 @@ while IFS="=" read -r key value; do
   case "${key-}" in
   distributionUrl) distributionUrl=$(trim "${value-}") ;;
   distributionSha256Sum) distributionSha256Sum=$(trim "${value-}") ;;
+  distributionTarGzSha256Sum) distributionTarGzSha256Sum=$(trim "${value-}") ;;
   esac
 done <"$scriptDir/.mvn/wrapper/maven-wrapper.properties"
 [ -n "${distributionUrl-}" ] || die "cannot read distributionUrl property in $scriptDir/.mvn/wrapper/maven-wrapper.properties"
@@ -142,8 +143,30 @@ esac
 distributionUrlName="${distributionUrl##*/}"
 distributionUrlNameMain="${distributionUrlName%.*}"
 distributionUrlNameMain="${distributionUrlNameMain%-bin}"
+case "${distributionUrl-}" in
+*?-bin.zip | *?maven-mvnd-?*-?*.zip) ;;
+*) die "distributionUrl is not valid, must match *-bin.zip or maven-mvnd-*.zip, but found '${distributionUrl-}'" ;;
+esac
+
+# Choose the separately pinned archive before looking for an installation.
+archiveChecksum="${distributionSha256Sum-}"
+archiveFormat=zip
+if ! command -v unzip >/dev/null; then
+  archiveFormat=tar.gz
+  distributionUrl="${distributionUrl%.zip}.tar.gz"
+  distributionUrlName="${distributionUrl##*/}"
+  archiveChecksum="${distributionTarGzSha256Sum-}"
+fi
+if [ -n "${distributionSha256Sum-}${distributionTarGzSha256Sum-}" ]; then
+  [ "$MVN_CMD" != mvnd.sh ] || die "Checksum validation is not supported for maven-mvnd."
+  case "$archiveChecksum" in
+  '' | *[!0-9a-f]*) die "Invalid or missing Maven distribution SHA-256 for $archiveFormat" ;;
+  esac
+  [ "${#archiveChecksum}" -eq 64 ] || die "Invalid Maven distribution SHA-256 for $archiveFormat"
+fi
 MAVEN_USER_HOME="${MAVEN_USER_HOME:-${HOME}/.m2}"
-MAVEN_HOME="${MAVEN_USER_HOME}/wrapper/dists/${distributionUrlNameMain-}/$(hash_string "$distributionUrl")"
+# The pin changes the cache identity, including for unchecked legacy installs.
+MAVEN_HOME="${MAVEN_USER_HOME}/wrapper/dists/${distributionUrlNameMain-}/$(hash_string "$distributionUrl")${archiveChecksum:+-$archiveChecksum}"
 
 exec_maven() {
   unset MVNW_VERBOSE MVNW_USERNAME MVNW_PASSWORD MVNW_REPOURL || :
@@ -155,31 +178,21 @@ if [ -d "$MAVEN_HOME" ]; then
   exec_maven "$@"
 fi
 
-case "${distributionUrl-}" in
-*?-bin.zip | *?maven-mvnd-?*-?*.zip) ;;
-*) die "distributionUrl is not valid, must match *-bin.zip or maven-mvnd-*.zip, but found '${distributionUrl-}'" ;;
-esac
-
 # prepare tmp dir
-if TMP_DOWNLOAD_DIR="$(mktemp -d)" && [ -d "$TMP_DOWNLOAD_DIR" ]; then
+mavenHomeParent="${MAVEN_HOME%/*}"
+mavenHomeName="${MAVEN_HOME##*/}"
+mkdir -p -- "$mavenHomeParent"
+if TMP_DOWNLOAD_DIR="$(mktemp -d "$mavenHomeParent/.install.XXXXXXXX")"; then
   clean() { rm -rf -- "$TMP_DOWNLOAD_DIR"; }
   trap clean HUP INT TERM EXIT
 else
   die "cannot create temp dir"
 fi
 
-mkdir -p -- "${MAVEN_HOME%/*}"
-
 # Download and Install Apache Maven
 verbose "Couldn't find MAVEN_HOME, downloading and installing it ..."
 verbose "Downloading from: $distributionUrl"
 verbose "Downloading to: $TMP_DOWNLOAD_DIR/$distributionUrlName"
-
-# select .zip or .tar.gz
-if ! command -v unzip >/dev/null; then
-  distributionUrl="${distributionUrl%.zip}.tar.gz"
-  distributionUrlName="${distributionUrl##*/}"
-fi
 
 # verbose opt
 __MVNW_QUIET_WGET=--quiet __MVNW_QUIET_CURL=--silent __MVNW_QUIET_UNZIP=-q __MVNW_QUIET_TAR=''
@@ -222,35 +235,27 @@ elif set_java_home; then
   "$(native_path "$JAVACMD")" -cp "$(native_path "$TMP_DOWNLOAD_DIR")" Downloader "$distributionUrl" "$(native_path "$targetZip")"
 fi
 
-# If specified, validate the SHA-256 sum of the Maven distribution zip file
-if [ -n "${distributionSha256Sum-}" ]; then
+# Validate the selected archive before extraction.
+if [ -n "$archiveChecksum" ]; then
   distributionSha256Result=false
-  if [ "$MVN_CMD" = mvnd.sh ]; then
-    echo "Checksum validation is not supported for maven-mvnd." >&2
-    echo "Please disable validation by removing 'distributionSha256Sum' from your maven-wrapper.properties." >&2
-    exit 1
-  elif command -v sha256sum >/dev/null; then
-    if echo "$distributionSha256Sum  $TMP_DOWNLOAD_DIR/$distributionUrlName" | sha256sum -c - >/dev/null 2>&1; then
+  if command -v sha256sum >/dev/null; then
+    if printf '%s  %s\n' "$archiveChecksum" "$TMP_DOWNLOAD_DIR/$distributionUrlName" | sha256sum -c - >/dev/null 2>&1; then
       distributionSha256Result=true
     fi
   elif command -v shasum >/dev/null; then
-    if echo "$distributionSha256Sum  $TMP_DOWNLOAD_DIR/$distributionUrlName" | shasum -a 256 -c >/dev/null 2>&1; then
+    if printf '%s  %s\n' "$archiveChecksum" "$TMP_DOWNLOAD_DIR/$distributionUrlName" | shasum -a 256 -c - >/dev/null 2>&1; then
       distributionSha256Result=true
     fi
   else
-    echo "Checksum validation was requested but neither 'sha256sum' or 'shasum' are available." >&2
-    echo "Please install either command, or disable validation by removing 'distributionSha256Sum' from your maven-wrapper.properties." >&2
-    exit 1
+    die "Checksum validation requires sha256sum or shasum."
   fi
-  if [ $distributionSha256Result = false ]; then
-    echo "Error: Failed to validate Maven distribution SHA-256, your Maven distribution might be compromised." >&2
-    echo "If you updated your Maven version, you need to update the specified distributionSha256Sum property." >&2
-    exit 1
+  if [ "$distributionSha256Result" = false ]; then
+    die "Failed to validate Maven distribution SHA-256 for $archiveFormat."
   fi
 fi
 
 # unzip and move
-if command -v unzip >/dev/null; then
+if [ "$archiveFormat" = zip ]; then
   unzip ${__MVNW_QUIET_UNZIP:+"$__MVNW_QUIET_UNZIP"} "$TMP_DOWNLOAD_DIR/$distributionUrlName" -d "$TMP_DOWNLOAD_DIR" || die "failed to unzip"
 else
   tar xzf${__MVNW_QUIET_TAR:+"$__MVNW_QUIET_TAR"} "$TMP_DOWNLOAD_DIR/$distributionUrlName" -C "$TMP_DOWNLOAD_DIR" || die "failed to untar"
@@ -289,7 +294,12 @@ fi
 
 verbose "Found extracted Maven distribution directory: $actualDistributionDir"
 printf %s\\n "$distributionUrl" >"$TMP_DOWNLOAD_DIR/$actualDistributionDir/mvnw.url"
-mv -- "$TMP_DOWNLOAD_DIR/$actualDistributionDir" "$MAVEN_HOME" || [ -d "$MAVEN_HOME" ] || die "fail to move MAVEN_HOME"
+# Publish on the cache filesystem. Moving by basename into the parent keeps a
+# concurrent winner from becoming the destination directory for this install.
+mkdir "$TMP_DOWNLOAD_DIR/install"
+mv -- "$TMP_DOWNLOAD_DIR/$actualDistributionDir" "$TMP_DOWNLOAD_DIR/install/$mavenHomeName"
+mv -- "$TMP_DOWNLOAD_DIR/install/$mavenHomeName" "$mavenHomeParent/" 2>/dev/null \
+  || [ -x "$MAVEN_HOME/bin/$MVN_CMD" ] || die "fail to move MAVEN_HOME"
 
 clean || :
 exec_maven "$@"
