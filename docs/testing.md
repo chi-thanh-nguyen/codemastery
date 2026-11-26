@@ -23,6 +23,54 @@ checks and protected integration. This records design, not newly executed tests.
 CT17's two Batch 4 operational checkpoints remain pending Leader inputs.
 Earlier dated records below retain their approval scope and history.
 
+## CO12 publication producer qualification — 25 November 2026
+
+PR #290 implements CO12.event under `CT26-EVENT-2026-11-15-r1` and consumes
+`CT26-SUBSCRIPTION-2026-11-15-r1` only as the producer's transaction boundary
+(ADR012 §§8–9.1, B7-O02). CT21 authoring r1, ADR006 §§3/5, ADR005's unchanged
+Course-root guard, CT14 placement and CT39's negative global-Clock selection apply.
+The actual publication call is `CourseStructureService.setCourseLessonPublication`;
+`CourseManagementService.publishLessonPublished` checks the held root, flushes,
+reads the current Course and joined recipients, then publishes inside that unit.
+
+| Requirement | Production evidence | Executed oracle |
+|---|---|---|
+| Actual hidden-to-published Lesson of a published Course only | Structure publication calls helper only in the changed-to-published branch; helper checks Course status | `InteractionAdminIntegrationTest.co12PublicationReconcilesThenDeliversOnlyAfterCommitAndConsumerFailureIsIsolated` |
+| Reconciliation and flush precede event; recipient set is active/completed, unsigned UUID ascending, distinct and immutable | Existing JDBC reconciliation/joined query, explicit persistence flush, UUID-string ordering and event defensive copy | Same integration case; `CourseServiceTest.co12PayloadUsesOperationClockUnsignedUuidOrderAndFlushBeforeEvent` uses high-bit UUIDs and verifies order of calls |
+| UTC operation-local injectable Clock, exact microseconds, no global bean | Management constructor delegates to local Clock seam and truncates to MICROS | Fixed nanosecond Clock unit test |
+| No-op, hiding, Course publication, edits, Chapter changes and reorder are silent | Sole production helper call is the Lesson transition branch | Interaction case and `EnrollmentIntegrationTest.co12UnauthorizedForeignAndNonPublicationMutationsAreSilent` |
+| Unauthorized, missing and foreign-scoped publication has no event | Existing CT03 admission and authoritative guard precede the branch | Enrollment negative cases and affected authoring regression |
+| Rollback silence, no recipients, committed producer survives listener failure | Spring transactional event synchronization; no production subscriber is added | Two `InteractionAdminIntegrationTest#co12*` cases; test-only AFTER_COMMIT + REQUIRES_NEW probe reads published state on a separate connection before deliberately failing |
+
+Executed with Java 25.0.4.1, the Maven Wrapper and disposable DP01 PostgreSQL:
+
+```sh
+cd backend
+./mvnw -Dtest=CourseServiceTest test
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='InteractionAdminIntegrationTest#co12*,EnrollmentIntegrationTest#co12*+instructorAuthorsOwnedContentAndLessonPublicationReconcilesLearnerCompletion+coursePublicationChangeReconcilesJoinedCompletionWithoutCascadeOrAdaptiveRewrite+learnerCompletionWaitsBehindAnInstructorLessonPublicationAndCountsTheNewRequiredSet+instructorPublicationAndAdministratorHideSerializeOnTheRootAndTheLastCommitWins'
+```
+
+The unit run passed 75/75. The final integration selection passed 7/7: two event
+transaction cases in InteractionAdminIntegrationTest, the negative publication
+case and four affected authoring/reconciliation/root-serialization regressions in
+EnrollmentIntegrationTest. No failures, errors or skips remained. Earlier iterations exercised the same producer with three passing
+Course integration cases; transaction cases now live in ADR012 §19.3's dedicated
+Interaction/Admin suite. The deliberate after-commit error is expected evidence,
+not a producer failure. Tests use committed FK-safe fixtures and no shared database.
+
+The comprehensive automated audit of PR #290/#291 found no confirmed CO12
+production defect. This is author-side automated verification, not independent
+human CODEOWNER acceptance. IN15's actual production subscriber, notification
+persistence, pool-capacity operational qualification, QA and protected integration
+remain separate gates. No notification workflow, broker, outbox or global Clock
+was implemented. No remote CI run was awaited or dispatched.
+
+AI-assisted work: Codex implemented and tested the producer under the Project
+Leader's explicit instruction; an isolated automated reviewer inspected both full
+diffs. The Leader explicitly requested TamiaoNguyen author/committer metadata,
+with the verified existing associated email and the Leader's authenticated push.
+Original skeleton attribution is preserved; no human review is claimed.
+
 ## SH05 storage adapter qualification — 25 November 2026
 
 `FileStorageIntegrationTest` implements the SH05 portion of ADR012 §19.3 at its

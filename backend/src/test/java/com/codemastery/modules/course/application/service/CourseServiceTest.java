@@ -438,7 +438,7 @@ class CourseServiceTest {
     private CourseManagementService management(org.springframework.transaction.PlatformTransactionManager transactions) {
         return new CourseManagementService(repository, service, identity,
                 mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class),
-                mock(com.codemastery.modules.course.domain.repository.EnrollmentRepository.class), transactions);
+                mock(com.codemastery.modules.course.domain.repository.EnrollmentRepository.class), transactions, mock(org.springframework.context.ApplicationEventPublisher.class));
     }
 
     @Test void managementGuardsRejectNullInputsBeforeAnyTransactionOrLookup() {
@@ -764,7 +764,7 @@ class CourseServiceTest {
         var content = mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class);
         var management = new CourseManagementService(repository, service, identity, content,
                 mock(com.codemastery.modules.course.domain.repository.EnrollmentRepository.class),
-                mock(org.springframework.transaction.PlatformTransactionManager.class));
+                mock(org.springframework.transaction.PlatformTransactionManager.class), mock(org.springframework.context.ApplicationEventPublisher.class));
         actor(IdentityRole.INSTRUCTOR);
         var created = management.createOwnedCourse(" Title ", "Description", null);
         var stored = org.mockito.ArgumentCaptor.forClass(com.codemastery.modules.course.domain.model.Course.class);
@@ -803,5 +803,31 @@ class CourseServiceTest {
             assertEquals(400, assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
                     () -> management.listCoursesForAdministration(unpaired, null, 0, 20)).getStatus().value());
         verifyNoInteractions(repository);
+    }
+
+    @Test void co12PayloadUsesOperationClockUnsignedUuidOrderAndFlushBeforeEvent() {
+        var joined = mock(com.codemastery.modules.course.domain.repository.EnrollmentRepository.class);
+        var events = mock(org.springframework.context.ApplicationEventPublisher.class);
+        var persistence = mock(jakarta.persistence.EntityManager.class);
+        java.time.Instant instant = java.time.Instant.parse("2026-11-25T10:00:00.123456789Z");
+        var producer = new CourseManagementService(repository, service, identity,
+                mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class), joined,
+                mock(org.springframework.transaction.PlatformTransactionManager.class), events,
+                java.time.Clock.fixed(instant, java.time.ZoneOffset.UTC));
+        org.springframework.test.util.ReflectionTestUtils.setField(producer, "publicationPersistence", persistence);
+        when(repository.currentTransactionFacts()).thenReturn(new com.codemastery.modules.course.domain.repository.CourseRepository.TransactionFacts("read committed", false, true, COURSE));
+        when(repository.findById(COURSE)).thenReturn(Optional.of(catalogueCourse(COURSE, PUBLISHED)));
+        UUID lower = UUID.fromString("00000000-0000-4000-8000-000000000001"), upper = UUID.fromString("ffffffff-ffff-4fff-bfff-ffffffffffff");
+        when(joined.joinedLearnerIds(List.of(COURSE))).thenReturn(java.util.Map.of(COURSE,java.util.Set.of(upper,lower)));
+        org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+        try {
+            producer.publishLessonPublished(COURSE, OTHER);
+            var captured = org.mockito.ArgumentCaptor.forClass(com.codemastery.modules.course.application.event.ContentPublishedEvent.class);
+            var order = org.mockito.Mockito.inOrder(persistence, joined, events);
+            order.verify(persistence).flush(); order.verify(joined).joinedLearnerIds(List.of(COURSE)); order.verify(events).publishEvent(captured.capture());
+            assertEquals(instant.truncatedTo(java.time.temporal.ChronoUnit.MICROS),captured.getValue().publishedAt());
+            assertEquals(List.of(lower,upper),captured.getValue().recipientLearnerIds());
+        } finally { org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false); }
+        assertThrows(IllegalStateException.class,()->producer.publishLessonPublished(COURSE,OTHER));
     }
 }
