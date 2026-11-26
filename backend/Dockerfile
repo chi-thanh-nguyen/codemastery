@@ -33,9 +33,17 @@ RUN --network=none set -eu; \
     /opt/maven/bin/mvn --version
 # END MAVEN DISTRIBUTION VERIFICATION
 
-FROM maven-bootstrap AS build
+FROM maven-bootstrap AS maven-dependencies
 COPY .mvn/ .mvn/
 COPY pom.xml ./
+# Keep the repository in an ordinary image layer: exported BuildKit caches retain it
+# across ephemeral builders, unlike a RUN cache mount. No host settings or secrets
+# are imported. Dependency/plugin versions continue to follow this POM and its BOM.
+RUN /opt/maven/bin/mvn -B dependency:go-offline -DskipTests \
+    -Daether.connector.http.retryHandler.interval=15000 \
+    -Daether.connector.http.retryHandler.intervalMax=60000
+
+FROM maven-dependencies AS build
 COPY src/ src/
 # Give Resolver's existing 429/503 retries more time on cold runners.
 # Without Retry-After the three delays are 15, 30 and 45 seconds.
