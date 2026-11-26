@@ -15,7 +15,7 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpServer } from 'node:http';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -45,7 +45,14 @@ function fakeCheckout(name = 'co') {
     return entry;
 }
 const recordFile = (key) => join(registry, 'runs', `${key}.json`);
-const readRecord = (key) => (existsSync(recordFile(key)) ? JSON.parse(readFileSync(recordFile(key), 'utf8')) : null);
+// Admission archives the completed record before publishing the next one. Read once;
+// only an absent pathname means "not yet active". Corruption and I/O errors still fail.
+function readRecord(key, read = readFileSync) {
+    let raw;
+    try { raw = read(recordFile(key), 'utf8'); }
+    catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+    return JSON.parse(raw);
+}
 const sentinels = (checkout) => [
     readFileSync(join(checkout.root, 'test-results', 'artifacts', 'sentinel.txt'), 'utf8'),
     readFileSync(join(checkout.root, 'test-results', 'results.json'), 'utf8'),
@@ -94,6 +101,29 @@ after(() => {
         rmSync(join(registry, 'locks', `${key}.lock`), { force: true });
         rmSync(join(registry, 'runs', `.${key}.json.lock`), { force: true });
     }
+});
+
+describe('polling a concurrently archived lifecycle record', () => {
+    test('absence during archive is retried and the next active generation is observed', () => {
+        const checkout = fakeCheckout('read-race');
+        assert.equal(coordinate(checkout, ['recover']).status, EXIT.ok, 'initialize the private registry on a fresh host');
+        const file = recordFile(checkout.key), archive = join(checkout.root, 'archived.json');
+        writeFileSync(file, '{"state":"complete","runId":"old"}', { mode: 0o600 });
+        assert.equal(readRecord(checkout.key, (path, encoding) => {
+            renameSync(path, archive); // deterministic interleaving immediately before open
+            return readFileSync(path, encoding);
+        }), null);
+        writeFileSync(file, '{"state":"active","runId":"next"}', { mode: 0o600 });
+        assert.equal(readRecord(checkout.key).runId, 'next');
+        assert.equal(JSON.parse(readFileSync(archive, 'utf8')).runId, 'old');
+    });
+    test('unexpected I/O errors and malformed records remain failures', () => {
+        for (const code of ['EACCES', 'EIO', 'ENOTDIR']) {
+            const error = Object.assign(new Error(code), { code });
+            assert.throws(() => readRecord('unused', () => { throw error; }), (caught) => caught === error);
+        }
+        assert.throws(() => readRecord('unused', () => '{broken'), SyntaxError);
+    });
 });
 
 describe('ownership is taken and persisted before the runner is entered', () => {
