@@ -4,22 +4,28 @@ import com.codemastery.common.api.PageResponse;
 import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.ResourceNotFoundException;
 import com.codemastery.modules.assessment.domain.model.Assignment;
+import com.codemastery.modules.assessment.domain.model.Submission;
 import com.codemastery.modules.assessment.domain.repository.AssignmentRepository;
 import com.codemastery.modules.assessment.domain.repository.AssignmentRepository.SubmissionCounts;
+import com.codemastery.modules.auth.application.service.UserAccountService;
 import com.codemastery.modules.course.application.service.CourseAccessService;
+import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * CT10.rest owner assignment authoring and read operations (ADR010 §§8, 10, 12, 14).
+ * CT10.rest assignment authoring, owner reads and learner reads (ADR010 §§8, 10, 12, 14).
  *
  * <p>Assignments do not participate in adaptive invariants, so ADR005/ADR007 Course-root guards are
  * not used (ADR010 §10). Every mutation runs at READ COMMITTED, locking the Assignment row
@@ -33,12 +39,6 @@ public class AssignmentService {
     static final String PUBLISHED = "published";
     private static final Set<String> STATUSES = Set.of(HIDDEN, PUBLISHED);
 
-    /**
-     * Earliest and latest deadlines the CT10 REST representation can carry. Responses render
-     * {@code deadlineAt} as a UTC RFC 3339 instant, whose {@code date-fullyear} has exactly four
-     * digits, so a representable deadline lies in years 0000-9999 after normalization to UTC. An
-     * input such as {@code 9999-12-31T23:59:59-05:00} names year 10000 in UTC and is rejected.
-     */
     public static final Instant EARLIEST_REPRESENTABLE_DEADLINE = Instant.parse("0000-01-01T00:00:00Z");
     public static final Instant LATEST_REPRESENTABLE_DEADLINE = Instant.parse("9999-12-31T23:59:59.999999Z");
 
@@ -57,12 +57,60 @@ public class AssignmentService {
             int gradedCount) {
     }
 
+    public record LearnerAssignmentSummaryView(
+            UUID id,
+            UUID courseId,
+            UUID lessonId,
+            String title,
+            Instant deadlineAt,
+            boolean open,
+            String submissionStatus) {
+    }
+
+    public record LearnerSubmissionView(
+            String originalFilename,
+            Instant submittedAt,
+            boolean graded,
+            BigDecimal gradePercentage,
+            String feedback,
+            Instant gradedAt) {
+    }
+
+    public record LearnerAssignmentView(
+            UUID id,
+            UUID courseId,
+            UUID lessonId,
+            String title,
+            String instructions,
+            Instant deadlineAt,
+            boolean open,
+            LearnerSubmissionView submission) {
+    }
+
     private final AssignmentRepository assignments;
     private final CourseAccessService courseAccess;
+    private final UserAccountService identities;
+    private final Clock clock;
 
     public AssignmentService(AssignmentRepository assignments, CourseAccessService courseAccess) {
+        this(assignments, courseAccess, null, Clock.systemUTC());
+    }
+
+    @Autowired
+    public AssignmentService(AssignmentRepository assignments,
+                             CourseAccessService courseAccess,
+                             UserAccountService identities) {
+        this(assignments, courseAccess, identities, Clock.systemUTC());
+    }
+
+    public AssignmentService(AssignmentRepository assignments,
+                             CourseAccessService courseAccess,
+                             UserAccountService identities,
+                             Clock clock) {
         this.assignments = Objects.requireNonNull(assignments, "assignments");
         this.courseAccess = Objects.requireNonNull(courseAccess, "courseAccess");
+        this.identities = identities;
+        this.clock = Objects.requireNonNull(clock, "clock");
     }
 
     /** Stage-3 admission check for course-level assignment authoring before reading the request body. */
@@ -191,6 +239,98 @@ public class AssignmentService {
         return new PageResponse<>(content, page, size, total);
     }
 
+    /** Coherent REPEATABLE READ learner page ordered by {@code deadline_at ASC, id ASC} (ADR010 §12). */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public PageResponse<LearnerAssignmentSummaryView> listForLearner(UUID courseId, int page, int size) {
+        requireId(courseId);
+        PageResponse.validateRequest(page, size);
+        courseAccess.requireLearnerCourseAccess(courseId);
+        UUID learnerId = requireSelfLearnerId();
+
+        long total = assignments.countPublishedVisibleInCourse(courseId);
+        List<Assignment> rows = (long) page * size >= total
+                ? List.of()
+                : assignments.findPublishedVisiblePageInCourse(courseId, page, size);
+        Map<UUID, Submission> ownSubmissions = assignments.findSubmissionsByAssignmentsAndLearner(
+                rows.stream().map(Assignment::id).toList(), learnerId);
+
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
+        List<LearnerAssignmentSummaryView> content = rows.stream()
+                .map(row -> {
+                    requireStoredAssignment(courseId, row);
+                    if (!PUBLISHED.equals(row.publication_status())) {
+                        throw new IllegalStateException("Non-published assignment reached learner list");
+                    }
+                    Submission sub = ownSubmissions.get(row.id());
+                    String status = (sub == null)
+                            ? "none"
+                            : (sub.graded_at() != null ? "graded" : "submitted");
+                    return new LearnerAssignmentSummaryView(
+                            row.id(),
+                            row.course_id(),
+                            row.lesson_id(),
+                            row.title(),
+                            row.deadline_at(),
+                            now.isBefore(row.deadline_at()),
+                            status);
+                })
+                .toList();
+        return new PageResponse<>(content, page, size, total);
+    }
+
+    /** Coherent REPEATABLE READ learner detail with own submission & grade only (ADR010 §12). */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public LearnerAssignmentView readForLearner(UUID courseId, UUID assignmentId) {
+        requireId(courseId);
+        requireId(assignmentId);
+        courseAccess.requireLearnerCourseAccess(courseId);
+        UUID learnerId = requireSelfLearnerId();
+
+        Assignment row = assignments.findInCourse(assignmentId, courseId).orElseThrow(AssignmentService::unavailable);
+        requireStoredAssignment(courseId, row);
+        if (!PUBLISHED.equals(row.publication_status())) {
+            throw unavailable();
+        }
+        if (row.lesson_id() != null) {
+            courseAccess.requireLearnerLessonAccess(courseId, row.lesson_id());
+        }
+
+        Submission sub = assignments.findSubmissionByAssignmentAndLearner(row.id(), learnerId).orElse(null);
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
+        LearnerSubmissionView submissionView = (sub == null) ? null : toLearnerSubmissionView(sub);
+        return new LearnerAssignmentView(
+                row.id(),
+                row.course_id(),
+                row.lesson_id(),
+                row.title(),
+                row.instructions(),
+                row.deadline_at(),
+                now.isBefore(row.deadline_at()),
+                submissionView);
+    }
+
+    private UUID requireSelfLearnerId() {
+        if (identities == null) {
+            throw new IllegalStateException("UserAccountService not configured");
+        }
+        var actor = identities.requireCurrentIdentity();
+        if (actor == null || actor.userId() == null) {
+            throw new IllegalStateException("Missing current identity");
+        }
+        return actor.userId();
+    }
+
+    private static LearnerSubmissionView toLearnerSubmissionView(Submission sub) {
+        boolean graded = sub.graded_at() != null;
+        return new LearnerSubmissionView(
+                sub.original_filename(),
+                sub.submitted_at(),
+                graded,
+                graded ? sub.grade_percentage() : null,
+                graded ? sub.feedback() : null,
+                sub.graded_at());
+    }
+
     private Assignment lockedAssignment(UUID courseId, UUID assignmentId) {
         return assignments.findInCourseForUpdate(assignmentId, courseId).orElseThrow(AssignmentService::unavailable);
     }
@@ -240,7 +380,6 @@ public class AssignmentService {
         return new AssignmentInput(trimmedTitle, verbatimInstructions, deadlineAt, input.lessonId());
     }
 
-    /** Whether {@code deadline}, normalized to UTC, renders as a four-digit-year RFC 3339 instant. */
     public static boolean isRepresentableDeadline(Instant deadline) {
         return deadline != null
                 && !deadline.isBefore(EARLIEST_REPRESENTABLE_DEADLINE)

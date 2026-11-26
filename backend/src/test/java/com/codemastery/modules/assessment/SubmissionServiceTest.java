@@ -57,6 +57,38 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+import com.codemastery.infrastructure.storage.FileStorage;
+import com.codemastery.infrastructure.storage.FileStorage.ObjectNotFoundException;
+import com.codemastery.infrastructure.storage.FileStorage.StoredObject;
+import com.codemastery.modules.assessment.api.dto.AssignmentRequests.GradeSubmissionRequest;
+import com.codemastery.modules.assessment.application.event.AssignmentGradedEvent;
+import com.codemastery.modules.assessment.application.service.AssignmentService.LearnerAssignmentView;
+import com.codemastery.modules.assessment.application.service.SubmissionService;
+import com.codemastery.modules.assessment.application.service.SubmissionService.FilePart;
+import com.codemastery.modules.assessment.application.service.SubmissionService.GradeInput;
+import com.codemastery.modules.assessment.application.service.SubmissionService.SubmissionFile;
+import com.codemastery.modules.assessment.application.service.SubmissionService.SubmissionOutcome;
+import com.codemastery.modules.assessment.application.service.SubmissionService.SubmissionSummaryView;
+import com.codemastery.modules.assessment.domain.model.Submission;
+import com.codemastery.modules.auth.application.service.UserAccountService;
+import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
+import com.codemastery.modules.auth.application.service.UserAccountService.IdentityRole;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.Set;
+import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import static org.mockito.Mockito.lenient;
+
 /**
  * CT10.rest owner assignment authoring unit evidence (ADR010 §§8, 10, 12, 14; AS09 #160).
  */
@@ -413,4 +445,276 @@ class SubmissionServiceTest {
                     .andExpect(jsonPath("$.detail").value("The requested resource is unavailable."));
         }
     }
+
+    @Nested
+        class SubmissionsAndGrading {
+
+        private AssignmentRepository repo;
+        private CourseAccessService access;
+        private UserAccountService identities;
+        private FileStorage storage;
+        private ApplicationEventPublisher events;
+        private MutableClock clock;
+        private SubmissionService submissionService;
+        private AssignmentService learnerAssignmentService;
+        private Map<UUID, String> displayNames = Map.of();
+
+        private final UUID courseId = UUID.fromString("00000000-0000-0000-0000-00000000c101");
+        private final UUID lessonId = UUID.fromString("00000000-0000-0000-0000-00000000d101");
+        private final UUID assignmentId = UUID.fromString("00000000-0000-0000-0000-00000000a101");
+        private final UUID learnerId = UUID.fromString("00000000-0000-0000-0000-00000000e101");
+
+        @BeforeEach
+        void setUpSubmissions() {
+                repo = mock(AssignmentRepository.class);
+                access = mock(CourseAccessService.class);
+                identities = mock(UserAccountService.class);
+                storage = mock(FileStorage.class);
+                events = mock(ApplicationEventPublisher.class);
+                clock = new MutableClock(Instant.parse("2026-11-26T10:00:00Z"));
+                submissionService = new SubmissionService(
+                        repo, access, identities, storage, null, events, null, 1024 * 1024, clock) {
+                @Override
+                protected Map<UUID, String> readLearnerDisplayNames(UUID course, Set<UUID> learnerIds) {
+                        return displayNames;
+                }
+                };
+                learnerAssignmentService = new AssignmentService(repo, access, identities, clock);
+                lenient().when(identities.requireCurrentIdentity())
+                        .thenReturn(new CurrentIdentity(learnerId, IdentityRole.LEARNER));
+        }
+
+        private Assignment publishedAssignment(UUID lesson, Instant deadline) {
+                return new Assignment(assignmentId, courseId, lesson, "Lab 1", "Upload PDF or ZIP", deadline, "published");
+        }
+
+        private static byte[] pdfBytes() {
+                return "%PDF-1.7\n%sample".getBytes(StandardCharsets.US_ASCII);
+        }
+
+        private static byte[] zipBytes() {
+                return new byte[] {0x50, 0x4B, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00};
+        }
+
+        @Test
+        void submitBeforeDeadlineCreates201AndReplacementBeforeDeadlineReplacesWithLaterTimestamp() {
+                Instant deadline = Instant.parse("2026-11-26T11:00:00Z");
+                Assignment assignment = publishedAssignment(lessonId, deadline);
+                when(repo.findInCourse(assignmentId, courseId)).thenReturn(Optional.of(assignment));
+                when(repo.findInCourseForUpdate(assignmentId, courseId)).thenReturn(Optional.of(assignment));
+                when(repo.findSubmissionByAssignmentAndLearner(assignmentId, learnerId)).thenReturn(Optional.empty());
+                when(repo.findSubmissionByAssignmentAndLearnerForUpdate(assignmentId, learnerId))
+                        .thenReturn(Optional.empty());
+
+                SubmissionOutcome created = submissionService.submitOrReplace(
+                        courseId, assignmentId, () -> new FilePart("report.pdf", pdfBytes().length, new ByteArrayInputStream(pdfBytes())));
+                assertTrue(created.created());
+                assertEquals("report.pdf", created.submission().originalFilename());
+                assertEquals(Instant.parse("2026-11-26T10:00:00Z"), created.submission().submittedAt());
+                assertFalse(created.submission().graded());
+
+                ArgumentCaptor<String> firstKeyCaptor = ArgumentCaptor.forClass(String.class);
+                verify(storage).store(firstKeyCaptor.capture(), any(), eq((long) pdfBytes().length), eq("application/pdf"));
+                String firstKey = firstKeyCaptor.getValue();
+                assertTrue(firstKey.matches("submissions/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"));
+
+                // Replacement without advancing clock fails with 500 and deletes the new object (ADR010 §8)
+                UUID subId = UUID.randomUUID();
+                Submission existing = new Submission(subId, assignmentId, learnerId, firstKey,
+                        "report.pdf", Instant.parse("2026-11-26T10:00:00Z"), null, null, null);
+                when(repo.findSubmissionByAssignmentAndLearner(assignmentId, learnerId)).thenReturn(Optional.of(existing));
+                when(repo.findSubmissionByAssignmentAndLearnerForUpdate(assignmentId, learnerId))
+                        .thenReturn(Optional.of(existing));
+
+                assertThrows(IllegalStateException.class, () -> submissionService.submitOrReplace(
+                        courseId, assignmentId, () -> new FilePart("solution.zip", zipBytes().length, new ByteArrayInputStream(zipBytes()))));
+                verify(repo, never()).replaceSubmissionFile(any(), any(), any(), any(), any(), any());
+
+                // Advance clock by 1 microsecond -> replacement succeeds (200) and deletes superseded key
+                clock.advanceMicros(1);
+                SubmissionOutcome replaced = submissionService.submitOrReplace(
+                        courseId, assignmentId, () -> new FilePart("solution.zip", zipBytes().length, new ByteArrayInputStream(zipBytes())));
+                assertFalse(replaced.created());
+                assertEquals("solution.zip", replaced.submission().originalFilename());
+                assertEquals(Instant.parse("2026-11-26T10:00:00.000001Z"), replaced.submission().submittedAt());
+                verify(storage).delete(firstKey);
+        }
+
+        @Test
+        void lateOrGradedSubmissionIsRejectedWith409WithoutWritingToStorage() {
+                Instant deadline = Instant.parse("2026-11-26T10:00:00Z"); // equality now == deadline is late!
+                Assignment assignment = publishedAssignment(null, deadline);
+                when(repo.findInCourse(assignmentId, courseId)).thenReturn(Optional.of(assignment));
+
+                BusinessRuleException lateEx = assertThrows(BusinessRuleException.class, () -> submissionService.submitOrReplace(
+                        courseId, assignmentId, () -> new FilePart("late.pdf", pdfBytes().length, new ByteArrayInputStream(pdfBytes()))));
+                assertEquals(HttpStatus.CONFLICT, lateEx.getStatus());
+                verifyNoInteractions(storage);
+
+                // Before deadline, but already graded -> 409 without storage write
+                Assignment openAssignment = publishedAssignment(null, Instant.parse("2026-11-26T12:00:00Z"));
+                Submission graded = new Submission(
+                        UUID.randomUUID(), assignmentId, learnerId,
+                        "submissions/11111111-1111-4111-8111-111111111111", "ok.pdf",
+                        Instant.parse("2026-11-26T09:55:00Z"), new BigDecimal("95.00"), "Good",
+                        Instant.parse("2026-11-26T09:58:00Z"));
+                when(repo.findInCourse(assignmentId, courseId)).thenReturn(Optional.of(openAssignment));
+                when(repo.findSubmissionByAssignmentAndLearner(assignmentId, learnerId)).thenReturn(Optional.of(graded));
+
+                BusinessRuleException gradedEx = assertThrows(BusinessRuleException.class, () -> submissionService.submitOrReplace(
+                        courseId, assignmentId, () -> new FilePart("new.pdf", pdfBytes().length, new ByteArrayInputStream(pdfBytes()))));
+                assertEquals(HttpStatus.CONFLICT, gradedEx.getStatus());
+                verifyNoInteractions(storage);
+        }
+
+        @Test
+        void invalidFileTypesSignaturesFilenamesAndOversizedPartsFollowPrecedence() {
+                Assignment open = publishedAssignment(null, Instant.parse("2026-11-26T12:00:00Z"));
+                when(repo.findInCourse(assignmentId, courseId)).thenReturn(Optional.of(open));
+
+                // Wrong signature with .pdf extension -> 400
+                byte[] fakePdf = "NOTPDF".getBytes(StandardCharsets.US_ASCII);
+                assertEquals(HttpStatus.BAD_REQUEST, assertThrows(BusinessRuleException.class,
+                        () -> submissionService.submitOrReplace(courseId, assignmentId,
+                                () -> new FilePart("bad.pdf", fakePdf.length, new ByteArrayInputStream(fakePdf)))).getStatus());
+
+                // Disallowed extension -> 400
+                assertEquals(HttpStatus.BAD_REQUEST, assertThrows(BusinessRuleException.class,
+                        () -> submissionService.submitOrReplace(courseId, assignmentId,
+                                () -> new FilePart("script.sh", 10, new ByteArrayInputStream(new byte[10])))).getStatus());
+
+                // Path separator in filename -> 400
+                assertEquals(HttpStatus.BAD_REQUEST, assertThrows(BusinessRuleException.class,
+                        () -> submissionService.submitOrReplace(courseId, assignmentId,
+                                () -> new FilePart("../evil.pdf", pdfBytes().length, new ByteArrayInputStream(pdfBytes())))).getStatus());
+
+                // Oversized -> MaxUploadSizeExceededException (413)
+                assertThrows(MaxUploadSizeExceededException.class,
+                        () -> submissionService.submitOrReplace(courseId, assignmentId,
+                                () -> new FilePart("big.pdf", 2 * 1024 * 1024, new ByteArrayInputStream(pdfBytes()))));
+                verifyNoInteractions(storage);
+        }
+
+        @Test
+        void gradingPublishesCt27EventInsideTransactionEnforcesPreconditionAndMakesScoreVisibleToLearner() {
+                UUID subId = UUID.randomUUID();
+                Instant submittedAt = Instant.parse("2026-11-26T09:15:02.123456Z");
+                Assignment assignment = publishedAssignment(lessonId, Instant.parse("2026-11-26T12:00:00Z"));
+                Submission ungraded = new Submission(
+                        subId, assignmentId, learnerId,
+                        "submissions/22222222-2222-4222-8222-222222222222", "lab.pdf",
+                        submittedAt, null, null, null);
+
+                when(repo.findInCourseForUpdate(assignmentId, courseId)).thenReturn(Optional.of(assignment));
+                when(repo.findSubmissionInAssignmentForUpdate(subId, assignmentId)).thenReturn(Optional.of(ungraded));
+                displayNames = Map.of(learnerId, "Minh Tan");
+
+                // Stale submittedAt -> 409, no event published
+                BusinessRuleException stale = assertThrows(BusinessRuleException.class,
+                        () -> submissionService.gradeSubmission(courseId, assignmentId, subId,
+                                new GradeInput(new BigDecimal("88.50"), "Nice work", Instant.parse("2026-11-26T09:15:02.123000Z"))));
+                assertEquals(HttpStatus.CONFLICT, stale.getStatus());
+                verifyNoInteractions(events);
+
+                // Matching microsecond token -> saves grade, publishes CT27 event, regrade=false
+                SubmissionSummaryView gradedView = submissionService.gradeSubmission(
+                        courseId, assignmentId, subId,
+                        new GradeInput(new BigDecimal("88.50"), "Nice work\nKeep it up", submittedAt));
+                assertTrue(gradedView.graded());
+                assertEquals("Minh Tan", gradedView.learnerDisplayName());
+                assertEquals(new BigDecimal("88.50"), gradedView.gradePercentage());
+                assertEquals("Nice work\nKeep it up", gradedView.feedback());
+
+                ArgumentCaptor<AssignmentGradedEvent> eventCaptor = ArgumentCaptor.forClass(AssignmentGradedEvent.class);
+                verify(events).publishEvent(eventCaptor.capture());
+                AssignmentGradedEvent publishedEvent = eventCaptor.getValue();
+                assertEquals(subId, publishedEvent.submissionId());
+                assertEquals(assignmentId, publishedEvent.assignmentId());
+                assertEquals(courseId, publishedEvent.courseId());
+                assertEquals(lessonId, publishedEvent.lessonId());
+                assertEquals(learnerId, publishedEvent.learnerId());
+                assertEquals("Lab 1", publishedEvent.assignmentTitle());
+                assertTrue(publishedEvent.assignmentPublished());
+                assertFalse(publishedEvent.regrade());
+
+                // Learner read exposes score and feedback (and never object_key)
+                Submission gradedRow = new Submission(
+                        subId, assignmentId, learnerId,
+                        "submissions/22222222-2222-4222-8222-222222222222", "lab.pdf",
+                        submittedAt, new BigDecimal("88.50"), "Nice work\nKeep it up",
+                        Instant.parse("2026-11-26T10:00:00Z"));
+                when(repo.findInCourse(assignmentId, courseId)).thenReturn(Optional.of(assignment));
+                when(repo.findSubmissionByAssignmentAndLearner(assignmentId, learnerId)).thenReturn(Optional.of(gradedRow));
+                LearnerAssignmentView learnerView = learnerAssignmentService.readForLearner(courseId, assignmentId);
+                assertNotNull(learnerView.submission());
+                assertTrue(learnerView.submission().graded());
+                assertEquals(new BigDecimal("88.50"), learnerView.submission().gradePercentage());
+                assertEquals("Nice work\nKeep it up", learnerView.submission().feedback());
+
+                // Grade wire parser enforces microsecond precision and closed JSON
+                assertTrue(AssignmentRequests.parseGrade(
+                        "{\"gradePercentage\":95.5,\"feedback\":\"Solid\",\"submittedAt\":\"2026-11-26T09:15:02.123456Z\"}")
+                        .isPresent());
+                assertTrue(AssignmentRequests.parseGrade(
+                        "{\"gradePercentage\":95.5,\"feedback\":\"Solid\",\"submittedAt\":\"2026-11-26T09:15:02.1234567Z\"}")
+                        .isEmpty());
+        }
+
+        @Test
+        void downloadReReadsOnceOnConcurrentReplacementAndRefusesUnauthorizedOwner() throws IOException {
+                UUID subId = UUID.randomUUID();
+                String oldKey = "submissions/33333333-3333-4333-8333-333333333333";
+                String newKey = "submissions/44444444-4444-4444-8444-444444444444";
+                Submission oldRow = new Submission(subId, assignmentId, learnerId, oldKey, "v1.pdf",
+                        Instant.parse("2026-11-26T09:50:00Z"), null, null, null);
+                Submission newRow = new Submission(subId, assignmentId, learnerId, newKey, "v2.zip",
+                        Instant.parse("2026-11-26T09:55:00Z"), null, null, null);
+
+                when(repo.existsInCourse(assignmentId, courseId)).thenReturn(true);
+                when(repo.findSubmissionInAssignment(subId, assignmentId))
+                        .thenReturn(Optional.of(oldRow))
+                        .thenReturn(Optional.of(newRow));
+                when(storage.open(oldKey)).thenThrow(new ObjectNotFoundException());
+                when(storage.open(newKey)).thenReturn(
+                        new StoredObject(zipBytes().length, "application/zip", new ByteArrayInputStream(zipBytes())));
+
+                try (SubmissionFile downloaded = submissionService.downloadSubmissionForOwner(courseId, assignmentId, subId)) {
+                assertEquals("v2.zip", downloaded.originalFilename());
+                assertEquals("application/zip", downloaded.mediaType());
+                assertArrayEquals(zipBytes(), downloaded.content().readAllBytes());
+                }
+
+                // Ownership denial blocks download before any repository or storage call
+                doThrow(new ResourceNotFoundException("Not owner")).when(access).requireCourseOwnership(courseId);
+                assertThrows(ResourceNotFoundException.class,
+                        () -> submissionService.downloadSubmissionForOwner(courseId, assignmentId, subId));
+        }
+
+        private static final class MutableClock extends Clock {
+                private Instant instant;
+
+                private MutableClock(Instant initial) {
+                this.instant = initial;
+                }
+
+                private void advanceMicros(long micros) {
+                this.instant = this.instant.plusNanos(micros * 1_000L);
+                }
+
+                @Override
+                public ZoneId getZone() {
+                return ZoneOffset.UTC;
+                }
+
+                @Override
+                public Clock withZone(ZoneId zone) {
+                return this;
+                }
+
+                @Override
+                public Instant instant() {
+                return instant;
+                }
+        }
+        }
 }
