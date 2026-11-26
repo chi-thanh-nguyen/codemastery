@@ -181,6 +181,9 @@ public class CourseStructureService {
             if (lesson.publicationStatus() != publicationStatus) {
                 content.updateLessonPublicationStatus(lesson.chapterId(), lessonId, publicationStatus);
                 enrollments.reconcileCompletion(courseId);
+                if (publicationStatus == PublishStatus.PUBLISHED) {
+                    management.publishLessonPublished(courseId, lessonId);
+                }
             }
             return ownedLesson(courseId, lessonId);
         });
