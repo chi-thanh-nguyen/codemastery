@@ -74,6 +74,30 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      # Source-free BuildKit layers only; PR cache writes remain scoped to the PR.
+      - name: Restore Maven dependency layers
+        id: maven-layer
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ runner.temp }}/maven-layer
+          key: maven-layer-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/Dockerfile', 'backend/pom.xml', 'backend/.mvn/**') }}
+      - name: Prepare Maven dependency layers
+        timeout-minutes: 10
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f "$RUNNER_TEMP/maven-layer/index.json" ]]; then
+            # This isolated builder exports a standard local cache, independently
+            # of the runner's Docker image store. Ordinary consumers import it.
+            builder="maven-cache-${GITHUB_JOB}"
+            docker buildx create --name "$builder" --driver docker-container
+            trap 'docker buildx rm "$builder" >/dev/null' EXIT
+            docker buildx build --builder "$builder" --platform linux/amd64 \
+              --target maven-dependencies --output type=cacheonly \
+              --cache-to "type=local,dest=$RUNNER_TEMP/maven-layer,mode=max" backend
+          fi
+          echo "CODEMASTERY_MAVEN_LAYER_CACHE=$RUNNER_TEMP/maven-layer" >> "$GITHUB_ENV"
       - name: Build the backend image from this revision
         shell: bash
         # Quiet on success. A `-q` build used to print only "Dockerfile:10 ... exit
@@ -83,7 +107,11 @@ jobs:
         # The exit status is Docker's own. No build argument carries a secret.
         run: |
           log="$(mktemp)"; status=0
-          BUILDKIT_PROGRESS=plain docker build -t codemastery-backend:privilege-test backend >"$log" 2>&1 || status=$?
+          cache=()
+          if [[ -n "${CODEMASTERY_MAVEN_LAYER_CACHE:-}" ]]; then
+            cache=(--cache-from "type=local,src=$CODEMASTERY_MAVEN_LAYER_CACHE")
+          fi
+          BUILDKIT_PROGRESS=plain docker build "${cache[@]}" -t codemastery-backend:privilege-test backend >"$log" 2>&1 || status=$?
           if [ "$status" -ne 0 ]; then
             echo "docker build of backend failed (exit $status); last 80 lines of the build log:" >&2
             tail -n 80 "$log" >&2
@@ -135,6 +163,30 @@ jobs:
       - name: Verify Maven distribution integrity offline
         shell: bash
         run: exec bash infrastructure/vm/tests/test-maven-bootstrap.sh
+      # Source-free BuildKit layers only; PR cache writes remain scoped to the PR.
+      - name: Restore Maven dependency layers
+        id: maven-layer
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ runner.temp }}/maven-layer
+          key: maven-layer-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/Dockerfile', 'backend/pom.xml', 'backend/.mvn/**') }}
+      - name: Prepare Maven dependency layers
+        timeout-minutes: 10
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f "$RUNNER_TEMP/maven-layer/index.json" ]]; then
+            # This isolated builder exports a standard local cache, independently
+            # of the runner's Docker image store. Ordinary consumers import it.
+            builder="maven-cache-${GITHUB_JOB}"
+            docker buildx create --name "$builder" --driver docker-container
+            trap 'docker buildx rm "$builder" >/dev/null' EXIT
+            docker buildx build --builder "$builder" --platform linux/amd64 \
+              --target maven-dependencies --output type=cacheonly \
+              --cache-to "type=local,dest=$RUNNER_TEMP/maven-layer,mode=max" backend
+          fi
+          echo "CODEMASTERY_MAVEN_LAYER_CACHE=$RUNNER_TEMP/maven-layer" >> "$GITHUB_ENV"
       - name: Build the release and local images; reject invalid release origins
         shell: bash
         run: exec bash infrastructure/vm/tests/test-ingress-release-image-build.sh

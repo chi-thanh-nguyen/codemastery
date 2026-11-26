@@ -218,7 +218,7 @@ RUN set -eu; \
         alpine-release=3.24.4-r0 brotli-libs=1.2.1-r0 c-ares=1.34.9-r0 \
         ca-certificates=20261020-r0 ca-certificates-bundle=20261020-r0 \
         curl=8.23.0-r0 libcrypto3=3.5.9-r1 libcurl=8.23.0-r0 libexpat=2.11.0-r0 \
-        libssl3=3.5.9-r1 libxml2=2.13.9-r3 libxslt=1.1.43-r4 musl=1.2.6-r3 \
+        libssl3=3.5.9-r1 libxml2=2.13.9-r5 libxslt=1.1.43-r4 musl=1.2.6-r3 \
         musl-utils=1.2.6-r3 zlib=1.4-r0; \
     echo 'e09fa32f0a0eab2b879ccbbc4d0e4fb9751486eedda75e35fac65802cc9faa266425edf83e261137a2f4d16281ce2c1a5f4502930fe75154723da014214f0655  /etc/apk/keys/nginx_signing.rsa.pub' \
         | sha512sum -c -; \

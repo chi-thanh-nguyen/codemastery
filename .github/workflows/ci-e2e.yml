@@ -21,12 +21,12 @@ jobs:
   e2e:
     name: E2E
     runs-on: ubuntu-24.04
-    # Outer budget (ADR008 §10.5). The step budgets below sum to 88 minutes and
+    # Outer budget (ADR008 §10.5). The step budgets below sum to 98 minutes and
     # leave 12 for checkout, Node setup, post steps and termination grace, so
     # recovery and the summary keep their own time after a timed-out suite.
     # First measured run (ubuntu-24.04, cold image builds): browsers 66 s,
     # lifecycle tests 33 s, suite 5.2 min, recovery 1 s, whole job about 7 min.
-    timeout-minutes: 100
+    timeout-minutes: 110
     defaults:
       run:
         working-directory: e2e
@@ -63,6 +63,30 @@ jobs:
         id: lifecycle
         timeout-minutes: 5
         run: node --test fixtures/*.test.mjs
+      # Source-free BuildKit layers only; PR cache writes remain scoped to the PR.
+      - name: Restore Maven dependency layers
+        id: maven-layer
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ runner.temp }}/maven-layer
+          key: maven-layer-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/Dockerfile', 'backend/pom.xml', 'backend/.mvn/**') }}
+      - name: Prepare Maven dependency layers
+        timeout-minutes: 10
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f "$RUNNER_TEMP/maven-layer/index.json" ]]; then
+            # This isolated builder exports a standard local cache, independently
+            # of the runner's Docker image store. Ordinary consumers import it.
+            builder="maven-cache-${GITHUB_JOB}"
+            docker buildx create --name "$builder" --driver docker-container
+            trap 'docker buildx rm "$builder" >/dev/null' EXIT
+            docker buildx build --builder "$builder" --platform linux/amd64 \
+              --target maven-dependencies --output type=cacheonly \
+              --cache-to "type=local,dest=$RUNNER_TEMP/maven-layer,mode=max" backend
+          fi
+          echo "CODEMASTERY_MAVEN_LAYER_CACHE=$RUNNER_TEMP/maven-layer" >> "$GITHUB_ENV"
       - name: Run the E2E suite on all five projects
         id: e2e
         timeout-minutes: 25

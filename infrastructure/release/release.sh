@@ -80,7 +80,11 @@ build() {
     ! docker image inspect "$ref" >/dev/null 2>&1 || fail "Candidate tag $ref already exists; refusing to reuse it."
   done
   log "Building five linux/amd64 candidates from ${revision}."
-  quiet_build backend --platform linux/amd64 -t "$(candidate_ref backend "$revision")" "$source/backend"
+  local backend_cache=()
+  if [[ -n "${CODEMASTERY_MAVEN_LAYER_CACHE:-}" ]]; then
+    backend_cache=(--cache-from "type=local,src=$CODEMASTERY_MAVEN_LAYER_CACHE")
+  fi
+  quiet_build backend "${backend_cache[@]}" --platform linux/amd64 -t "$(candidate_ref backend "$revision")" "$source/backend"
   quiet_build frontend --platform linux/amd64 --target release --build-arg "PUBLIC_ORIGIN=${origin}" \
     -t "$(candidate_ref frontend "$revision")" "$source/frontend"
   quiet_build postgres --platform linux/amd64 -t "$(candidate_ref postgres "$revision")" "$source/infrastructure/postgres"

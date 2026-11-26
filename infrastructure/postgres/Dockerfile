@@ -45,7 +45,7 @@ RUN apk add --no-cache su-exec=0.3-r0
 # (docs/deployment.md, "DP01 release image security remediation").
 RUN apk add --no-cache \
         alpine-release=3.24.4-r0 krb5-libs=1.22.3-r0 libcrypto3=3.5.9-r1 \
-        libssl3=3.5.9-r1 libxml2=2.13.9-r3 libxslt=1.1.43-r4 zlib=1.4-r0
+        libssl3=3.5.9-r1 libxml2=2.13.9-r5 libxslt=1.1.43-r4 zlib=1.4-r0
 
 RUN rm /usr/local/bin/gosu
 

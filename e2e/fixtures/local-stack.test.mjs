@@ -14,7 +14,7 @@ import { chmodSync, existsSync, mkdtempSync, readdirSync, readFileSync, realpath
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import globalSetup, { BUILD_FAILURE_LINES, STACK_LABEL, buildImage, buildMarker, cacheTag, confirmRecordedRunner, containerExit, markBuild, waitForBackend, waitForPreview } from './local-stack.ts';
+import globalSetup, { BUILD_FAILURE_LINES, STACK_LABEL, buildImage, buildMarker, cacheTag, confirmRecordedRunner, containerExit, markBuild, waitForBackend, waitForPreview, waitForStorageInitializer } from './local-stack.ts';
 import { hostIdentity, processIdentity } from './host-identity.mjs';
 import { readInventory, writeInventory } from './run-inventory.mjs';
 
@@ -36,6 +36,10 @@ const live = (key) => { if (!db[key] || !db[key].present) fail('Error: No such o
 const counter = path.join(dir, 'inspects');
 if (args[0] === 'context' && args[1] === 'show') console.log('stub-context');
 else if (args[0] === 'context') console.log('unix:///var/run/docker.sock');
+else if (args[0] === 'compose') console.log(JSON.stringify({ services: {
+    minio: { image: 'fixture/minio@sha256:' + '1'.repeat(64), command: ['server', '/data'] },
+    'minio-init': { image: 'fixture/mc@sha256:' + '2'.repeat(64), entrypoint: ['/bin/sh', '-ec'], command: ['echo "$$STORAGE_BUCKET"'] },
+} }));
 else if (args[0] === 'info') console.log('stub-daemon');
 else if (args[0] === 'network' && args[1] === 'create') { db['net-' + id] = { kind: 'network', labels: labelsOf(), present: true }; save(); }
 else if (args[0] === 'network' && args[1] === 'inspect') { const key = db[id] ? id : 'net-' + id; const r = live(key); console.log(args.includes('{{.Id}}') ? key : JSON.stringify(r.labels)); }
@@ -71,6 +75,10 @@ else if (args[0] === 'run') {
 } else if (args[0] === 'inspect' && args.includes('{{json .Mounts}}')) {
     if (mode === 'mounts-fail') fail('Error response from daemon: i/o timeout');
     console.log(JSON.stringify(live(id).mounts));
+}
+else if (args[0] === 'inspect' && args.includes('{{json .State}}')) {
+    if (mode === 'init-inspect-fails') fail('Error response from daemon: i/o timeout');
+    console.log(JSON.stringify({ Status: mode === 'init-running' ? 'running' : 'exited', ExitCode: mode === 'init-fails' ? 7 : 0 }));
 }
 else if (args[0] === 'inspect' && args.includes('{{json .}}')) { const r = live(id); console.log(JSON.stringify({ Id: id, Config: { Labels: r.labels }, Mounts: r.mounts, State: { Status: 'exited' } })); }
 else if (args[0] === 'inspect') {
@@ -318,11 +326,25 @@ describe('backend readiness detects a failed start and keeps its diagnostics', (
         assert.equal(record.state, 'cleaning', 'resources are gone but the run is not complete while its runner lives');
         assert.equal(record.processes.runner.state, 'reconciling-self');
         assert.deepEqual(record.intents.map((intent) => `${intent.kind}:${intent.state}`),
-            ['network:removed', 'container:removed', 'volume:removed', 'container:removed']);
+            ['network:removed', 'container:removed', 'volume:removed', 'container:removed', 'container:removed', 'container:removed']);
         assert.equal(record.processes.preview.state, 'exited');
         assert.equal(record.processes.builder.state, 'exited');
         assert.ok(record.processes.preview.birth, 'the preview was recorded with its OS birth identity');
         assert.ok(!JSON.stringify(record).includes(secret), 'no secret reaches the inventory');
+    });
+    test('the default stack initializes storage once, isolates root credentials and recovers it on failure', async () => {
+        const { error, record } = await setupFailure('init-fails');
+        assert.match(error.message, /Storage initializer failed \(exit 7\)/);
+        const log = calls(), starts = log.filter((line) => line.startsWith('run -d --name '));
+        assert.equal(starts.filter((line) => line.includes('-minio-init ')).length, 1, 'never replay initialization');
+        assert.ok(!starts.some((line) => line.includes('-backend ')), 'backend cannot start after failed initialization');
+        for (const role of ['minio', 'minio-init']) {
+            const intent = record.intents.find((entry) => entry.role === role);
+            assert.equal(intent.state, 'removed');
+            assert.equal(intent.volumes, 'recorded');
+        }
+        assert.ok(starts.filter((line) => line.includes('-minio')).every((line) => !line.includes(' -p ')), 'storage stays private');
+        assert.ok(!JSON.stringify(record).includes('MINIO_ROOT_PASSWORD'));
     });
     test('every resource is recorded as an intent before it is created', async () => {
         const { record } = await setupFailure('exited');
@@ -361,7 +383,7 @@ describe('backend readiness detects a failed start and keeps its diagnostics', (
     test('container volume associations are intents written before creation and resolved from the container\'s mounts', async () => {
         const { record } = await setupFailure('exited');
         const containers = record.intents.filter((intent) => intent.kind === 'container');
-        assert.deepEqual(containers.map((intent) => intent.volumes), ['recorded', 'recorded']);
+        assert.deepEqual(containers.map((intent) => intent.volumes), ['recorded', 'recorded', 'recorded', 'recorded']);
         assert.equal(record.processes.builder.state, 'exited');
         assert.ok(record.processes.preview.pid > 0 && record.processes.preview.control.endsWith('cm-e2e-ls.sock'));
     });
@@ -409,5 +431,17 @@ describe('backend readiness detects a failed start and keeps its diagnostics', (
         delete process.env.CODEMASTERY_E2E_INVENTORY;
         await assert.rejects(globalSetup(), /must be started through the lifecycle coordinator/);
         assert.deepEqual(calls(), [], 'no Docker call was made');
+    });
+});
+
+describe('storage initializer completion is mandatory', () => {
+    test('only confirmed zero exit succeeds; failure, timeout and unreadable state propagate', async () => {
+        process.env.STUB_MODE = 'exited';
+        await waitForStorageInitializer('owned-init', [], { timeoutMs: 50, intervalMs: 5 });
+        for (const [mode, reason] of [['init-fails', /failed \(exit 7\)/], ['init-running', /Timed out/],
+            ['init-inspect-fails', /could not be inspected/]]) {
+            process.env.STUB_MODE = mode;
+            await assert.rejects(waitForStorageInitializer('owned-init', [], { timeoutMs: 20, intervalMs: 5 }), reason);
+        }
     });
 });

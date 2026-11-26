@@ -20,7 +20,8 @@ observation=/maven-bootstrap-observation
 [ ! -e "$observation/started" ] || exit 97
 : > "$observation/started" || exit 97
 status=0
-/bin/sh -c "$1" || status=$?
+/bin/sh -c "$1" > "$observation/output" 2>&1 || status=$?
+cat "$observation/output"
 printf '%s\n' "$status" > "$observation/status"
 SH
 
@@ -131,27 +132,13 @@ check_build() {
         echo "Unverified Maven launcher executed before verification: $name" >&2
         return 1
     fi
-    # Plain progress echoes RUN commands and reports other build steps in the same
-    # stream. Only the output lines of the final maven-bootstrap step, which the
-    # extraction guarantees is the marked verifier RUN, are evidence.
-    if ! awk '
-        match($0, /^#[0-9]+ \[maven-bootstrap [0-9]+\/[0-9]+\] /) {
-            split(substr($0, 1, RLENGTH - 2), part, " ")
-            split(part[3], position, "/")
-            if (position[1] == position[2]) {
-                if (substr($0, RLENGTH + 1, 4) != "RUN ") invalid = 1
-                if (!(part[1] in seen)) { seen[part[1]] = 1; steps++ }
-                step = part[1]
-            }
-            next
-        }
-        step != "" && $1 == step && $2 ~ /^[0-9]+\.[0-9]+$/ { sub(/^#[0-9]+ [0-9.]+ /, ""); print }
-        END { if (steps != 1 || invalid) exit 1 }
-    ' "$scratch/build.log" > "$scratch/verifier.log"; then
-        cat "$scratch/build.log" >&2
-        echo "Verifier output is not attributable to exactly one final maven-bootstrap RUN: $name" >&2
+    # Export the verifier's own stdout/stderr with its status and sentinel. BuildKit
+    # progress formatting and interleaved instruction echoes are not evidence.
+    if [[ ! -f "$scratch/observed/output" ]]; then
+        echo "Verifier output evidence is missing: $name" >&2
         return 1
     fi
+    cp "$scratch/observed/output" "$scratch/verifier.log"
     if [[ -z "$expected" ]]; then
         if [[ "$status" -ne 0 ]] || ! grep -Fxq '/tmp/maven-tree.tar: OK' "$scratch/verifier.log" \
             || ! grep -Eq '^Apache Maven 3\.9\.16([[:space:]]|$)' "$scratch/verifier.log"; then
@@ -163,8 +150,10 @@ check_build() {
         cat "$scratch/build.log" >&2
         echo "Verifier exited with status $status; expected 1: $name" >&2
         return 1
-    elif ! grep -Fxq "$expected" "$scratch/verifier.log" \
-        || grep -Eq '^#[0-9]+ [0-9.]+ (Apache Maven|UNVERIFIED_MAVEN_EXECUTED)' "$scratch/build.log"; then
+    elif ! { grep -Fxq "$expected" "$scratch/verifier.log" \
+        || { [[ "$expected" == '/tmp/maven-tree.tar: FAILED' ]] \
+            && grep -Fxq "sha512sum: $expected" "$scratch/verifier.log"; }; } \
+        || grep -Eq '^(Apache Maven|UNVERIFIED_MAVEN_EXECUTED)' "$scratch/verifier.log"; then
         cat "$scratch/build.log" >&2
         echo "Verifier failed without the expected diagnostic, or Maven output appeared: $name" >&2
         return 1
@@ -183,6 +172,13 @@ printf '# distributionUrl=https://example.invalid/ignored.zip\n' >> "$context/$p
 check_build 'surrounding value whitespace and comments work offline' '' ''
 cp "$scratch/original.properties" "$context/$properties"
 check_build 'modified executable never runs' '/tmp/maven-tree.tar: FAILED' "$sentinel"
+original_dockerfile="$dockerfile"
+awk '{ sub(/\| sha512sum -c -; \\$/, "| { rc=0; sha512sum -c - > /tmp/digest-output 2>\"/tmp/digest-error\" || rc=$?; sed \"s|^/tmp/maven-tree.tar:|sha512sum: /tmp/maven-tree.tar:|\" /tmp/digest-output; cat /tmp/digest-error; exit \"$rc\"; }; \\"); print }' \
+    "$dockerfile" > "$scratch/prefixed.Dockerfile"
+if cmp -s "$dockerfile" "$scratch/prefixed.Dockerfile"; then echo 'Diagnostic control did not mutate the verifier' >&2; exit 1; fi
+dockerfile="$scratch/prefixed.Dockerfile"
+check_build 'real digest rejection with prefixed output never runs the launcher' '/tmp/maven-tree.tar: FAILED' "$sentinel"
+dockerfile="$original_dockerfile"
 check_build 'missing JAR is rejected' '/tmp/maven-tree.tar: FAILED' \
     'rm /opt/maven/boot/*.jar'
 check_build 'unexpected added file is rejected' '/tmp/maven-tree.tar: FAILED' \

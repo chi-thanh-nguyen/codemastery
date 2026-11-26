@@ -8711,3 +8711,79 @@ matrices were not repeated. The selected component regressions and production
 journey still run. No CI query/wait/dispatch, GitHub review submission, merge,
 Issue/Project change or deployment was performed. Independent QA, CODEOWNER,
 required CI at the integration revision and protected merge remain separate.
+
+## Shared CI reliability remediation qualification — 26 November 2026
+
+Author-side implementation baseline: main
+`23402754743e0d35048e74cbabebfa133e5e6da3`. The user explicitly authorized one
+shared remediation PR and disposable integration revisions. No feature branch,
+protected requirement, normative contract, release admission or deployment is
+changed. See [design and limits](deployment.md#shared-ci-reliability-remediation--26-november-2026).
+
+Historical failure evidence was retrieved by individual run attempt:
+
+| Run / attempt | Verified failure boundary |
+| --- | --- |
+| [45845186528 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45845186528/attempts/1) | 31 Maven integrity controls passed, then release frontend APK resolution failed on libxml2 r3 |
+| [45845186528 / 2](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45845186528/attempts/2) | Actual verifier rejected the changed tree; harness rejected `sha512sum: /tmp/maven-tree.tar: FAILED` |
+| [45845186426 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45845186426/attempts/1) | lifecycle test `readRecord`/`awaitActive` threw ENOENT during record archival |
+| [45845186426 / 2](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45845186426/attempts/2) | lifecycle proceeded; PostgreSQL APK build then failed on libxml2 r3 |
+| [45844066644 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45844066644/attempts/1) | backend Docker package failed resolving Spring Boot parent POM with Central HTTP 429 after existing retries |
+| [45834577950 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45834577950/attempts/1) | five FE14 upload journeys returned 500 instead of 201 with no real initialized storage |
+| [45834577950 / 2, 3](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45834577950) | PostgreSQL APK build blocked the browser suite before upload assertions |
+| [45849479517 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45849479517) | Release rehearsal blocked by the same retired libxml2 constraint; no candidate produced |
+
+Regression commands remain the repository's existing entry points:
+
+- `node --test e2e/fixtures/*.test.mjs`: deterministic archive-before-open probe,
+  subsequent-generation observation, ENOENT-only handling, propagated EACCES/EIO/
+  ENOTDIR/JSON failures, initializer exit/timeout/inspection failures, default
+  storage isolation and partial-setup cleanup, plus existing lifecycle/recovery.
+- `MAVEN_TEST_PLATFORM=linux/arm64 bash infrastructure/vm/tests/test-maven-bootstrap.sh`
+  (also linux/amd64): actual offline verifier, status 0/1, independent execution
+  sentinel and malformed-Dockerfile controls. An added output-format control runs
+  the real digest rejection with the alternate prefix and preserves its status.
+- `bash infrastructure/vm/tests/test-maven-wrapper-pins.sh`: existing separate
+  host archive-pin/extraction-order controls.
+- `cd backend && ./mvnw verify`: units and real PostgreSQL/MinIO integration.
+- `cd frontend && npm test` and `npm run build`.
+- Default `cd e2e && E2E_WORKERS=1 npm test`, all five projects, followed by
+  `npm run stack:down`; no upload mocks, extra skips or reduced assertions.
+- Existing VM scripts and Release rehearsal retain exact-candidate/runtime,
+  ingress, containment, containerd and security qualification responsibilities.
+
+Execution results and integration limitations are recorded below as they finish;
+unexecuted checks must not be inferred from this command list. Author-side
+verification is separate from independent acceptance and protected integration.
+
+### Direct checks completed before the initial PR push
+
+- Signed APK index probes on x86_64/aarch64: r5 available; exact-base x86_64
+  install of r3 fails and r5 succeeds. Real hardened PostgreSQL image builds
+  pass on both architectures; local and release frontend images build on amd64.
+- Maven integrity suite: original 31 controls pass on amd64 and arm64; the
+  expanded 32-control suite (real digest rejection under the alternate output
+  prefix) passes on arm64. The unchanged host Wrapper suite passes 36 Unix cases
+  in a network-disabled Linux arm64 container; PowerShell was unavailable there.
+- E2E fixture suite: 159/159 pass in a network-disabled Linux arm64 container
+  with an init process, including ownership/fencing/recovery and new controls.
+  A fresh-registry regression case first exposed a test initialization omission;
+  it now asks the real coordinator to initialize its private registry before
+  simulating archival. macOS sandbox execution cannot obtain the kernel boot
+  identity and correctly refuses recovery; no production guard was relaxed.
+- Maven dependency resolution completes cold. Its standard local cache exports
+  from an isolated docker-container builder and imports into the normal Docker
+  builder. A second, fresh builder imports that cache and completes the actual
+  package lifecycle with `RUN --network=none`, with no dependency downloads.
+  Supplying a different global RUN network mode invalidates a BuildKit cache key;
+  that deliberately invalidated cold/no-network probe fails, as expected.
+- Native arm64 backend runtime image builds successfully. Release tooling unit
+  tests pass 95/95. Actionlint 1.7.12, shell syntax and `git diff --check` pass.
+- Frontend's initial full run reports 1052 passed/14 failed after the first
+  Settings test times out under concurrent qualification load; its unchanged
+  file passes all 87 cases in an isolated rerun. Hosted final-revision results
+  remain the required evidence; no application assertion or timeout is weakened.
+
+Backend full verification, active-PR integration journeys and hosted CI are still
+in progress at this initial-push checkpoint. The final PR report must supply
+those actual results and distinguish any residual scanner findings.
