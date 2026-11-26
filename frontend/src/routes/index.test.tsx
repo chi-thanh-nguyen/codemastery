@@ -35,6 +35,8 @@ beforeEach(() => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T10:00:00Z')); vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080');
     fetcher = vi.fn((url: string, _init?: RequestInit) => {
         const pathname = new URL(url).pathname;
+        if (pathname === '/api/me/notifications/unread-count') return Promise.resolve(json({ unreadCount: 0 }));
+        if (pathname === '/api/me/notifications') return Promise.resolve(json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }));
         if (pathname === '/api/instructor/courses') return Promise.resolve(json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }));
         return Promise.resolve(json(pathname.startsWith('/api/courses/') ? detail : page));
     });
@@ -221,6 +223,8 @@ it.each([['Learner', '/home'], ['Instructor', '/teach'], ['Administrator', '/cou
     fetcher.mockImplementation((url: string) => {
         const pathname = new URL(url).pathname;
         if (pathname === '/api/me/courses') return Promise.resolve(json(membershipPage()));
+        if (pathname === '/api/me/notifications/unread-count') return Promise.resolve(json({ unreadCount: 0 }));
+        if (pathname === '/api/me/notifications') return Promise.resolve(json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }));
         if (pathname === '/api/instructor/courses') return Promise.resolve(json({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 }));
         return Promise.resolve(json(page));
     });
@@ -242,7 +246,7 @@ it('shows a Learner home of active courses from the membership API only', async 
     expect(list.querySelector('a')?.getAttribute('href')).toBe(`/courses/${id}`);
     // Resume, progress and recommendations have no contract yet, so their sections are absent.
     expect(host.textContent).not.toMatch(/Continue learning|Up next|lessons ·|Resume/);
-    expect(fetcher.mock.calls.every(([url]) => ['/api/auth/login', '/api/courses', '/api/me/courses'].includes(new URL(url).pathname))).toBe(true);
+    expect(fetcher.mock.calls.every(([url]) => ['/api/auth/login', '/api/courses', '/api/me/courses', '/api/me/notifications/unread-count'].includes(new URL(url).pathname))).toBe(true);
 });
 it('links "See all N active courses" to My courses filtered by Active, which reads ?status= and keeps Joined as the default', async () => {
     // 25 active memberships: Home lists the first 20 and links to the rest.
@@ -842,7 +846,7 @@ describe('FE32 Instructor navigation and parent-aware active section (CT16.route
         expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
         await go('/teach/courses/new');
         expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
-        expect(fetcher).not.toHaveBeenCalled();
+        expect(fetcher.mock.calls.map(([url]) => new URL(url).pathname).filter((path) => path !== '/api/me/notifications/unread-count')).toEqual([]);
     });
 });
 
@@ -880,7 +884,7 @@ describe('FE32 complete model and actual route activation', () => {
         ['Learner', ['Home', 'Catalogue', 'My courses']], ['Instructor', ['Teaching', 'Catalogue']], ['Administrator', ['Catalogue']],
     ] as const)('filters %s against the actual delivered route tree', (role, labels) => {
         expect(roleNavigation(role).map(({ label }) => label)).toEqual(labels);
-        expect(notificationsAvailable(role)).toBe(false);
+        expect(notificationsAvailable(role)).toBe(role !== 'Administrator');
         expect(roleNavigation(undefined).map(({ label }) => label)).toEqual(['Catalogue']);
     });
     it('activates future start pages by registration alone, while constants and preview do not activate them', () => {
@@ -927,14 +931,14 @@ describe('FE32 complete model and actual route activation', () => {
         expect(currentSection('/courses/one')).toBe('/courses');
         expect(currentSection('/home')).toBeUndefined();
     });
-    it.each(['/admin', '/admin/users', '/admin/courses', '/admin/reports', '/admin/audit', '/teach/grading', '/teach/grading/one', '/teach/learners', '/teach/courses/one/learners', '/notifications'])
+    it.each(['/admin', '/admin/users', '/admin/courses', '/admin/reports', '/admin/audit', '/teach/grading', '/teach/grading/one', '/teach/learners', '/teach/courses/one/learners'])
     ('leaves inactive %s unregistered for anonymous visitors and every authenticated role', async (path) => {
         await mount(path);
         expect(location.pathname).toBe(path); expect(host.querySelector('main h1')?.textContent).toBe('Page not found');
         for (const role of ['Learner', 'Instructor', 'Administrator']) {
             await login('Role fixture', role); fetcher.mockClear(); await go(path);
             expect(location.pathname).toBe(path); expect(host.querySelector('main h1')?.textContent).toBe('Page not found');
-            expect(host.querySelectorAll('header nav [aria-current]')).toHaveLength(0); expect(fetcher).not.toHaveBeenCalled();
+            expect(host.querySelectorAll('header nav [aria-current]')).toHaveLength(0); expect(fetcher.mock.calls.map(([url]) => new URL(url).pathname).filter((path) => path !== '/api/me/notifications/unread-count')).toEqual([]);
         }
     });
     it('replaces all menu and active state on session role replacement, without privilege inheritance', async () => {
@@ -1012,7 +1016,7 @@ describe('FE32 role groups cover every delivered Instructor screen', () => {
         for (const role of ['Learner', 'Administrator']) {
             await login('Other role', role); fetcher.mockClear(); await go(path);
             expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
-            expect(host.querySelector('header nav [aria-current]')).toBeNull(); expect(fetcher).not.toHaveBeenCalled();
+            expect(host.querySelector('header nav [aria-current]')).toBeNull(); expect(fetcher.mock.calls.map(([url]) => new URL(url).pathname).filter((path) => path !== '/api/me/notifications/unread-count')).toEqual([]);
         }
     });
 });
@@ -1105,5 +1109,49 @@ describe('B1-F02 navigation-scoped delayed heading focus', () => {
         await act(async () => resolve(json({ id, title: 'Delayed owned Course', description: 'Synthetic course', publicationStatus: 'hidden', prerequisiteDescription: null, chapters: [] })));
         expect(host.querySelector('main h1')?.textContent).toBe('Delayed owned Course');
         expect(document.activeElement).toBe(host.querySelector('main h1'));
+    });
+});
+
+describe('FE28 production activation and shell integration', () => {
+    it.each(['Learner', 'Instructor'] as const)('delivers notifications and a current header bell for %s without marking on open', async (role) => {
+        await mount('/courses'); await login('Notice reader', role); fetcher.mockClear();
+        const bell = host.querySelector<HTMLAnchorElement>('header a[href="/notifications"]')!; expect(bell).not.toBeNull();
+        await act(async () => bell.click()); expect(location.pathname).toBe('/notifications'); expect(host.querySelector('main h1')?.textContent).toBe('Notifications');
+        expect(host.querySelector('header a[href="/notifications"]')?.getAttribute('aria-current')).toBe('page');
+        expect(host.querySelector('header nav [aria-current]')).toBeNull();
+        expect(fetcher.mock.calls.map(([url, init]) => [new URL(url).pathname, init.method])).toEqual(expect.arrayContaining([
+            ['/api/me/notifications', 'GET'], ['/api/me/notifications/unread-count', 'GET'],
+        ]));
+        expect(fetcher.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
+    });
+    it('redirects anonymous deep links to sign-in without a notification request or arbitrary return capture', async () => {
+        await mount('/notifications?returnTo=https://outside.test'); expect(location.pathname).toBe('/login'); expect(fetcher).not.toHaveBeenCalled(); expect(auth.consumeReturn()).toBe('/courses');
+    });
+    it('denies Administrator while retaining its session, hides the bell and never requests notifications', async () => {
+        await mount('/courses'); await login('Administrator', 'Administrator'); fetcher.mockClear(); await go('/notifications');
+        expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page"); expect(auth.isAuthenticated).toBe(true);
+        expect(host.querySelector('header a[href="/notifications"]')).toBeNull(); expect(fetcher).not.toHaveBeenCalled();
+    });
+    it('waits for session restoration before mounting the notification page and issuing protected reads', async () => {
+        let release!: (value: Response) => void;
+        fetcher.mockImplementation((url: string) => new URL(url).pathname === '/api/auth/refresh' ? new Promise<Response>((done) => { release = done; })
+            : Promise.resolve(json(new URL(url).pathname.endsWith('unread-count') ? { unreadCount: 0 } : { content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 })));
+        window.history.replaceState(null, '', '/notifications');
+        await act(async () => root.render(<ThemeProvider theme={appTheme}><BrowserRouter><AuthProvider refreshSessions><Probe /><AppRouter /></AuthProvider></BrowserRouter></ThemeProvider>));
+        expect(host.textContent).toContain('Restoring your session'); expect(fetcher.mock.calls.every(([url]) => new URL(url).pathname === '/api/auth/refresh')).toBe(true);
+        await act(async () => release(json(loginResponse('Restored learner')))); expect(location.pathname).toBe('/notifications'); expect(host.querySelector('main h1')?.textContent).toBe('Notifications');
+    });
+    it('preserves dirty-editor interception for a plain bell click and native modified clicks', async () => {
+        let proceed: (() => void) | undefined;
+        function DirtyEditor() { useNavigationGuard((next) => { proceed = next; return true; }); return <h1>Unsaved draft</h1>; }
+        window.history.replaceState(null, '', '/courses');
+        await act(async () => root.render(<ThemeProvider theme={appTheme}><BrowserRouter><AuthProvider><Probe /><AppRouter catalogue={<DirtyEditor />} /></AuthProvider></BrowserRouter></ThemeProvider>));
+        await login('Teacher', 'Instructor'); const bell = host.querySelector<HTMLAnchorElement>('header a[href="/notifications"]')!;
+        const modified = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true }); await act(async () => bell.dispatchEvent(modified));
+        expect(modified.defaultPrevented).toBe(false); expect(proceed).toBeUndefined();
+        const plain = new MouseEvent('click', { bubbles: true, cancelable: true }); await act(async () => bell.dispatchEvent(plain));
+        expect(plain.defaultPrevented).toBe(true); expect(location.pathname).toBe('/courses'); expect(proceed).toBeTypeOf('function');
+        expect(fetcher.mock.calls.some(([url]) => new URL(url).pathname === '/api/me/notifications')).toBe(false);
+        await act(async () => proceed!()); expect(location.pathname).toBe('/notifications'); expect(host.querySelector('main h1')?.textContent).toBe('Notifications');
     });
 });
