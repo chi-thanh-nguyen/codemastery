@@ -97,6 +97,43 @@ def build_archive(path, images, extra_index=None, tamper=None, duplicate=False, 
                 t.addfile(info, io.BytesIO(data))
 
 
+class SmokeEnvironmentTests(unittest.TestCase):
+    """Run smoke's shared generator, without entering its destructive stage."""
+
+    def test_generated_inputs_are_explicit_and_private(self):
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        with tempfile.TemporaryDirectory() as work:
+            target = os.path.join(work, "smoke.env")
+            origin = "https://smoke.example.invalid"
+            env = os.environ.copy()
+            # Ambient values must never hide a missing generator input.
+            keys = ("APP_QUIZ_AUTO_SUBMIT_ENABLED", "APP_QUIZ_AUTO_SUBMIT_DELAY_MS",
+                    "APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE")
+            for key in keys:
+                env.pop(key, None)
+            subprocess.run(["bash", "-c", 'source "$1"; write_smoke_env "$2" "$3"', "_",
+                            os.path.join(root, "infrastructure/release/release.sh"), origin, target],
+                           check=True, env=env, capture_output=True, text=True, timeout=15)
+            with open(target) as generated:
+                lines = generated.read().splitlines()
+            values = dict(line.split("=", 1) for line in lines)
+            self.assertEqual(len(lines), len(values), "duplicate generated keys")
+            self.assertEqual([values.get(key) for key in keys], ["false", "1000", "2"])
+            self.assertEqual(values["CORS_ALLOWED_ORIGINS"], origin)
+            self.assertEqual(os.stat(target).st_mode & 0o777, 0o600)
+
+    def test_smoke_retains_host_refusal(self):
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        env = os.environ.copy()
+        env.pop("GITHUB_ACTIONS", None)
+        env.pop("RUNNER_ENVIRONMENT", None)
+        result = subprocess.run(["bash", os.path.join(root, "infrastructure/release/release.sh"),
+                                 "smoke", "unused", "unused", "unused"],
+                                env=env, capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("only on a disposable GitHub-hosted runner", result.stderr)
+
+
 class ArchiveIdentityTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

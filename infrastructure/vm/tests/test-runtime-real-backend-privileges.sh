@@ -86,7 +86,7 @@ provision_db_roles >/dev/null
 umask 077
 { printf 'DB_HOST=postgres\nDB_PORT=5432\nDB_NAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\n' "$(env_get DB_NAME)" "$(env_get DB_USER)" "$(env_get DB_PASSWORD)"
   printf 'SPRING_FLYWAY_URL=%s\nSPRING_FLYWAY_USER=%s\nSPRING_FLYWAY_PASSWORD=%s\n' "$(env_get SPRING_FLYWAY_URL)" "$(env_get SPRING_FLYWAY_USER)" "$(env_get SPRING_FLYWAY_PASSWORD)"
-  printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=https://codemastery.example.test\nSTORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\nSPRING_PROFILES_ACTIVE=prod\n' "$(openssl rand -hex 32)"
+  printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=https://codemastery.example.test\nSTORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\nSPRING_PROFILES_ACTIVE=prod\nAPP_QUIZ_AUTO_SUBMIT_ENABLED=false\nAPP_QUIZ_AUTO_SUBMIT_DELAY_MS=1000\nAPP_QUIZ_AUTO_SUBMIT_BATCH_SIZE=2\n' "$(openssl rand -hex 32)"
 } > "$work/backend.env"
 # Read the whole log before matching: `docker logs | grep -q` fails under pipefail
 # (docker logs gets SIGPIPE, status 141) once the log outgrows the pipe buffer.
@@ -612,7 +612,7 @@ provision_db_roles >/dev/null
 umask 077
 { printf 'DB_HOST=postgres\nDB_PORT=5432\nDB_NAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\n' "$(env_get DB_NAME)" "$(env_get DB_USER)" "$(env_get DB_PASSWORD)"
   printf 'SPRING_FLYWAY_URL=%s\nSPRING_FLYWAY_USER=%s\nSPRING_FLYWAY_PASSWORD=%s\n' "$(env_get SPRING_FLYWAY_URL)" "$(env_get SPRING_FLYWAY_USER)" "$(env_get SPRING_FLYWAY_PASSWORD)"
-  printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=https://codemastery.example.test\nSTORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\nSPRING_PROFILES_ACTIVE=prod\n' "$(openssl rand -hex 32)"
+  printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=https://codemastery.example.test\nSTORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\nSPRING_PROFILES_ACTIVE=prod\nAPP_QUIZ_AUTO_SUBMIT_ENABLED=false\nAPP_QUIZ_AUTO_SUBMIT_DELAY_MS=1000\nAPP_QUIZ_AUTO_SUBMIT_BATCH_SIZE=2\n' "$(openssl rand -hex 32)"
 } > "$work/upgrade.env"
 { cat "$work/upgrade.env"; printf 'SPRING_FLYWAY_TARGET=8\n'; } > "$work/upgrade-v008.env"
 # This build's entities expect V009, so schema validation stops it once Flyway has

@@ -5628,6 +5628,28 @@ The Retry-After description above was corrected in the same follow-up
 wait; Resolver 1.9.27 retries immediately for a negative number or past date.
 The Docker retry properties are unchanged.
 
+
+### CT17-P6-PRIVILEGES-2026-11-26-r15 — AS08 timed attempts (26 November 2026)
+
+**DELEGATED_APPROVED within the existing ADR012 §19.2 ceiling.** The Project
+Leader's AS08 completion task explicitly authorizes the necessary runtime bindings
+and bounded technical selection. This revision replaces only the r6/r7 Attempt
+rows below; every other row, inventory and migration is unchanged. It grants
+nothing on a live database and authorizes no deployment or operational risk.
+
+| Relation | Runtime privileges | Implemented consumer |
+|---|---|---|
+| `attempts` (assessment) | SELECT, INSERT; UPDATE (submitted_at, score_percentage) | AS08 scoped reads, numbering, discovery, row locking, capture and terminal transition |
+| `attempt_answers` (assessment) | SELECT, INSERT; UPDATE (selected_options, is_correct) | AS08 captured reads/locks, answer replacement and exact-mask grading |
+
+The adapters use dynamic, mutable-column updates. No DELETE, TRUNCATE, ownership,
+DDL, grant option, attempt identity/timer rewrite or captured answer membership
+rewrite is allowed. SELECT covers the complete scalar projections; PostgreSQL
+row locks use the existing approved mutable-column UPDATE privileges. No migration
+or schema expansion is needed. The executable matrix, containment assertions and
+consumer tests ship together. AS12 publication, AD13 execution and operational
+statement/transaction deadline qualification remain separate gates.
+
 ## Shared CI reliability remediation — 26 November 2026
 
 This implementation follows DP01, ADR003's byte-clean PostgreSQL image, ADR008

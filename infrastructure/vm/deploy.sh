@@ -320,6 +320,7 @@ validate_env_file() {
   for k in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DB_NAME DB_USER DB_PASSWORD \
            MINIO_ROOT_USER MINIO_ROOT_PASSWORD STORAGE_ACCESS_KEY STORAGE_SECRET_KEY \
            JWT_SECRET CORS_ALLOWED_ORIGINS \
+           APP_QUIZ_AUTO_SUBMIT_ENABLED APP_QUIZ_AUTO_SUBMIT_DELAY_MS APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE \
            SPRING_FLYWAY_URL SPRING_FLYWAY_USER SPRING_FLYWAY_PASSWORD; do
     need "${k}"
   done
@@ -330,6 +331,16 @@ validate_env_file() {
 
   [[ "$(env_get JWT_SECRET)" =~ ^[0-9A-Fa-f]{64}$ ]] \
     || fail "JWT_SECRET must be exactly 64 hexadecimal characters."
+
+  [[ "$(env_get APP_QUIZ_AUTO_SUBMIT_ENABLED)" =~ ^(true|false)$ ]] \
+    || fail "APP_QUIZ_AUTO_SUBMIT_ENABLED must be explicit true or false."
+  for k in APP_QUIZ_AUTO_SUBMIT_DELAY_MS APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE; do
+    python3 - "$(env_get "$k")" <<'PYQUIZ' || fail "$k must be an integer in 1..2147483647."
+import re, sys
+value = sys.argv[1]
+sys.exit(0 if re.fullmatch(r"[0-9]+", value) and 1 <= int(value) <= 2147483647 else 1)
+PYQUIZ
+  done
 
   # distinct bootstrap, migrator and runtime identities and credentials.
   local pg_user db_user fw_user
@@ -471,6 +482,7 @@ allowed_environment = {
                 "STORAGE_ENDPOINT", "STORAGE_PATH_STYLE_ACCESS", "STORAGE_BUCKET",
                 "STORAGE_REGION", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY",
                 "JWT_SECRET", "JWT_EXPIRATION", "CORS_ALLOWED_ORIGINS",
+                "APP_QUIZ_AUTO_SUBMIT_ENABLED", "APP_QUIZ_AUTO_SUBMIT_DELAY_MS", "APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE",
                 "SERVER_PORT", "SERVER_FORWARD_HEADERS_STRATEGY", "SPRING_PROFILES_ACTIVE"},
     "frontend": set(),
 }
@@ -1347,7 +1359,8 @@ SQL
 # CT17-P6-PRIVILEGES-2026-11-24-r11 CO15 mastery-skip row and the
 # CT17-P6-PRIVILEGES-2026-11-25-r12 CO06 authoring and AS09 owner-assignment rows and the
 # CT17-P6-PRIVILEGES-2026-11-25-r13 IN07 notifications row and the
-# CT17-P6-PRIVILEGES-2026-11-26-r14 CO09 material-write row
+# CT17-P6-PRIVILEGES-2026-11-26-r14 CO09 material-write row and
+# CT17-P6-PRIVILEGES-2026-11-26-r15 AS08 timed-attempt rows
 # (all within the ADR012 §19.2 ceiling):
 # the complete runtime privilege matrix for the reviewed V001-V009 schema. Every relation in schema
 # public must be listed, and its reviewed columns are pinned, so a later migration
@@ -1369,8 +1382,8 @@ lesson_skills            SELECT,INSERT,DELETE -                                 
 quizzes                  SELECT,INSERT,DELETE UPDATE(title,kind,time_limit_seconds,publication_status) id,course_id,title,kind,time_limit_seconds,publication_status
 questions                SELECT,INSERT,DELETE UPDATE(skill_id,prompt,kind,difficulty,options,correct_options) id,skill_id,prompt,kind,difficulty,options,correct_options
 quiz_questions           SELECT,INSERT,DELETE -                                  id,quiz_id,question_id,position
-attempts                 -              SELECT(id,quiz_id)                       id,user_id,quiz_id,attempt_number,started_at,expires_at,submitted_at,score_percentage
-attempt_answers          -              SELECT(id,question_id)                   id,attempt_id,question_id,position,selected_options,is_correct
+attempts                 SELECT,INSERT  UPDATE(submitted_at,score_percentage)                       id,user_id,quiz_id,attempt_number,started_at,expires_at,submitted_at,score_percentage
+attempt_answers          SELECT,INSERT  UPDATE(selected_options,is_correct)                   id,attempt_id,question_id,position,selected_options,is_correct
 assignments              SELECT,INSERT  UPDATE(lesson_id,title,instructions,deadline_at,publication_status) id,course_id,lesson_id,title,instructions,deadline_at,publication_status
 submissions              -              SELECT(id,assignment_id,graded_at)       id,assignment_id,user_id,object_key,original_filename,submitted_at,grade_percentage,feedback,graded_at
 learner_skill_masteries  INSERT         SELECT(user_id,skill_id,state)+UPDATE(state) id,user_id,skill_id,state
@@ -1649,7 +1662,11 @@ SQL
   expect_denied  "runtime role rewriting Lesson mappings in place" 42501 "${app}" "${app_pw}" <<<'UPDATE public.lesson_skills SET lesson_id = lesson_id WHERE false;'
   expect_denied  "runtime role moving a quiz to another Course" 42501 "${app}" "${app_pw}" <<<'UPDATE public.quizzes SET course_id = course_id WHERE false;'
   expect_denied  "runtime role rewriting quiz membership in place" 42501 "${app}" "${app_pw}" <<<'UPDATE public.quiz_questions SET position = position WHERE false;'
-  expect_denied  "runtime role reading attempt owners, timing or scores" 42501 "${app}" "${app_pw}" <<<'SELECT user_id, started_at, score_percentage FROM public.attempts WHERE false;'
+  expect_allowed "runtime role reading attempt owners, timing or scores" "${app}" "${app_pw}" <<<'SELECT user_id, started_at, score_percentage FROM public.attempts WHERE false;'
+  expect_denied  "runtime role rewriting captured attempt identity or timing" 42501 "${app}" "${app_pw}" <<<'UPDATE public.attempts SET user_id=user_id, quiz_id=quiz_id, started_at=started_at, expires_at=expires_at, attempt_number=attempt_number WHERE false;'
+  expect_denied  "runtime role deleting attempts" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.attempts WHERE false;'
+  expect_denied  "runtime role rewriting captured answer membership" 42501 "${app}" "${app_pw}" <<<'UPDATE public.attempt_answers SET attempt_id=attempt_id, question_id=question_id, position=position WHERE false;'
+  expect_denied  "runtime role deleting captured answers" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.attempt_answers WHERE false;'
   expect_denied  "runtime role re-keying or re-targeting mastery rows" 42501 "${app}" "${app_pw}" <<<'UPDATE public.learner_skill_masteries SET id = id, user_id = user_id, skill_id = skill_id WHERE false;'
   expect_denied  "runtime role deleting mastery rows" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.learner_skill_masteries WHERE false;'
   expect_denied  "runtime role rewriting recommendation history" 42501 "${app}" "${app_pw}" <<<'UPDATE public.path_recommendations SET reason = reason WHERE false;'
@@ -1658,7 +1675,7 @@ SQL
   expect_denied  "runtime role moving an Assignment to another Course" 42501 "${app}" "${app_pw}" <<<'UPDATE public.assignments SET course_id = course_id WHERE false;'
   expect_denied  "runtime role deleting Assignments" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.assignments WHERE false;'
   expect_denied  "runtime role reading or writing submission files and grades" 42501 "${app}" "${app_pw}" <<<'SELECT object_key, feedback, grade_percentage FROM public.submissions WHERE false;'
-  expect_denied  "runtime role reading captured answer selections" 42501 "${app}" "${app_pw}" <<<'SELECT selected_options FROM public.attempt_answers WHERE false;'
+  expect_allowed "runtime role reading captured answer selections" "${app}" "${app_pw}" <<<'SELECT selected_options FROM public.attempt_answers WHERE false;'
   expect_denied  "runtime role re-keying or re-typing learning materials" 42501 "${app}" "${app_pw}" <<<'UPDATE public.learning_materials SET id = id, lesson_id = lesson_id, material_type = material_type WHERE false;'
   expect_denied  "runtime role deleting learning materials" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.learning_materials WHERE false;'
   expect_allowed "runtime role reading notifications" "${app}" "${app_pw}" <<<'SELECT id, user_id, message, is_read, created_at FROM public.notifications WHERE false;'

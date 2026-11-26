@@ -25,10 +25,11 @@ import org.springframework.core.Ordered;
 
 /**
  * CT38.core bindings, with consumption-scoped validation. DataSourceProperties is
- * validated when datasource infrastructure creates it; JWT/CORS/scheduler beans
- * remain lazy until a consumer injects them; AU07 recovery activation never fails
- * startup and only reports whether recovery delivery is configured. No Auth, CORS enforcement, storage or
- * scheduling behavior is implemented here. VITE_API_BASE_URL belongs to the frontend.
+ * validated when datasource infrastructure creates it; JWT/CORS/legacy scheduler settings
+ * remain lazy until consumed. Quiz expiry inputs are eager and required even when disabled;
+ * its feature flag activates Spring scheduling. AU07 recovery activation never fails startup
+ * and only reports whether delivery is configured. Auth/CORS enforcement and storage remain
+ * outside this configuration. VITE_API_BASE_URL belongs to the frontend.
  */
 @Configuration(proxyBeanMethods = false)
 public class AppConfig {
@@ -110,6 +111,43 @@ public class AppConfig {
         }
         return new SchedulingSettings(Boolean.parseBoolean(value));
     }
+
+    /** ADR007 §3.2: eager validation, including when the scheduler is disabled. */
+    @Bean
+    public QuizExpirySettings quizExpirySettings(Environment environment) {
+        String enabled = environment.getProperty("app.quiz.auto-submit.enabled");
+        if (!"true".equals(enabled) && !"false".equals(enabled)) {
+            throw invalid("APP_QUIZ_AUTO_SUBMIT_ENABLED");
+        }
+        return new QuizExpirySettings(Boolean.parseBoolean(enabled),
+                positiveInteger(environment, "app.quiz.auto-submit.delay-ms", "APP_QUIZ_AUTO_SUBMIT_DELAY_MS"),
+                positiveInteger(environment, "app.quiz.auto-submit.batch-size", "APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE"));
+    }
+
+    private static int positiveInteger(Environment environment, String property, String name) {
+        String value = environment.getProperty(property);
+        if (value == null || !value.matches("[0-9]+")) throw invalid(name);
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed < 1) throw invalid(name);
+            return parsed;
+        } catch (NumberFormatException failure) {
+            throw invalid(name);
+        }
+    }
+
+    public record QuizExpirySettings(boolean enabled, int delayMs, int batchSize) {
+        public QuizExpirySettings {
+            if (delayMs < 1 || batchSize < 1) throw invalid("quiz expiry positive integer bounds");
+        }
+    }
+
+    /** Feature-local scheduling activation; unrelated scheduling configuration is unchanged. */
+    @Configuration(proxyBeanMethods = false)
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(
+            name = "app.quiz.auto-submit.enabled", havingValue = "true")
+    @org.springframework.scheduling.annotation.EnableScheduling
+    static class QuizExpiryScheduling {}
 
     @Bean
     public static BeanPostProcessor consumedDatasourceValidation() {
