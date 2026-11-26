@@ -9016,10 +9016,154 @@ remain. Initial copied dependencies lacked FE14's Markdown parser; locked `npm c
 resolved that setup failure. The first new test incorrectly counted the existing
 mobile drawer as a leave dialog; it was corrected to assert the actual leave
 prompt. Final assertions pass; no production behavior was changed for that oracle.
-The browser harness exits 0 but reports **zero executed scenarios**: all three
+The native browser harness exits 1 and reports **zero executed scenarios**: all three
 native macOS engines fail launch (Chromium/WebKit closed, Firefox SIGABRT).
 This is a launch limitation, never a browser PASS. Real E2E evidence and any
 bounded diagnostic follow-up are recorded separately with IR-04 below.
 
 These are author checks, not independent closure, CODEOWNER acceptance, protected
 integration or release/deployment authorization. No CI dispatch or wait is performed.
+
+
+## FE14 IR-04 storage capability gating — 26 November 2026
+
+### Confirmed cause and exact correction
+
+GitHub run `45834577950`, original job `139959952579`, reports 124 passed,
+5 failed and 11 skipped. All five failures required HTTP 201 and received 500:
+delayed PDF recovery in Chromium desktop/mobile and Firefox desktop; direct PDF
+transport in WebKit desktop/mobile. Source confirms the full authoring journey,
+disposable MinIO plus initializer and backend storage endpoint already share the
+`E2E_MATERIAL_FILES=1` opt-in, while these two PDF tests omitted it and default CI
+does not enable it. No internal backend exception is inferred from HTTP 500.
+
+Both tests now begin with `test.skip(process.env.E2E_MATERIAL_FILES !== '1',
+'Requires the disposable MinIO-enabled fixture.')`. It runs before sign-in,
+Course creation, interception or upload, and preserves the existing disposable
+and WebKit applicability checks. The entire original spec is byte-identical
+when just those two lines are removed: exact HTTP 201, no duplicate material,
+failed recovery/explicit retry, full journey and committed PUT/remount assertions
+remain. No production source, fixture architecture, dependency or CI change.
+
+### Actual default and storage-enabled execution
+
+Exact commands from the isolated repository root:
+
+```bash
+(
+    unset E2E_MATERIAL_FILES E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD
+    E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts
+)
+npm --prefix e2e run stack:down
+(
+    unset E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD
+    E2E_MATERIAL_FILES=1 E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts
+)
+```
+
+Default exits **1 before browser execution**. The lifecycle admits run
+`cm-e2e-1a2188bbf2f-397681` for checkout lock `16777234-22098420`, but the backend
+build fails writing Docker Buildx's activity file (operation not permitted).
+No PostgreSQL build, backend start, storage provisioning or PDF operation occurs.
+Separately the sandbox denies macOS boot identity (`host.boot` is null), so cleanup
+cannot prove same-boot writer ownership and fails closed. Recovery exits **1**.
+The subsequent opt-in invocation exits **3 before Playwright entry** because that
+inventory is incomplete. Neither mode reaches test applicability or assertions.
+
+| Project | Default actual | Storage-enabled actual |
+| --- | --- | --- |
+| chromium-desktop | NOT RUN: setup failure | NOT RUN: admission refused |
+| firefox-desktop | NOT RUN: setup failure | NOT RUN: admission refused |
+| webkit-desktop | NOT RUN: setup failure | NOT RUN: admission refused |
+| chromium-mobile | NOT RUN: setup failure | NOT RUN: admission refused |
+| webkit-mobile | NOT RUN: setup failure | NOT RUN: admission refused |
+
+Both modes: **0 PASS, 0 executed SKIP, 0 browser assertion FAIL**; four scenarios
+per project remain NOT RUN. Expected 10 PASS/10 SKIP in default and 15 PASS/5 SKIP
+with storage are contract expectations, not observed results. The two guards are
+implemented and statically verified; runtime skip behavior and real 201/one-row/
+retry behavior at this revision remain unverified. No mocks, retries, direct
+Playwright invocation, external target or backend/PostgreSQL override hides this.
+
+The retained record is `~/.codemastery-e2e/runs/16777234-22098420.json`, state
+`incomplete`, with **zero Docker creation intents**. One marked temporary build
+`/var/folders/bx/b_377_w93sl91jx1l7yrbmj40000gp/T/codemastery-e2e-gjSPE8` remains
+preserved. No E2E containers, volumes or network were created. The record and
+uncertain process ownership are preserved; no process guessing, inventory edit
+or broad Docker cleanup was performed. An authorized host operator must reconcile
+this exact inventory/temp ownership under ADR008 before reusing the checkout.
+The existing automated recover command could not establish the missing identity.
+
+### Infrastructure and CI are separate
+
+Later job `139995247102` of the same run fails before browsers while PostgreSQL
+build resolves `libxml2-2.13.9-r2`, which breaks `world[libxml2=2.13.9-r3]`.
+The current Dockerfile remains identical at original FE14 HEAD and integrated
+main, including that exact security pin and the ADR003 base/byte-clean policy.
+The DP01 23 November security record explains its reviewed update. This is a
+separate observed build failure, not IR-04 and not proof of a permanent upstream
+failure. This local attempt did not reach PostgreSQL; no current cold PostgreSQL
+build PASS or reproduced package failure is claimed. DP01 must separately resolve
+package availability under the existing reviewed pinning/security process and
+qualify the exact resulting artifact. No pins, image digests or repositories change.
+
+A read-only pre-push snapshot at old HEAD `36be38f` shows E2E FAILURE (the later
+job), CodeQL SUCCESS (`139960245386`) and the other reported backend/frontend/VM
+checks SUCCESS. Alert #8's returned most-recent instance is `fixed`; that scanner
+state is not independent closure of the author correction. No final-head CI PASS
+is inferred, no workflow was dispatched/rerun and no CI completion was awaited.
+
+### Narrow self-audit and remaining gates
+
+IR-04: **FIX_IMPLEMENTED_VERIFICATION_BLOCKED**. Conflict integration:
+**CONFLICTS_RESOLVED_VERIFICATION_LIMITED**, with 350 focused component/route tests,
+typecheck/build and exact preservation checks passed; real combined E2E remains
+unverified. Original IR-01/02/03 and CodeQL author corrections remain pending
+independent acceptance. Source and both merge-parent diffs were inspected; no
+confirmed in-scope production defect or assertion weakening remains. Graphify was
+queried only as a navigation aid, with actual source checks governing conclusions.
+
+Recommend **Targeted Delta-focused Independent Review + Main Integration
+Regression Review**, covering the complete remediation delta from
+`e4d7eb3febfad8f89db1b9091c7931ed3308654a` through final PR HEAD, with integrated
+main `2340275` explicitly separated. Include IR-01 lifecycle, IR-02/03 Markdown,
+CodeQL helper, IR-04 default/opt-in runtime evidence, manual documentation merges,
+FE14/FE28 routing/navigation and the two integration regressions. Real E2E must
+be completed in a qualified environment. No full-scope rereview, independent
+closure, protected merge, Issue/Project update or release/deployment is implied.
+Attribution remains consensual heizseung author/committer and chi-thanh-nguyen
+pusher, with truthful Codex assistance disclosure and no fabricated contribution.
+
+
+### Bounded header browser follow-up on the combined production build
+
+After native launches failed, the existing cached official Playwright 1.63.0
+Linux arm64 image was independently identified by both local ID and RepoDigest:
+`sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27`
+(`mcr.microsoft.com/playwright@` that digest). This is a browser tooling image,
+not a backend/PostgreSQL override. A task-owned `--rm` container ran with network
+`none`, UID/GID `502:20`, the isolated checkout mounted read-only and a separate
+writable evidence directory. Its owned loopback static server served only the
+combined build, with SPA fallback; controlled REST doubles stayed in the existing
+harness. No security flags, dependencies, app sources or E2E fixtures changed.
+
+Executed build: `VITE_API_BASE_URL=/api npm --prefix frontend run build -- --outDir
+../../evidence/browser-dist` (exit 0). Inside the container the existing harness
+ran `node src/shared/components/presentation.browser.cjs --fe28-remediation --case
+IR-FE28 --url <that-container-owned-loopback-url> --out /evidence/header-linux
+--engine chromium,webkit,firefox`. The task-local static-server wrapper and Docker
+mounts are diagnostic artifacts outside the repository; no new project entrypoint.
+
+Results: Chromium **153.0.8010.12: 8 PASS / 0 FAIL**; WebKit **26.6: 8 PASS /
+0 FAIL**. D01 verifies focused bell identity through delayed count/reconciliation;
+D02 verifies Home's 44px target and operable edges. Six per-engine role/theme
+cases retain count geometry, hit testing and native navigation. Nineteen unrelated
+cases per successful engine are deliberately excluded by `--case`, not failed or
+executed E2E skips. Firefox executes **0**: launch fails with `CanCreateUserNamespace`
+`clone() failure: EPERM` and `Could not find profile folder`. Overall harness/container
+exit **1**, caused by this launch block, with no assertion failure in either
+executed engine. No namespace/sandbox bypass was introduced. The named container
+`codemastery-fe14-header-1a218870` was verified absent after `--rm`; its loopback
+server and browser processes ended with it. This establishes controlled frontend
+browser behavior only, not real PDF/storage/backend execution or cold-build
+qualification. IR-04 and integration classifications above remain unchanged.

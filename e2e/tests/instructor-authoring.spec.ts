@@ -189,6 +189,7 @@ test('FE14-IR-01: committed PUT survives app Leave and remount',async({page},inf
 });
 
 test('FE14-IR-01: accepted PDF survives native Back and failed recovery',async({page,browserName},info)=>{
+ test.skip(process.env.E2E_MATERIAL_FILES !== '1', 'Requires the disposable MinIO-enabled fixture.');
  test.skip(browserName === 'webkit', 'The WebKit route.fetch multipart probe returned 400 before acceptance on both baseline and remediation; qualify the delayed-upload race in Chromium.');
  test.skip(!target.fixture);test.setTimeout(90000);await signIn(page,target.instructor!,'teach');
  await page.getByRole('link',{name:'Create course',exact:true}).first().click();
@@ -234,6 +235,7 @@ test('FE14-IR-01: accepted PDF survives native Back and failed recovery',async({
 
 // Isolate the response-interception limitation from actual WebKit file transport.
 test('FE14-IR-01: WebKit PDF transport without response interception', async ({page, browserName}) => {
+    test.skip(process.env.E2E_MATERIAL_FILES !== '1', 'Requires the disposable MinIO-enabled fixture.');
     test.skip(browserName !== 'webkit' || !target.fixture);
     await signIn(page, target.instructor!, 'teach');
     await page.getByRole('link', {name:'Create course',exact:true}).first().click();

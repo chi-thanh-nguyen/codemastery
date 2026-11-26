@@ -2641,3 +2641,38 @@ first-definition precedence. Images remain alt-text links; HTML remains literal.
 Executed verification and the CodeQL test-helper correction are appended to
 `docs/testing.md`. No effective contract, OpenAPI, dependency or governance rule
 was changed.
+
+
+## FE14 main integration and storage-gated regressions — 26 November 2026
+
+The Project Leader explicitly authorized integrating current main into the existing
+PR #279 branch and correcting FE14-IR-04, with Codex assistance. Regular merge
+`e54dcf54caf762cf7c3f040912d9f8ad7457f67d` retains original FE14 HEAD `36be38f`
+and FE28 main `23402754743e0d35048e74cbabebfa133e5e6da3`; all earlier FE14
+commits and both features' historical documentation remain intact. FE28's guarded
+Notifications/Workspace owner and FE14's shared Course/Lesson owner coexist.
+
+Both PDF-specific tests in `e2e/tests/instructor-authoring.spec.ts` now require
+`E2E_MATERIAL_FILES=1` before any sign-in, data creation, interception or upload.
+This matches the existing full journey and disposable MinIO/initializer/backend
+endpoint policy. HTTP 201, one-material, failed-recovery/retry and browser-specific
+assertions are unchanged; no fixture, workflow, dependency or production source
+changes are made for IR-04. Removing the two guards exactly restores the prior spec.
+
+Real execution remains blocked on this sandbox: the default lifecycle run failed
+before browser tests because Docker Buildx could not write its activity record.
+The host boot identity is unavailable, so r2 cleanup preserves the incomplete
+inventory and one marked temporary build instead of guessing process ownership.
+No E2E Docker resource was created. Recovery returned 1; the storage-enabled
+invocation then returned 3 without entering Playwright. No image override, external
+target or lifecycle bypass was used. An authorized host operator must reconcile
+that exact inventory under ADR008 before reuse; no forced registry edit is made.
+
+The separate later GitHub job `139995247102` failed resolving the unchanged exact
+PostgreSQL `libxml2=2.13.9-r3` pin. Its continued presence is verified, but this
+sandbox did not reach the PostgreSQL build and does not establish a permanent
+upstream fault. DP01 owns any separately authorized package-availability/security
+qualification. No downgrade, unpinning, repository/digest change or CI bypass.
+See [the execution record](testing.md#fe14-ir-04-storage-capability-gating--26-november-2026)
+for actual results and limits. Independent review, required CI, protected merge
+and release/deployment remain separate; no independent finding is closed here.
