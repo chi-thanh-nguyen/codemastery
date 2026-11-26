@@ -1,6 +1,139 @@
 import { randomUUID } from 'node:crypto';
+import { request as playwrightRequest } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { expect, expectNoPageOverflow, signIn, target, test } from '../fixtures/auth-fixture';
+
+/** Real REST, PostgreSQL and production UI; no intercepted responses or persisted credentials. */
+test('FE16 complete authoring, safe Preview, exact deadlines and grading handoffs', async ({ page, request }, testInfo) => {
+    test.skip(!target.fixture, 'Mutates only this run’s disposable environment.');
+    test.setTimeout(180_000); page.setDefaultTimeout(15_000);
+    const api = (path: string) => new URL('/api' + path, target.api).href;
+    const isolated = await playwrightRequest.newContext();
+    let token: string;
+    try {
+        const login = await isolated.post(api('/auth/login'), { data: { email: target.instructor!.email, password: target.instructor!.password } });
+        expect(login.status()).toBe(200); token = (await login.json()).accessToken;
+    } finally { await isolated.dispose(); }
+    const headers = { Authorization: `Bearer ${token}` };
+    const courseResponse = await request.post(api('/instructor/courses'), { headers, data: { title: `FE16 ${randomUUID()}`, description: 'Disposable Assignment authoring.', prerequisiteDescription: null } });
+    expect(courseResponse.status()).toBe(201); const course = await courseResponse.json();
+    const assignments = `/courses/${course.id}/owned-assignments`;
+    const invalid = await request.post(api(`/courses/${course.id}/assignments`), { headers, data: { title: 'Invalid', instructions: '', deadlineAt: 'invalid', lessonId: null } });
+    expect(invalid.status()).toBe(400);
+    const problem = await invalid.json();
+    expect(problem.detail).toBe('The request is invalid.'); expect(problem.errors ?? []).toEqual([]);
+    await testInfo.attach('actual-assignment-400', { body: JSON.stringify(problem), contentType: 'application/json' });
+
+    await signIn(page, target.instructor!, 'teach');
+    const listUrl = `/teach/courses/${course.id}/assessments?view=assignments`;
+    await page.goto(listUrl);
+    await expect(page.getByText('No assignments yet', { exact: true })).toBeVisible();
+    await page.getByRole('link', { name: 'New assignment', exact: true }).click();
+    await expect(page).toHaveURL(/\/assignments\/new$/);
+    const title = `Assignment ${randomUUID()}`;
+    const markdown = '# Assignment preview\n\n**Read carefully**\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n```js\nconst answer = 42;\n```\n\n<script>window.fe16Executed = true</script>\n\n![Remote](https://example.test/fe16.png)\n\n[Unsafe](javascript:evil)';
+    await page.getByRole('textbox', { name: 'Assignment title' }).fill(title);
+    await page.getByRole('textbox', { name: 'Instructions', exact: true }).fill(markdown);
+    await page.locator('input[type="datetime-local"]').fill('2020-01-02T12:30');
+    const external: string[] = [];
+    page.on('request', r => { if (new URL(r.url()).hostname === 'example.test') external.push(r.url()); });
+    await page.getByRole('button', { name: 'Preview', exact: true }).focus(); await page.keyboard.press('Space');
+    const preview = page.getByRole('region', { name: 'Instructions preview' });
+    await expect(preview.getByRole('heading', { name: 'Assignment preview' })).toBeVisible();
+    await expect(preview.getByRole('table')).toBeVisible();
+    await expect(preview.locator('pre')).toContainText('const answer = 42;');
+    await expect(preview.locator('script,img,a[href^="javascript:"]')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as Window & { fe16Executed?: boolean }).fe16Executed)).toBeUndefined(); expect(external).toEqual([]);
+    const createResponse = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === `/api/courses/${course.id}/assignments`);
+    await page.getByRole('button', { name: 'Create assignment', exact: true }).click();
+    const created = await createResponse; expect(created.status()).toBe(201); const assignment = await created.json();
+    await expect(page).toHaveURL(new RegExp(`/assignments/${assignment.id}$`));
+    await expect(page.getByText('Assignment created. It stays hidden until you publish it.', { exact: true })).toBeVisible();
+    const editorUrl = new URL(page.url()).pathname;
+    const checkControls = async () => {
+        const clipped = await page.locator('main input:not([type="hidden"]), main textarea, main button, main [role="combobox"]').evaluateAll(elements => elements.filter(el => {
+            let box = el.getBoundingClientRect(); const style = getComputedStyle(el);
+            if (box.width <= 2 || box.height <= 2 || style.visibility === 'hidden') return false;
+            // DESIGN intentionally scrolls segmented navigation on narrow screens. Prove each
+            // control can be revealed inside that scroll surface; hidden clipping gets no exemption.
+            if (box.left < -1 || box.right > innerWidth + 1) {
+                let parent = el.parentElement;
+                while (parent && !['auto', 'scroll'].includes(getComputedStyle(parent).overflowX)) parent = parent.parentElement;
+                if (parent && parent.scrollWidth > parent.clientWidth) {
+                    el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); box = el.getBoundingClientRect();
+                }
+            }
+            return box.left < -1 || box.right > innerWidth + 1;
+        }).map(el => ({ label: el.getAttribute('aria-label') ?? el.textContent, left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right })));
+        expect(clipped, 'Controls must fit the viewport even when a parent clips overflow').toEqual([]);
+    };
+    await page.reload();
+    await expect(page.getByRole('textbox', { name: 'Instructions', exact: true })).toHaveValue(markdown);
+    const precise = '2020-01-02T12:30:00.123456Z';
+    expect((await request.put(api(`${assignments}/${assignment.id}`), { headers, data: { title, instructions: markdown, deadlineAt: precise, lessonId: null } })).status()).toBe(200);
+    await page.reload();
+    await expect(page.getByRole('textbox', { name: 'Assignment title' })).toHaveValue(title);
+    await page.getByRole('textbox', { name: 'Assignment title' }).fill(title + ' edited');
+    await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+    const current = await (await request.get(api(`${assignments}/${assignment.id}`), { headers })).json();
+    expect(current.deadlineAt).toBe(precise); expect(current.instructions).toBe(markdown);
+    await page.getByRole('button', { name: 'Publish assignment', exact: true }).click();
+    await expect(page.getByRole('dialog')).toContainText('Learners in this course');
+    await page.getByRole('dialog').getByRole('button', { name: 'Publish assignment', exact: true }).click();
+    await expect(page.getByText('Assignment published.', { exact: true })).toBeVisible();
+    await page.getByRole('textbox', { name: 'Instructions', exact: true }).fill(markdown + '\nUnsaved.');
+    await page.getByRole('link', { name: 'Open grading', exact: true }).click();
+    await expect(page.getByRole('dialog')).toContainText('Leave without saving?');
+    await expect(page.getByRole('button', { name: 'Stay', exact: true })).toBeFocused();
+    await page.getByRole('button', { name: 'Stay', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: 'Instructions', exact: true })).toHaveValue(markdown + '\nUnsaved.');
+    await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+
+    // Every prescribed width in all three preferences, actual production editor and list.
+    for (const preference of ['light', 'dark', 'system']) {
+        await page.setViewportSize({ width: 1440, height: 960 });
+        await page.getByRole('button', { name: /^Theme:/ }).click();
+        await page.getByRole('menuitemradio', { name: new RegExp(`^${preference[0].toUpperCase()}${preference.slice(1)}`) }).click();
+        await page.keyboard.press('Escape');
+        await page.emulateMedia({ colorScheme: 'dark' });
+        await expect(page.locator('html')).toHaveAttribute('data-color-scheme', preference === 'light' ? 'light' : 'dark');
+        for (const width of [360, 768, 1024, 1280, 1440]) {
+            await page.setViewportSize({ width, height: 960 }); await expectResponsiveHeaderMode(page, width);
+            await page.getByRole('button', { name: 'Preview', exact: true }).click();
+            await expectNoPageOverflow(page); await checkControls(); await page.evaluate(() => scrollTo(0, 0));
+            await page.screenshot({ path: testInfo.outputPath(`fe16-${preference}-${width}.png`), fullPage: true });
+            await page.getByRole('button', { name: 'Instructions', exact: true }).click();
+            await expectNoPageOverflow(page); await checkControls();
+        }
+        if (preference === 'system') {
+            await page.emulateMedia({ colorScheme: 'light' });
+            await expect(page.locator('html')).toHaveAttribute('data-color-scheme', 'light');
+        }
+    }
+    await page.getByRole('button', { name: 'Hide assignment', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Hide assignment', exact: true }).click();
+    await expect(page.getByText('Assignment hidden.', { exact: true })).toBeVisible();
+    await page.getByRole('link', { name: 'Back to assignments', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/assessments\\?view=assignments$`));
+    await expect(page.getByRole('link', { name: `Open assignment: ${title} edited`, exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: `Grade: ${title} edited`, exact: true })).toHaveCount(0);
+    for (const preference of ['Light', 'Dark', 'System']) {
+        await page.setViewportSize({ width: 1440, height: 960 });
+        await page.getByRole('button', { name: /^Theme:/ }).click();
+        await page.getByRole('menuitemradio', { name: new RegExp(`^${preference}`) }).click(); await page.keyboard.press('Escape');
+        for (const width of [360, 768, 1024, 1280, 1440]) {
+            await page.setViewportSize({ width, height: 960 }); await expectResponsiveHeaderMode(page, width); await expectNoPageOverflow(page); await checkControls();
+        }
+    }
+    await page.setViewportSize({ width: 320, height: 844 }); await expectResponsiveHeaderMode(page, 320); await expectNoPageOverflow(page); await checkControls();
+    await page.goto(editorUrl);
+    await expect(page.getByRole('link', { name: 'Open grading', exact: true })).toHaveAttribute('href', `/teach/grading?courseId=${course.id}&assignmentId=${assignment.id}`);
+    await page.getByRole('link', { name: 'Open grading', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/teach/grading\\?courseId=${course.id}&assignmentId=${assignment.id}$`));
+    await expect(page.getByText('No submissions yet', { exact: true })).toBeVisible();
+});
 
 async function expectResponsiveHeaderMode(page: Page, width: number) {
     const header = page.getByRole('banner');

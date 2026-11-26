@@ -22,7 +22,7 @@ import type { SkillSource } from '../components/QuestionForm';
 import { AppRouter } from '../../../../routes';
 import { addCoursePrerequisite, createCourseSkill, getOwnedSkillGraph, mapCourseLessonSkill, removeCoursePrerequisite, unmapCourseLessonSkill, updateCourseSkill } from '../../skill-graph-editor/api/skillGraphApi';
 import type { OwnedSkillGraph } from '../../skill-graph-editor/api/skillGraphApi';
-import { instantMicros, sameAssignment, sameInstant } from './AssignmentEditorPage';
+import { instantMicros, localInputToRfc3339, sameAssignment, sameInstant, toLocalDateTimeInput } from './AssignmentEditorPage';
 
 import type { SharedCourseContextState } from '../hooks/useCourseEditor';
 let sharedProbe: SharedCourseContextState;
@@ -114,8 +114,7 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); document.body.innerHTML = ''; vi.unstubAllGlobals(); vi.resetAllMocks(); });
 
 function Where() { const value = useLocation(); location = `${value.pathname}${value.search}`; return null; }
-async function mount(path: string) {
-    const courseContext = { status: 'ready' as const, data: ownedCourseFixture(), reload: vi.fn() };
+async function mount(path: string, courseContext: { status: 'ready' | 'error' | 'loading'; data: OwnedCourse | null; reload: () => void } = { status: 'ready', data: ownedCourseFixture(), reload: vi.fn() }) {
     await act(async () => root.render(<MemoryRouter initialEntries={[path]}><AuthContext.Provider value={auth}><Where /><Routes>
         <Route path="/teach/courses/:courseId/assessments" element={<AssessmentsPage courseId={courseId} skills={skills} courseContext={courseContext} />} />
         <Route path="/teach/courses/:courseId/quizzes/:quizId" element={<QuizRoute />} />
@@ -158,6 +157,160 @@ async function choose(label: string, option: string, scope: ParentNode = documen
     await act(async () => item.click()); await flush();
 }
 const text = () => document.body.textContent ?? '';
+
+describe('FE16 complete Assignment authoring', () => {
+    it('keeps the related lesson unchanged when the course context failed', async () => {
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment());
+        vi.mocked(replaceAssignment).mockImplementation(async (_c, _a, write) => assignment(write));
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`, { status: 'error', data: null, reload: vi.fn() });
+        expect(text()).toContain("Lessons couldn't be loaded.");
+        await type('Assignment title', 'Context unavailable'); await click('Save changes');
+        expect(replaceAssignment).toHaveBeenCalledWith(courseId, assignmentId, expect.objectContaining({ lessonId: lessonHiddenId }), expect.anything());
+    });
+
+    it('re-reads a missing lesson once and keeps its identity until the user chooses another', async () => {
+        const reload = vi.fn();
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment({ lessonId: loops.id }));
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`, { status: 'ready', data: ownedCourseFixture(), reload });
+        expect(reload).toHaveBeenCalledTimes(1); expect(text()).toContain('Lesson unavailable');
+        await click('Preview'); await click('Instructions'); await type('Assignment title', 'Still missing');
+        expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps an unknown creation in place without a replay, including its Preview', async () => {
+        vi.mocked(createAssignment).mockRejectedValue(new ApiError('network', 'Unavailable'));
+        await mount(`/teach/courses/${courseId}/assignments/new`);
+        await type('Assignment title', 'Unknown creation'); await type('Instructions', '# Keep creation'); await type('Deadline', '2020-01-02T12:30');
+        await click('Preview'); await click('Create assignment');
+        expect(location).toContain('/assignments/new');
+        expect(text()).toContain("We couldn't confirm whether the assignment was created.");
+        expect(host.querySelector('[aria-label="Instructions preview"] h2')?.textContent).toBe('Keep creation');
+        expect(createAssignment).toHaveBeenCalledTimes(1); expect(readOwnedAssignment).not.toHaveBeenCalled();
+        const event = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(event); expect(event.defaultPrevented).toBe(true);
+    });
+
+    it('previews the current draft safely, and switches back without changing its bytes or deadline', async () => {
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment());
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        const markdown = '# Draft\n\n**Bold**\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n```js\nalert(1)\n```\n\n<script>evil()</script>\n\n![Remote](https://example.test/image.png) [Unsafe](javascript:evil)';
+        const deadline = field('Deadline').value;
+        await type('Instructions', markdown);
+        await click('Preview');
+        const region = host.querySelector('[aria-label="Instructions preview"]')!;
+        expect(region.querySelector('h2')?.textContent).toBe('Draft');
+        expect(region.querySelector('strong')?.textContent).toBe('Bold');
+        expect(region.querySelector('table')).not.toBeNull();
+        expect(region.querySelector('pre')?.textContent).toContain('alert(1)');
+        expect(region.textContent).toContain('<script>evil()</script>');
+        expect(region.querySelector('script,img,[onclick],a[href^="javascript:"]')).toBeNull();
+        expect(region.querySelector('a')?.getAttribute('rel')).toBe('noopener noreferrer');
+        expect(find('Preview').getAttribute('aria-pressed')).toBe('true');
+        expect(find('Preview').getAttribute('aria-controls')).toBe(region.id);
+        await click('Instructions');
+        expect(field('Instructions').value).toBe(markdown);
+        expect(field('Deadline').value).toBe(deadline);
+        expect(text()).toContain('Unsaved changes');
+        expect(replaceAssignment).not.toHaveBeenCalled();
+    });
+
+    it('returns to Instructions on validation failure, focuses the field, and preserves the preview draft', async () => {
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment());
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Instructions', '   ');
+        await click('Preview');
+        expect(text()).toContain('No instructions yet.');
+        await click('Save changes');
+        expect(field('Instructions').value).toBe('   ');
+        expect(field('Instructions').getAttribute('aria-invalid')).toBe('true');
+        expect(document.activeElement).toBe(field('Instructions'));
+        expect(text()).toContain('Check the highlighted fields.');
+        expect(replaceAssignment).not.toHaveBeenCalled();
+    });
+
+    it.each([400, 403, 404])('keeps the draft and safe preview after a real-shaped %s refusal', async status => {
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment());
+        vi.mocked(replaceAssignment).mockRejectedValue(http(status, 'Please check the supplied information.'));
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Instructions', '# Keep this draft');
+        await click('Preview');
+        await click('Save changes');
+        expect(host.querySelector('[aria-label="Instructions preview"] h2')?.textContent).toBe('Keep this draft');
+        await click('Instructions');
+        expect(field('Instructions').value).toBe('# Keep this draft');
+        expect(field('Instructions').disabled).toBe(status !== 400);
+        expect(text()).not.toContain('Saved');
+        expect(replaceAssignment).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['network', 'http'] as const)('reconciles an unknown %s save without replaying or discarding Preview', async kind => {
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment());
+        vi.mocked(replaceAssignment).mockRejectedValue(new ApiError(kind, 'Unavailable', kind === 'http' ? 503 : undefined));
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Instructions', '# Unsaved draft');
+        await click('Preview');
+        await click('Save changes');
+        expect(text()).toContain("We couldn't confirm whether your changes were saved.");
+        expect(host.querySelector('[aria-label="Instructions preview"] h2')?.textContent).toBe('Unsaved draft');
+        expect(readOwnedAssignment).toHaveBeenCalledTimes(2);
+        expect(replaceAssignment).toHaveBeenCalledTimes(1);
+    });
+
+    it('retains the original microseconds of a dirty draft after Hide returns a concurrent deadline', async () => {
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment({ publicationStatus: 'published' }));
+        vi.mocked(setAssignmentPublication).mockResolvedValue(assignment({ deadlineAt: '2026-12-02T13:00:00.987654Z' }));
+        vi.mocked(replaceAssignment).mockImplementation(async (_c, _a, write) => assignment(write));
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Assignment title', 'Retained draft');
+        await click('Hide assignment');
+        await click('Hide assignment', confirmDialog('Hide assignment?'));
+        await click('Save changes');
+        expect(replaceAssignment).toHaveBeenCalledWith(courseId, assignmentId, expect.objectContaining({ title: 'Retained draft', deadlineAt: '2026-12-01T12:00:00.123456Z' }), expect.anything());
+    });
+
+    it('does not call newer edits saved when a later reconciliation confirms the earlier unknown write', async () => {
+        vi.mocked(readOwnedAssignment).mockResolvedValueOnce(assignment())
+            .mockRejectedValueOnce(new ApiError('network', 'Unavailable'))
+            .mockResolvedValueOnce(assignment({ title: 'Earlier write' }));
+        vi.mocked(replaceAssignment).mockRejectedValue(http(503));
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Assignment title', 'Earlier write'); await click('Save changes');
+        await type('Assignment title', 'Newer unsent edit'); await click('Try again');
+        expect(field('Assignment title').value).toBe('Newer unsent edit');
+        expect((find('Save changes') as HTMLButtonElement).disabled).toBe(false);
+        expect(text()).toContain('Earlier changes were saved. Your current edits are not saved.');
+        expect(replaceAssignment).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not invent deletion when lesson refusal reconciliation cannot reach the server', async () => {
+        vi.mocked(readOwnedAssignment).mockResolvedValueOnce(assignment()).mockRejectedValueOnce(new ApiError('network', 'Unavailable'));
+        vi.mocked(replaceAssignment).mockRejectedValue(http(404));
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await choose('Related lesson', 'For Loops');
+        await click('Save changes');
+        expect(text()).toContain('The save was refused. We could not refresh the assignment. Your edits are still here.');
+        expect(field('Instructions').disabled).toBe(false);
+        expect(text()).not.toContain("This assignment isn't available.");
+    });
+
+    it('protects the grading handoff while a draft is previewed', async () => {
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment());
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Instructions', '# Keep draft'); await click('Preview');
+        expect(find('Open grading').getAttribute('href')).toBe(`/teach/grading?courseId=${courseId}&assignmentId=${assignmentId}`);
+        await click('Open grading');
+        expect(confirmDialog('Leave without saving?')).toBeTruthy();
+        await click('Stay', confirmDialog('Leave without saving?'));
+        expect(location).toContain(`/assignments/${assignmentId}`);
+        expect(host.querySelector('[aria-label="Instructions preview"] h2')?.textContent).toBe('Keep draft');
+    });
+
+    it('keeps a valid native date unchanged and refuses calendar normalization', () => {
+        expect(localInputToRfc3339('2026-02-30T12:00')).toBeNull();
+        expect(localInputToRfc3339('2026-12-01T12:00:00')).not.toBeNull();
+        expect(toLocalDateTimeInput(localInputToRfc3339('2026-12-01T12:00')!)).toBe('2026-12-01T12:00');
+        expect(toLocalDateTimeInput('0001-06-01T12:30:00Z')).toMatch(/^0001-/);
+    });
+});
 
 describe('Assessments page (S19, D12-2)', () => {
     it('opens Questions for a missing or unknown view and shows rows in API order with graph skill names', async () => {

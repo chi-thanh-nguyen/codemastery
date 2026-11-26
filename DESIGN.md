@@ -2633,6 +2633,19 @@ lessons." with a secondary "Create course". Pagination below.
   | Unknown outcome of a creation | "We couldn't confirm whether the quiz was created. Check the quiz list before creating it again." (or "assignment") with "Go to quizzes" (or "Go to assignments"); the draft is kept and creating again stays a deliberate action |
   | Edits elsewhere at the same time | Assignments, hidden unused quizzes and unused questions: the last save wins (no validator exists). Published or used resources: the server's 409 rules above |
 
+**FE16 error presentation clarification — `FE16-N7-2026-11-27-r1`.** Under the
+Project Leader's explicit task-local technical decision delegation in the FE13/FE16
+consolidation task, the Assignment editor applies the F14 fallback to the actual
+CT18/CT16 transport: local validation identifies invalid fields and focuses the
+first one with a submit error summary; an Assignment 400 without admitted field
+errors shows the shared safe form-level message and keeps the draft. Raw server
+detail and invented field errors are never shown. This narrowly reconciles the
+Assignment interpretation of the 400 row above and acceptance rule 6's "server
+reasons verbatim" with the higher-authority safe transport; it changes no server
+DTO, HTTP contract, security policy, quiz/question or S20 behavior. Decision,
+alternatives, authority and verification are recorded in `docs/setup.md` and
+`docs/testing.md`. Historical N7 observations remain historical evidence.
+
 ### S20 Skill graph editor
 
 **Contract:** Approved (CT05 representation/mutation/mapping/bindings, CT06.enablement r2 with N1 and R1, CT18 B1 errors r3). **Delivery:** Preview only. **Fidelity:** S (Canvas). **Data:** `getOwnedSkillGraph`, `getOwnedCourse` (lesson inventory, through the S18 course context), `createCourseSkill`, `updateCourseSkill`, `deleteCourseSkill`, `addCoursePrerequisite`, `removeCoursePrerequisite`, `mapCourseLessonSkill`, `unmapCourseLessonSkill`, `getCourseAdaptiveSettings`, `replaceCourseAdaptiveSettings`.

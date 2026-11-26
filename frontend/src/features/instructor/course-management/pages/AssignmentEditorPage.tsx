@@ -1,6 +1,6 @@
 import { gradingPath } from '../../grading/hooks/useSubmissions';
 import { isDestinationLive } from '../../../../routes/routePaths';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, Box, Button, ListSubheader, MenuItem, TextField, Typography } from '@mui/material';
 import { Link, useLocation, useNavigate } from 'react-router';
@@ -10,6 +10,8 @@ import { SegmentedControl } from '../../../../shared/components/ViewRail';
 import { StatusPill } from '../../../../shared/components/StatusPill';
 import { PageHeader } from '../../../../shared/components/PageHeader';
 import { ConfirmDialog } from '../../../../shared/components/ConfirmDialog';
+import { MarkdownRenderer } from '../../../../shared/components/MarkdownRenderer';
+import { radius, roles, shadow } from '../../../../app/theme/theme';
 import { ErrorView, LoadingView, SystemStateView } from '../../../../shared/components/StatusViews';
 import { PresentationIcon } from '../../../../shared/components/PresentationIcon';
 import { ApiError } from '../../../../shared/types/apiTypes';
@@ -41,7 +43,7 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
 export function toLocalDateTimeInput(isoString: string): string {
     const date = new Date(isoString);
     if (Number.isNaN(date.getTime())) return '';
-    const base = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+    const base = `${String(date.getFullYear()).padStart(4, '0')}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
     const seconds = date.getSeconds();
     return seconds ? `${base}:${pad2(seconds)}` : base;
 }
@@ -51,7 +53,10 @@ export function localInputToRfc3339(localValue: string): string | null {
     const trimmed = localValue.trim();
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(trimmed)) return null;
     const parsed = new Date(trimmed);
-    if (Number.isNaN(parsed.getTime())) return null;
+    if (Number.isNaN(parsed.getTime()) || parsed.getUTCFullYear() < 0 || parsed.getUTCFullYear() > 9999) return null;
+    // Refuse normalized invalid calendar times (including a local DST gap), rather than silently changing the deadline.
+    const canonical = toLocalDateTimeInput(parsed.toISOString());
+    if (canonical !== (trimmed.length === 19 && trimmed.endsWith(':00') ? trimmed.slice(0, -3) : trimmed)) return null;
     return parsed.toISOString();
 }
 
@@ -176,9 +181,28 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     const [notice, setNotice] = useState<string | null>(() => (location.state as { notice?: unknown } | null)?.notice === CREATED ? CREATED : null);
     const [confirm, setConfirm] = useState<'publish' | 'hide' | 'leave' | null>(null);
     const [leaveTo, setLeaveTo] = useState<{ go: () => void } | null>(null);
+    const [preview, setPreview] = useState(false);
+    const instructionsRegion = useId();
+    const form = useRef<HTMLDivElement>(null);
+    const [validationRevision, setValidationRevision] = useState(0);
+
+    useEffect(() => {
+        if (!validationRevision) return;
+        form.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+    }, [validationRevision]);
+
+    const showErrors = (next: Record<string, string>) => {
+        setErrors(next);
+        if (Object.keys(next).length) {
+            if (next.instructions) setPreview(false);
+            setValidationRevision(value => value + 1);
+        }
+    };
 
     const dirtyRef = useRef(dirty);
     dirtyRef.current = dirty;
+    const draftRef = useRef(draft), deadlineRef = useRef(baselineDeadline);
+    draftRef.current = draft; deadlineRef.current = baselineDeadline;
     const rereadLessons = useRef(new Set<string>());
     const { read } = editor;
 
@@ -190,8 +214,8 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
 
     const applyLoaded = useCallback((loaded: B5OwnedAssignment, overwriteDraft: boolean) => {
         setAssignment(loaded);
-        setBaselineDeadline({ input: toLocalDateTimeInput(loaded.deadlineAt), iso: loaded.deadlineAt });
         if (overwriteDraft) {
+            setBaselineDeadline({ input: toLocalDateTimeInput(loaded.deadlineAt), iso: loaded.deadlineAt });
             setDraft(draftFromAssignment(loaded));
             setDirty(false);
         }
@@ -288,7 +312,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     async function create() {
         if (noAccess) return;
         const next = validateAssignment(draft, baselineDeadline);
-        setErrors(next);
+        showErrors(next);
         if (Object.keys(next).length) return;
         setAlert(null); setNotice(null);
         try {
@@ -301,7 +325,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
             if (status === 403) { setNoAccess(true); setAlert({ type: 'no-access' }); return; }
             if (status === 400) {
                 const mapped = fieldErrorsFrom(error, ASSIGNMENT_FIELD_MAP);
-                if (Object.keys(mapped).length) { setErrors(mapped); return; }
+                if (Object.keys(mapped).length) { showErrors(mapped); return; }
             }
             if (status === 404 && draft.lessonId) {
                 course?.reload();
@@ -315,7 +339,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     async function save() {
         if (!assignment || noAccess) return;
         const next = validateAssignment(draft, baselineDeadline);
-        setErrors(next);
+        showErrors(next);
         if (Object.keys(next).length) return;
         const sent = draft;
         const sentBaseline = baselineDeadline;
@@ -330,7 +354,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
             if (status === 403) { setNoAccess(true); setAlert({ type: 'no-access' }); return; }
             if (status === 400) {
                 const mapped = fieldErrorsFrom(error, ASSIGNMENT_FIELD_MAP);
-                if (Object.keys(mapped).length) { setErrors(mapped); return; }
+                if (Object.keys(mapped).length) { showErrors(mapped); return; }
             }
             if (status === 404) {
                 // Distinguish a missing lessonId from a missing assignment row.
@@ -344,6 +368,10 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
                     } catch (readError) {
                         if (isCancelled(readError)) return;
                         if (failureStatus(readError) === 403) { setNoAccess(true); setAlert({ type: 'no-access' }); return; }
+                        if (failureStatus(readError) !== 404) {
+                            setAlert({ type: 'error', message: 'The save was refused. We could not refresh the assignment. Your edits are still here.' });
+                            return;
+                        }
                     }
                 }
                 setGone(true);
@@ -353,8 +381,12 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
             if (outcomeUnknown(error)) {
                 setAlert({ type: 'unknown', current: null, retry: () => undefined });
                 await recheck((current) => sameAssignment(sent, sentBaseline, current), () => {
-                    setDirty(false);
-                    setNotice('Saved');
+                    // A deliberate later GET can confirm the earlier write after the user has edited again.
+                    // It must not mark those newer, unsent edits as saved or disable their Save action.
+                    const unchanged = JSON.stringify(draftRef.current) === JSON.stringify(sent)
+                        && JSON.stringify(deadlineRef.current) === JSON.stringify(sentBaseline);
+                    if (unchanged) setDirty(false);
+                    setNotice(unchanged ? 'Saved' : 'Earlier changes were saved. Your current edits are not saved.');
                 });
                 return;
             }
@@ -470,15 +502,28 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
                 : <Button variant="contained" onClick={() => setConfirm('publish')} disabled={editor.busy || dirty} startIcon={<PresentationIcon name="eye" />}>Publish assignment</Button>)} />
         {assignment && !published && !gone && !noAccess && dirty && <Typography variant="body2" sx={{ color: 'text.secondary', mt: -2 }}>Save your changes before publishing.</Typography>}
         {alertView}
+        <Box ref={form}>
         <Tile padding={{ xs: 3, sm: 4 }} sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 2.5 }}>
             <Typography variant="h3" component="h2">Assignment details</Typography>
+            {Object.keys(errors).length > 0 && <Alert severity="error">
+                Check the highlighted fields. Your edits are still here.
+            </Alert>}
             <TextField label="Assignment title" value={draft.title} required disabled={readOnly}
                 onChange={(event) => change({ title: event.target.value })}
                 error={!!errors.title} helperText={errors.title} />
-            <TextField label="Instructions" multiline minRows={6} value={draft.instructions} required disabled={readOnly}
-                onChange={(event) => change({ instructions: event.target.value })}
-                error={!!errors.instructions}
-                helperText={errors.instructions ?? 'Markdown plain text. Line breaks and indentation are kept.'} />
+            <SegmentedControl label="Assignment instructions view" value={preview ? 'preview' : 'edit'} controls={instructionsRegion}
+                onChange={value => setPreview(value === 'preview')}
+                options={[{ value: 'edit', label: 'Instructions' }, { value: 'preview', label: 'Preview' }]} />
+            <Box id={instructionsRegion} role="region" aria-label={preview ? 'Instructions preview' : 'Instructions editor'} sx={{ minWidth: 0 }}>
+                {preview
+                    ? draft.instructions.trim()
+                        ? <MarkdownRenderer markdown={draft.instructions} />
+                        : <Typography sx={{ color: 'text.secondary' }}>No instructions yet. Add Markdown in Instructions.</Typography>
+                    : <TextField label="Instructions" fullWidth multiline minRows={6} value={draft.instructions} required disabled={readOnly}
+                        onChange={(event) => change({ instructions: event.target.value })}
+                        error={!!errors.instructions}
+                        helperText={errors.instructions ?? 'Markdown plain text. Line breaks and indentation are kept.'} />}
+            </Box>
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, alignItems: 'start' }}>
                 <TextField label="Deadline" type="datetime-local" value={draft.deadlineInput} required disabled={readOnly}
                     onChange={(event) => change({ deadlineInput: event.target.value })}
@@ -517,7 +562,10 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
                 Assignment grades do not trigger real-time skill mastery updates.
             </Typography>
         </Tile>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center' }}>
+        </Box>
+        <Box role="region" aria-label="Save assignment" sx={{ position: 'sticky', bottom: 16, zIndex: 5,
+            bgcolor: roles.bg.raised, borderRadius: `${radius.lg}px`, boxShadow: shadow.raised, p: 2,
+            display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center' }}>
             {!noAccess && !gone && (creating
                 ? <Button variant="contained" onClick={() => void create()} disabled={editor.busy} aria-busy={editor.busy || undefined}>Create assignment</Button>
                 : <Button variant="contained" onClick={() => void save()} disabled={editor.busy || !dirty} aria-busy={editor.busy || undefined}>Save changes</Button>)}

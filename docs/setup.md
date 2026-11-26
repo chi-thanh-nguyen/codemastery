@@ -1,5 +1,102 @@
 # Development Setup
 
+## FE16 completion and FE13 consolidation decisions — 27 November 2026
+
+Refs #201, PR #270; explicit Project Leader instruction “Consolidate FE13 PRs,
+Repurpose PR #270 for Complete FE16 Implementation, Synchronize with FE17, and
+Perform Full-Scope Self-Audit”. The Leader authorizes the implementation,
+reconstruction, scoped decisions/documentation and publication. This is author
+verification, not independent acceptance, protected integration or deployment.
+
+### `FE16-STACK-2026-11-27-r1`
+
+- Retain FE13 PR #271 at `c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2`.
+  Its ancestor `1e0953023c70982859087a4490d714dac8b6a4be` is PR #270's old
+  HEAD; #271 is one commit ahead, zero behind. `discussionApi.ts` and
+  `useDiscussion.ts` have identical blobs at both HEADs. The remaining change
+  to the shared types adds `mine?`; #271 retains the original FE13 API/hook
+  implementation plus its UI. No FE13 production file or historical commit is
+  changed by this task. Full original histories, PR bodies, binary patches and
+  a verified complete Git bundle are retained outside tracked files.
+- Reconstruct #270 directly on FE17 HEAD
+  `11ba8e49be6af16f5114d264e8bb1cc16b8bdbd1`, with base branch
+  `feature/learning-progress-ui`. Merge #288 before #270, then retarget/restack
+  only the FE16 delta on main; a squash merge requires tree/patch comparison,
+  not assumed ancestry. PR #288's HEAD, history, base and body remain unchanged.
+- The FE17 baseline includes main `13d9ca7e58ead77ecc66efc8408199059d57588a`:
+  PR #273 authoring, PR #297 AS09 and PR #279 FE14/CT37 are already present.
+  Refreshed main also contains AS16 PR #301 (`daddc507f1bb109f66c988537c00cab7bc08f256`),
+  which changes no consumed FE16/FE17 frontend or authoring binding. No
+  temporary main reconciliation is needed. This does not certify the AS16 journey.
+- Alternatives: duplicating FE17 in a main-targeted PR would obscure ownership;
+  rewriting #288 or cosmetically rebuilding #271 would invalidate unrelated
+  evidence. Neither is needed. No additional upstream capability is required:
+  cumulative upstream additions are zero for each consumed Issue.
+- Authority: the Leader's explicit stack/reconstruction delegation in this task.
+  Security/API/architecture unchanged. New Git Author and Committer metadata are
+  `Le Phan Quoc Thang <thangle12012006@gmail.com>`, verified through GitHub's
+  `heizseung` association on commit `49eaff63f1d79b1a7cc97b67e9cbb50640ac1b79`.
+  The authenticated publisher is `chi-thanh-nguyen`. Metadata attribution does
+  not assert personal authorship, signature, review or pushing by heizseung.
+
+### `FE16-N7-2026-11-27-r1`
+
+- Actual `AssignmentRequests` manually validates closed writes and raises a
+  `BusinessRuleException`; `GlobalExceptionHandler` returns the safe CT18 400
+  without Assignment field errors. `httpClient.ts` replaces server detail and
+  admits only safe authentication fields, not arbitrary Assignment diagnostics.
+  OpenAPI and CT18 do not guarantee useful per-field Assignment reasons.
+- Select local title/instructions/deadline validation with a submit summary,
+  linked field errors and first-error focus. When a 400 has no admitted field
+  errors, show the shared safe form message and preserve the exact draft and
+  selected Preview. Refused drafts remain read-only for 403/404; Preview stays usable.
+  This is the existing F14 fallback, explicitly reconciled for FE16 in S19.
+- Alternatives: fabricated `errors[]` or raw server text would misrepresent the
+  implemented contract and weaken diagnostic isolation; adding a global error
+  response/transport contract is unnecessary and beyond this correction.
+- Authority: explicit task-local technical decision and N7 reconciliation
+  delegation from the Project Leader. No CT18/CT16/OpenAPI change, new status,
+  backend implementation, risk waiver or broader FE15/S20 N7 resolution.
+- Verify with the actual disposable-backend Assignment 400, existing transport
+  tests, local validation/focus and draft/Preview refusal tests. Hypothetical
+  field-error doubles are not proof of a server capability.
+
+### `FE16-DRAFT-2026-11-27-r1`
+
+- Use the existing CT37 `MarkdownRenderer` and Lesson editor's segmented
+  Instructions/Preview pattern. Switching views changes no draft, deadline,
+  related Lesson or mutation state; validation brings an invalid Instructions
+  field back into view. The renderer admits links, treats raw HTML as text,
+  replaces images with links, and renders code without execution.
+- Keep each draft's exact original server deadline until that draft is replaced
+  by a confirmed body. A publication/recovery read must not replace its precision
+  baseline while edits are retained. Reject invalid native calendar normalization
+  rather than silently choosing a different local time; past deadlines remain valid.
+- A later recovery read may confirm an earlier save while the user has newer
+  edits. Only the unchanged sent snapshot can become “Saved”; newer edits remain
+  dirty with an explicit earlier-save notice. A failed GET after a lesson-related
+  404 cannot prove deletion. Never replay a mutation.
+- Alternatives: `Date`-roundtripping an untouched deadline loses microseconds;
+  overwriting retained drafts loses work; treating a failed read as deletion or
+  an earlier save as the current draft's success makes unsupported claims.
+- Authority: the same task's delegated bounded technical decisions, preserving
+  ADR010 full-replacement/last-save-wins and the existing navigation limitation.
+  No new API, dependency, route, persistence, shared theme state or upstream slice.
+  Verify the concurrency/precision regressions and real browser authoring journey.
+
+G4 is the already recorded FE17 delegated choice of `courseId`/`assignmentId`
+below. G7 is the FE15/FE16 owner confirmation reported through the Project Leader
+in live Issue #201's 25 November entry; this task does not invent personal owner
+statements or reopen that confirmation. The two existing FE17 grading handoffs
+and their route activation checks are preserved.
+
+OpenAI Codex implemented and self-audited these FE16 changes. Graphify was used
+for navigation (the graph predates this authoring implementation); source was
+verified directly. Impeccable guidance was read directly because no engine was
+available at the inspected local locations. Playwright supplies rendered and
+real REST evidence. No AI service is added to the product. Executed verification
+and remaining independent gates are recorded in `docs/testing.md`.
+
 ## FE17 targeted recovery, selection and responsive remediation — 27 November 2026
 
 PR #288 / Issue #202: author-verified correction of FE17-IR-01 (P1), IR-02 (P2)
