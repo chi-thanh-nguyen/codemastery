@@ -168,7 +168,22 @@ jobs:
           # The Chainguard release-server candidate, pinned by digest in the suite.
           mapfile -t candidate < <(sed -n "s/^CHAINGUARD_SERVER_IMAGE='\(cgr\.dev\/chainguard\/minio@sha256:[0-9a-f]\{64\}\)'$/\1/p" infrastructure/minio/test-minio-init.sh)
           [[ ${#candidate[@]} -eq 1 ]] || { echo "Unexpected Chainguard MinIO pin." >&2; exit 1; }
-          for ref in "${pins[@]}" "${candidate[@]}"; do docker pull -q --platform linux/amd64 "$ref" >/dev/null; done
+          for ref in "${pins[@]}" "${candidate[@]}"; do
+            for attempt in 1 2 3; do
+              if pull_output="$(docker pull -q --platform linux/amd64 "$ref" 2>&1)"; then
+                break
+              else
+                status=$?
+              fi
+              printf '%s\n' "$pull_output" >&2
+              if (( attempt == 3 )) || ! grep -Eq '^Error response from daemon: received unexpected HTTP status: (500|502|503|504)([[:space:]]|$)' <<< "$pull_output"; then
+                exit "$status"
+              fi
+              delay=$((5 * attempt))
+              printf 'Transient registry response for %s; retrying pull in %ss.\n' "$ref" "$delay" >&2
+              sleep "$delay"
+            done
+          done
       # One job keeps the required check name; all three servers run the same suite.
       - name: Build the initializer image and run it against disposable golithus MinIO servers
         shell: bash
