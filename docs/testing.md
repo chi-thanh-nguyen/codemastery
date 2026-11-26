@@ -883,7 +883,7 @@ Together they define eight independent jobs on `ubuntu-24.04`:
 
 | Job display name (ID) | What it runs |
 | --- | --- |
-| Backend (`backend`) | Temurin 25; `./mvnw verify` from `backend/`, including the Testcontainers integration tests on the runner's Docker |
+| Backend (`backend`) | `infrastructure/vm/tests/test-maven-wrapper-pins.sh` (offline host Maven Wrapper pin regression, [record](#pr-293-host-wrapper-pin-remediation-ir293-sec-01--26-november-2026)); then Temurin 25 and `./mvnw verify` from `backend/`, including the Testcontainers integration tests on the runner's Docker |
 | Frontend (`frontend`) | Node 22; `npm ci`, `npm test`, then `npm run build` from `frontend/` |
 | VM deployment script (`deployment-script`) | Checks of `infrastructure/vm/deploy.sh` without starting the application: shell syntax, authorization gates, Compose and provisioning guards, the runtime privilege matrix, env-file custody, preflight against rendered Compose, release-archive identity models and image identity through a real `docker save`/`load` round trip |
 | VM deployment PostgreSQL and containment tests (`deployment-script-postgres`) | The runtime privilege matrix on the real migrated schema, failure containment and published-port verification against real containers |
@@ -7569,3 +7569,421 @@ This changes test synchronization only, with no production implementation change
 no rule suppression, tolerance change or removed assertion. Focused browser verification passes 6 cases in each of Firefox 155 and WebKit 26.6,
 and the 8 harness lifecycle tests pass for this follow-up; the earlier full
 matrix and runtime-source evidence remain applicable to the identical application.
+
+## CI package-index remediation qualification — 25 November 2026
+
+Leader-authorized investigation and narrowly scoped remediation on
+`fix/ci-libexpat-security-pin`, based on `main` 1e4c54b. See the complete
+[incident and security record](deployment.md#dp01-ci-package-index-remediation--25-november-2026).
+Only the release libexpat pin is raised, to signed Alpine v3.24/main 2.11.0-r0;
+an installed-version assertion is added to the existing build regression.
+
+Local environment: macOS arm64, Docker Desktop Linux/aarch64 daemon, amd64
+images executed under emulation. Clean builds passed `--platform linux/amd64
+--no-cache --progress plain`; FROM/COPY metadata reuse is not a cached RUN.
+The new installed-package assertion also rejects the inherited base (exit 1)
+and accepts the candidate (exit 0), without network access.
+Subsequent existing-script runs use `DOCKER_DEFAULT_PLATFORM=linux/amd64` and
+may reuse build layers. All images use task-specific local tags, with synthetic
+credentials/certificates and disposable networks/databases only.
+
+| Command / scenario | Result |
+| --- | --- |
+| Exact pinned release base, root, fresh official signed indexes: `apk add --no-cache libexpat=2.10.0-r0` | FAIL as expected, exit 4, exact CI world/fontconfig signature; 2.11.0-r0 is the current index candidate |
+| `docker build --platform linux/amd64 --no-cache --progress plain --target release --build-arg PUBLIC_ORIGIN=https://ingress.codemastery.test -t codemastery-ci-investigation/frontend:release frontend` | PASS; signed exact pins resolve, including 2.11.0-r0 |
+| Same clean build, default frontend target, tag `codemastery-ci-investigation/frontend:local` | PASS; bounded related-pin audit includes all local runtime pins |
+| `docker build --platform linux/amd64 --no-cache --progress plain -t codemastery-ci-investigation/backend:qualification backend` | PASS; current Maven bootstrap and compilation succeed; Maven tests intentionally skipped by the existing Dockerfile |
+| `bash infrastructure/vm/tests/test-ingress-release-image-build.sh` | PASS; new installed libexpat assertion, Nginx binary/modules 1.30.7, UID 101, root-owned non-writable config, no setuid/setgid files in all three images, eight invalid/missing origin refusals |
+| `test-java-truststore.sh` (invoked by the build regression) | PASS, 13 build cases, including prohibited-root mutations and verification failures |
+| `bash infrastructure/vm/tests/test-ingress-release-ca-store.sh` | PASS, three chain/hostname positive and negative controls, with installed Homebrew OpenSSL 3 first on PATH; macOS default OpenSSL lacks the required verify option and its initial run failed |
+| `bash infrastructure/vm/tests/test-ingress-stub-backend.sh` | PASS, 168 assertions, `INGRESS_STUB_TESTS_PASS` |
+| `bash infrastructure/vm/tests/test-ingress-real-backend.sh` | PASS, 83 assertions, `INGRESS_BACKEND_TESTS_PASS`; real disposable PostgreSQL/Flyway and backend |
+| `bash infrastructure/vm/tests/test-ingress-dp01-preflight.sh` | PASS, `INGRESS_PREFLIGHT_TESTS_PASS`, inside disposable Ubuntu 24.04 amd64 Docker-in-Docker, non-root operator with Docker/sudo and root-custody cases. Actual host platform/custody gates remain enforced |
+| Trivy 0.76.2 default and comprehensive on final rebuilt image archives | Frontend release 0/0, local 0/0; unchanged backend 34/34 (29 MEDIUM, 5 LOW; no listed fixed versions), no Java findings. Database updated 25 November 13:07:24 UTC; no ignored vulnerabilities |
+| Same database, default scan of the exact inherited release base | Four libexpat 2.9.0-r0 HIGH findings, each listing 2.10.0-r0 as fixed; none reintroduced on the candidate |
+| `bash -n infrastructure/vm/tests/test-ingress-release-image-build.sh`; `git diff --check` | PASS |
+
+The final scan archive configuration identities are recorded in deployment.md.
+The regression script rebuilds tags, so earlier scans were not reused as proof
+for those final artifacts. Nginx signing-key SHA-512 and ABI-compatible dynamic
+modules remain enforced by the build and regression. The installed fontconfig
+library resolves the new `libexpat.so.1` successfully; real Nginx startup/HTTPS
+tests pass. Both frontend final filesystems have no reported libexpat finding.
+Inherited base-layer bytes are not claimed erased by these merged-view scans.
+
+The complete VM runtime-privilege script was also attempted. macOS's shell/host
+run exited before assertions; a disposable Alpine amd64 harness completed the
+consumer phase (`RUNTIME_CONSUMER_TESTS_PASS`) but exited 2 before the upgrade
+phase. These are not full-suite passes. The final complete run on Ubuntu 24.04
+amd64 passed both `RUNTIME_CONSUMER_TESTS_PASS` and `RUNTIME_UPGRADE_TESTS_PASS`,
+including real Flyway V008/r3 -> V009/r4 provisioning, invalid-history refusals
+and CO08 writes after upgrade. No test or host-policy gate was weakened.
+
+Self-audit caught an initial assertion using `apk info -v libexpat`, which prints
+descriptive metadata with APK 3. The assertion now checks the installed inventory
+from `apk info -v` instead, and the complete build regression passed afterwards.
+No other confirmed in-scope implementation defect was found in the reviewed
+diff; this is author-side automated evidence, not independent human approval.
+Full local application unit/integration/E2E suites, release candidate creation,
+MinIO/PostgreSQL image requalification and production deployment were not run
+for this isolated frontend package change. The existing workflows remain the
+protected CI gates; pending or skipped executions are not passes. No full release
+or risk acceptance is asserted for the unchanged backend residual findings.
+
+AI-assisted work: Codex investigated logs and upstream metadata, implemented the
+pin/assertion, and executed the listed local checks under the Leader's task.
+
+## Maven bootstrap reliability qualification — 25 November 2026
+
+[The recurrence and design record](deployment.md#maven-bootstrap-reliability--25-november-2026)
+documents the scope, source provenance and consumer matrix. This follow-up used
+the existing isolated PR #293 branch on `main` 1e4c54b, with the frontend
+libexpat pin and its installed-version assertion preserved.
+
+| Command or evidence | Result |
+| --- | --- |
+| `bash infrastructure/vm/tests/test-maven-bootstrap.sh`, then `MAVEN_TEST_PLATFORM=linux/arm64` with the same command | Ten cases pass on each platform, amd64 emulated and arm64 native in Docker Desktop. Correct and CRLF properties work offline. A changed executable, removed JAR, added file, wrong executable mode, different requested version, alternate source and duplicate URLs fail before Maven runs. |
+| `docker build --no-cache --platform linux/amd64 --progress plain -t codemastery-ci-investigation/backend:combined backend` | Pass. Verified Maven 3.9.16, zero direct distribution requests, one package invocation. BuildKit can reuse the input image blobs even when `RUN` caching is disabled. |
+| `docker build --platform linux/arm64 --network none --target maven-bootstrap --output type=cacheonly backend` followed by the same command | Pass. The repeat used the verified stage from the local builder. The full arm64 backend build also passed before the CRLF guard refinement. The refined guard passed the native arm64 fixture matrix. |
+| Disposable source-only edit, `docker build --platform linux/amd64 --network none --target build ...` | Verified Maven stage cached. The single packaging command failed with nonzero exit at unresolved project dependency. This establishes both source-only reuse and an observable dependency failure. |
+| `docker build --no-cache --platform linux/amd64 --network none --target truststore-verifier --output type=cacheonly backend` | Pass. `javac` ran without a Maven stage or project dependency downloads. |
+| Host `cd backend && ./mvnw -B verify`, macOS arm64 Temurin 25.0.4.1 and disposable Testcontainers | 1,146 unit and 594 integration tests pass, no failures or skips. Uses the existing host Wrapper path. |
+| Combined build/origin regression, public CA chain, stub and real backend ingress, and Ubuntu amd64 DP01 preflight | Pass. Includes 13 Java trust-store cases, eight invalid-origin refusals, three CA controls, 168 stub assertions and 83 real-backend assertions. The re-exported backend from the real ingress build has the same scanned config and application layer. |
+| `python3 -m unittest discover -s infrastructure/release/tests` | 95 pass, with release tooling operating on test fixtures. The release backend build uses the same Dockerfile and amd64 target. |
+| Exact exported frontend and backend archives, pinned Trivy 0.76.2, precise and comprehensive | Both frontend targets 0/0. Backend 34/34, including 29 MEDIUM and 5 LOW with no listed fixes, matching the prior finding set. Vulnerability DB updated 25 November 13:07:24 UTC. |
+
+The backend scan archive contains config
+`sha256:03a9e488bd0edd92d58fbd1ddcfa0a658ed5e2230e1b1b3ada7985107b9564c5`.
+The frontend archive configs match the two previously qualified frontend
+identities above. The root inspection of the new backend verifies no Maven
+directory, Maven cache, Maven command, compiler or setuid/setgid files. The
+runtime user and root-owned `0444` JAR are preserved. The prior backend JAR
+and this scanned JAR have the same 754 archive entries. The only entry with a
+byte difference is `META-INF/build-info.properties`, whose build time changed.
+
+This is author-side qualification. The original rollout's host Wrapper remains
+unchanged and its installed distribution cache is not reverified on every
+invocation. The Docker bootstrap deliberately removes the outbound distribution
+request, so HTTP 429/503, timeout and reset retries for that request do not apply.
+Docker Hub and repository dependency retrieval can still fail. Do not interpret
+local layer reuse as cross-run GitHub cache availability.
+
+AI-assisted work: Codex inspected the Actions logs and upstream artifacts,
+implemented the Docker bootstrap change, and executed the local qualification.
+
+### PR #293 author-side Maven regression follow-up
+
+The earlier ten-case runs above apply to `94118b6`. Its GitHub E2E job reported
+114 passed and six skipped on Linux, and its release rehearsal passed. Its
+Backend job passed on attempt 2 with 1,146 unit and 594 integration tests.
+Attempt 1 had one SH05 integration failure. The parent reported exit 1
+without the child's assertion, so the original cause remains undetermined.
+
+The follow-up runs `bash infrastructure/vm/tests/test-maven-bootstrap.sh` in
+the required `VM HTTPS ingress` job. The 18 cases passed locally on amd64
+(emulated) and arm64 (native) with Docker Desktop. Cases cover the reviewed
+archive, LF and CRLF, value whitespace, comments, four distribution tree
+mutations and malformed, empty, conflicting or mismatched URL declarations.
+The harness checks the explicit build target, verifies marker placement and
+requires actual output from the verifier. Disposable controls showed that
+unrelated registry errors, command echoes, diagnostics from other steps and
+malformed markers do not count as passes.
+
+The release frontend inventory check now uses a fixed-string match. The
+synthetic inventory line `libexpat-201100-r0` matched the old regular
+expression and fails the literal check. The installed `libexpat-2.11.0-r0`
+line passes.
+
+The clean amd64 rebuild ran one Maven package command. The runtime retained
+its non-root user, read-only JAR and Java trust-store check. Comparing the
+754 JAR entries with the earlier qualification found only a build timestamp
+change. Trivy 0.76.2, using the database dated 25 November 2026 13:07 UTC,
+reported the same 29 MEDIUM and five LOW findings with no listed fixes in both
+detection modes. These scan results are a point-in-time measurement.
+
+AI-assisted work: Codex performed the author-side review, corrected the Docker
+URL check and CI regression harness, and ran the follow-up qualification.
+
+### PR #293 independent-review remediation (IR293-01) — 26 November 2026
+
+The comprehensive independent review of `f97af14` requested changes. Finding
+IR293-01 (P2) showed three harness false passes. Each was reproduced on that
+baseline against disposable Dockerfile copies, native `linux/arm64`, and each
+run reported 18/18 and exit 0:
+
+| Control | Baseline mechanism | Independent observation |
+| --- | --- | --- |
+| A: the verifier runs the replaced launcher quietly (`>/dev/null 2>&1 \|\| true`) before the digest check | Execution was inferred only from launcher output in the build log, and the expected digest failure satisfied the case | A sentinel that slept 5 s delayed the verifier's `FAILED` line to 5.058 s, against 0.066 s and 0.113 s for other tree mutations |
+| B: the verifier no longer runs Maven; a second `RUN --network=none` inside the marked block prints `Apache Maven 3.9.16` | Output of every offline `maven-bootstrap` RUN counted as verifier output | The version line came from step 5/5, not from the verifier at step 4/5 |
+| C: a RUN after the end marker overwrites the verified launcher | Extraction stopped at the end marker | The instruction occurs once in the source Dockerfile and zero times in the test copy |
+
+`test-maven-bootstrap.sh` now:
+
+- copies the Dockerfile through the end of the `maven-bootstrap` stage. Exactly one stage of that name is allowed. Before the begin marker, only `WORKDIR` and `COPY` are allowed. The single RUN must directly follow the begin marker, and the end marker must directly follow that RUN. Nothing may follow it in the stage. Heredocs and malformed, duplicated or misplaced markers are refused.
+- inserts, in the test copy only, after the begin marker: the case mutation and a test-only `SHELL` wrapper for the unchanged verifier. The wrapper runs the command with `/bin/sh -c`, as the default shell does, records its exit status and exits 0. BuildKit discards a failed step's filesystem, and a cache mount did not persist between builds here, so this is how the record survives an expected failure.
+- exports the record and requires status 0 for accepted cases and exactly 1 for rejected cases. A missing or malformed record fails.
+- uses a sentinel launcher that creates a marker file in the committed layer. Any marker fails the run, whatever the launcher printed.
+- attributes diagnostics only to the final `maven-bootstrap` step and refuses zero or several such steps.
+- refuses 11 Dockerfile regressions with the stated reason: Controls A, B and C, an offline RUN before the block, a masked verifier exit status, the expected diagnostic printed by a failed setup step, a missing begin marker, a duplicate end marker, an end marker inside the RUN, markers outside the target and a second target stage.
+
+`backend/Dockerfile`, the production verifier and the workflow are unchanged. The
+existing required step runs the 18 cases and the 11 controls; any failure exits
+nonzero.
+
+| Command or evidence | Result |
+| --- | --- |
+| `MAVEN_TEST_PLATFORM=linux/arm64 bash infrastructure/vm/tests/test-maven-bootstrap.sh` (native) | 18 cases and 11 controls pass, exit 0 |
+| `bash infrastructure/vm/tests/test-maven-bootstrap.sh` (amd64 under emulation) | 18 cases and 11 controls pass, exit 0 |
+| Corrected harness against the Control A, B and C fixtures | All fail, exit 1, no pass line. A: `Unverified Maven launcher executed before verification`. B: `RUN outside the verifier block`. C: `instruction after the verifier end marker` |
+| Control A with the 5 s sentinel under the corrected harness | `FAILED` at 5.061 s and the run is refused. The sentinel's output text appears only in the echoed mutation command |
+| Extraction, control transforms and attribution under macOS awk and Ubuntu noble mawk | Identical refusals and byte-identical extracted Dockerfiles |
+| `bash -n`; `git diff --check` | Pass |
+
+Author-side evidence on Docker Desktop 29.8.1 (Linux arm64 daemon), not
+independent review. The earlier artifact-level qualification still applies
+because no build input or runtime artifact changed. A hosted run of this
+revision is pending at the time of writing.
+
+AI-assisted work: Claude Code reproduced the findings, corrected the harness
+and ran these checks under the Leader's remediation task.
+
+### PR #293 remaining CI failures — 26 November 2026
+
+The hosted observation after the earlier IR293-01 cutoff is
+[CI VM 45663373135 attempt 3](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45663373135/job/139636899469).
+The checked-out merge SHA was ff0c388707848e73b53860b133615e5c6d4057d4.
+Ingress passed 29 Maven controls. Attempts 1 and 2 had six successful VM
+jobs and failed ingress before the old placement of the regression step.
+The Job now runs the mandatory verifier harness before the network-dependent
+backend packaging step. Two new controls reject a missing or overridden
+explicit network-disable flag, bringing the suite to 31 controls.
+
+The Backend SH05 parent now consumes only an exact allowlisted phase or
+completion token from a private temporary result file. Raw child stdout and
+stderr are discarded and the child's confidentiality assertions still inspect
+their original captured logging. The parent distinguishes failure in a named
+phase, timeout and abnormal or incomplete termination. A negative control
+throws with synthetic protected text and requires the exact sanitized failure
+message. Another child emits a completion-shaped stdout line and exits
+successfully without writing the result; it must fail the parent check. The
+original CI exit 1 remains unattributed.
+
+Two failures in shared VM fixtures were also investigated. The SSH
+qualification sometimes embedded a space in the Docker tag after truncating
+short decimal cksum outputs; the recovery test had the same construction.
+Both now use the checksum field in full. Also, a release rehearsal reported
+a permission failure when the digits 42501 appeared in an ordinary log
+timestamp. The runtime checks now recognize actual permission-denied text
+or the SQLState field Hibernate emits. The inline control includes the
+historical timestamp, a longer SQLState-like token and two genuine denial
+forms. A failed Docker log read fails the test.
+
+### PR #293 host Wrapper pin remediation (IR293-SEC-01) — 26 November 2026
+
+The independent review of `5bf8a62` requested changes for IR293-SEC-01 (P2):
+the host Wrapper archive pins could be removed without any check failing. It
+also raised IR293-R2-01 (P3) on the Retry-After description. Both were
+reproduced before the correction.
+
+On `5bf8a62`, macOS arm64, the official Apache 3.9.16 archives were served from
+a local file mirror to a disposable `MAVEN_USER_HOME`. The Unix Wrapper started
+Maven with both pins blank, both absent, the TAR.GZ pin absent or malformed, a
+wrong ZIP declaration followed by the correct one, or the pins supplied only
+as environment variables. With blank pins it ran a pre-existing installation
+from the unpinned cache namespace. A wrong pin, uppercase hex and a ZIP pin
+with only a leading-space spelling already failed. Because the Unix Wrapper
+read the pins only when they were present, upstream's unpinned path remained
+reachable. The PowerShell body also emitted a launcher for absent or blank
+pins, an absent, blank or malformed TAR.GZ pin, a space before `=`, and blank
+pins with an installation in that namespace.
+
+`mvnw` and the PowerShell body of `mvnw.cmd` now read both pins from the file
+before choosing an installation. Each must appear exactly once as
+`name=<64 lowercase hex>`. Archive verification always runs before extraction.
+The Backend job runs `test-maven-wrapper-pins.sh` before Java setup. The script
+copies the committed scripts into disposable projects whose paths contain a
+space. It serves a synthetic distribution (not Apache Maven) and a tampered
+copy from a local file mirror. For `mvnw`, a minimal `PATH` uses shims to record every download, extraction
+and Maven start. Each rejected case must fail for its pin or digest reason
+and leave no installation, staging directory or Maven start. The initial
+PowerShell oracle checked the post-cleanup state and launcher output; its
+extraction-order observation gap is corrected in the follow-up below. Each `mvnw` run
+has `stdin` closed, so no run can consume the case list.
+
+| Group | Cases |
+| --- | --- |
+| `mvnw` positive | P00 committed pins reach the pinned download; P01–P02 ZIP cold and warm (no download), argument propagation including spaces and an empty argument; P03 exit status 7; P04–P05 TAR.GZ cold and warm without `unzip`; P06 `shasum` instead of `sha256sum`; P07 CRLF with spaces around values; P08 two concurrent cold installs publish one installation |
+| `mvnw` pin rejection | H01–H05 absent or blank; H06a–f wrong length, uppercase, non-hex, inner space, malformed unselected TAR.GZ; H07a–b, H08 duplicates; H09a–e leading space, space before `=`, `:`, whitespace separator, case variant; H14 inherited variables |
+| `mvnw` digest rejection | H10 tampered ZIP, H10b wrong well-formed ZIP pin, H11 tampered TAR.GZ: download only, then failure |
+| `mvnw` warm or unpinned cache | H12a–c invalid pins with a warm installation; H13 blank pins with an unpinned installation present |
+| PowerShell body under `pwsh` | W01–W02 cold, and warm with the mirror withdrawn; W03 CRLF; W-H01–W-H09c, W-H14 pin rejection; W-H10 tampered ZIP; W-H12 warm; W-H13 the blank-pin namespace. A verdict depends on the emitted `MVN_CMD` line, which the batch uses; upstream's warm path exits 1 |
+
+| Command or evidence | Result |
+| --- | --- |
+| `MAVEN_WRAPPER_TEST_SHELLS="/bin/sh /bin/dash /bin/bash" bash …/test-maven-wrapper-pins.sh`, macOS arm64, runner Bash 3.2 | 36 cases per shell, 108 in total. PowerShell skipped: no `pwsh` |
+| Same script, Docker `ubuntu:24.04` arm64 native and amd64 emulated (`dash`, `mawk`; `wget` present) | 70 per platform: 35 under each of `/bin/sh` and `/bin/bash`. P06 omitted: no `shasum` |
+| Same script, Docker `alpine:3.22` arm64 (BusyBox `sh` and `awk`) | 35 pass |
+| `MAVEN_WRAPPER_TEST_REQUIRE_PWSH=true`, PowerShell 7.4.6 image, amd64 emulated, `gawk` | 36 `mvnw` and 19 PowerShell cases pass |
+| A copy with failures counted instead of fatal, against the `5bf8a62` scripts | Substantive acceptance in `mvnw` H01, H02, H04, H05, H06e, H06f, H07a, H07b, H08, H09e, H12a–c, H13 and H14. Launcher emitted in W-H01, W-H02, W-H04, W-H05, W-H06b, W-H09a, W-H12, W-H13 and W-H14. The remaining rejection cases failed closed and differed only in diagnostic wording. H10, H10b, H11, W-H10 and all positive cases pass on both revisions |
+| Corrected `mvnw`, committed properties, official archives, file mirror, `MAVEN_USER_HOME` containing a space | Two concurrent ZIP cold starts run Maven 3.9.16 and publish one installation, bound to the ZIP pin. Warm reuse succeeds with the mirror withdrawn. Without `unzip`, TAR.GZ cold and warm succeed. The installed tree equals the extracted Apache ZIP apart from `mvnw.url`. The original blank, absent, duplicate, inherited and unpinned-namespace reproductions now fail with the pin diagnostic |
+| Official Maven 3.9.16 (Resolver 1.9.27), Docker retry properties, loopback fault server for the parent POM | 429 with no Retry-After or `soon`: one retry after 15.01 s. `-1` or a past HTTP date: immediate retry. 503 with `2`: 2.01 s. `61`: no retry, the build fails with 429. Persistent 429: four requests, 15.01, 30.01 and 45.01 s apart, then failure |
+| `MAVEN_USER_HOME=<disposable> ./mvnw -B -o verify` from `backend/` with the corrected Wrapper, macOS arm64 Temurin 25.0.4.1, disposable Testcontainers | 1,146 unit and 595 integration tests pass, no failures, errors or skips |
+| `MAVEN_TEST_PLATFORM=linux/arm64 bash infrastructure/vm/tests/test-maven-bootstrap.sh` (native), then the same without the variable (amd64 emulated) | 31 Docker Maven controls pass on each platform, `MAVEN_BOOTSTRAP_TESTS_PASS`. Its inputs are unchanged by this remediation |
+| `sh -n` and `dash -n backend/mvnw`; `bash -n` on every script in `infrastructure/vm/tests/`; `git -c core.whitespace=cr-at-eol diff --check` | Pass. `mvnw.cmd` keeps CRLF line endings |
+
+The PowerShell body ran under PowerShell 7.4 on Linux. There, a trapped
+`Write-Error` with `Stop`, a `throw` and a .NET exception each ended the script.
+Windows PowerShell 5.1, `cmd.exe`, argument and exit propagation through the
+batch, NTFS and Windows cold-install contention were not executed. Native
+Windows qualification remains outstanding. `backend/Dockerfile`, the Docker
+verifier and its 31 controls, the cache identity of a valid configuration and
+the runtime artifacts are unchanged. The Retry-After corrections are in
+[setup](setup.md#backend-image) and
+[deployment](deployment.md#host-wrapper-pin-enforcement--26-november-2026).
+Adding `test-maven-wrapper-pins.sh` to the repository inventory needs a separate
+Leader decision.
+
+Author-side evidence only, not independent review.
+
+AI-assisted work: Claude Code reproduced both findings, corrected the Wrappers
+and documentation, wrote the regression and ran these checks under the Leader's
+remediation task.
+
+### PR #293 VM test file renames — 26 November 2026
+
+Three VM test files were renamed under the Leader's naming-standardization
+instruction
+([inventory record](repository-structure.md#bounded-vm-test-file-renames--26-november-2026)):
+`test-phase5-recovery-roundtrip.sh` to `test-recovery-roundtrip.sh`,
+`test-phase5-ssh-gates.sh` to `test-ssh-deployment-gates.sh`, and
+`test_phase5_units.py` to `test_deployment_recovery_units.py`, all under
+`infrastructure/vm/tests/`. Git records each as a rename with unchanged
+content apart from its own run instruction and the unit test's two script names.
+The dated records above keep the former names; use the new paths to run them.
+
+| Command | Result |
+| --- | --- |
+| `CODEMASTERY_OPENSSL=<OpenSSL 3> python3 -m unittest -v infrastructure/vm/tests/test_deployment_recovery_units.py`, macOS arm64 | 48 tests pass, none skipped, including the resource-name case that reads both renamed scripts |
+| `bash infrastructure/vm/tests/test-ssh-deployment-gates.sh`, Docker Desktop 29.8.1 | 3 PASS and 23 expected-refusal lines, `PHASE5_SSH_GATES_PASS`, exit 0 |
+| `bash infrastructure/vm/tests/test-recovery-roundtrip.sh` (helper-container tar), same host | 20 PASS and 10 expected-refusal lines, `PHASE5_RECOVERY_ROUNDTRIP_PASS`, exit 0 |
+| `bash -n` on every VM test, `cd` and host script; `py_compile`; YAML parse of `ci-vm.yml` and `deploy.yml`; `git diff --check` | Pass |
+
+The host GNU tar mode of the recovery test runs as root in CI only. Job names,
+step names, required checks and the completion markers are unchanged.
+
+
+### PR #293 PowerShell extraction-order regression remediation — 26 November 2026
+
+Author verification under the Leader's targeted remediation instruction, based on
+`a43c6626f47cbcfae95648c089a882040a7c9579`. The production Wrappers, archive pins,
+Dockerfiles, Maven Resolver properties and three VM test renames are unchanged.
+IR293-R2-01's corrected Retry-After contract remains unchanged.
+
+**Reproduction.** In a disposable copy only, the PowerShell body extracted the
+synthetic ZIP before hashing it, removed that early extraction, then retained the
+real checksum rejection and trap cleanup. The original harness returned 0 and
+`MAVEN_WRAPPER_PIN_TESTS_PASS mvnw=36 powershell=19`. An independent file outside
+the installation recorded the early extraction, including W-H10's wrong-digest
+archive. This is a test sensitivity failure, not an observed production compromise.
+
+**Observation.** The harness parses a byte-for-byte `.ps1` copy of `mvnw.cmd`
+(PowerShell line breakpoints require that extension), retaining `$script=mvnw.cmd`
+and the project's `$scriptDir`, and executes its actual AST through
+`Invoke-Command -NoNewScope`. Test-only debugger actions record execution of the
+single `DownloadFile` statement, entry into the real `Get-FileHash`, continuation
+past the mismatch branch, and actual `Expand-Archive` command entry. The
+`verified` event is continuation after the real hash comparison, not hash entry
+alone. Neither hashing, comparison, extraction nor exception handling is replaced.
+Unsupported verification/download structure or missing/malformed events fails.
+
+Every invocation starts fresh observation state in its case directory, outside
+`m2/wrapper/dists`, so installation cleanup cannot erase it. The observer emits
+no launcher stdout and records only fixed event names. A command breakpoint can
+report both entry and process callbacks for `Expand-Archive`: one or more adjacent
+`extract` events are permitted after `verified`; callback count is not an exact
+count of archive invocations. `download` observes execution of the selected
+method-call statement, not a separate network/transport trace. These synthetic
+cases use a local file mirror; the Backend workflow does not impose OS network
+isolation. The local Linux qualification below additionally uses `--network none`.
+
+| Control | Required events and outcome |
+| --- | --- |
+| W01 cold ZIP, W03 CRLF, paths containing spaces | `ready download hash verified extract...`; real extraction and fixture publication, exact launcher stdout |
+| W02 warm, mirror withdrawn | `ready` only; same trusted installation and launcher |
+| Invalid pins, including warm/legacy caches | `ready` only, pin error, no launcher and unchanged cache paths |
+| W-H10 wrong digest | `ready download hash` only; checksum error, zero extraction callbacks, no launcher or residual staging/install |
+| W-S early extraction, with and without explicit early cleanup | `ready download extract... hash`; both preserve checksum error and complete cleanup, and the same digest oracle must reject their event order |
+| W-S missing, malformed, missing-ready and missing-verified evidence | The actual cold-install acceptance oracle must reject each independently altered observation |
+| W04 correctly pinned non-ZIP | `ready download hash verified extract...`, real cmdlet failure, nonzero status, no launcher or residual staging/install |
+
+All existing substantive controls remain. There are now 36 Unix cases per shell
+when both digest tools are available and 27 PowerShell controls (19 original,
+one 64-character inner-space case, four evidence sensitivity controls, two
+extraction-order mutations and one failed-extraction control). The existing
+mandatory Backend step runs them before setup-java and Maven verification;
+missing PowerShell remains fatal there. H06e now substitutes one character with
+an internal space, keeping exactly 64 characters. Every Bash condition in this
+harness uses `[[ ... ]]` with quoted literal comparisons. Generated POSIX `sh`
+launchers and production `backend/mvnw` retain POSIX syntax. The three `eval`
+inputs remain checked-in static fixture tables, with generated hexadecimal pins;
+no externally supplied command text enters them, and neither Sonar rule flags
+these expressions. No framework redesign or suppression was added.
+
+**Executed local evidence:** macOS arm64 Bash 3.2 ran 36 cases each under `sh`,
+`dash` and `bash` (108). Linux PowerShell 7.4.6 amd64 under emulation passed
+72 Unix (36 each under dash and Bash) + 27 PowerShell controls in one
+container with disposable caches and no network. Native Linux arm64 passed the
+same 72 Unix controls. The unchanged Docker Maven suite passed all 31 controls
+on native arm64 and emulated amd64. ShellCheck 0.11.0 at warning severity,
+Bash syntax, POSIX Wrapper syntax and `git diff --check` also passed.
+Native Windows PowerShell 5.1, `cmd.exe`, argument/status propagation, native
+filesystem publication and contention remain unqualified. The PowerShell observer
+uses APIs/syntax available in Windows PowerShell 5.1, but source compatibility is
+not native execution evidence. An authorized Windows host is needed for that
+qualification; no workflow job or required-check change is authorized here.
+
+**SonarCloud baseline:** analysis of `a43c662` at `2026-11-26T05:06:23Z`, check
+`139705810941`, has 43 issues: 38 `shell:S7688` and five `shell:S5332`.
+S7688 is a legacy `CODE_SMELL`/MAJOR with RELIABILITY/HIGH impact; the source
+normalization addresses all 38 baseline annotations. S5332 is an ordinary
+`VULNERABILITY`/MINOR with SECURITY/LOW impact, not a hotspot. The Quality Gate
+fails `new_security_rating=2` (B), maximum 1 (A); hotspot review is already 100%.
+The API returns both legacy types and software-quality impacts. The gate's exact
+metric is verified; the organization-wide UI analysis-mode setting was not
+exposed by the public settings response and is not inferred from annotation labels.
+
+| S5332 PR issue | Recovery test line | Matching main issue |
+| --- | --- | --- |
+| `AaIWP_jE02ZzFMqK9oxo` | 99 | `AaIL-_0KPWUT3T_MHBiC` |
+| `AaIWP_jE02ZzFMqK9oxp` | 102 | `AaIL-_0KPWUT3T_MHBiD` |
+| `AaIWP_jE02ZzFMqK9oxq` | 112 | `AaIL-_0KPWUT3T_MHBiE` |
+| `AaIWP_jE02ZzFMqK9oxr` | 300 | `AaIL-_0KPWUT3T_MHBiF` |
+| `AaIWP_jE02ZzFMqK9oxs` | 305 | `AaIL-_0KPWUT3T_MHBiG` |
+
+Each match has the same rule, line, source hash and creation timestamp. All five
+source lines are identical at main `1e4c54b`, intermediate `361bafb` and renamed
+`a43c662`. The 38 intermediate style annotations are also identical by path,
+range and title. This supports existing-issue attribution after the rename;
+SonarCloud's internal rename algorithm is not independently observable.
+The five calls reach only disposable source/restored MinIO containers on the
+unique `docker network create --internal` network, with no published ports.
+The script generates its own PostgreSQL/MinIO credentials, synthetic data and
+per-run keys, passes only these credentials explicitly, and cleans up fixture
+containers, volumes, network and keys. It does not read a production env/escrow.
+Internal Docker networking does not encrypt traffic or protect it from the host
+or daemon administrator. No new production defect is established in this scope.
+
+**Outstanding decision:** the Leader/security authority must adjudicate each
+ordinary S5332 issue's applicability using the exact fixture evidence and choose
+the authorized issue-specific disposition. A context-based False Positive
+classification is a proposal for that authority, not an applied decision or a
+statement that HTTP is encrypted. Do not use a hotspot Safe review, silently
+accept risk, change thresholds/exclusions/baselines, or revert the rename to
+obtain a green gate. No issue status was changed. Final exact-revision scan and
+hosted results belong in the PR readback; this baseline does not qualify a later
+head. The inventory decisions for both Maven regression scripts and an eligible
+CODEOWNER review route remain outstanding. Author verification is not independent
+acceptance, release admission or deployment authorization.
+
+AI-assisted work: OpenAI Codex reproduced the test gap, corrected and qualified
+the harness, and prepared the issue-level analysis under the Leader's instruction.

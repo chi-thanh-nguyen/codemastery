@@ -10,10 +10,10 @@ cleanup() { docker image rm "${VERIFIER}" >/dev/null 2>&1 || true; rm -rf "${WOR
 trap cleanup EXIT
 base="$(sed -n 's/^FROM \(eclipse-temurin:.*\) AS runtime$/\1/p' "${ROOT}/backend/Dockerfile")"
 [[ "${base}" == *@sha256:* ]] || { echo 'Runtime base is not pinned' >&2; exit 1; }
-# The verifier stage builds on the Maven stage. Quiet on success; on failure the
+# The verifier stage needs only the pinned JDK. Quiet on success; on failure the
 # end of the plain build log shows the real cause instead of only "exit code: 1".
 rc=0
-BUILDKIT_PROGRESS=plain docker build --platform "${PLATFORM}" --target truststore-verifier -t "${VERIFIER}" "${ROOT}/backend" \
+BUILDKIT_PROGRESS=plain docker build --network none --platform "${PLATFORM}" --target truststore-verifier -t "${VERIFIER}" "${ROOT}/backend" \
   >"${WORK}/verifier-build.log" 2>&1 || rc=$?
 if [[ ${rc} -ne 0 ]]; then
   echo "docker build of the truststore verifier failed (exit ${rc}); last 80 lines of the build log:" >&2
