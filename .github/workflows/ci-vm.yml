@@ -132,12 +132,12 @@ jobs:
       BACKEND_IMAGE: codemastery-ci/backend:ingress-test
     steps:
       - uses: actions/checkout@v7
-      - name: Build the release and local images; reject invalid release origins
-        shell: bash
-        run: exec bash infrastructure/vm/tests/test-ingress-release-image-build.sh
       - name: Verify Maven distribution integrity offline
         shell: bash
         run: exec bash infrastructure/vm/tests/test-maven-bootstrap.sh
+      - name: Build the release and local images; reject invalid release origins
+        shell: bash
+        run: exec bash infrastructure/vm/tests/test-ingress-release-image-build.sh
       - name: Check the release image CA store against the deployed public chain
         shell: bash
         run: exec bash infrastructure/vm/tests/test-ingress-release-ca-store.sh

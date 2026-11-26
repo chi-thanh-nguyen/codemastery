@@ -83,6 +83,8 @@ extract_stage() {
                 else if (ends) reject("instruction after the verifier end marker")
                 else if (keyword == "RUN") {
                     if (!expect_run) reject("RUN outside the verifier block")
+                    else if ($2 != "--network=none" || NF < 3 || $3 == "\\" || $3 ~ /^--/)
+                        reject("verifier RUN must explicitly disable networking")
                     runs++
                     if (!continued) verifier_end = NR
                 } else if (keyword != "WORKDIR" && keyword != "COPY") reject("unsupported " keyword " instruction")
@@ -268,4 +270,10 @@ expect_rejection 'markers outside the maven-bootstrap target' 'begin marker outs
         { sub(/^FROM jdk AS maven-bootstrap$/, "FROM jdk AS maven-prepare"); print }'
 expect_rejection 'a second maven-bootstrap stage' 'expected exactly one maven-bootstrap stage' '' '' '
         { print } END { print "FROM jdk AS maven-bootstrap" }'
+expect_rejection 'a verifier RUN without an explicit network mode' \
+    'verifier RUN must explicitly disable networking' '' '' '
+        { sub(/^RUN --network=none /, "RUN "); print }'
+expect_rejection 'a verifier RUN overriding its network mode' \
+    'verifier RUN must explicitly disable networking' '' '' '
+        { sub(/^RUN --network=none /, "RUN --network=none --network=default "); print }'
 printf 'MAVEN_BOOTSTRAP_TESTS_PASS\n'
