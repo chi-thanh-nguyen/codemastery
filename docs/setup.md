@@ -2691,3 +2691,60 @@ qualification. No downgrade, unpinning, repository/digest change or CI bypass.
 See [the execution record](testing.md#fe14-ir-04-storage-capability-gating--26-november-2026)
 for actual results and limits. Independent review, required CI, protected merge
 and release/deployment remain separate; no independent finding is closed here.
+
+## FE14 post-upstream integration and shared fixture supersession — 27 November 2026
+
+The Project Leader explicitly authorized normal integration of current main into
+PR #279, bounded redundancy removal, prospective AS08 checks, documentation and
+push. Original FE14 HEAD `b6763a36fb7ef7562a93bc6a19f2f6726cdf1eac` and all six
+published commits are retained. Main `3f1831198982b712bfdaa91381e447d39978d550`
+contains actual squash integrations #300 `e7fa15386e48686c7d9a6c6ed4e936aed1c9f6df`
+and #295 `3f1831198982b712bfdaa91381e447d39978d550`; neither a synthetic merge ref
+nor the unmerged #300 feature history was imported. Regular merge
+`a07f334ad36c1c64291fd5d1b19c15265ead9458` resolves exactly `docs/setup.md`,
+`docs/testing.md` and `e2e/fixtures/local-stack.ts`.
+
+The fixture is byte-identical to authoritative main (blob
+`22ea227c6563a875964e313a236cfed2815c3312`) and leaves the effective FE14 diff.
+Shared default real storage supersedes the historical FE14 opt-in provisioning,
+duplicate credential/provisioning path, initializer retry/wait and conditional
+backend endpoint. One private, digest-pinned MinIO/initializer pair, distinct
+administrative/application identities, initializer-before-backend ordering,
+`waitForStorageInitializer()`, ownership/fencing/recovery, Maven cache support,
+CT38 fixture values and automatic successful-setup capability export remain.
+Both IR-04 guards and every feature regression/browser restriction are unchanged.
+The old 10 PASS / 10 SKIP expectation is historical, not the current default oracle.
+Documentation reconciliation preserves main's complete content, including FT02's
+current-state amendment, and FE14's complete historical append exactly once.
+
+PR #296 initially remained unmerged at `4fa292386144d6ab5037058b81bef3065e7891af`.
+Before FE14 push it advanced to `25ba001b3cd0b2c1aa2d2cfa2b7c7017ac8e332b`,
+a normal integration of the same main; it remains unmerged. Separate local
+candidates integrate the initial revision with main, then FE14, and recheck a
+clean direct merge with the latest AS08 HEAD. Executable inputs are identical
+between the tested and refreshed combined candidates; only document ordering
+differs. No AS08
+code, speculative resolution or stacked dependency is published to FE14 or #296.
+The shared `quizExpiryFixture` already supplies the same explicit disposable
+`false` / `1000` / `2` values to Compose rendering and backend startup. AS08's
+duplicate direct bindings are unnecessary. Required validation, disabled behavior
+and production policy remain AS08-owned. The candidate's actual backend starts
+with these values; this does not qualify production scheduling or all AS08 flows.
+
+CT19 remains a separate discrepancy: ADR013 §7.3 requires bucket
+`codemastery-e2e` and explicit `MAX_UPLOAD_SIZE=1MB`; integrated shared storage
+uses `codemastery` and omits that explicit limit (application fallback `20MB`).
+No later scoped supersession was found in the current decision records or shared
+CI decisions. FE24/shared-fixture and FE25/CT19 owners must reconcile the learner
+L-N3 fixture before CT19/QA08 acceptance. FE14 small-PDF success does not establish
+that acceptance; this integration changes neither the contract nor shared policy.
+
+All six original raw author/committer pairs already match the exact author of
+first FE14 commit `aba5e9ce879ef272e1ad4f2ded827ed7828ad6b3`:
+`heizseung <thangle12012006@gmail.com>`. No existing-history rewrite is needed.
+New maintenance commits use that identity through process-scoped configuration
+under the explicit consensual PR-specific arrangement; authenticated push account
+is separately verified as `chi-thanh-nguyen`. Codex performed integration,
+verification and author audit. Metadata does not establish human contribution;
+no signature or independent approval is fabricated and global Git settings are
+unchanged. See [execution and remaining limits](testing.md#fe14-post-upstream-integration-verification--27-november-2026).

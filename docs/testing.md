@@ -9359,3 +9359,157 @@ executed engine. No namespace/sandbox bypass was introduced. The named container
 server and browser processes ended with it. This establishes controlled frontend
 browser behavior only, not real PDF/storage/backend execution or cold-build
 qualification. IR-04 and integration classifications above remain unchanged.
+
+## FE14 post-upstream integration verification — 27 November 2026
+
+Author-side result: **INTEGRATION_COMPLETE_VERIFICATION_LIMITED**. This record
+supersedes current integration/default-storage expectations, preserving every
+earlier failure, remediation and observed result as history. Refs #199; Refs #193
+remains bounded to the shared Markdown renderer. No independent finding is closed.
+
+### Exact inputs, preservation and commands
+
+Original FE14 HEAD `b6763a36fb7ef7562a93bc6a19f2f6726cdf1eac`, merge-base
+`23402754743e0d35048e74cbabebfa133e5e6da3`, integrated actual main
+`3f1831198982b712bfdaa91381e447d39978d550`. Main adds only the #300 and #295
+squash integrations. The normal FE14 merge is
+`a07f334ad36c1c64291fd5d1b19c15265ead9458`, tree
+`6f44a30ee641196fbcff61ebd049ba042019a12d`. Tests ran on this exact integrated
+tree before its commit; the subsequent evidence commit changes only setup/testing
+documentation. Final source/input equivalence and Git checks preserve this evidence.
+
+Actual conflicts: setup, testing and local-stack. Resolution uses complete
+authoritative main fixture blob `22ea227c6563a875964e313a236cfed2815c3312`.
+Main's full setup/testing text is retained, including the in-place FT02 correction;
+each FE14 historical suffix is retained once. All 22 feature-only paths remain
+byte-identical to original HEAD; all 15 main-only paths match integrated main.
+The complete production frontend and original E2E spec are unchanged by this
+integration. No duplicated MinIO provisioning or CT38 bindings remain.
+
+Executed on macOS arm64, Node 24.21.0, Java 25.0.4.1, locked Playwright 1.63.0;
+all commands below are from the isolated checkout root except Maven:
+
+| Command | Actual result |
+| --- | --- |
+| `npm --prefix frontend ci`; `npm --prefix e2e ci` | Both exit 0, locked dependencies |
+| `node --test e2e/fixtures/local-stack.test.mjs e2e/fixtures/lifecycle.test.mjs` | Exit 0, 67 passed, zero failed/skipped |
+| `npm --prefix frontend test -- src/routes/index.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/shared/components/MarkdownRenderer.test.tsx --maxWorkers=1 --testTimeout=15000` | Exit 0, 293 passed across three suites |
+| `npm --prefix frontend run build` | Exit 0, includes typecheck; existing large-chunk advisory |
+| `(unset E2E_MATERIAL_FILES E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD; E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts)` | Exit 1, 11 passed / 4 skipped / 5 failed; classification below |
+| `npm --prefix e2e run stack:down` | Exit 0, all seven owned resources verified absent |
+| `git diff --check`; unresolved/conflict-marker, both-parent, original-HEAD/main ancestry, fixture blob and whole-file preservation checks | Pass; original six commits preserved, no rewrite |
+
+### Actual real-storage browser matrix
+
+| Project | Full authoring | Committed PUT/remount | Delayed PDF recovery | Direct WebKit PDF |
+| --- | --- | --- | --- | --- |
+| chromium-desktop | FAIL, transient 377/360 overflow after file operations | PASS | PASS | Expected browser SKIP |
+| firefox-desktop | Launch blocked | Launch blocked | Launch blocked | Launch blocked before applicability guard |
+| webkit-desktop | PASS | PASS | Expected browser SKIP | PASS, HTTP 201 |
+| chromium-mobile | PASS | PASS | PASS | Expected browser SKIP |
+| webkit-mobile | PASS | PASS | Expected browser SKIP | PASS, HTTP 201 |
+
+The oracle remains 15 PASS / 5 expected browser SKIP in a qualified five-project
+environment. These actual results do not satisfy it. Firefox fails before test
+body execution with `Could not find profile folder`; its four launch failures are
+not assertion failures or skips. No browser flag, new skip or assertion was changed.
+There are no unexpected storage-capability skips in executed journeys.
+
+Run `cm-e2e-1a21902027a-cfae1b`, lock `16777234-22404782`, initialized real
+MinIO once (exit 0 at `2026-11-26T17:58:41.544194468Z`) before backend creation
+at `17:58:44.498312969Z`. Observed private storage has no host bindings, distinct
+root/application identities and no root environment in the backend. The inventory
+contains none of the generated secrets. Backend image is
+`sha256:032dea97ef818d1af1c67af52f70266f4ac4900ef04f3be62c9c5b7bfa5de600`;
+MinIO/initializer retain the Compose pins. Successful setup enables the retained
+IR-04 guards without caller opt-in. Passing cases exercise actual PDF creation,
+replacement/download-byte equality, accepted delayed mutation, failed recovery,
+deliberate retry, one-row duplicate prevention and authoritative PUT/remount.
+Normal teardown plus explicit recovery confirms all seven resources absent and
+the temporary build removed. Historical incomplete macOS run
+`cm-e2e-1a2188bbf2f-397681` / lock `16777234-22098420` is preserved, not reused.
+
+### Prospective AS08 and responsive diagnostic
+
+Initially PR #296 is OPEN/unmerged at `4fa292386144d6ab5037058b81bef3065e7891af`
+(nine commits ahead / two behind actual main). Its isolated main integration
+conflicts in `docs/deployment.md`, `docs/testing.md` and `local-stack.ts`.
+`docs/setup.md`, release shell and release tests merge cleanly. Distinct AS08
+privilege/history and shared-CI records are retained; main's fixture completely
+supersedes the duplicate direct CT38 arguments. This is preparation evidence,
+not a published #296 resolution or a guarantee about a later revision.
+
+Local AS08+main candidate `24ddfe5bae84796c48601ff68dd63f7c9568cedf` passes
+`cd backend && ./mvnw -B test -Dtest=AppConfigTest`: exit 0, 42 tests, no
+failures/errors/skips. It exercises invalid/missing values including disabled
+mode and actual enabled scheduling registration/invocation. Combining FE14 merge
+`a07f334` yields disposable candidate
+`f8b2e747621a9f34ac08f35237d339a11e870f4d`, tree
+`4474181ecd55fe73ea9940b77f045ca635375ba7`. Only `docs/testing.md` conflicts
+at this second merge; fixture, frontend and E2E spec match FE14, while backend,
+infrastructure and workflows match the tested AS08+main candidate. No candidate
+commit is published to either feature branch.
+
+Pre-push refresh finds new AS08 HEAD
+`25ba001b3cd0b2c1aa2d2cfa2b7c7017ac8e332b`, still OPEN/unmerged, ten ahead /
+zero behind main. It normally merges the same main into the original AS08 HEAD.
+Its tree differs from local `24ddfe5` only in deployment/testing record ordering;
+all executable/configuration inputs, including the exact main fixture, are equal.
+A separate no-commit merge of FE14 `a07f334` into this actual latest AS08 revision
+merges entirely cleanly, tree `a6e9a5bd65b7bc2e973089fa0d973f0d4af19eea`.
+Its executable/configuration inputs equal the tested
+combined `f8b2e74` tree; documentation ordering is the only difference. Thus the
+focused configuration/startup evidence below is reusable for the refreshed
+candidate without claiming a repeated suite or future unknown-head mergeability.
+
+A temporary untracked copy of the full authoring test adds layout diagnostics,
+retains the original immediate-width assertion, and runs only Chromium desktop:
+`(unset E2E_MATERIAL_FILES E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD APP_QUIZ_AUTO_SUBMIT_ENABLED APP_QUIZ_AUTO_SUBMIT_DELAY_MS APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE; E2E_WORKERS=1 npm --prefix e2e test -- fe14-overflow.probe.spec.ts --project=chromium-desktop)`.
+Exit 1, one assertion failure after successful CT38 startup, real file operations
+and material POST HTTP 201. Actual backend inputs are exactly disabled `false`,
+delay `1000`, batch `2`; initialization precedes backend creation. Backend image
+is `sha256:da5a7d113e679cf8731a12cbbfc228adfe7ad07aa066cda209f0ee168123b2ff`.
+Run `cm-e2e-1a21905be1e-eddeac` cleans all seven resources; explicit recovery
+also exits 0. The probe is moved outside the checkout and is not committed.
+
+The diagnostic captures the same immediate `scroll=377`, `client=360` and an
+account monogram right edge `376.546875`; two animation frames later both document
+widths are 360. The account button temporarily shrinks to 12px around its fixed
+40px monogram. This is a pre-existing shared-header responsive transition exposed
+by immediate resize sampling. The source indicates the responsive mechanism:
+AppHeader uses `useMediaQuery` for desktop Theme
+presence while CSS already applies the compact layout (`AppHeader.tsx:250-251`,
+`:318-322`, account/monogram `:359-381`). Those sources and the assertion are
+identical to original FE14 HEAD. The observed transient is real; it is not a
+persistent Lesson-material overflow or a demonstrated integration-induced defect.
+No UI fix, frame wait, retry or weakened assertion is published. Owner follow-up
+must decide the shared-header transition/test synchronization correction; the
+historical WebKit symptom's exact original cause is not independently established
+by this Chromium reproduction. Both final WebKit full journeys pass all five widths.
+
+### Self-audit and remaining gates
+
+No confirmed defect introduced by this bounded integration requires production
+code changes. CT19's bucket/upload-limit discrepancy remains with the shared
+fixture/learner-case owners, as recorded in setup; PDF success is not CT19/QA08
+acceptance. The attempted Linux harness with host networking and Docker socket
+was rejected by automatic approval review for broad host-Docker authority; no
+such harness was created. Direct host lifecycle execution supplies the evidence
+above without that configuration. Graphify's 5 November graph was used only for
+navigation and verified against current source.
+
+Attribution preserves all original author/committer metadata and timestamps;
+new PR maintenance uses `heizseung <thangle12012006@gmail.com>` under explicit
+consent, with separate authenticated `chi-thanh-nguyen` push verification and
+accurate Codex assistance disclosure. No global configuration, credential or
+signature is changed. No full unrelated frontend/backend/AS08/VM/release suite,
+hosted-CI rerun/wait, independent review, merge/approval, Issue closure, Project
+write or deployment is performed.
+
+Next review: cumulative `e4d7eb3febfad8f89db1b9091c7931ed3308654a` through the
+actual final PR HEAD, separating upstream main changes from PR-owned remediation.
+Cover IR-01–04, Markdown URL/reference security, CodeQL helper, manual conflicts,
+FE14/FE28 coexistence, shared fixture supersession, prospective AS08 impact,
+real-storage evidence and the retained responsive/environment failures. Author
+checks do not close independent CODEOWNER, required-CI, protected integration,
+operational, security or release gates.
