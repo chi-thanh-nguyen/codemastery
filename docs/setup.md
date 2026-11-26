@@ -1,5 +1,44 @@
 # Development Setup
 
+## FE17 targeted recovery, selection and responsive remediation — 27 November 2026
+
+PR #288 / Issue #202: author-verified correction of FE17-IR-01 (P1), IR-02 (P2)
+and IR-03 (P3), under the Project Leader's targeted remediation instruction.
+Reviewed baseline `11ba8e49` was REQUEST_CHANGES; the historical delivery record
+below remains evidence of that revision, not independent acceptance. Ordinary
+main integration is merge `4e3a6260`, parents `11ba8e49` and main `daddc507`;
+AS16 backend and both historical testing records are preserved without conflicts.
+
+- Reviewed-submission eligibility is separate from the refreshed authoritative
+  row. Unknown-result recovery retains the draft and current-result information.
+  If the exact token or bound evidence changes, downloading the current file and
+  explicit review are required before eligibility advances. Each recovery read
+  has a new identity and grading remains locked while it is pending/failed/unknown.
+  The PUT boundary checks reviewed eligibility independently of disabled controls.
+  Ordinary initial grading/regrading has no new mandatory download rule.
+- Download completion does not prove the bytes' timestamp under ADR010 §11;
+  filenames are not version identities. No new API/header/schema is introduced,
+  and further replacement still yields the existing exact-token backend 409.
+- Selected Course/Assignment labels are independent of visible paginated windows.
+  Existing decoded page summaries are reused; a missing selected summary is
+  resolved with one approved `getOwnedCourse` or `b5ReadOwnedAssignment` supporting
+  owner read. URL identities remain authoritative; generation/resource changes
+  invalidate summaries and obsolete requests. This is an additional use of an
+  existing owner operation, not a new backend contract or public catalogue read.
+- S21 has one top action region, before potentially long title/recovery content.
+  Its Save/Update action retains native form association and the existing
+  validation, confirmation and busy/refusal locks. No global shell/layout change.
+
+No dependency/configuration change or setup step is required. OpenAI Codex
+performed this remediation and implementation-author self-audit; Claude Code did
+not execute this session. Verified heizseung metadata is assigned under explicit
+Leader authority and does not establish personal implementation or independent
+review. Normal push is by chi-thanh-nguyen. The original reconstruction/G4/FE16
+provenance below is retained. See the new FE17 record in `docs/testing.md` for
+actual focused, rendered and disposable real backend/storage evidence, failures
+corrected in tests, limitations and separate independent/QA/integration gates.
+
+
 ## FE17 Instructor grading delivery and delegated decisions — 27 November 2026
 
 Refs #202; implementation and author verification in PR #288. This is the

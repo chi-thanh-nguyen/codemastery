@@ -8,7 +8,9 @@ import { EmptyView, ErrorView, LoadingView } from '../../../../shared/components
 import { useAuth } from '../../../auth/hooks/useAuth';
 import { useOwnedCourses } from '../../course-management/hooks/useCourseEditor';
 import { useOwnerRead } from '../../course-management/hooks/useAssessmentEditor';
-import { listOwnedAssignments } from '../../course-management/api/assessmentAuthoringApi';
+import { getOwnedCourse } from '../../course-management/api/instructorCourseApi';
+import type { AuthoringRequestOptions } from '../../course-management/api/assessmentAuthoringApi';
+import { listOwnedAssignments, readOwnedAssignment } from '../../course-management/api/assessmentAuthoringApi';
 import { CourseUnavailable, courseRefused, errorMessage, formatDeadlineDisplay } from '../../course-management/pages/QuestionBankPage';
 import { failureStatus } from '../../course-management/hooks/useAssessmentEditor';
 import { gradingId } from '../api/gradingApi';
@@ -34,6 +36,19 @@ export function ProductionSubmissionListPage() {
     return <GradingSelection key={auth.generation} courseId={course?.toLowerCase() ?? null} assignmentId={assignment?.toLowerCase() ?? null}
         choose={(courseId, assignmentId) => setParams(new URLSearchParams({ ...(courseId ? { courseId } : {}), ...(assignmentId ? { assignmentId } : {}) }))} />;
 }
+/** One selected summary per resource and session, independent of the visible page window.
+ * Reuse an admitted page row; only a missing summary needs one bounded owner read.
+ * useOwnerRead suppresses obsolete settlements and handles explicit read-only retries.
+ */
+function useSelectedSummary<T extends { id: string; title: string }>(identity: string | null, visible: T | undefined,
+    loadingPage: boolean, load: (options: AuthoringRequestOptions) => Promise<T>) {
+    const [retained, setRetained] = useState<{ identity: string | null; data: T | null }>({ identity, data: null });
+    const previous = retained.identity === identity ? retained.data : null;
+    const read = useOwnerRead(identity && !visible && !previous && !loadingPage ? identity : null, load);
+    const data = visible ?? previous ?? read.data;
+    if (retained.identity !== identity || data && retained.data !== data) setRetained({ identity, data });
+    return { ...read, data, loading: !!identity && !data && (loadingPage || read.loading) };
+}
 function GradingSelection({ courseId, assignmentId, choose }: { courseId: string | null; assignmentId: string | null; choose: (courseId: string | null, assignmentId?: string) => void }) {
     const [coursePage, setCoursePage] = useState(0);
     const [paging, setPaging] = useState({ courseId, page: 0 });
@@ -42,20 +57,30 @@ function GradingSelection({ courseId, assignmentId, choose }: { courseId: string
     const setAssignmentPage = (page: number) => setPaging({ courseId, page });
     const courses = useOwnedCourses(coursePage), assignments = useOwnerRead(courseId ? `grading-assignments|${courseId}|${assignmentPage}` : null,
         options => listOwnedAssignments(courseId!, assignmentPage, 20, options));
-    const selectedCourse = courses.data?.content.find(c => c.id.toLowerCase() === courseId);
-    const assignment = assignments.data?.content.find(a => a.id.toLowerCase() === assignmentId);
+    const selectedCourse = useSelectedSummary(courseId ? `grading-course|${courseId}` : null,
+        courses.data?.content.find(c => c.id.toLowerCase() === courseId), courses.loading,
+        options => getOwnedCourse(courseId!, options));
+    const assignment = useSelectedSummary(courseId && assignmentId ? `grading-assignment|${courseId}|${assignmentId}` : null,
+        assignments.data?.content.find(a => a.id.toLowerCase() === assignmentId), assignments.loading,
+        options => readOwnedAssignment(courseId!, assignmentId!, options));
+    const courseOptions = [...(courses.data?.content ?? [])];
+    if (selectedCourse.data && !courseOptions.some(c => c.id.toLowerCase() === courseId)) courseOptions.push(selectedCourse.data);
+    const selectionRefusal = selectedCourse.error || assignment.error;
+    if (courseRefused(selectionRefusal)) return <Page><PageHeader title="Grading" /><CourseUnavailable status={failureStatus(selectionRefusal)} /></Page>;
     const error = assignments.error || courses.error;
     return <Page><PageHeader title="Grading" subtitle="File submissions from learners in your courses." />
         <Box sx={{ display: 'grid', gap: 3, minWidth: 0 }}>
             {courses.loading && <LoadingView message="Loading courses…" />}
             {!!courses.error && <ErrorView title="Courses couldn't be loaded." message={errorMessage(courses.error)} onRetry={courses.reload} />}
-            {courses.data && <>
-                {!courses.data.totalElements ? <EmptyView icon="book" title="You haven't created a course yet" message="Create a course in Teaching to start adding assignments." /> : <>
-                    <TextField select label="Course" value={selectedCourse?.id ?? ''} onChange={e => { setAssignmentPage(0); choose(e.target.value); }} sx={{ maxWidth: 560 }}>
-                        {courses.data.content.map(c => <MenuItem key={c.id} value={c.id}>{c.title}</MenuItem>)}
+            {selectedCourse.loading && <LoadingView message="Loading selected course…" />}
+            {!!selectedCourse.error && <ErrorView title="Selected course couldn't be loaded." message={errorMessage(selectedCourse.error)} onRetry={selectedCourse.reload} />}
+            {(courses.data || selectedCourse.data) && <>
+                {!courseId && !courses.data?.totalElements ? <EmptyView icon="book" title="You haven't created a course yet" message="Create a course in Teaching to start adding assignments." /> : <>
+                    <TextField select label="Course" value={selectedCourse.data?.id ?? ''} onChange={e => { setAssignmentPage(0); choose(e.target.value); }} sx={{ maxWidth: 560 }}>
+                        {courseOptions.map(c => <MenuItem key={c.id} value={c.id}>{c.title}</MenuItem>)}
                     </TextField>
-                    {courseId && !selectedCourse && <Typography>Showing the selected course. Choose another course to change the selection.</Typography>}
-                    <PaginationBar page={coursePage} totalPages={courses.data.totalPages} totalItems={courses.data.totalElements} pageSize={courses.data.size} itemsOnPage={courses.data.content.length} onChange={setCoursePage} noun="courses" nounOne="course" />
+                    {courseId && !selectedCourse.data && <Typography>Selected course: {courseId}</Typography>}
+                    {courses.data && <PaginationBar page={coursePage} totalPages={courses.data.totalPages} totalItems={courses.data.totalElements} pageSize={courses.data.size} itemsOnPage={courses.data.content.length} onChange={setCoursePage} noun="courses" nounOne="course" />}
                 </>}
             </>}
             {courseId && (courseRefused(assignments.error) ? <CourseUnavailable status={failureStatus(assignments.error)} /> : <>
@@ -71,7 +96,9 @@ function GradingSelection({ courseId, assignmentId, choose }: { courseId: string
                     ]} actions={a => <Button variant="outlined" onClick={() => choose(courseId, a.id)} aria-label={`View submissions: ${a.title}`}>Submissions</Button>}
                     footer={assignments.data && <PaginationBar page={assignmentPage} totalPages={assignments.data.totalPages} totalItems={assignments.data.totalElements} pageSize={assignments.data.size} itemsOnPage={assignments.data.content.length} onChange={setAssignmentPage} noun="assignments" nounOne="assignment" />} />}
             </>)}
-            {courseId && assignmentId && !courseRefused(assignments.error) && <AssignmentSubmissions key={`${courseId}|${assignmentId}`} courseId={courseId} assignmentId={assignmentId} title={assignment?.title ?? 'Assignment'} />}
+            {assignment.loading && <LoadingView message="Loading selected assignment…" />}
+            {!!assignment.error && <ErrorView title="Selected assignment couldn't be loaded." message={errorMessage(assignment.error)} onRetry={assignment.reload} />}
+            {courseId && assignmentId && assignment.data && !courseRefused(assignments.error) && <AssignmentSubmissions key={`${courseId}|${assignmentId}`} courseId={courseId} assignmentId={assignmentId} title={assignment.data.title} />}
         </Box>
     </Page>;
 }

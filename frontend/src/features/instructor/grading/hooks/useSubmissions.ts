@@ -29,8 +29,9 @@ export function useSubmissions(courseId: string, assignmentId: string, page: num
     return useOwnerRead(`submissions|${courseId}|${assignmentId}|${page}`, options => listSubmissions(courseId, assignmentId, page, 20, options));
 }
 export function useReviewedSubmission(courseId: string, assignmentId: string, submissionId: string, initial: SubmissionSummary | null) {
-    const [fresh, setFresh] = useState(false);
-    const read = useOwnerRead(`reviewed-submission|${courseId}|${assignmentId}|${submissionId}|${fresh}`, options =>
-        !fresh && initial ? Promise.resolve(initial) : findSubmission(courseId, assignmentId, submissionId, options));
-    return { ...read, reload: () => { setFresh(true); read.reload(); } };
+    // A distinct read identity synchronously withdraws readiness on EVERY recovery/retry.
+    const [revision, setRevision] = useState(0);
+    const read = useOwnerRead(`reviewed-submission|${courseId}|${assignmentId}|${submissionId}|${revision}`, options =>
+        revision === 0 && initial ? Promise.resolve(initial) : findSubmission(courseId, assignmentId, submissionId, options));
+    return { ...read, reload: () => setRevision(value => value + 1) };
 }

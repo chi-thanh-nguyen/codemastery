@@ -1,5 +1,177 @@
 # Testing
 
+## FE17 targeted independent-finding remediation and author delta verification — 27 November 2026
+
+**Disposition: REMEDIATION_COMPLETE_AUTHOR_VERIFIED.** Explicit Project Leader
+instruction for PR #288 / Issue #202 authorizes IR-01 (P1), IR-02 (P2), IR-03 (P3),
+ordinary main integration, focused regressions, directly related corrections and
+normal publication to the existing branch. This is OpenAI Codex implementation-
+author verification, not independent closure, CODEOWNER approval, QA acceptance,
+merge, release or operational-risk acceptance. Claude Code did not execute this
+remediation session. Historical implementation/self-audit records below describe
+their original baseline; they do not establish that `11ba8e49` was defect-free.
+
+### Exact baseline and integration accounting
+
+The complete preceding focused independent review and its component, browser and
+real-persistence evidence were accessible and inspected. Its REQUEST_CHANGES
+baseline is `11ba8e49be6af16f5114d264e8bb1cc16b8bdbd1`, original merge-base
+`13d9ca7e58ead77ecc66efc8408199059d57588a`: 1 effective commit, 19 files, +914/-75.
+The pre-edit live PR still named that HEAD; 16/16 hosted checks were successful
+there. Those checks are historical evidence for that SHA only.
+
+Verified remote main `daddc507f1bb109f66c988537c00cab7bc08f256` adds exactly AS16's
+five backend production/test files and 282 lines in `docs/testing.md` (+987/-16
+over the original merge-base). Ordinary merge
+`4e3a6260feca544d42f1d85723b60f3f35455aab` has parents `11ba8e49...` then
+`daddc507...`. There were no conflicts. Git combined the independent FE17 top
+record and appended AS16 records without losing either; no manual resolution.
+Every backend blob equals main. AS16 insight reads do not modify FE17's
+submission, grading, storage or ownership producers. The original FE17 commit,
+reconstruction backup ref and PR #286 are preserved. Remediation below is a
+separate delta from that merge, not an attribution of inherited AS16 code.
+
+### Finding corrections and reviewed-evidence invariant
+
+| Finding | Confirmed root cause | Targeted correction | Author disposition |
+|---|---|---|---|
+| FE17-IR-01 (P1) | Unknown-outcome recovery replaced the row and allowed acknowledgement without replacement review; the next PUT used the new row token with the old draft | GradeController keeps eligible reviewed evidence separately from current authoritative data and completed-download evidence. Evidence binds generation, Course, Assignment, Submission, learner, filename and exact opaque token. GET/retry/download cannot promote eligibility. Changed evidence requires a current successful download and explicit acknowledgement; save independently compares both current data and reviewed evidence before PUT | Remediated; focused author regressions pass |
+| FE17-IR-02 (P2) | Selected labels existed only in current paginated responses | Retain one current-identity summary independent of page windows. Seed it from a decoded page row, otherwise use one approved `getOwnedCourse` / `b5ReadOwnedAssignment` supporting owner read. Abort/identity/generation checks reject stale settlements; explicit errors/refusals never borrow another title. No collection scan or cross-session persistent cache | Remediated; component and rendered navigation regressions pass |
+| FE17-IR-03 (P3) | The only primary action followed all form content below both required initial viewports | Put one primary action before the title/notices in a bounded S21 action region. Native `form` association uses a unique React ID; validation, first-invalid focus, confirmation, locks and Save/Update labels remain shared with preview | Remediated; both exact viewport heights pass |
+
+Before: reviewed A/T1 + retained draft → unknown/uncommitted PUT → GET B/T2 →
+acknowledge result → PUT T2 with A's draft. After: GET B/T2 updates authoritative
+state while eligible reviewed evidence remains A/T1; save and acknowledgement
+are locked until download B completes and the Instructor explicitly acknowledges
+B. Download alone never promotes T2. The next deliberate PUT echoes T2 exactly;
+a further replacement still produces backend 409. Same filenames are irrelevant
+to version equality. Unknown-result copy and current saved/ungraded evidence
+remain visible until deliberate acknowledgement; no automatic replay or inferred
+success. Initial grading/regrading retains its accepted semantics without a new
+mandatory initial-download rule.
+
+ADR010 §11's binary download has no authoritative version token and can serve a
+replacement during re-admission. Completion therefore does not prove that actual
+bytes match the captured frontend token. No header/endpoint/DTO/database change
+or stronger guarantee is claimed; RT02 exact precondition protection remains.
+
+### Focused execution evidence
+
+Environment: macOS, Node 24.21.0 / npm 11.19.0, copied existing locked dependency
+installs (no manifest/lock/dependency changes), Chromium 153.0.8010.12 and WebKit
+26.6. Commands run from the isolated PR worktree unless stated otherwise.
+
+```sh
+npm --prefix frontend test -- src/features/instructor/grading
+# Final: 98 PASS / 2 suites.
+npm --prefix frontend test -- src/routes/index.test.tsx src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/shared/components/presentation.test.tsx src/app/preview/PreviewApp.test.tsx
+# Final: 420 PASS / 4 suites.
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
+VITE_API_BASE_URL=/api npm --prefix frontend run build -- --outDir <private-cli-build>
+# PASS; final command also typechecks final source. Existing >500 kB advisory remains.
+npm --prefix frontend run test:browser -- --fe17 --engine chromium,webkit --out <private-evidence>/browser-final
+# 33/33 PASS each engine; controlled HTTP, not real backend evidence.
+# 76 action geometry observations across both engines.
+(unset E2E_MATERIAL_FILES E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD APP_QUIZ_AUTO_SUBMIT_ENABLED APP_QUIZ_AUTO_SUBMIT_DELAY_MS APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE
+ E2E_WORKERS=1 npm --prefix e2e test -- instructor-grading.spec.ts --project=chromium-desktop --project=webkit-desktop --workers=1)
+# Final: 4/4 PASS, real disposable backend/PostgreSQL/MinIO/production frontend.
+git diff --check
+```
+
+IR-01 deterministic coverage includes network/5xx/protocol unknown outcomes with
+same/different-name uncommitted replacements, unchanged-token recovery, original
+mutation committed (unchanged token, no impossible learner replacement), repeated
+unknown outcomes, replacement during recovery, A→B→C, failed/cancelled/stale
+Blob settlement, read failure/retry/unknown lookup, route departure/session
+replacement, confirmation single flight and exact token/verbatim draft retention.
+A protocol failure models an unconfirmed transport/proxy response; it does not
+claim that the real backend successfully commits and then permits replacement.
+The strict API and original A03 response-identity tests remain in the same run.
+
+The new real negative E2E case makes only the browser offline for the first PUT,
+proves the authoritative persisted row is ungraded, uploads distinct same-name B
+through real learner REST/storage, then retries the owner read. It asserts no B
+PUT or persisted grade before download/review, keeps the draft verbatim, downloads
+actual B bytes, requires acknowledgement, and verifies the final persisted
+83.25/feedback/T2 plus exactly two deliberate grade requests and two downloads.
+The original real download/409/grade/regrade case also passes in both engines.
+Final lifecycle run `cm-e2e-1a219bf7cfd-8dbe36` completed; all 7 owned Docker
+resources and the private preview/build were verified absent. An earlier run
+before the read-revision correction also passed 4/4 and completed cleanup;
+`cm-e2e-1a219bdcedf-782d0e` is not substituted for the final-source result.
+
+IR-02 verifies legitimate 20-of-21 page windows, later-page selection, paging away,
+exact scoped supporting requests, no repeated owner reads during paging, S19
+handoff, refresh/new document, Back/Forward, pending Course/Assignment switches,
+failed supporting reads/retry, 403/404 and generation replacement. Existing A02
+false-empty and A04 page-2 selection assertions remain.
+
+IR-03 initial scrollY=0 action bounds in **both engines and all preferences**:
+1280×720: x=993.03125, y=120, width=126.96875, height=48 (bottom=168).
+390×844: x=247.03125, y=88, width=126.96875, height=48 (bottom=136).
+Draft, busy, unknown recovery, prefilled regrade and long-content observations
+also fit with no clipping; enabled actions have an unobstructed hit target.
+The matrix covers Light/Dark/System and live OS change, 201-character title,
+254-byte filename, long display name/feedback, keyboard Enter, first-invalid
+focus and dialog confirmation/Escape. Existing five-width 360/768/1024/1280/1440
+checks also pass. Playwright CLI Chrome independently measured the same initial
+bounds against the final private production build, with native form association;
+the named session and preview were closed. Screenshots were inspected visually.
+
+### Targeted author delta self-audit and corrections
+
+**FE17-R-A01 (directly related recovery readiness).** The old fresh boolean changed
+read identity only once. A repeated reload could expose retained data as ready
+until the new read effect ran. A layout-effect regression
+on a separate source copy with the original hook fails (1 expected failure,
+64 tests unselected): it observes stale readiness in the repeated-read commit.
+Each recovery/retry now increments the hook's read identity, synchronously
+withdrawing authoritative data/readiness; the controller retains the last visible
+row and draft separately. The same assertion passes in the final 98-test run,
+and final browser/real integration was repeated after this correction.
+
+Author audit challenged eligibility at both acknowledgement and mutation,
+opaque microseconds, composed failures, async/session identity, selected-summary
+read counts/refusals, native form/focus, geometry, AS16 preservation and final
+scope. A01 validation/focus, A02 false-empty, A03 response identities, A04 course
+page retention and A05 notice spacing remain reverified by relevant component,
+shared/preview and rendered cases. RT02–RT04 controls for download re-admission's
+limited guarantee, successive conflicts and stale/unmounted/session settlement
+were retained/adapted from independent probes and executed as author evidence.
+No further confirmed directly related product defect remains in this audit scope.
+
+Initial added pagination tests failed because their new locator assumed noun-
+specific labels; corrected to the actual existing MUI labels without weakening
+assertions. Initial geometry checks ran before the closing confirmation overlay
+was detached; the final checks wait for that observable layout settlement before
+asserting unobscured geometry. First browser run: 27 pass / 6 test-timing failures
+each engine; final: 33/33 each. The initial consumer command misspelled the preview
+filename and ran only 376 tests/3 suites; final corrected command runs 420/4.
+Original baseline independent probes were rerun before fixes: 12/12 pass their
+defect-observation/control assertions, not remediation acceptance assertions.
+jsdom document-navigation notices and E2E NO_COLOR/FORCE_COLOR warnings remain.
+
+Impeccable context/adapt/craft guidance was applied to the existing S21 surface;
+its final source detector reports 0 mechanical findings. The older Graphify graph
+has only scaffold FE17 nodes; its query was navigation only, with current source
+inspection supplying the actual relationships. Neither tool grants acceptance.
+Firefox was not repeated after the preceding review's profile launch failure;
+physical devices, screen readers, native zoom/full contrast and real storage-
+re-admission fault injection were not newly exercised. No full Maven, unrelated
+backend/module/consumer/browser suites, release/VM/security scans or hosted CI
+was dispatched or awaited. CI/reviews remain exact-head external gates.
+
+Final source scope: two grading pages + their existing read hook; existing FE17
+component test, shared browser harness (FE17 branch only), real grading E2E and
+these two existing documentation records. No shared runtime layout/widget, API,
+backend behavior, contract, dependency, migration, DESIGN or unrelated screen
+change. New commit metadata is the Leader-authorized verified heizseung identity;
+OpenAI Codex performed remediation/self-audit and chi-thanh-nguyen publishes.
+Independent narrow delta review, human CODEOWNER/QA, protected main integration,
+IN15 downstream acceptance and operational acceptance remain separate gates.
+
+
 ## FE17 full implementation and author self-audit — 27 November 2026
 
 **Scope/authority.** Refs #202, PR #288; explicit Project Leader instruction
