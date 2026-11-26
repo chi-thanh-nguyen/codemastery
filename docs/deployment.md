@@ -5506,9 +5506,10 @@ hit the same dependency. These outcomes bound the observation to those jobs.
 Docker packaging uses the native Maven 3.9.16 / Resolver 1.9.27 HTTP
 transport. Its existing 429/503 retry count is three. Docker now sets the
 Resolver 1.x connector properties for a 15-second initial wait and a
-60-second per-response retry limit. A valid Retry-After within that limit
-governs the wait. Without one the delays are 15, 30 and 45 seconds. The
-package lifecycle is invoked once. The change applies to Docker, Compose,
+60-second per-response retry limit. A numeric or HTTP-date Retry-After of 60
+seconds or less sets the wait, and a past date or negative number retries
+immediately. A missing or unparseable value gives delays of 15, 30 and 45
+seconds. The package lifecycle is invoked once. The change applies to Docker, Compose,
 E2E, both VM backend-image consumers and off-host release construction. The
 Java trust-store verifier uses the pinned JDK directly.
 
@@ -5541,3 +5542,33 @@ the reviewed revisions.
 These changes concern CI and off-host build behavior. The runtime targets,
 artifact admission procedure and protected release and deployment controls
 continue to use ADR009, ADR015 and ADR017.
+
+### Host Wrapper pin enforcement — 26 November 2026
+
+The independent review of `5bf8a62` found that the host Wrapper archive pins
+could disappear without a failure (IR293-SEC-01). Both scripts checked a pin
+only when one was present. With both values blank or absent they took
+upstream's unpinned path, and both reused an installation already present in
+their unpinned cache namespace. The Unix script also let a later duplicate override
+an earlier pin, ignored a malformed TAR.GZ pin while installing the ZIP, and
+read a missing pin from an inherited shell variable. The positive Backend run
+and the Docker verifier could not detect this. The committed pins match
+Apache's archives, and no unverified Maven was observed in CI.
+
+Both scripts now read both pins from the properties file before they choose an
+installation. They require one exact declaration of each, with 64 lowercase
+hexadecimal characters, and treat case, spacing and separator variants of a
+name as further declarations. Archive verification always runs before
+extraction. Upstream's unpinned mode and mvnd distributions are therefore
+unsupported. The cache identity, staging, publication and warm-reuse trust model
+are unchanged. The Backend job runs
+`infrastructure/vm/tests/test-maven-wrapper-pins.sh` before Java setup. It
+exercises the committed scripts against a synthetic distribution, with no
+network access and no shared Maven cache. Native Windows PowerShell 5.1 and
+`cmd.exe` execution has not been qualified. Evidence is in
+[testing.md](testing.md#pr-293-host-wrapper-pin-remediation-ir293-sec-01--26-november-2026).
+
+The Retry-After description above was corrected in the same follow-up
+(IR293-R2-01). The earlier text described every valid header as governing the
+wait; Resolver 1.9.27 retries immediately for a negative number or past date.
+The Docker retry properties are unchanged.

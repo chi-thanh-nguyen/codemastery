@@ -835,7 +835,7 @@ Together they define eight independent jobs on `ubuntu-24.04`:
 
 | Job display name (ID) | What it runs |
 | --- | --- |
-| Backend (`backend`) | Temurin 25; `./mvnw verify` from `backend/`, including the Testcontainers integration tests on the runner's Docker |
+| Backend (`backend`) | `infrastructure/vm/tests/test-maven-wrapper-pins.sh` (offline host Maven Wrapper pin regression, [record](#pr-293-host-wrapper-pin-remediation-ir293-sec-01--26-november-2026)); then Temurin 25 and `./mvnw verify` from `backend/`, including the Testcontainers integration tests on the runner's Docker |
 | Frontend (`frontend`) | Node 22; `npm ci`, `npm test`, then `npm run build` from `frontend/` |
 | VM deployment script (`deployment-script`) | Checks of `infrastructure/vm/deploy.sh` without starting the application: shell syntax, authorization gates, Compose and provisioning guards, the runtime privilege matrix, env-file custody, preflight against rendered Compose, release-archive identity models and image identity through a real `docker save`/`load` round trip |
 | VM deployment PostgreSQL and containment tests (`deployment-script-postgres`) | The runtime privilege matrix on the real migrated schema, failure containment and published-port verification against real containers |
@@ -7729,3 +7729,73 @@ timestamp. The runtime checks now recognize actual permission-denied text
 or the SQLState field Hibernate emits. The inline control includes the
 historical timestamp, a longer SQLState-like token and two genuine denial
 forms. A failed Docker log read fails the test.
+
+### PR #293 host Wrapper pin remediation (IR293-SEC-01) — 26 November 2026
+
+The independent review of `5bf8a62` requested changes for IR293-SEC-01 (P2):
+the host Wrapper archive pins could be removed without any check failing. It
+also raised IR293-R2-01 (P3) on the Retry-After description. Both were
+reproduced before the correction.
+
+On `5bf8a62`, macOS arm64, the official Apache 3.9.16 archives were served from
+a local file mirror to a disposable `MAVEN_USER_HOME`. The Unix Wrapper started
+Maven with both pins blank, both absent, the TAR.GZ pin absent or malformed, a
+wrong ZIP declaration followed by the correct one, or the pins supplied only
+as environment variables. With blank pins it ran a pre-existing installation
+from the unpinned cache namespace. A wrong pin, uppercase hex and a ZIP pin
+with only a leading-space spelling already failed. Because the Unix Wrapper
+read the pins only when they were present, upstream's unpinned path remained
+reachable. The PowerShell body also emitted a launcher for absent or blank
+pins, an absent, blank or malformed TAR.GZ pin, a space before `=`, and blank
+pins with an installation in that namespace.
+
+`mvnw` and the PowerShell body of `mvnw.cmd` now read both pins from the file
+before choosing an installation. Each must appear exactly once as
+`name=<64 lowercase hex>`. Archive verification always runs before extraction.
+The Backend job runs `test-maven-wrapper-pins.sh` before Java setup. The script
+copies the committed scripts into disposable projects whose paths contain a
+space. It serves a synthetic distribution (not Apache Maven) and a tampered
+copy from a local file mirror. A minimal `PATH` uses shims to record every
+download, extraction and Maven start. Each rejected case must fail for its
+pin or digest reason, without download or extraction where that applies, and
+must leave no installation, staging directory or Maven start. Each `mvnw` run
+has `stdin` closed, so no run can consume the case list.
+
+| Group | Cases |
+| --- | --- |
+| `mvnw` positive | P00 committed pins reach the pinned download; P01–P02 ZIP cold and warm (no download), argument propagation including spaces and an empty argument; P03 exit status 7; P04–P05 TAR.GZ cold and warm without `unzip`; P06 `shasum` instead of `sha256sum`; P07 CRLF with spaces around values; P08 two concurrent cold installs publish one installation |
+| `mvnw` pin rejection | H01–H05 absent or blank; H06a–f wrong length, uppercase, non-hex, inner space, malformed unselected TAR.GZ; H07a–b, H08 duplicates; H09a–e leading space, space before `=`, `:`, whitespace separator, case variant; H14 inherited variables |
+| `mvnw` digest rejection | H10 tampered ZIP, H10b wrong well-formed ZIP pin, H11 tampered TAR.GZ: download only, then failure |
+| `mvnw` warm or unpinned cache | H12a–c invalid pins with a warm installation; H13 blank pins with an unpinned installation present |
+| PowerShell body under `pwsh` | W01–W02 cold, and warm with the mirror withdrawn; W03 CRLF; W-H01–W-H09c, W-H14 pin rejection; W-H10 tampered ZIP; W-H12 warm; W-H13 the blank-pin namespace. A verdict depends on the emitted `MVN_CMD` line, which the batch uses; upstream's warm path exits 1 |
+
+| Command or evidence | Result |
+| --- | --- |
+| `MAVEN_WRAPPER_TEST_SHELLS="/bin/sh /bin/dash /bin/bash" bash …/test-maven-wrapper-pins.sh`, macOS arm64, runner Bash 3.2 | 36 cases per shell, 108 in total. PowerShell skipped: no `pwsh` |
+| Same script, Docker `ubuntu:24.04` arm64 native and amd64 emulated (`dash`, `mawk`; `wget` present) | 70 per platform: 35 under each of `/bin/sh` and `/bin/bash`. P06 omitted: no `shasum` |
+| Same script, Docker `alpine:3.22` arm64 (BusyBox `sh` and `awk`) | 35 pass |
+| `MAVEN_WRAPPER_TEST_REQUIRE_PWSH=true`, PowerShell 7.4.6 image, amd64 emulated, `gawk` | 36 `mvnw` and 19 PowerShell cases pass |
+| A copy with failures counted instead of fatal, against the `5bf8a62` scripts | Substantive acceptance in `mvnw` H01, H02, H04, H05, H06e, H06f, H07a, H07b, H08, H09e, H12a–c, H13 and H14. Launcher emitted in W-H01, W-H02, W-H04, W-H05, W-H06b, W-H09a, W-H12, W-H13 and W-H14. The remaining rejection cases failed closed and differed only in diagnostic wording. H10, H10b, H11, W-H10 and all positive cases pass on both revisions |
+| Corrected `mvnw`, committed properties, official archives, file mirror, `MAVEN_USER_HOME` containing a space | Two concurrent ZIP cold starts run Maven 3.9.16 and publish one installation, bound to the ZIP pin. Warm reuse succeeds with the mirror withdrawn. Without `unzip`, TAR.GZ cold and warm succeed. The installed tree equals the extracted Apache ZIP apart from `mvnw.url`. The original blank, absent, duplicate, inherited and unpinned-namespace reproductions now fail with the pin diagnostic |
+| Official Maven 3.9.16 (Resolver 1.9.27), Docker retry properties, loopback fault server for the parent POM | 429 with no Retry-After or `soon`: one retry after 15.01 s. `-1` or a past HTTP date: immediate retry. 503 with `2`: 2.01 s. `61`: no retry, the build fails with 429. Persistent 429: four requests, 15.01, 30.01 and 45.01 s apart, then failure |
+| `MAVEN_USER_HOME=<disposable> ./mvnw -B -o verify` from `backend/` with the corrected Wrapper, macOS arm64 Temurin 25.0.4.1, disposable Testcontainers | 1,146 unit and 595 integration tests pass, no failures, errors or skips |
+| `MAVEN_TEST_PLATFORM=linux/arm64 bash infrastructure/vm/tests/test-maven-bootstrap.sh` (native), then the same without the variable (amd64 emulated) | 31 Docker Maven controls pass on each platform, `MAVEN_BOOTSTRAP_TESTS_PASS`. Its inputs are unchanged by this remediation |
+| `sh -n` and `dash -n backend/mvnw`; `bash -n` on every script in `infrastructure/vm/tests/`; `git -c core.whitespace=cr-at-eol diff --check` | Pass. `mvnw.cmd` keeps CRLF line endings |
+
+The PowerShell body ran under PowerShell 7.4 on Linux. There, a trapped
+`Write-Error` with `Stop`, a `throw` and a .NET exception each ended the script.
+Windows PowerShell 5.1, `cmd.exe`, argument and exit propagation through the
+batch, NTFS and Windows cold-install contention were not executed. Native
+Windows qualification remains outstanding. `backend/Dockerfile`, the Docker
+verifier and its 31 controls, the cache identity of a valid configuration and
+the runtime artifacts are unchanged. The Retry-After corrections are in
+[setup](setup.md#backend-image) and
+[deployment](deployment.md#host-wrapper-pin-enforcement--26-november-2026).
+Adding `test-maven-wrapper-pins.sh` to the repository inventory needs a separate
+Leader decision.
+
+Author-side evidence only, not independent review.
+
+AI-assisted work: Claude Code reproduced both findings, corrected the Wrappers
+and documentation, wrote the regression and ran these checks under the Leader's
+remediation task.

@@ -802,20 +802,39 @@ URL. Surrounding value whitespace is allowed. The bootstrap
 layer has no network access. A fresh builder needs the pinned OCI layers from
 Docker Hub, and Maven still contacts Maven Central for project dependencies and
 plugins. `mvn package -DskipTests` runs once, compiling the test sources without
-executing them. Maven Resolver retries project downloads that return HTTP 429
-or 503, with 15, 30 and 45 second waits when no usable `Retry-After` is sent.
-An advertised wait above 60 seconds ends that request with its error.
+executing them. Maven Resolver retries a project download that returns HTTP 429
+or 503 up to three times. Without a `Retry-After` header, or with a value it
+cannot parse, the three waits are 15, 30 and 45 seconds. A number of seconds or
+an HTTP date sets the wait when it is 60 seconds or less. A past date or a
+negative number retries immediately. A requested wait above 60 seconds ends
+that request with its error. These limits apply to each request; there is no
+overall build deadline.
 
 Host-side development and the Backend CI job use `./mvnw verify` (Windows:
-`mvnw.cmd verify`). The Wrapper checks the ZIP's SHA-256 before extraction.
-On Unix without `unzip` it uses the separately pinned TAR.GZ. A cold Unix
-installation needs `sha256sum` or `shasum`. The archive pin is part of the
-installation cache identity. A warm invocation reuses the extracted files from
-the user's Maven directory, which must remain under that user's control. If the
+`mvnw.cmd verify`). Both Wrapper scripts require both archive pins in
+`.mvn/wrapper/maven-wrapper.properties`: exactly one `distributionSha256Sum=`
+line and one `distributionTarGzSha256Sum=` line, each with 64 lowercase
+hexadecimal characters. Spaces around the value are allowed. A missing, blank,
+malformed or repeated pin stops the Wrapper before it downloads Maven or
+starts an existing installation. So does another spelling of a pin's name:
+different case, leading space, space before `=`, or `:` as the separator. An
+environment variable cannot supply a pin. These Wrappers therefore do not
+support upstream's unpinned mode or Maven Daemon (mvnd) distributions.
+
+The Wrapper checks the selected archive's SHA-256 before extraction: the ZIP,
+or on Unix without `unzip` the TAR.GZ. A mirror set with `MVNW_REPOURL` must
+serve the same bytes. A cold Unix installation needs `sha256sum` or `shasum`.
+The archive pin is part of the installation cache identity, so an installation
+made without that pin is never reused. The directory name does not prove that
+the extracted files are intact: a warm invocation reuses them from the user's
+Maven directory, which must remain under that user's control. If the
 installation is damaged, remove that specific installation directory and run the
 Wrapper again to download and verify it. When updating Maven, verify Apache's
 signatures before updating both Wrapper archive pins and the Docker distribution
-reference and tree digest.
+reference and tree digest. The Backend CI job first runs
+`infrastructure/vm/tests/test-maven-wrapper-pins.sh`, which checks these rules
+offline against a synthetic distribution
+([record](testing.md#pr-293-host-wrapper-pin-remediation-ir293-sec-01--26-november-2026)).
 See [distribution provenance and pin updates](deployment.md#maven-bootstrap-reliability--25-november-2026).
 
 The runtime uses `eclipse-temurin:25.0.5_8-jre-noble` and contains only the
