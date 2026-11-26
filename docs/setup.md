@@ -802,7 +802,20 @@ URL. Surrounding value whitespace is allowed. The bootstrap
 layer has no network access. A fresh builder needs the pinned OCI layers from
 Docker Hub, and Maven still contacts Maven Central for project dependencies and
 plugins. `mvn package -DskipTests` runs once, compiling the test sources without
-executing them. Host-side development and the Backend CI job use `./mvnw verify`.
+executing them. Maven Resolver retries project downloads that return HTTP 429
+or 503, with 15, 30 and 45 second waits when no usable `Retry-After` is sent.
+An advertised wait above 60 seconds ends that request with its error.
+
+Host-side development and the Backend CI job use `./mvnw verify` (Windows:
+`mvnw.cmd verify`). The Wrapper checks the ZIP's SHA-256 before extraction.
+On Unix without `unzip` it uses the separately pinned TAR.GZ. A cold Unix
+installation needs `sha256sum` or `shasum`. The archive pin is part of the
+installation cache identity. A warm invocation reuses the extracted files from
+the user's Maven directory, which must remain under that user's control. If the
+installation is damaged, remove that specific installation directory and run the
+Wrapper again to download and verify it. When updating Maven, verify Apache's
+signatures before updating both Wrapper archive pins and the Docker distribution
+reference and tree digest.
 See [distribution provenance and pin updates](deployment.md#maven-bootstrap-reliability--25-november-2026).
 
 The runtime uses `eclipse-temurin:25.0.5_8-jre-noble` and contains only the

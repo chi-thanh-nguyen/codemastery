@@ -5320,8 +5320,8 @@ application code is invalid. Existing bounded retries cannot guarantee recovery.
 No rate-limit stress test was performed. More retries, an unqualified mirror or
 shared cache would introduce additional policy/integrity concerns without a
 demonstrated need after recovery; no immediate Maven change is justified.
-The current wrapper properties specify no optional distributionSha256Sum;
-this investigation does not claim an existing checksum guarantee or remove one.
+At this observation cutoff, the host Wrapper properties had no
+`distributionSha256Sum`. The 26 November follow-up records the later policy.
 
 ### Incident evidence (UTC, 25 November)
 
@@ -5489,3 +5489,55 @@ uses its `libexpat.so.1` through fontconfig. The libexpat project tracks
 [CVE-2025-66382](https://github.com/libexpat/libexpat/issues/1076). The scan is
 limited to its advisory data. Application reachability for that upstream issue
 was not established and remains part of release risk assessment.
+
+## PR #293 CI reliability follow-up — 26 November 2026
+
+The [initial inspection of CI VM run 45663373135](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45663373135)
+found six successful jobs and one failed ingress job in each of attempts 1
+and 2. Their checkout was the PR merge commit
+ff0c388707848e73b53860b133615e5c6d4057d4, with PR head 4c9fd4a and main
+1e4c54be. Both failures followed successful distribution verification and
+occurred while resolving the Spring Boot 4.1.1 parent POM from Maven Central.
+[Attempt 3](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45663373135/job/139636899469)
+passed all seven jobs, and the ingress job ran the 18 substantive tests and
+11 harness controls. The earlier [94118b6 failure](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45653036519/job/139342280667)
+hit the same dependency. These outcomes bound the observation to those jobs.
+
+Docker packaging uses the native Maven 3.9.16 / Resolver 1.9.27 HTTP
+transport. Its existing 429/503 retry count is three. Docker now sets the
+Resolver 1.x connector properties for a 15-second initial wait and a
+60-second per-response retry limit. A valid Retry-After within that limit
+governs the wait. Without one the delays are 15, 30 and 45 seconds. The
+package lifecycle is invoked once. The change applies to Docker, Compose,
+E2E, both VM backend-image consumers and off-host release construction. The
+Java trust-store verifier uses the pinned JDK directly.
+
+The Docker build uses ordinary builder layer reuse. Source changes rebuild
+the package layer and a fresh runner must still resolve project dependencies
+and plugins. Separating a go-offline prefetch would introduce a second
+resolution path and require proving complete plugin/profile coverage. A
+builder-local Maven mount would help reused builders with source changes but
+would start empty in the affected hosted jobs. No cross-job or cross-run
+Docker dependency cache, mirror or new registry was introduced. Host
+setup-java restores a project repository cache and a separate Wrapper
+distribution cache. The host verification cache is outside the release
+candidate build path.
+
+Apache Maven's separate ZIP and TAR.GZ have verified Apache SHA-512 checksums
+and detached signatures from key 84789D24DF77A32433CE1F079EB80E92EB2135B1.
+The host Wrapper checks the corresponding SHA-256 before extraction and
+publishes the installation in a cache namespace bound to its archive pin.
+The extracted cache retains the same local trust boundary on warm runs.
+See [the archive and signatures](https://archive.apache.org/dist/maven/maven-3/3.9.16/binaries/).
+
+The explicit MinIO test-image pull can retry the Docker daemon's HTTP
+500/502/503/504 report twice, after 5 and 10 seconds, using the original
+digest and platform on every attempt. The recovery and release builds can
+still fail while resolving a registry manifest or fetching content. These
+builds and their test suites retain their existing failure propagation.
+Alpine package availability still depends on the live signed index carrying
+the reviewed revisions.
+
+These changes concern CI and off-host build behavior. The runtime targets,
+artifact admission procedure and protected release and deployment controls
+continue to use ADR009, ADR015 and ADR017.

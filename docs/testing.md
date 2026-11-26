@@ -7698,3 +7698,34 @@ revision is pending at the time of writing.
 
 AI-assisted work: Claude Code reproduced the findings, corrected the harness
 and ran these checks under the Leader's remediation task.
+
+### PR #293 remaining CI failures — 26 November 2026
+
+The hosted observation after the earlier IR293-01 cutoff is
+[CI VM 45663373135 attempt 3](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45663373135/job/139636899469).
+The checked-out merge SHA was ff0c388707848e73b53860b133615e5c6d4057d4.
+Ingress passed 29 Maven controls. Attempts 1 and 2 had six successful VM
+jobs and failed ingress before the old placement of the regression step.
+The Job now runs the mandatory verifier harness before the network-dependent
+backend packaging step. Two new controls reject a missing or overridden
+explicit network-disable flag, bringing the suite to 31 controls.
+
+The Backend SH05 parent now consumes only an exact allowlisted phase or
+completion token from a private temporary result file. Raw child stdout and
+stderr are discarded and the child's confidentiality assertions still inspect
+their original captured logging. The parent distinguishes failure in a named
+phase, timeout and abnormal or incomplete termination. A negative control
+throws with synthetic protected text and requires the exact sanitized failure
+message. Another child emits a completion-shaped stdout line and exits
+successfully without writing the result; it must fail the parent check. The
+original CI exit 1 remains unattributed.
+
+Two failures in shared VM fixtures were also investigated. The SSH
+qualification sometimes embedded a space in the Docker tag after truncating
+short decimal cksum outputs; the recovery test had the same construction.
+Both now use the checksum field in full. Also, a release rehearsal reported
+a permission failure when the digits 42501 appeared in an ordinary log
+timestamp. The runtime checks now recognize actual permission-denied text
+or the SQLState field Hibernate emits. The inline control includes the
+historical timestamp, a longer SQLState-like token and two genuine denial
+forms. A failed Docker log read fails the test.
