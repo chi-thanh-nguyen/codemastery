@@ -2228,6 +2228,26 @@ record and its authorization remain intact. This r14 record is based on effectiv
 r13; it changes no privilege beyond the already authorized CO09 material extension.
 The previous independent review is historical evidence, not approval of this merge.
 
+### CT17-P6-PRIVILEGES-2026-11-27-r15 — AS09 submissions (within ADR012 §19.2, 27 November 2026)
+
+The Project Leader's explicit **“AS09 Full-Scope Completion, Bounded Upstream
+Implementation, and Post-Implementation Audit”** task authorizes this consumer,
+its dated matrix extension, deployment-script synchronization and tests. This
+replaces only r12's submission row, within the unchanged ADR012 §19.2 ceiling:
+
+| Relation (schema) | Runtime privileges | Consumer |
+|---|---|---|
+| `submissions` (public) | SELECT, INSERT; UPDATE (object_key, original_filename, submitted_at, grade_percentage, feedback, graded_at) | AS09 learner reads, file replacement, owner listing/download/grading, CT27 producer admission |
+
+Full SELECT is exercised by the Submission entity projection; INSERT stores a
+first submission; the six column UPDATE grants cover replacement and grade writes
+and PostgreSQL row locks. Assignment grants remain r12. Identity updates (`id`,
+`assignment_id`, `user_id`), DELETE, TRUNCATE and DDL remain denied. This changes
+no effective contract ceiling or production privilege. The executable matrix,
+contract/containment tests and real PostgreSQL/MinIO consumer tests ship together.
+Author-side verification, independent CODEOWNER review, CI, protected integration,
+operator provisioning, residual-risk acceptance and deployment are separate gates.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,

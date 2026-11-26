@@ -30,6 +30,20 @@ public class EnrollmentService {
         this.enrollments = enrollments; this.identities = identities; this.access = access;
     }
 
+    /** ADR010 §3.1: owner-admitted page IDs only, including retained LEFT memberships. */
+    @Transactional(readOnly = true)
+    public Map<UUID, String> learnerDisplayNames(UUID courseId, Set<UUID> learnerIds) {
+        access.requireCourseOwnership(courseId);
+        Set<UUID> ids = Set.copyOf(learnerIds);
+        if (ids.size() > 100) {
+            throw new IllegalArgumentException("At most 100 learner IDs per call");
+        }
+        Set<UUID> members = ids.stream()
+                .filter(id -> enrollments.find(id, courseId).isPresent())
+                .collect(Collectors.toUnmodifiableSet());
+        return members.isEmpty() ? Map.of() : identities.learnerDisplayNames(members);
+    }
+
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public Membership membership(UUID courseId) {
         var actor = learner();

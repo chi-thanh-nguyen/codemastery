@@ -1372,7 +1372,7 @@ quiz_questions           SELECT,INSERT,DELETE -                                 
 attempts                 -              SELECT(id,quiz_id)                       id,user_id,quiz_id,attempt_number,started_at,expires_at,submitted_at,score_percentage
 attempt_answers          -              SELECT(id,question_id)                   id,attempt_id,question_id,position,selected_options,is_correct
 assignments              SELECT,INSERT  UPDATE(lesson_id,title,instructions,deadline_at,publication_status) id,course_id,lesson_id,title,instructions,deadline_at,publication_status
-submissions              -              SELECT(id,assignment_id,graded_at)       id,assignment_id,user_id,object_key,original_filename,submitted_at,grade_percentage,feedback,graded_at
+submissions              SELECT,INSERT  UPDATE(object_key,original_filename,submitted_at,grade_percentage,feedback,graded_at)       id,assignment_id,user_id,object_key,original_filename,submitted_at,grade_percentage,feedback,graded_at
 learner_skill_masteries  INSERT         SELECT(user_id,skill_id,state)+UPDATE(state) id,user_id,skill_id,state
 path_recommendations     INSERT         -                                        id,enrollment_id,lesson_id,recommendation_type,reason,recommended_at
 discussion_posts         -              -                                        id,lesson_id,author_id,parent_post_id,content,created_at,is_hidden
@@ -1597,10 +1597,10 @@ verify_runtime_privileges() {  # present (before migration) | complete (after mi
     || fail "Could not verify runtime privileges against the approved matrix; ingress remains closed."
   if [[ -n "${violations}" ]]; then
     printf '%s\n' "${violations}" | head -n 25 | sed 's/^/  violation: /' >&2
-    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write, r10 audit-log, r11 mastery-skip, r12 authoring, r13 notifications and r14 material rows); reconcile explicitly. Ingress remains closed."
+    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write, r10 audit-log, r11 mastery-skip, r12 authoring, r13 notifications, r14 material and r15 submission rows); reconcile explicitly. Ingress remains closed."
   fi
   if [[ "${mode}" == "complete" ]]; then
-    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write, r10 audit-log, r11 mastery-skip, r12 authoring, r13 notifications and r14 material rows) verified (every public relation reviewed)"
+    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write, r10 audit-log, r11 mastery-skip, r12 authoring, r13 notifications, r14 material and r15 submission rows) verified (every public relation reviewed)"
   fi
   log "  ok: runtime privileges equal the approved matrix (${mode} schema)"
 }
@@ -1657,7 +1657,11 @@ SQL
   expect_denied  "runtime role re-keying questions" 42501 "${app}" "${app_pw}" <<<'UPDATE public.questions SET id = id WHERE false;'
   expect_denied  "runtime role moving an Assignment to another Course" 42501 "${app}" "${app_pw}" <<<'UPDATE public.assignments SET course_id = course_id WHERE false;'
   expect_denied  "runtime role deleting Assignments" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.assignments WHERE false;'
-  expect_denied  "runtime role reading or writing submission files and grades" 42501 "${app}" "${app_pw}" <<<'SELECT object_key, feedback, grade_percentage FROM public.submissions WHERE false;'
+  expect_allowed "runtime role reading submission files and grades" "${app}" "${app_pw}" <<<'SELECT object_key, feedback, grade_percentage FROM public.submissions WHERE false;'
+  expect_allowed "runtime role creating submissions" "${app}" "${app_pw}" <<<'INSERT INTO public.submissions SELECT * FROM public.submissions WHERE false;'
+  expect_allowed "runtime role replacing and grading submissions" "${app}" "${app_pw}" <<<'UPDATE public.submissions SET object_key=object_key, original_filename=original_filename, submitted_at=submitted_at, grade_percentage=grade_percentage, feedback=feedback, graded_at=graded_at WHERE false;'
+  expect_denied "runtime role changing submission identities" 42501 "${app}" "${app_pw}" <<<'UPDATE public.submissions SET id=id, assignment_id=assignment_id, user_id=user_id WHERE false;'
+  expect_denied "runtime role deleting submissions" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.submissions WHERE false;'
   expect_denied  "runtime role reading captured answer selections" 42501 "${app}" "${app_pw}" <<<'SELECT selected_options FROM public.attempt_answers WHERE false;'
   expect_denied  "runtime role re-keying or re-typing learning materials" 42501 "${app}" "${app_pw}" <<<'UPDATE public.learning_materials SET id = id, lesson_id = lesson_id, material_type = material_type WHERE false;'
   expect_denied  "runtime role deleting learning materials" 42501 "${app}" "${app_pw}" <<<'DELETE FROM public.learning_materials WHERE false;'

@@ -50,7 +50,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
@@ -103,9 +102,9 @@ public class AssignmentController {
     @GetMapping("/owned-assignments")
     public ResponseEntity<PageResponse<OwnedAssignmentResponse>> listOwned(
             @PathVariable String courseId,
-            @RequestParam MultiValueMap<String, String> params) {
+            HttpServletRequest http) {
         UUID course = id(courseId);
-        int[] paging = page(params);
+        int[] paging = page(query(http));
         PageResponse<OwnedAssignmentView> result = assignmentService.listOwned(course, paging[0], paging[1]);
         return response(HttpStatus.OK, new PageResponse<>(
                 result.content().stream().map(OwnedAssignmentResponse::from).toList(),
@@ -166,9 +165,9 @@ public class AssignmentController {
     @GetMapping("/assignments")
     public ResponseEntity<PageResponse<LearnerAssignmentSummaryResponse>> listForLearner(
             @PathVariable String courseId,
-            @RequestParam MultiValueMap<String, String> params) {
+            HttpServletRequest http) {
         UUID course = id(courseId);
-        int[] paging = page(params);
+        int[] paging = page(query(http));
         PageResponse<LearnerAssignmentSummaryView> result =
                 assignmentService.listForLearner(course, paging[0], paging[1]);
         return response(HttpStatus.OK, new PageResponse<>(
@@ -230,10 +229,10 @@ public class AssignmentController {
     public ResponseEntity<PageResponse<SubmissionSummaryResponse>> listSubmissions(
             @PathVariable String courseId,
             @PathVariable String assignmentId,
-            @RequestParam MultiValueMap<String, String> params) {
+            HttpServletRequest http) {
         UUID course = id(courseId);
         UUID assignment = id(assignmentId);
-        int[] paging = page(params);
+        int[] paging = page(query(http));
         PageResponse<SubmissionSummaryView> result =
                 submissions().listSubmissionsForOwner(course, assignment, paging[0], paging[1]);
         return response(HttpStatus.OK, new PageResponse<>(
@@ -358,6 +357,24 @@ public class AssignmentController {
         } catch (IOException ioFailure) {
             throw new UncheckedIOException(ioFailure);
         }
+    }
+
+    /** Parse only the URL query: Servlet getParameter* can eagerly parse a multipart GET body. */
+    private static MultiValueMap<String, String> query(HttpServletRequest http) {
+        var params = new org.springframework.util.LinkedMultiValueMap<String, String>();
+        String raw = http.getQueryString();
+        if (raw == null || raw.isEmpty()) return params;
+        for (String pair : raw.split("&", -1)) {
+            String[] parts = pair.split("=", 2);
+            if (parts.length != 2) throw AssignmentRequests.invalid();
+            try {
+                params.add(java.net.URLDecoder.decode(parts[0], StandardCharsets.UTF_8),
+                        java.net.URLDecoder.decode(parts[1], StandardCharsets.UTF_8));
+            } catch (IllegalArgumentException malformed) {
+                throw AssignmentRequests.invalid();
+            }
+        }
+        return params;
     }
 
     private static int[] page(MultiValueMap<String, String> params) {

@@ -1,5 +1,150 @@
 # Testing
 
+## AS09 full-scope author verification — 27 November 2026
+
+**Scope and authority.** The Project Leader's explicit “CodeMastery — AS09 Full-Scope
+Completion, Bounded Upstream Implementation, and Post-Implementation Audit” task
+covers Issue #160 in existing PR #297, the bounded AU06/CO07 slices below, necessary
+supporting files and CT17 consumer synchronization. This is implementation-agent
+self-audit with Codex assistance, not independent CODEOWNER review or acceptance.
+No mandatory requirement, effective ADR, schema, dependency or production resource
+is changed. CT09/CT10/CT18 use ADR010's r1 revisions including §§16–18 corrections;
+CT01 learner names use `CT01-LEARNER-NAMES-2026-11-12-r1`; CT27 and the Assessment-owned
+notification reads use ADR012 §§3.3/9.2/19, including r2 concurrency corrections.
+
+**Git baseline.** Initial PR HEAD `5af4f4b96ad56b57d5a3ad2c64e4479b54175ba1`;
+remote main `23402754743e0d35048e74cbabebfa133e5e6da3`; initial PR base and merge-base
+`cc6cb54ddedf226966a51c9614fc5fc5756267bb`. Main was integrated by an ordinary merge,
+preserving the contributor commit and attribution. PR #273's owner authoring and
+PR #289's SH05 adapter were verified integrated and reused.
+
+**Implementation inventory.** These are functional units, not lines or test counts.
+Before/after states compare the initial PR against the delivered candidate.
+`COMPLETE` means its implementation obligation is met; verification and acceptance
+remain distinct below. The completed-unit ratio is 12/25 before (48%, with partial
+units deliberately not assigned fractional credit), 25/25 after (100%). This is an
+explicit inventory measure, not an estimate of how many lines already existed.
+
+| Unit | Checkpoint | Before | After | Concrete implementation evidence |
+|---|---|---|---|---|
+| Assignment schema mapping and exact UTC deadlines | persist | COMPLETE | COMPLETE | `AssignmentEntity.DeadlineJdbcType`, `AssignmentRepositoryImpl`, existing owner integration tests |
+| Submission persistence, null grades, immutable identities and targeted SQL | persist | COMPLETE | COMPLETE | `SubmissionEntity`, `SubmissionJpaRepository`, real PostgreSQL consumer test |
+| Five owner Assignment authoring/read operations | persist | COMPLETE | COMPLETE | `AssignmentController`, `AssignmentService.create/replace/setPublication/readOwned/listOwned` |
+| Deterministic owner order and submission/grade counts | persist | COMPLETE | COMPLETE | `AssignmentJpaRepository.findPageInCourse`, `SubmissionJpaRepository.countByAssignmentIds` |
+| Learner visibility filtering, order, total and pagination | persist | INCORRECT | COMPLETE | `AssignmentService.listForLearner`, Assessment-only candidate queries, Course access gates |
+| Learner detail admission and own submission projection | persist | PARTIAL | COMPLETE | `AssignmentService.readForLearner`: one strongest CT03 Course/Lesson gate |
+| Coherent read snapshots | persist | COMPLETE | COMPLETE | REPEATABLE READ service/transaction templates for admission, rows and counts |
+| All implemented HTTP bindings, default-deny elsewhere | submit/grade | MISSING | COMPLETE | exact method/path `ASSIGNMENT_OPERATIONS` in Auth `SecurityConfig` |
+| Multipart admission, request-shape precedence and unread-body transport | submit | PARTIAL | COMPLETE | lazy resolution, deferred part accessor, raw query parser, form-filter exclusions and `Connection: close` |
+| File signature, filename, extension, size and byte preservation | submit | COMPLETE | COMPLETE | `SubmissionService` validation, SH05 real MinIO adapter, raw Tomcat round trip |
+| First submission, exclusive deadline and post-lock microsecond clock | submit | COMPLETE | COMPLETE | `submitOrReplace`; real deadline-minus-1µs/equality and upload-crossing tests |
+| Replacement, stable row ID, monotonic version and lock order | submit | COMPLETE | COMPLETE | Assignment-before-Submission `FOR UPDATE`; concurrent-first and replacement/grade barriers |
+| Store/transaction/compensation and unknown commit outcome | submit | COMPLETE | COMPLETE | `Outcome` callbacks, explicit flush, real JDBC commit-before/after fault injection |
+| Learner protected download | submit | PARTIAL | COMPLETE | strongest CT03 admission; current-user row, re-admitted replacement retry |
+| Owner protected download, attachment headers and resource closure | grade | COMPLETE | COMPLETE | `downloadSubmissionForOwner`, `streamAttachment`, no transaction during storage/copy |
+| Owner submission page and stored learner names | grade | PARTIAL | COMPLETE | `listSubmissionsForOwner` → `EnrollmentService` → `UserAccountService` |
+| Grade/regrade, precise version, exact decimal and feedback validation | grade | PARTIAL | COMPLETE | `gradeSubmission`, strict `AssignmentRequests` BigDecimal parsing and Unicode-whitespace rejection |
+| Learner grade/feedback visibility | grade | COMPLETE | COMPLETE | `LearnerSubmissionResponse`; null before grade and visible only to admitted self |
+| AU06 stored learner-name read | grade | MISSING | COMPLETE | `UserAccountService.learnerDisplayNames`; role/status independent, immutable, page bounded |
+| CO07 ownership/enrollment-filtered learner-name read | grade | MISSING | COMPLETE | `EnrollmentService.learnerDisplayNames`; includes LEFT and excludes nonmembers |
+| CT27 payload, flush-before-publication and successful grade/regrade | event | COMPLETE | COMPLETE | `AssignmentGradedEvent`, locked grade producer and real after-commit/rollback tests |
+| Assessment-owned reminder discovery | event | MISSING | COMPLETE | `findReminderCandidates`, exclusive/inclusive window and strict keyset order |
+| Locked current notification state handoff | event | MISSING | COMPLETE | `lockNotificationState`, active read-write transaction, `FOR SHARE`, current submitters |
+| Restricted runtime database consumer | all | MISSING | COMPLETE | CT17-P6 r15; executable matrix, real restricted-role consumer and PostgreSQL containment |
+| OpenAPI status, wire types and documentation synchronization | all | PARTIAL | COMPLETE | seven AS09 operation statuses/descriptions; existing assessment/grading types, setup/testing/deployment docs |
+
+**Bounded upstream accounting.** AU06 #53 adds only its approved stored-name
+projection (estimated 5–8% of its registration/login/profile/session/account-handoff
+responsibilities). CO07 #173 adds only an owner-admitted, at-most-100-ID enrollment
+filter/name facade (estimated 10–15% compared with join/leave/rejoin, membership,
+My Courses and stored-status filtering). These are cumulative functional estimates
+per Issue, not file/line percentages. Both reuse existing repositories, with no
+new REST operation, schema, directory or dependency. No other upstream Issue is
+implemented. Course remains the sole direct Auth learner-name consumer.
+
+**Implementation choices and exclusions.** No unresolved technical contract needed
+replacement. Learner pages scan Assessment-owned published candidates in bounded
+100-row chunks and cache each bound Lesson's CT03 result in the same read snapshot;
+filtering precedes counting and paging. This avoids cross-module SQL or an unapproved
+new structural interface. Cost is proportional to published Assignment candidates
+and distinct Lessons in that Course, while name lookup remains output-page bounded.
+The ADR012 Assessment-owned producer reads ship here; Interaction notification
+consumers/schedulers, unrelated reporting, frontend screens, timed quizzes and
+Adaptive orchestration remain separately owned. CT17 r15 is a dated consumer matrix
+extension inside the existing ceiling; it grants no actual production privilege.
+
+**Confirmed findings and remediation.**
+
+| ID | Severity | Failure trigger and correction | Regression evidence |
+|---|---|---|---|
+| AS09-F01 | P1 | Learner/submission/grading URLs hit default-deny despite implemented handlers; add exact authenticated bindings, leaving role decisions to CT03 | Real Tomcat success, role/media/UUID/page precedence and unsupported-method checks |
+| AS09-F02 | P2 | Learner list queried nonexistent `lessons.course_id` and reached into Course tables; use Assessment candidates and public Course gates before paging | Real PostgreSQL learner list and unit hidden-Lesson/page/count oracle |
+| AS09-F03 | P2 | Name seam always returned empty; implement the approved Course→Auth chain with historical enrollment semantics | Auth/Course unit tests and real cross-module stored-name/status/role tests |
+| AS09-F04 | P1 | Current runtime role could not insert/read/update/lock full Submission rows; ship r15 without identity UPDATE, DELETE or DDL | Actual service SQL under restricted PostgreSQL SET ROLE plus deployment containment harness |
+| AS09-F05 | P2 | PUT form parsing / GET `@RequestParam` resolution could touch multipart before admission; exclude exact routes from form filtering and parse URL query only | Malformed/oversized denied uploads, hostile GET and encoded unread-body socket oracle |
+| AS09-F06 | P2 | Detail/upload called redundant Course+Lesson gates; select the strongest gate from stored Assignment context and preserve Course concealment for missing rows | Unit gate selection and real HTTP Course/Lesson/Assignment/LEFT/role concealment matrix |
+| AS09-F07 | P2 | JSON float nodes could round a long grade fraction to an allowed decimal; feedback validation admitted Unicode-only whitespace; service grade shape preceded Submission scope | BigDecimal tree parsing, Unicode-space validation and resource-before-shape regressions |
+| AS09-F08 | P2 | Assessment's approved current notification-state/discovery producer handoffs were absent | Real cursor/window/read-only rejection and shared-lock-vs-edit tests |
+| AS09-F09 | P3 | OpenAPI still said learner/submission/grade operations unimplemented; grading view-model comment incorrectly said grades immutable | Description/status-only OpenAPI semantic diff, exact wire types and TypeScript check |
+
+The final audit covers retained authoring, entities/repositories, all REST operations,
+real Course/Auth/storage callers, clock/lock ordering, transaction outcomes, streaming,
+configuration, privilege ceiling, event producers and every new upstream addition.
+It finds no remaining confirmed actionable in-scope implementation defect. This is
+an author self-audit, not an independent review. Corrupted historical-row repair and
+real production risk/configuration acceptance are excluded.
+
+**Executed verification (isolated local environment).** Java 25.0.4.1, repository
+Maven wrapper, Docker Desktop 29.8.1, disposable hardened PostgreSQL 17.11 with all
+nine Flyway migrations and the exact Compose-pinned MinIO server/client digests.
+FileStorage uses an isolated bucket-scoped application identity; no production
+resources or credentials are used. Fault injection and SET ROLE are test-only.
+
+```bash
+# backend/: focused unit tests and real database/storage/HTTP tests
+./mvnw -q '-Dtest=SubmissionServiceTest,EnrollmentServiceTest,AuthServiceTest$LearnerNames,AuthServiceTest$PublicInstructorNames,AuthServiceTest$UserSummaries' '-Dit.test=FileStorageIntegrationTest#as09*,AuthorizationIntegrationTest$AssignmentAuthoringEndpoints' verify
+# repository root:
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+bash -n infrastructure/vm/deploy.sh infrastructure/vm/tests/test-runtime-real-backend-privileges.sh infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+npm --prefix frontend run typecheck
+# backend/: final additional Unicode-space assertion, same 50 AS09 unit cases
+./mvnw -q -Dtest=SubmissionServiceTest test
+git diff --check
+```
+
+Final Maven result: **PASS — 87 unit tests and 14 integration tests, zero failures,
+errors or skips**. The integration set includes HTTP concealment and a paused download
+with only one pool connection. Matrix contract and full PostgreSQL containment
+(including V006→V009, drift, PUBLIC/inherited permissions and failure containment)
+passed. TypeScript passed. A duplicate-key-rejecting OpenAPI semantic probe found
+only 14 approved description/status changes, 946 resolved internal references and
+no schema changes. An initial sandbox-only Mockito attach failure was environmental;
+unsandboxed focused execution works. Intermediate test/setup failures were corrected;
+only final executed results establish delivery evidence.
+
+**Unexecuted checks and remaining gates.** The separate Docker-packaged
+`test-runtime-real-backend-privileges.sh` has AS09 r15 consumer assertions and passed
+shell syntax checking; its whole unrelated-consumer/upgrade suite was not rerun.
+Restricted-role AS09 application SQL is instead executed in the approved real
+PostgreSQL/MinIO integration suite. No frontend runtime behavior changed, so no
+browser/UI/E2E suite was needed. Unaffected adapter/full-repository/release suites
+and hosted CI were not awaited or claimed. Independent Auth/Course/Assessment/
+storage/infrastructure CODEOWNER review, required CI, protected integration,
+functional QA acceptance and actual notification-consumer integration remain gates.
+Operator-recorded upload/ingress/tmpfs settings, production privilege provisioning,
+hostile-download residual-risk acceptance, release and deployment remain separate.
+
+**Attribution.** Original contributor commit remains unchanged. Contributor metadata
+is `minhtan29042006 <tan.buikhmt0429@hcmut.edu.vn>`. Follow-up work retains the actual
+configured identity `Nguyen Chi Thanh <ctnguyen20072006@gmail.com>` under
+CONTRIBUTING's truthful-attribution rule; original-contributor consent to substitute
+follow-up metadata was not established. The Leader's task explicitly permits this
+fallback. Authenticated GitHub pusher is `chi-thanh-nguyen`. Codex inspected,
+implemented, tested and self-audited these additions; no human review or contributor
+consent is fabricated.
+
+
 **Post-PR231 integration update — 10 November 2026:** ADR008, including CP-030 r2,
 is merged; ADR009's two r2 approvals remain pending #233 protected integration.
 Batch 4 is **8/8 technically approved**. [ADR009 section 10](decisions/009-ct17-final-runtime-recovery.md#10-post-pr231-integration-and-azure-evidence--10-november-2026)

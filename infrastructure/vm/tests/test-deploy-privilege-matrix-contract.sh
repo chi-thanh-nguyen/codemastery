@@ -171,11 +171,15 @@ for rel, forbidden in {"courses": {"UPDATE:instructor_id", "DELETE"}, "chapters"
     granted = set(r12[rel][0]) | set(r12[rel][1])
     assert not granted & forbidden, f"r12 grants a never-granted privilege on {rel}: {granted & forbidden}"
 assert r13 == {"notifications": normalize({"SELECT", "INSERT"}, {"UPDATE:is_read"})}, "CT17 r13 must match the IN07 ceiling exactly"
-documented = {**r1, **r2, **r3, **r4, **r5, **r6, **r7, **r8, **r10, **r11, **r12, **r13, **r14}
+r15_part = record.split("### CT17-P6-PRIVILEGES-2026-11-27-r15", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
+r15 = documented_rows(r15_part)
+assert r15 == {"submissions": normalize({"SELECT", "INSERT"}, {f"UPDATE:{c}" for c in
+    ("object_key", "original_filename", "submitted_at", "grade_percentage", "feedback", "graded_at")})}, "CT17 r15 must match the AS09 ceiling"
+documented = {**r1, **r2, **r3, **r4, **r5, **r6, **r7, **r8, **r10, **r11, **r12, **r13, **r14, **r15}
 if executable != documented:
     for rel in sorted(set(executable) | set(documented)):
         if executable.get(rel) != documented.get(rel):
             print(f"mismatch for {rel}: script={executable.get(rel)} record={documented.get(rel)}", file=sys.stderr)
-    sys.exit("RUNTIME_PRIVILEGE_MATRIX differs from CT17-P6-PRIVILEGES r1 plus the r2, r3, r4, r5, r6, r7, r8, r10, r11, r12, r13 and r14 rows")
-print(f"MATRIX_CONTRACT_SYNC_PASS: {len(executable)} relations match r1 ({len(r1)} rows, history intact) plus approved r2 ({len(r2)} rows), r3 ({len(r3)} rows) and ceiling-bounded r4 ({len(r4)} rows) r5 ({len(r5)} rows), r6 ({len(r6)} rows), r7 ({len(r7)} rows), r8 ({len(r8)} rows), r10 ({len(r10)} rows), r11 ({len(r11)} rows) r12 ({len(r12)} rows) r13 ({len(r13)} row) and r14 ({len(r14)} row)")
+    sys.exit("RUNTIME_PRIVILEGE_MATRIX differs from CT17-P6-PRIVILEGES r1 plus the r2, r3, r4, r5, r6, r7, r8, r10, r11, r12, r13, r14 and r15 rows")
+print(f"MATRIX_CONTRACT_SYNC_PASS: {len(executable)} relations match r1 ({len(r1)} rows, history intact) plus approved r2 ({len(r2)} rows), r3 ({len(r3)} rows) and ceiling-bounded r4 ({len(r4)} rows) r5 ({len(r5)} rows), r6 ({len(r6)} rows), r7 ({len(r7)} rows), r8 ({len(r8)} rows), r10 ({len(r10)} rows), r11 ({len(r11)} rows) r12 ({len(r12)} rows) r13 ({len(r13)} row) r14 ({len(r14)} row) and r15 ({len(r15)} row)")
 PY

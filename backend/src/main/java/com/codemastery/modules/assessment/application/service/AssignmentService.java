@@ -16,6 +16,9 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -111,6 +114,48 @@ public class AssignmentService {
         this.courseAccess = Objects.requireNonNull(courseAccess, "courseAccess");
         this.identities = identities;
         this.clock = Objects.requireNonNull(clock, "clock");
+    }
+
+    public record ReminderCursor(Instant deadlineAt, UUID assignmentId) {
+        public ReminderCursor {
+            Objects.requireNonNull(deadlineAt, "deadlineAt");
+            Objects.requireNonNull(assignmentId, "assignmentId");
+        }
+    }
+
+    public record ReminderCandidate(UUID assignmentId, UUID courseId, UUID lessonId,
+            String assignmentTitle, Instant deadlineAt, Set<UUID> submittedLearnerIds) {
+        public ReminderCandidate { submittedLearnerIds = Set.copyOf(submittedLearnerIds); }
+    }
+
+    /** Actorless producer read; only DeadlineReminderScheduler may discover candidates (ADR012 §3.3). */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public List<ReminderCandidate> findReminderCandidates(Instant now, Instant windowEnd, ReminderCursor after, int limit) {
+        Objects.requireNonNull(now, "now");
+        Objects.requireNonNull(windowEnd, "windowEnd");
+        if (limit < 1) throw new IllegalArgumentException("Limit must be positive");
+        return assignments.findReminderCandidates(now, windowEnd,
+                        after == null ? now : after.deadlineAt(),
+                        after == null ? new UUID(0, 0) : after.assignmentId(), limit).stream()
+                .map(this::reminderCandidate).toList();
+    }
+
+    /** CT27 listener/reminder admission: first row lock in the caller's read-write transaction. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<ReminderCandidate> lockNotificationState(UUID assignmentId) {
+        requireId(assignmentId);
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || TransactionSynchronizationManager.isCurrentTransactionReadOnly()) {
+            throw new IllegalStateException("Notification admission requires a read-write transaction");
+        }
+        return assignments.lockNotificationState(assignmentId)
+                .filter(row -> PUBLISHED.equals(row.publication_status())).map(this::reminderCandidate);
+    }
+
+    private ReminderCandidate reminderCandidate(Assignment row) {
+        requireStoredAssignment(row.course_id(), row);
+        return new ReminderCandidate(row.id(), row.course_id(), row.lesson_id(), row.title(), row.deadline_at(),
+                assignments.submittedLearnerIds(row.id()));
     }
 
     /** Stage-3 admission check for course-level assignment authoring before reading the request body. */
@@ -247,10 +292,31 @@ public class AssignmentService {
         courseAccess.requireLearnerCourseAccess(courseId);
         UUID learnerId = requireSelfLearnerId();
 
-        long total = assignments.countPublishedVisibleInCourse(courseId);
-        List<Assignment> rows = (long) page * size >= total
-                ? List.of()
-                : assignments.findPublishedVisiblePageInCourse(courseId, page, size);
+        // Filter before pagination/counts, without querying Course-owned tables from Assessment.
+        // The Course-level list admits even an empty result. Each bound Lesson uses its strongest
+        // CT03 gate once in this same snapshot; hidden/foreign/missing Lessons are omitted.
+        long candidates = assignments.countPublishedInCourse(courseId);
+        long offset = (long) page * size;
+        long total = 0;
+        List<Assignment> rows = new java.util.ArrayList<>();
+        Map<UUID, Boolean> lessonVisibility = new java.util.HashMap<>();
+        for (int candidatePage = 0; (long) candidatePage * PageResponse.MAX_SIZE < candidates; candidatePage++) {
+            for (Assignment candidate : assignments.findPublishedPageInCourse(courseId, candidatePage, PageResponse.MAX_SIZE)) {
+                requireStoredAssignment(courseId, candidate);
+                boolean visible = candidate.lesson_id() == null || lessonVisibility.computeIfAbsent(candidate.lesson_id(), lesson -> {
+                    try {
+                        courseAccess.requireLearnerLessonAccess(courseId, lesson);
+                        return true;
+                    } catch (ResourceNotFoundException concealed) {
+                        return false;
+                    }
+                });
+                if (visible) {
+                    if (total >= offset && rows.size() < size) rows.add(candidate);
+                    total++;
+                }
+            }
+        }
         Map<UUID, Submission> ownSubmissions = assignments.findSubmissionsByAssignmentsAndLearner(
                 rows.stream().map(Assignment::id).toList(), learnerId);
 
@@ -283,17 +349,17 @@ public class AssignmentService {
     public LearnerAssignmentView readForLearner(UUID courseId, UUID assignmentId) {
         requireId(courseId);
         requireId(assignmentId);
-        courseAccess.requireLearnerCourseAccess(courseId);
         UUID learnerId = requireSelfLearnerId();
 
-        Assignment row = assignments.findInCourse(assignmentId, courseId).orElseThrow(AssignmentService::unavailable);
-        requireStoredAssignment(courseId, row);
-        if (!PUBLISHED.equals(row.publication_status())) {
-            throw unavailable();
-        }
-        if (row.lesson_id() != null) {
+        Assignment row = assignments.findInCourse(assignmentId, courseId).orElse(null);
+        if (row != null && row.lesson_id() != null) {
             courseAccess.requireLearnerLessonAccess(courseId, row.lesson_id());
+        } else {
+            courseAccess.requireLearnerCourseAccess(courseId);
         }
+        if (row == null) throw unavailable();
+        requireStoredAssignment(courseId, row);
+        if (!PUBLISHED.equals(row.publication_status())) throw unavailable();
 
         Submission sub = assignments.findSubmissionByAssignmentAndLearner(row.id(), learnerId).orElse(null);
         Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
@@ -316,6 +382,9 @@ public class AssignmentService {
         var actor = identities.requireCurrentIdentity();
         if (actor == null || actor.userId() == null) {
             throw new IllegalStateException("Missing current identity");
+        }
+        if (actor.role() != UserAccountService.IdentityRole.LEARNER) {
+            throw new org.springframework.security.access.AccessDeniedException("Access denied");
         }
         return actor.userId();
     }

@@ -37,6 +37,7 @@ public final class AssignmentRequests {
     private static final JsonMapper STRICT_JSON = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .build();
     private static final Set<String> WRITE_MEMBERS =
             Set.of("title", "instructions", "deadlineAt", "lessonId");

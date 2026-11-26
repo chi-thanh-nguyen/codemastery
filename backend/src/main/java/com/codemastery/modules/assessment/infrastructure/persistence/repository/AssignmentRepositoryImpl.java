@@ -40,6 +40,25 @@ public class AssignmentRepositoryImpl implements AssignmentRepository {
     }
 
     @Override
+    public List<Assignment> findReminderCandidates(Instant now, Instant windowEnd, Instant afterDeadline, UUID afterId, int limit) {
+        return assignments.reminderCandidates(now, windowEnd, afterDeadline, afterId, limit).stream()
+                .map(AssignmentMapper::toDomain).toList();
+    }
+
+    @Override
+    public Optional<Assignment> lockNotificationState(UUID assignmentId) {
+        return assignments.lockNotificationState(assignmentId).map(entity -> {
+            entityManager.refresh(entity);
+            return AssignmentMapper.toDomain(entity);
+        });
+    }
+
+    @Override
+    public Set<UUID> submittedLearnerIds(UUID assignmentId) {
+        return Set.copyOf(submissions.submittedLearnerIds(assignmentId));
+    }
+
+    @Override
     public Assignment insert(Assignment assignment) {
         AssignmentEntity entity = AssignmentMapper.toEntity(assignment);
         entityManager.persist(entity);
@@ -102,14 +121,14 @@ public class AssignmentRepositoryImpl implements AssignmentRepository {
     }
 
     @Override
-    public long countPublishedVisibleInCourse(UUID courseId) {
-        return assignments.countPublishedVisibleInCourse(courseId);
+    public long countPublishedInCourse(UUID courseId) {
+        return assignments.countPublishedInCourse(courseId);
     }
 
     @Override
-    public List<Assignment> findPublishedVisiblePageInCourse(UUID courseId, int page, int size) {
+    public List<Assignment> findPublishedPageInCourse(UUID courseId, int page, int size) {
         long offset = (long) page * size;
-        return assignments.findPublishedVisiblePageInCourse(courseId, size, offset).stream()
+        return assignments.findPublishedPageInCourse(courseId, size, offset).stream()
                 .map(AssignmentMapper::toDomain)
                 .toList();
     }

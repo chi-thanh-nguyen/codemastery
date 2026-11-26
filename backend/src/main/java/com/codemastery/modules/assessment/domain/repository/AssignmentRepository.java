@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.Set;
 
 public interface AssignmentRepository {
 
@@ -21,6 +22,13 @@ public interface AssignmentRepository {
             }
         }
     }
+
+    /** ADR012 §3.3: Assessment-owned reminder discovery and locked notification state. */
+    List<Assignment> findReminderCandidates(Instant now, Instant windowEnd, Instant afterDeadline, UUID afterId, int limit);
+
+    Optional<Assignment> lockNotificationState(UUID assignmentId);
+
+    Set<UUID> submittedLearnerIds(UUID assignmentId);
 
     Assignment insert(Assignment assignment);
 
@@ -39,11 +47,11 @@ public interface AssignmentRepository {
 
     List<Assignment> findPageInCourse(UUID courseId, int page, int size);
 
-    /** Published assignments in a Course (excluding assignments bound to hidden lessons). */
-    long countPublishedVisibleInCourse(UUID courseId);
+    /** Published candidates in a Course; application filters visibility through CT03 before paging. */
+    long countPublishedInCourse(UUID courseId);
 
     /** Learner page ordered by {@code deadline_at ASC, id ASC} (ADR010 §12). */
-    List<Assignment> findPublishedVisiblePageInCourse(UUID courseId, int page, int size);
+    List<Assignment> findPublishedPageInCourse(UUID courseId, int page, int size);
 
     Map<UUID, SubmissionCounts> countSubmissions(Collection<UUID> assignmentIds);
 

@@ -5476,7 +5476,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Self Learner with current visibility; published assignments only, ordered by deadlineAt then UUID. open is derived from server time. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner with current visibility; published assignments only, ordered by deadlineAt then UUID. open is derived from server time. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates.",
         "security": [
           {
             "bearerAuth": []
@@ -5544,7 +5544,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -5554,7 +5554,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Self Learner with current visibility; own submission and own grade only. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner with current visibility; own submission and own grade only. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates.",
         "security": [
           {
             "bearerAuth": []
@@ -5612,7 +5612,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -5622,7 +5622,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Self Learner; multipart part file only (PDF or ZIP). Admitted only if server now is before deadlineAt (equality is late), sampled after the Assignment row lock, and the current submission is ungraded. A replacement records a strictly later submittedAt; a non-advancing clock is 500 with rollback. Errors follow ADR010 §14 precedence. 201 when created, 200 when replaced. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner; multipart part file only (PDF or ZIP). Admitted only if server now is before deadlineAt (equality is late), sampled after the Assignment row lock, and the current submission is ungraded. A replacement records a strictly later submittedAt; a non-advancing clock is 500 with rollback. Errors follow ADR010 §14 precedence. 201 when created, 200 when replaced. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates. Runtime database consumer privileges are CT17-P6-PRIVILEGES-2026-11-27-r15; no production grant or residual-risk acceptance is implied.",
         "security": [
           {
             "bearerAuth": []
@@ -5704,7 +5704,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -5729,7 +5729,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Self Learner with current visibility; own current submission file only. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner with current visibility; own current submission file only. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates. Runtime database consumer privileges are CT17-P6-PRIVILEGES-2026-11-27-r15; no production grant or residual-risk acceptance is implied.",
         "security": [
           {
             "bearerAuth": []
@@ -5793,7 +5793,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -6105,7 +6105,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; current submissions ordered by submittedAt then UUID, learner display names resolved through Course and Auth. No object keys. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; current submissions ordered by submittedAt then UUID, learner display names resolved through Course and Auth. No object keys. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates. Runtime database consumer privileges are CT17-P6-PRIVILEGES-2026-11-27-r15; no production grant or residual-risk acceptance is implied.",
         "security": [
           {
             "bearerAuth": []
@@ -6182,7 +6182,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -6192,7 +6192,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; submission of an Assignment in the owned Course. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; submission of an Assignment in the owned Course. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates. Runtime database consumer privileges are CT17-P6-PRIVILEGES-2026-11-27-r15; no production grant or residual-risk acceptance is implied.",
         "security": [
           {
             "bearerAuth": []
@@ -6265,7 +6265,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -6275,7 +6275,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; grade 0-100 with at most two decimals, nonblank feedback and the reviewed submittedAt as a precondition (mismatch 409). Regrade replaces all three fields. Publishes no quiz event and changes no mastery or progress; the graded event is CT27. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; grade 0-100 with at most two decimals, nonblank feedback and the reviewed submittedAt as a precondition (mismatch 409). Regrade replaces all three fields. Publishes no quiz event and changes no mastery or progress; the graded event is CT27. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates. Runtime database consumer privileges are CT17-P6-PRIVILEGES-2026-11-27-r15; no production grant or residual-risk acceptance is implied.",
         "security": [
           {
             "bearerAuth": []
@@ -6348,7 +6348,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,

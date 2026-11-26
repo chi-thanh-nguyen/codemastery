@@ -12,6 +12,7 @@ import com.codemastery.modules.assessment.domain.model.Submission;
 import com.codemastery.modules.assessment.domain.repository.AssignmentRepository;
 import com.codemastery.modules.auth.application.service.UserAccountService;
 import com.codemastery.modules.course.application.service.CourseAccessService;
+import com.codemastery.modules.course.application.service.EnrollmentService;
 import jakarta.persistence.EntityManager;
 import java.io.BufferedInputStream;
 import java.io.IOException;
@@ -104,6 +105,7 @@ public class SubmissionService {
     private final AssignmentRepository assignments;
     private final CourseAccessService courseAccess;
     private final UserAccountService identities;
+    private final EnrollmentService enrollments;
     private final FileStorage storage;
     private final EntityManager entityManager;
     private final ApplicationEventPublisher eventPublisher;
@@ -116,18 +118,20 @@ public class SubmissionService {
     public SubmissionService(AssignmentRepository assignments,
                              CourseAccessService courseAccess,
                              UserAccountService identities,
+                             EnrollmentService enrollments,
                              @Lazy FileStorage storage,
                              EntityManager entityManager,
                              ApplicationEventPublisher eventPublisher,
                              PlatformTransactionManager transactionManager,
                              Environment environment) {
-        this(assignments, courseAccess, identities, storage, entityManager, eventPublisher,
+        this(assignments, courseAccess, identities, enrollments, storage, entityManager, eventPublisher,
                 transactionManager, resolveUploadLimit(environment), Clock.systemUTC());
     }
 
     public SubmissionService(AssignmentRepository assignments,
                              CourseAccessService courseAccess,
                              UserAccountService identities,
+                             EnrollmentService enrollments,
                              FileStorage storage,
                              EntityManager entityManager,
                              ApplicationEventPublisher eventPublisher,
@@ -137,6 +141,7 @@ public class SubmissionService {
         this.assignments = Objects.requireNonNull(assignments, "assignments");
         this.courseAccess = Objects.requireNonNull(courseAccess, "courseAccess");
         this.identities = Objects.requireNonNull(identities, "identities");
+        this.enrollments = Objects.requireNonNull(enrollments, "enrollments");
         this.storage = Objects.requireNonNull(storage, "storage");
         this.entityManager = entityManager;
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher");
@@ -252,12 +257,12 @@ public class SubmissionService {
                 }
                 Assignment lockedAssignment = assignments.findInCourseForUpdate(assignmentId, courseId)
                         .orElseThrow(SubmissionService::unavailable);
-                requirePublishedVisibleAssignment(courseId, lockedAssignment);
                 if (lockedAssignment.lesson_id() != null) {
                     courseAccess.requireLearnerLessonAccess(courseId, lockedAssignment.lesson_id());
                 } else {
                     courseAccess.requireLearnerCourseAccess(courseId);
                 }
+                requirePublishedVisibleAssignment(courseId, lockedAssignment);
 
                 Submission existing = assignments
                         .findSubmissionByAssignmentAndLearnerForUpdate(assignmentId, learnerId)
@@ -415,7 +420,7 @@ public class SubmissionService {
         requireId(courseId);
         requireId(assignmentId);
         requireId(submissionId);
-        courseAccess.requireCourseOwnership(courseId);
+        requireOwnedSubmission(courseId, assignmentId, submissionId);
         GradeInput valid = validateGradeInput(input);
 
         return runWrite(() -> {
@@ -468,21 +473,20 @@ public class SubmissionService {
         });
     }
 
-    /**
-     * Seam for CT01.learner-names via Course (ADR010 §3.1); returns empty map until Course/Auth
-     * wires {@code EnrollmentService#learnerDisplayNames}, yielding {@code null} display names per OpenAPI.
-     */
+    /** CT01.learner-names follows Assessment → Course → Auth (ADR010 §3.1). */
     protected Map<UUID, String> readLearnerDisplayNames(UUID courseId, Set<UUID> learnerIds) {
-        return Map.of();
+        return enrollments.learnerDisplayNames(courseId, learnerIds);
     }
 
     private Assignment admitLearnerAssignment(UUID courseId, UUID assignmentId) {
-        courseAccess.requireLearnerCourseAccess(courseId);
-        Assignment row = assignments.findInCourse(assignmentId, courseId).orElseThrow(SubmissionService::unavailable);
-        requirePublishedVisibleAssignment(courseId, row);
-        if (row.lesson_id() != null) {
+        Assignment row = assignments.findInCourse(assignmentId, courseId).orElse(null);
+        if (row != null && row.lesson_id() != null) {
             courseAccess.requireLearnerLessonAccess(courseId, row.lesson_id());
+        } else {
+            courseAccess.requireLearnerCourseAccess(courseId);
         }
+        if (row == null) throw unavailable();
+        requirePublishedVisibleAssignment(courseId, row);
         return row;
     }
 
@@ -557,7 +561,8 @@ public class SubmissionService {
             throw invalid("Grade must be between 0 and 100 with at most 2 decimal places");
         }
         String feedback = input.feedback();
-        if (!isStorable(feedback) || feedback.trim().isEmpty()) {
+        if (!isStorable(feedback) || feedback.codePoints().allMatch(cp -> Character.isWhitespace(cp)
+                || Character.isSpaceChar(cp) || cp == 0x0085 || cp == 0xFEFF)) {
             throw invalid("Feedback must contain non-whitespace characters");
         }
         Instant submittedAt = input.submittedAt();
@@ -653,6 +658,9 @@ public class SubmissionService {
         var actor = identities.requireCurrentIdentity();
         if (actor == null || actor.userId() == null) {
             throw new IllegalStateException("Missing current identity");
+        }
+        if (actor.role() != UserAccountService.IdentityRole.LEARNER) {
+            throw new org.springframework.security.access.AccessDeniedException("Access denied");
         }
         return actor.userId();
     }

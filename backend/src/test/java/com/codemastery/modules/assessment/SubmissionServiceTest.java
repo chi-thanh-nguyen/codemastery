@@ -472,13 +472,11 @@ class SubmissionServiceTest {
                 storage = mock(FileStorage.class);
                 events = mock(ApplicationEventPublisher.class);
                 clock = new MutableClock(Instant.parse("2026-11-26T10:00:00Z"));
+                var enrollments = mock(com.codemastery.modules.course.application.service.EnrollmentService.class);
+                lenient().when(enrollments.learnerDisplayNames(any(), any())).thenAnswer(call -> displayNames);
                 submissionService = new SubmissionService(
-                        repo, access, identities, storage, null, events, null, 1024 * 1024, clock) {
-                @Override
-                protected Map<UUID, String> readLearnerDisplayNames(UUID course, Set<UUID> learnerIds) {
-                        return displayNames;
-                }
-                };
+                        repo, access, identities, enrollments, storage, null, events, null, 1024 * 1024, clock);
+                lenient().when(repo.existsInCourse(assignmentId, courseId)).thenReturn(true);
                 learnerAssignmentService = new AssignmentService(repo, access, identities, clock);
                 lenient().when(identities.requireCurrentIdentity())
                         .thenReturn(new CurrentIdentity(learnerId, IdentityRole.LEARNER));
@@ -607,6 +605,7 @@ class SubmissionServiceTest {
 
                 when(repo.findInCourseForUpdate(assignmentId, courseId)).thenReturn(Optional.of(assignment));
                 when(repo.findSubmissionInAssignmentForUpdate(subId, assignmentId)).thenReturn(Optional.of(ungraded));
+                when(repo.findSubmissionInAssignment(subId, assignmentId)).thenReturn(Optional.of(ungraded));
                 displayNames = Map.of(learnerId, "Minh Tan");
 
                 // Stale submittedAt -> 409, no event published
@@ -688,6 +687,52 @@ class SubmissionServiceTest {
                 doThrow(new ResourceNotFoundException("Not owner")).when(access).requireCourseOwnership(courseId);
                 assertThrows(ResourceNotFoundException.class,
                         () -> submissionService.downloadSubmissionForOwner(courseId, assignmentId, subId));
+        }
+
+        @Test
+        void learnerDetailUsesOnlyTheLessonGateAndMissingAssignmentStillAdmitsCourse() {
+                var assignment = publishedAssignment(lessonId, clock.instant().plusSeconds(60));
+                when(repo.findInCourse(assignmentId, courseId)).thenReturn(Optional.of(assignment));
+                learnerAssignmentService.readForLearner(courseId, assignmentId);
+                verify(access).requireLearnerLessonAccess(courseId, lessonId);
+                verify(access, never()).requireLearnerCourseAccess(any());
+                org.mockito.Mockito.clearInvocations(access);
+                when(repo.findInCourse(assignmentId, courseId)).thenReturn(Optional.empty());
+                assertThrows(ResourceNotFoundException.class, () -> learnerAssignmentService.readForLearner(courseId, assignmentId));
+                verify(access).requireLearnerCourseAccess(courseId);
+        }
+
+        @Test
+        void unroundedGradeFractionsCannotBecomeValidAndResourceAdmissionPrecedesShape() {
+                var parsed = AssignmentRequests.parseGrade("{\"gradePercentage\":99.9900000000000000000001,\"feedback\":\"ok\",\"submittedAt\":\"2026-11-26T09:15:02.123456Z\"}").orElseThrow();
+                UUID id = UUID.randomUUID();
+                when(repo.findSubmissionInAssignment(id, assignmentId)).thenReturn(Optional.of(new Submission(id,
+                        assignmentId, learnerId, "unused", "a.pdf", clock.instant(), null, null, null)));
+                assertEquals(HttpStatus.BAD_REQUEST, assertThrows(BusinessRuleException.class,
+                        () -> submissionService.gradeSubmission(courseId, assignmentId, id, parsed.toInput())).getStatus());
+                assertEquals(HttpStatus.BAD_REQUEST, assertThrows(BusinessRuleException.class,
+                        () -> submissionService.gradeSubmission(courseId, assignmentId, id,
+                                new GradeInput(new BigDecimal("50"), "\u00a0\ufeff", clock.instant()))).getStatus());
+                when(repo.existsInCourse(assignmentId, courseId)).thenReturn(false);
+                assertThrows(ResourceNotFoundException.class,
+                        () -> submissionService.gradeSubmission(courseId, assignmentId, id, null));
+                verifyNoInteractions(events, storage);
+        }
+
+        @Test
+        void learnerPageFiltersHiddenLessonsBeforeCountingAndPaging() {
+                UUID hiddenLesson = UUID.randomUUID(), firstId = UUID.randomUUID(), hiddenId = UUID.randomUUID(), lastId = UUID.randomUUID();
+                when(repo.countPublishedInCourse(courseId)).thenReturn(3L);
+                when(repo.findPublishedPageInCourse(courseId, 0, 100)).thenReturn(List.of(
+                        new Assignment(firstId, courseId, lessonId, "First", "I", clock.instant().plusSeconds(1), "published"),
+                        new Assignment(hiddenId, courseId, hiddenLesson, "Hidden", "I", clock.instant().plusSeconds(2), "published"),
+                        new Assignment(lastId, courseId, null, "Last", "I", clock.instant().plusSeconds(3), "published")));
+                doThrow(new ResourceNotFoundException("Unavailable")).when(access).requireLearnerLessonAccess(courseId, hiddenLesson);
+                var page = learnerAssignmentService.listForLearner(courseId, 1, 1);
+                assertEquals(2, page.totalElements()); assertEquals(2, page.totalPages());
+                assertEquals(lastId, page.content().getFirst().id());
+                verify(repo).findSubmissionsByAssignmentsAndLearner(List.of(lastId), learnerId);
+                verify(access).requireLearnerLessonAccess(courseId, lessonId);
         }
 
         private static final class MutableClock extends Clock {

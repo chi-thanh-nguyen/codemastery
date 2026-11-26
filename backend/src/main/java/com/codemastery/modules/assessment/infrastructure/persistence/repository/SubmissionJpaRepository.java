@@ -14,6 +14,9 @@ import org.springframework.data.repository.query.Param;
 
 public interface SubmissionJpaRepository extends JpaRepository<SubmissionEntity, UUID> {
 
+    @Query("SELECT s.user_id FROM SubmissionEntity s WHERE s.assignment_id = :assignmentId")
+    java.util.Set<UUID> submittedLearnerIds(@Param("assignmentId") UUID assignmentId);
+
     @Query("SELECT s.assignment_id, COUNT(s), COUNT(s.graded_at) FROM SubmissionEntity s "
             + "WHERE s.assignment_id IN :assignmentIds GROUP BY s.assignment_id")
     List<Object[]> countByAssignmentIds(@Param("assignmentIds") Collection<UUID> assignmentIds);

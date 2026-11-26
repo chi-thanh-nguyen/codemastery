@@ -12,6 +12,16 @@ import org.springframework.data.repository.query.Param;
 
 public interface AssignmentJpaRepository extends JpaRepository<AssignmentEntity, UUID> {
 
+    @Query(value = "SELECT * FROM public.assignments WHERE publication_status = 'published' "
+            + "AND deadline_at > :now AND deadline_at <= :windowEnd "
+            + "AND (deadline_at > :afterDeadline OR (deadline_at = :afterDeadline AND id > :afterId)) "
+            + "ORDER BY deadline_at, id LIMIT :limit", nativeQuery = true)
+    List<AssignmentEntity> reminderCandidates(@Param("now") Instant now, @Param("windowEnd") Instant windowEnd,
+            @Param("afterDeadline") Instant afterDeadline, @Param("afterId") UUID afterId, @Param("limit") int limit);
+
+    @Query(value = "SELECT * FROM public.assignments WHERE id = :id FOR SHARE", nativeQuery = true)
+    Optional<AssignmentEntity> lockNotificationState(@Param("id") UUID id);
+
         @Query("SELECT CASE WHEN COUNT(a) > 0 THEN true ELSE false END FROM AssignmentEntity a "
                 + "WHERE a.id = :id AND a.course_id = :courseId")
         boolean existsInCourse(@Param("id") UUID id, @Param("courseId") UUID courseId);
@@ -64,21 +74,13 @@ public interface AssignmentJpaRepository extends JpaRepository<AssignmentEntity,
                                         @Param("courseId") UUID courseId,
                                         @Param("publicationStatus") String publicationStatus);
 
-        @Query(value = "SELECT COUNT(*) FROM public.assignments a "
-            + "LEFT JOIN public.lessons l ON l.id = a.lesson_id "
-            + "WHERE a.course_id = :courseId AND a.publication_status = 'published' "
-            + "AND (a.lesson_id IS NULL OR (l.course_id = :courseId AND l.publication_status = 'published'))",
-            nativeQuery = true)
-    long countPublishedVisibleInCourse(@Param("courseId") UUID courseId);
+    @Query(value = "SELECT COUNT(*) FROM public.assignments WHERE course_id = :courseId "
+            + "AND publication_status = 'published'", nativeQuery = true)
+    long countPublishedInCourse(@Param("courseId") UUID courseId);
 
-    /** Ordered by deadline_at ASC, id ASC (ADR010 §12). */
-    @Query(value = "SELECT a.* FROM public.assignments a "
-            + "LEFT JOIN public.lessons l ON l.id = a.lesson_id "
-            + "WHERE a.course_id = :courseId AND a.publication_status = 'published' "
-            + "AND (a.lesson_id IS NULL OR (l.course_id = :courseId AND l.publication_status = 'published')) "
-            + "ORDER BY a.deadline_at ASC, a.id ASC LIMIT :limit OFFSET :offset",
-            nativeQuery = true)
-    List<AssignmentEntity> findPublishedVisiblePageInCourse(@Param("courseId") UUID courseId,
-                                                            @Param("limit") int limit,
-                                                            @Param("offset") long offset);
+    /** Assessment-owned candidates only. Course proves Lesson visibility through its public gates. */
+    @Query(value = "SELECT * FROM public.assignments WHERE course_id = :courseId "
+            + "AND publication_status = 'published' ORDER BY deadline_at, id LIMIT :limit OFFSET :offset", nativeQuery = true)
+    List<AssignmentEntity> findPublishedPageInCourse(@Param("courseId") UUID courseId,
+            @Param("limit") int limit, @Param("offset") long offset);
 }

@@ -1,5 +1,24 @@
 # Development Setup
 
+## AS09 assignment/submission consumer — 27 November 2026
+
+PR #297 completes backend Assignment authoring/learner reads, PDF/ZIP submission
+and replacement, owner listing/protected downloads, grade/regrade and CT27 event
+production. Files use the integrated SH05 adapter; storage remains private. The
+Course→Auth learner-name lookup admits the Course owner and includes retained LEFT
+enrollments. Only an admitted learner's own submission/grade is returned to them.
+
+Existing storage settings and `MAX_UPLOAD_SIZE` apply unchanged. Lazy multipart,
+CORS `Content-Disposition`, open-in-view=false and local UTC clocks are reused.
+Replacement is allowed only before the exclusive deadline and before grading;
+grades echo the exact `submittedAt` string, including microseconds. No key is a
+public identifier. Database runtime consumers require the dated CT17-P6 r15 matrix
+in [deployment](deployment.md#ct17-p6-privileges-2026-11-27-r15--as09-submissions-within-adr012-192-27-november-2026).
+Applying grants on a real host, operator upload/ingress/tmpfs configuration and
+hostile-download risk acceptance remain separate gates. See the dated
+[author verification](testing.md#as09-full-scope-author-verification--27-november-2026).
+Notification consumers and frontend screens remain separate implementation Issues.
+
 ## CO09 protected material consumer — 25 November 2026
 
 PR #291 implements text/canonical external-video authoring and protected PDF material
