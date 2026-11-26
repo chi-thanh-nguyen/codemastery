@@ -238,11 +238,10 @@ async function completePlacementThroughUi(
     courseId: string,
     chooseCorrectForPrompt: (promptText: string) => boolean
 ) {
-    await page.getByRole('link', { name: /Start diagnostic/i }).click();
-    await expect(page).toHaveURL(new RegExp(`/courses/${courseId}/diagnostic`));
     await page.getByRole('button', { name: 'Start diagnostic' }).click();
+    await expect(page).toHaveURL(new RegExp(`/courses/${courseId}/(diagnostic|quizzes/.+)`));
+    await page.getByRole('button', { name: 'Start quiz' }).click();
     await expect(page).toHaveURL(new RegExp(`/courses/${courseId}/quizzes/.+/attempt`));
-
     for (let i = 0; i < 8; i += 1) {
         const legend = await page.locator('fieldset legend').innerText();
         const label = chooseCorrectForPrompt(legend) ? 'Correct answer' : 'Wrong answer';
@@ -251,8 +250,7 @@ async function completePlacementThroughUi(
             await page.getByRole('button', { name: 'Next', exact: true }).click();
         }
     }
-
-    await page.getByRole('button', { name: 'Submit quiz' }).first().click();
+    await page.getByRole('button', { name: 'Review and submit' }).click();
     await page.getByRole('dialog', { name: 'Submit quiz?' }).getByRole('button', { name: 'Submit quiz' }).click();
     await expect(page).toHaveURL(new RegExp(`/courses/${courseId}/attempts/`));
 }
@@ -267,8 +265,7 @@ async function setupLearnerSessionWithPlacement(
 ): Promise<{ page: Page; context: BrowserContext }> {
     const account = newAccount(profileLabel);
     await registerThroughApi(request, account);
-    const context = await browser.newContext();
-    const page = await context.newPage();
+    const context = await browser.newContext({ baseURL: target.base }); const page = await context.newPage();
     await signIn(page, account);
     await enrollLearnerInCourse(page, courseId);
     await completePlacementThroughUi(page, courseId, evaluator);
@@ -280,10 +277,10 @@ test.describe('adaptive learning end-to-end journey (CT35)', () => {
         browser,
         request,
     }) => {
+        test.setTimeout(150_000);
         const instructor = target.instructor;
         test.skip(!instructor, 'Needs an Instructor account to author the adaptive E2E course.');
         const fx = await createAdaptiveCourseFixture(request, instructor!);
-
         // Profile A: Strong foundation
         const { page: pageA, context: ctxA } = await setupLearnerSessionWithPlacement(
             browser,
@@ -292,18 +289,21 @@ test.describe('adaptive learning end-to-end journey (CT35)', () => {
             'StrongA',
             () => true
         );
-
-        await pageA.getByRole('link', { name: /Open Mastery Map|See your Mastery Map/i }).click();
+        await pageA.getByRole('button', { name: 'Open Mastery Map' }).click();
         await expect(pageA).toHaveURL(new RegExp(`/courses/${fx.courseId}/mastery`));
         await expect(pageA.getByText('Mastery states reflect the latest submitted quiz evidence for each skill.')).toBeVisible();
-
-        await pageA.getByRole('link', { name: 'Path', exact: true }).click();
+        await pageA.getByRole('button', { name: 'List view' }).click();
+        const tableA = pageA.getByRole('table', { name: `Skills in ${fx.courseTitle}` });
+        for (const masteredSkill of ['Conditionals', 'While Loops', 'For Loops', 'Loop Control']) {
+            await expect(tableA.getByRole('row', { name: new RegExp(masteredSkill) })).toContainText('Mastered');
+        }
+        await expect(tableA.getByRole('row', { name: /Lists/ })).toContainText('Unknown');
+        await pageA.goto(`/courses/${encodeURIComponent(fx.courseId)}/learn`);
         await expect(pageA.getByText('Mastered · Counted as complete')).toHaveCount(4);
         await expect(pageA.getByText('Continue with the next lesson in the course order.')).toBeVisible();
         await expect(pageA.getByText('E5 Lists').first()).toBeVisible();
         await expectNoPageOverflow(pageA);
         await ctxA.close();
-
         // Profile B: Loops prerequisite gap
         const { page: pageB, context: ctxB } = await setupLearnerSessionWithPlacement(
             browser,
@@ -312,19 +312,27 @@ test.describe('adaptive learning end-to-end journey (CT35)', () => {
             'GapB',
             (prompt) => prompt.includes('K1 ')
         );
-
-        await pageB.getByRole('link', { name: 'Path', exact: true }).click();
+        await pageB.getByRole('button', { name: 'Open Mastery Map' }).click();
+        await expect(pageB).toHaveURL(new RegExp(`/courses/${fx.courseId}/mastery`));
+        await pageB.getByRole('button', { name: 'List view' }).click();
+        const tableB = pageB.getByRole('table', { name: `Skills in ${fx.courseTitle}` });
+        await expect(tableB.getByRole('row', { name: /Conditionals/ })).toContainText('Mastered');
+        for (const weakSkill of ['While Loops', 'For Loops', 'Loop Control']) {
+            await expect(tableB.getByRole('row', { name: new RegExp(weakSkill) })).toContainText('Weak');
+        }
+        await expect(tableB.getByRole('row', { name: /Lists/ })).toContainText('Unknown');
+        await pageB.goto(`/courses/${encodeURIComponent(fx.courseId)}/learn`);
         await expect(
             pageB.getByText(
                 'Review this lesson first: your skill "Loop Control" is Weak and its prerequisite "While Loops" is not yet Mastered.'
             )
         ).toBeVisible();
-
         // A-2: Non-blocking prerequisite warning when opening E5 directly
-        await pageB.getByRole('link', { name: 'E5 Lists' }).first().click();
+        await pageB.getByText('E5 Lists').first().click();
         await expect(pageB).toHaveURL(new RegExp(`/courses/${fx.courseId}/lessons/${fx.lessons[4].id}`));
-        await expect(pageB.getByText(/You haven't mastered "For Loops" yet/)).toBeVisible();
+        await expect(pageB.getByText(/You haven't mastered For Loops yet\./)).toBeVisible();
         await expect(pageB.getByText('Content for E5 Lists.')).toBeVisible();
+        await expect(pageB.getByRole('button', { name: 'Mark as complete' })).toBeEnabled();
         await expectNoPageOverflow(pageB);
         await ctxB.close();
     });
@@ -333,21 +341,23 @@ test.describe('adaptive learning end-to-end journey (CT35)', () => {
         page,
         request,
     }) => {
+        test.setTimeout(120_000);
         const instructor = target.instructor;
         test.skip(!instructor, 'Needs an Instructor account to author the adaptive E2E course.');
         const fx = await createAdaptiveCourseFixture(request, instructor!);
-
         const learnerC = newAccount('SkipC');
         await registerThroughApi(request, learnerC);
         await signIn(page, learnerC);
         await enrollLearnerInCourse(page, fx.courseId);
-
         await page.getByRole('button', { name: 'Skip and start from the beginning' }).click();
-        await expect(page.getByRole('link', { name: 'E1 Conditionals' }).first()).toBeVisible();
-
-        await page.getByRole('link', { name: 'Mastery Map' }).click();
+        await expect(page.getByText('E1 Conditionals').first()).toBeVisible();
+        await page.getByRole('button', { name: 'Open Mastery Map' }).click();
         await expect(page).toHaveURL(new RegExp(`/courses/${fx.courseId}/mastery`));
-        await expect(page.getByText('Unknown')).toHaveCount(5);
+        await page.getByRole('button', { name: 'List view' }).click();
+        const table = page.getByRole('table', { name: `Skills in ${fx.courseTitle}` });
+        for (const skill of fx.skills) {
+            await expect(table.getByRole('row', { name: new RegExp(skill.name) })).toContainText('Unknown');
+        }
     });
 
     test('A-4: recommended practice difficulty and fallback adapt to Mastered, Weak, Unknown and Learning states', async ({
@@ -409,6 +419,12 @@ test.describe('adaptive learning end-to-end journey (CT35)', () => {
                 'Recommended practice: Easy, because your skill "Conditionals" is Learning and no Medium practice quiz is available for this lesson.'
             )
         ).toBeVisible();
+        await expect(
+            pageD.getByText('Mastery states reflect the latest submitted quiz evidence for each skill.')
+        ).toBeVisible();
+        const practiceLink = pageD.getByRole('link', { name: /E2E practice K1 easy|Practice|Start/i }).first();
+        await expect(practiceLink).toHaveAttribute('href', new RegExp(`/courses/${fx.courseId}/quizzes/`));
+        await expectNoPageOverflow(pageD);
         await ctxD.close();
     });
 });
