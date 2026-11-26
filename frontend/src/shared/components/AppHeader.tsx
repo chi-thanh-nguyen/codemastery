@@ -381,7 +381,7 @@ export function Monogram({ name, initial, size = 40, tone = 'chrome' }: { name: 
 export function AccountMenuDivider() { return <Divider sx={{ my: .5 }} />; }
 
 /** Utility button on the frame. `current` marks the page it opens (as the drawer marks its active row). */
-export function HeaderIconButton({ label, icon, badge, onClick, href, current = false }: { label: string; icon: PresentationIconName; badge?: number; onClick?: () => void; href?: string; current?: boolean }) {
+export function HeaderIconButton({ label, icon, badge, onClick, href, current = false }: { label: string; icon: PresentationIconName; badge?: number; onClick?: (event: MouseEvent<HTMLElement>) => void; href?: string; current?: boolean }) {
     const name = badge ? `${label}, ${badge} unread` : label;
     return <Tooltip title={label}>
         <IconButton aria-label={name} aria-current={current ? 'page' : undefined} onClick={onClick} {...(href ? { component: 'a', href } : {})}

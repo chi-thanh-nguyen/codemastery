@@ -94,12 +94,30 @@ const problem = (status, detail, instance) => ({ status, contentType: 'applicati
 const ok = (value) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(value) });
 
 function createApi() {
-    const state = { role: 'Learner', displayName: 'Harness Learner', sessionId: instructorId, restore: false, requests: [], hold: null, fail: new Map(), memberships: new Map([[primaryId, 'active'], [courses[3].id, 'left']]) };
+    const state = { notifications: [], newAfterMarkAll: null, role: 'Learner', displayName: 'Harness Learner', sessionId: instructorId, restore: false, requests: [], hold: null, fail: new Map(), memberships: new Map([[primaryId, 'active'], [courses[3].id, 'left']]) };
     async function handle(route) {
         const request = route.request(), url = new URL(request.url()), p = url.pathname.replace(/^\/api/, '');
         state.requests.push(`${request.method()} ${url.pathname}${url.search}`);
         if (state.hold && state.hold.test(p)) { const release = await new Promise((resolve) => { state.release = resolve; }); if (release === 'abort') return route.abort(); }
         if (state.fail.has(p)) return route.fulfill(problem(state.fail.get(p), 'The request could not be completed.', url.pathname));
+        if (p === '/me/notifications/unread-count') return route.fulfill(ok({ unreadCount: state.notifications.filter((item) => !item.read).length }));
+        if (p === '/me/notifications' && request.method() === 'GET') {
+            const page = Number(url.searchParams.get('page')), size = Number(url.searchParams.get('size'));
+            const rows = state.notifications.filter((item) => url.searchParams.get('unreadOnly') !== 'true' || !item.read);
+            return route.fulfill(ok({ content: rows.slice(page * size, (page + 1) * size), page, size, totalElements: rows.length, totalPages: Math.ceil(rows.length / size) }));
+        }
+        if (p === '/me/notifications/read-all' && request.method() === 'PUT') {
+            const markedCount = state.notifications.filter((item) => !item.read).length;
+            state.notifications.forEach((item) => { item.read = true; });
+            if (state.newAfterMarkAll) { state.notifications.unshift(state.newAfterMarkAll); state.newAfterMarkAll = null; }
+            return route.fulfill(ok({ markedCount }));
+        }
+        const notice = /^\/me\/notifications\/([^/]+)\/read$/.exec(p);
+        if (notice && request.method() === 'PUT') {
+            const item = state.notifications.find((item) => item.id === notice[1]);
+            if (!item) return route.fulfill(problem(404, 'Not found.', url.pathname));
+            item.read = true; return route.fulfill(ok(item));
+        }
         if (p === '/auth/login' && request.method() === 'POST') {
             const body = request.postDataJSON();
             return body.password === 'wrong-password-123' ? route.fulfill(problem(401, 'Invalid email or password.', url.pathname)) : route.fulfill(ok(loginBody(state.role, state.displayName, state.sessionId)));
@@ -199,7 +217,7 @@ async function main() {
         for (const engine of engines) {
             const fixtureUrl = flag('fixture-url');
             if (args.includes('--fe32') && !fixtureUrl) throw new Error('--fe32 requires --fixture-url serving createFE32Fixture output; never activate production routes.');
-            const result = args.includes('--fe32') ? await runFE32Engine(playwright, engine, baseUrl, fixtureUrl) : await runEngine(playwright, engine, baseUrl);
+            const result = args.includes('--fe28') ? await runFE28Engine(playwright, engine, baseUrl) : args.includes('--fe32') ? await runFE32Engine(playwright, engine, baseUrl, fixtureUrl) : await runEngine(playwright, engine, baseUrl);
             report.engines.push(result); failed += result.failed.length;
         }
     } finally {
@@ -1606,7 +1624,7 @@ async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl, selection 
     result.version = browser.version();
     const check = async (name, run) => {
         try { await run(); result.passed.push(name); console.log(`PASS [${engine}] ${name}`); }
-        catch (error) { result.failed.push({ name, error: String(error) }); console.log(`FAIL [${engine}] ${name}: ${String(error).split('\n')[0]}`); }
+        catch (error) { result.failed.push({ name, error: String(error) }); console.log(`FAIL [${engine}] ${name}: ${String(error)}`); }
     };
     const ready = async (page) => { await page.locator('header').first().waitFor(); await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(300); };
     const longName = 'Alexandria Nguyễn Montgomery';
@@ -1729,6 +1747,118 @@ async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl, selection 
                 } finally { release(); await context.close(); }
             });
         }
+    } finally { await browser.close(); }
+    return result;
+}
+
+/** FE28: production notifications only, controlled REST doubles; backend evidence is separate. */
+async function runFE28Engine(playwright, engine, baseUrl) {
+    const result = { engine, version: null, passed: [], failed: [], measurements: [], notExercised: ['Real browser-to-backend delivery', 'VoiceOver/NVDA and physical devices'] };
+    const dir = path.join(out, engine); fs.mkdirSync(dir, { recursive: true });
+    let browser;
+    try { browser = await playwright[engine].launch({ headless: true }); }
+    catch (error) { result.launchError = String(error); return result; }
+    result.version = browser.version();
+    const check = async (name, run) => {
+        try { await run(); result.passed.push(name); console.log(`PASS [${engine}] ${name}`); }
+        catch (error) { result.failed.push({ name, error: String(error) }); console.log(`FAIL [${engine}] ${name}: ${String(error)}`); }
+    };
+    const fixtures = () => Array.from({ length: 23 }, (_, index) => {
+        const date = new Date(); date.setDate(date.getDate() - (index < 2 ? 0 : index < 4 ? 1 : 7));
+        return { id: `00000000-0000-3000-8000-${String(index + 1).padStart(12, '0')}`, read: false, createdAt: date.toISOString(),
+            message: index === 0 ? `<b>Plain text</b>\n${'W'.repeat(180)} in "Course".` : `Notification ${index + 1} in "Programming".` };
+    });
+    const open = async (preference = 'light', width = 1280, role = 'Learner') => {
+        const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: 'dark' });
+        await context.addInitScript((value) => localStorage.setItem('codemastery.theme', value), preference);
+        const page = await context.newPage(), api = createApi(); api.state.role = role; api.state.notifications = fixtures();
+        await page.route('**/api/**', api.handle);
+        await page.goto(new URL('/login', baseUrl).href);
+        await page.locator('input[name="email"]').fill('synthetic@example.com'); await page.locator('input[name="password"]').fill('synthetic-password');
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+        await page.waitForURL((url) => url.pathname !== '/login');
+        return { context, page, api };
+    };
+    const ready = async (page) => { await page.locator('#notification-results').waitFor(); await page.waitForFunction(() => document.querySelector('#notification-results')?.getAttribute('aria-busy') === 'false'); await page.evaluate(() => document.fonts.ready); };
+    try {
+        await check('production journey: count-only shell, explicit reads, pagination, Unread and concurrent mark-all', async () => {
+            const { context, page, api } = await open();
+            try {
+                await page.getByRole('link', { name: 'Notifications, 23 unread', exact: true }).waitFor();
+                assert(!api.state.requests.some((value) => /GET \/api\/me\/notifications\?/.test(value)), 'Bell mounted without fetching a list');
+                await page.getByRole('link', { name: 'Notifications, 23 unread', exact: true }).click(); await ready(page);
+                assert.equal(await page.locator('h1').textContent(), 'Notifications');
+                assert.equal(await page.locator('header [aria-current="page"]').getAttribute('href'), '/notifications');
+                assert.equal(api.state.requests.filter((value) => value.startsWith('PUT ')).length, 0);
+                assert.equal(await page.locator('#notification-results li').count(), 20);
+                assert.equal(await page.locator('#notification-results a, #notification-results b').count(), 0);
+                await page.getByRole('button', { name: 'Go to page 2', exact: true }).click(); await ready(page);
+                assert.equal(await page.locator('#notification-results li').count(), 3);
+                await page.getByRole('button', { name: 'Unread', exact: true }).click(); await ready(page);
+                assert(api.state.requests.some((value) => value.includes('unreadOnly=true&page=0&size=20')));
+                await page.getByRole('button', { name: 'Mark as read', exact: true }).first().click();
+                await page.getByRole('link', { name: 'Notifications, 22 unread', exact: true }).waitFor(); await ready(page);
+                api.state.newAfterMarkAll = { id: '00000000-0000-3000-8000-999999999999', read: false, message: 'Concurrent new notification', createdAt: new Date().toISOString() };
+                await page.getByRole('button', { name: 'Mark all as read', exact: true }).click();
+                await page.getByText('Marked 22 notifications as read.', { exact: true }).waitFor();
+                await page.getByRole('link', { name: 'Notifications, 1 unread', exact: true }).waitFor(); await ready(page);
+                assert.equal(await page.locator('#notification-results li').count(), 1);
+                api.state.fail.set('/me/notifications/unread-count', 500);
+                await page.locator('header a[href="/courses"]').click();
+                await page.getByRole('link', { name: 'Notifications', exact: true }).waitFor();
+                assert.equal(await page.locator('header [aria-label*="unread"]').count(), 0);
+                assert.equal(await page.locator('[role="alert"]').count(), 0);
+            } finally { await context.close(); }
+        });
+        for (const preference of ['light', 'dark', 'system']) for (const width of [360, 768, 1024, 1280, 1440]) {
+            await check(`${preference} ${width}px: reflow, grouping, roles, keyboard and visible focus`, async () => {
+                const { context, page } = await open(preference, width);
+                try {
+                    await page.locator('header a[href="/notifications"]').click(); await ready(page);
+                    const overflow = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, width: innerWidth, scheme: document.documentElement.dataset.colorScheme }));
+                    assert(overflow.scroll <= width + 1, JSON.stringify(overflow));
+                    assert.equal(overflow.scheme, preference === 'system' ? 'dark' : preference);
+                    assert.deepEqual(await page.locator('#notification-results h2').allTextContents(), ['Today', 'Yesterday', new Date(Date.now() - 7 * 86400000).toLocaleDateString('en-US', { dateStyle: 'medium' })]);
+                    const button = page.getByRole('button', { name: 'Unread', exact: true });
+                    await page.getByRole('button', { name: 'All', exact: true }).focus(); await page.keyboard.press('ArrowRight');
+                    await ready(page); assert.equal(await button.getAttribute('aria-pressed'), 'true');
+                    assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Unread');
+                    const focus = await button.evaluate((node) => ({ outline: getComputedStyle(node).outlineStyle, width: getComputedStyle(node).outlineWidth, focus: node.matches(':focus-visible') }));
+                    assert(focus.focus && focus.outline !== 'none' && parseFloat(focus.width) >= 2, JSON.stringify(focus));
+                    const targets = await page.locator('#notification-results button').first().boundingBox(); assert(targets && targets.width >= 44 && targets.height >= 44);
+                    const colors = await page.evaluate(sampleText); const low = colors.filter((item) => contrast(item.color, item.bg) < (item.large ? 3 : 4.5)); assert.equal(low.length, 0, JSON.stringify(low));
+                    if (width >= 1024) {
+                        const order = await page.locator('header :is(a,button)[aria-label]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')).filter((value) => /^(Notifications|Theme|Account menu)/.test(value)));
+                        assert(/^Notifications/.test(order[0]) && /^Theme/.test(order[1]) && /^Account menu/.test(order[2]), JSON.stringify(order));
+                    }
+                    await page.screenshot({ path: path.join(dir, `notifications-${preference}-${width}.png`), fullPage: true });
+                    result.measurements.push({ preference, width, overflow, focus });
+                } finally { await context.close(); }
+            });
+        }
+        await check('320px, System OS change, error/retry, zero-count disabling and preview isolation', async () => {
+            const { context, page, api } = await open('system', 320);
+            try {
+                await page.locator('header a[href="/notifications"]').click(); await ready(page);
+                await page.emulateMedia({ colorScheme: 'light' }); await page.waitForFunction(() => document.documentElement.dataset.colorScheme === 'light');
+                assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+                api.state.fail.set('/me/notifications', 500); await page.getByRole('button', { name: 'Unread', exact: true }).click();
+                await page.getByRole('heading', { name: "Couldn't load notifications" }).waitFor(); api.state.fail.delete('/me/notifications');
+                await page.getByRole('button', { name: 'Try again', exact: true }).click(); await ready(page);
+                await page.getByRole('button', { name: 'Mark all as read', exact: true }).click(); await page.getByText('Marked 23 notifications as read.', { exact: true }).waitFor();
+                assert(await page.getByRole('button', { name: 'Mark all as read', exact: true }).isDisabled());
+                api.state.requests.length = 0;
+                await page.goto(new URL('/preview?screen=notifications', baseUrl).href); await page.locator('h1').filter({ hasText: 'Notifications' }).waitFor();
+                assert.equal(api.state.requests.length, 0); assert.equal(await page.locator('#notification-results a').count(), 0);
+            } finally { await context.close(); }
+        });
+        for (const role of ['Instructor', 'Administrator']) await check(`${role} production role boundary`, async () => {
+            const { context, page, api } = await open('light', 1280, role);
+            try {
+                if (role === 'Instructor') { await page.locator('header a[href="/notifications"]').click(); await ready(page); assert.equal(await page.locator('h1').textContent(), 'Notifications'); }
+                else { assert.equal(await page.locator('header a[href="/notifications"]').count(), 0); api.state.restore = true; api.state.requests.length = 0; await page.goto(new URL('/notifications', baseUrl).href); await page.getByRole('heading', { name: "You don't have access to this page" }).waitFor(); assert(!api.state.requests.some((value) => value.includes('/me/notifications'))); }
+            } finally { await context.close(); }
+        });
     } finally { await browser.close(); }
     return result;
 }

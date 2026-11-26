@@ -44,6 +44,21 @@ function object(value: unknown, keys: string[]): Record<string, unknown> {
     return value;
 }
 
+/** RFC 3339 instant, including the backend's microsecond precision; reject calendar rollover. */
+function timestamp(value: unknown): value is string {
+    if (typeof value !== 'string') return false;
+    const match = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/.exec(value);
+    if (!match) return false;
+    const [, y, m, d, h, minute, second, zone] = match;
+    const year = Number(y), month = Number(m), day = Number(d);
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    return month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1] &&
+        Number(h) <= 23 && Number(minute) <= 59 && Number(second) <= 59 &&
+        (zone.length === 1 || Number(zone.slice(1, 3)) <= 23 && Number(zone.slice(4)) <= 59) &&
+        Number.isFinite(Date.parse(value.toUpperCase()));
+}
+
 function decodeNotification(value: unknown): NotificationItemModel {
     const row = object(value, ['id', 'message', 'read', 'createdAt']);
     if (
@@ -52,7 +67,7 @@ function decodeNotification(value: unknown): NotificationItemModel {
         typeof row.message !== 'string' ||
         row.message.trim().length === 0 ||
         typeof row.read !== 'boolean' ||
-        typeof row.createdAt !== 'string'
+        !timestamp(row.createdAt)
     ) {
         throw protocolError();
     }
@@ -76,8 +91,12 @@ function decodeNotificationPage(value: unknown): NotificationPage {
     ) {
         throw protocolError();
     }
+    const content = row.content.map(decodeNotification);
+    const expectedLength = Math.min(row.size, Math.max(0, row.totalElements - row.page * row.size));
+    if (row.totalPages !== Math.ceil(row.totalElements / row.size) || content.length !== expectedLength ||
+        new Set(content.map((item) => item.id.toLowerCase())).size !== content.length) throw protocolError();
     return {
-        content: row.content.map(decodeNotification),
+        content,
         page: row.page,
         size: row.size,
         totalElements: row.totalElements,
@@ -91,7 +110,7 @@ export function listMyNotifications(
     size = 20,
     options: NotificationRequestOptions = {}
 ): Promise<NotificationPage> {
-    if (!integer(page, 0) || !integer(size, 1) || size > 100) {
+    if (typeof unreadOnly !== 'boolean' || !integer(page, 0) || page > 2147483647 || !integer(size, 1) || size > 100) {
         return Promise.reject(new ApiError('validation', 'Please check the requested page.'));
     }
     const query = new URLSearchParams({
@@ -104,7 +123,11 @@ export function listMyNotifications(
         method: 'GET',
         auth: 'authenticated',
         expectedStatus: 200,
-        decode: decodeNotificationPage,
+        decode: (value) => {
+            const result = decodeNotificationPage(value);
+            if (result.page !== page || result.size !== size || unreadOnly && result.content.some((item) => item.read)) throw protocolError();
+            return result;
+        },
         query,
     });
 }
@@ -129,12 +152,17 @@ export function markNotificationRead(
     notificationId: string,
     options: NotificationRequestOptions = {}
 ): Promise<NotificationItemModel> {
+    if (!uuid.test(notificationId)) return Promise.reject(new ApiError('validation', 'Please check the notification identifier.'));
     return request(`/me/notifications/${encodeURIComponent(notificationId)}/read`, {
         ...options,
         method: 'PUT',
         auth: 'authenticated',
         expectedStatus: 200,
-        decode: decodeNotification,
+        decode: (value) => {
+            const result = decodeNotification(value);
+            if (result.id.toLowerCase() !== notificationId.toLowerCase() || !result.read) throw protocolError();
+            return result;
+        },
     });
 }
 
