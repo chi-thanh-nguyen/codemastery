@@ -2536,3 +2536,51 @@ and preserves its current callers. Test-only `E2E_MATERIAL_FILES=1` opts the dis
 into the Compose-pinned MinIO server/initializer, random per-run identities and the existing
 intent/ID/volume cleanup protocol. It publishes no storage port and makes no production-policy,
 release or deployment change. Existing E2E runs leave this opt-in off.
+
+### FE14 targeted independent-review remediation — 26 November 2026
+
+The Leader explicitly authorized additive remediation of PR #279 after independent
+`REQUEST_CHANGES` at `e4d7eb3febfad8f89db1b9091c7931ed3308654a`: FE14-IR-01
+(P1, sent work lost on child unmount), IR-02 (P2, encoded URL semantics) and IR-03
+(P2, nested reference definitions). The original implementation and A1–A4 audit
+above remain historical evidence; they do not close these subsequent findings.
+This is author remediation with Codex assistance, not independent acceptance.
+
+Within CT16.final-state F1, the existing Course composing owner now registers a
+single operation/controller before dispatch. Course and mapping mutation runners
+share its synchronous entry barrier. A child can disappear without aborting that
+owner's sent request; its callbacks are still discarded. Course/session replacement
+or owner teardown aborts and invalidates the old work. Explicit upload cancellation
+and the owner's "Stop waiting" action still signal cancellation, never rollback.
+Known settlement establishes the floor of an authoritative Course/graph GET; an
+older GET cannot answer it. Failed recovery retains the floor and supports explicit
+read retry. Settings acknowledgments are recorded by the surviving owner; drafting
+can continue after acknowledgment, but another dependent write waits for recovery.
+
+Unknown/cancelled transport outcomes retain a visible uncertainty notice even
+after inspection. CT16/CT37 permit resource inspection before a new deliberate
+attempt; that inspection does not prove termination of an unobserved transaction.
+There is no mutation replay, transaction-status endpoint, idempotency key, global
+store/provider, timeout or browser-history blocker. Native Back/Forward retains
+DESIGN A15's limitation. Leaving the whole composing owner still follows CT16
+session/cancellation rules; this correction guarantees child-route survival.
+
+Course metadata/publication, Chapter/Lesson authoring, all eight material operations
+and Lesson–Skill mapping use the applicable owner. S20 mapping shares the same
+lifecycle; other S20 multi-step skill/prerequisite work keeps its existing ownership
+and checks the shared entry barrier. FE15 question/quiz and FE16 assignment writes
+do not replace Course/Lesson/material/mapping state and retain their existing
+operations. Their Course/skill selectors still consume the shared authoritative
+reads. D12-3 ownership, D1/D1-R1/D1-R2 acknowledgment and A3/N1 deliberate graph
+retry remain in place; no unrelated assessment operation was migrated.
+
+Markdown keeps the approved parser stack. Security inspection decodes bounded
+layers and compares admitted reference kind, effective scheme and origin against
+the browser-parsed emitted destination. It emits the original mdast destination,
+preserving encoded path/query/fragment data and CommonMark entity/escape handling.
+Backslashes and malformed source encodings remain rejected. Definitions are
+collected recursively in document order using mdast's normalized identifiers and
+first-definition precedence. Images remain alt-text links; HTML remains literal.
+Executed verification and the CodeQL test-helper correction are appended to
+`docs/testing.md`. No effective contract, OpenAPI, dependency or governance rule
+was changed.

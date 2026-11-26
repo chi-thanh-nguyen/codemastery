@@ -9,25 +9,36 @@ import type { Nodes, Definition } from 'mdast';
 import { CodeBlock } from './CodeBlock';
 import { codeFontStack, roles } from '../../app/theme/theme';
 
-/** CT37.markdown: admit only decoded HTTP(S), single-slash root paths and fragments. */
+/** CT37.markdown: inspect decoded spellings, navigate only the parser's original destination. */
 export function markdownHref(raw: string): string | null {
-    let value = raw;
+    const base = 'https://markdown.invalid';
+    const classify = (value: string) => {
+        if (!value || value.includes('\\')) return null;
+        const url = new URL(value, base);
+        if (value[0] === '#') return { kind: 'fragment', url };
+        if (value[0] === '/' && value.length > 1 && value[1] !== '/' && url.origin === base) return { kind: 'root', url };
+        const absolute = new URL(value);
+        return absolute.protocol === 'http:' || absolute.protocol === 'https:' ? { kind: 'absolute', url: absolute } : null;
+    };
     try {
-        // Character references can themselves be percent encoded. Inspect the fully decoded target;
-        // return that same target, so admission and browser navigation never use different spellings.
+        // mdast already applies CommonMark entity/escape handling. Do not decode it again for output.
+        // Validate source encoding once. Later layers may contain a legitimate literal percent (100%25).
+        decodeURIComponent(raw);
+        const navigation = classify(raw);
+        if (!navigation) return null;
+        let inspected = raw;
         for (let i = 0; i < 8; i++) {
-            const decoded = decodeURIComponent(value);
+            const decoded = decodeURIComponent(inspected.replace(/%(?![0-9a-f]{2})/gi, '%25'));
+            // Preserve A2: escape decoding must never consume a percent-decoded backslash.
             if (decoded.includes('\\')) return null;
             const next = decodeString(decoded).replace(/[\s\u0000-\u001f\u007f-\u009f]/gu, '');
-            if (next === value) break;
-            value = next;
+            const inspection = classify(next);
+            if (!inspection || inspection.kind !== navigation.kind || inspection.url.protocol !== navigation.url.protocol
+                || inspection.url.origin !== navigation.url.origin) return null;
+            if (next === inspected) return raw;
+            inspected = next;
         }
-        if (!value || /[\\%]/.test(value)) return null;
-        const url = new URL(value, 'https://markdown.invalid');
-        if (value[0] === '#') return value;
-        if (value[0] === '/' && value.length > 1 && value[1] !== '/' && url.origin === 'https://markdown.invalid') return value;
-        const absolute = new URL(value);
-        return ['http:', 'https:'].includes(absolute.protocol) ? absolute.href : null;
+        return null; // Bounded inspection: unresolved nested obfuscation is not admitted.
     } catch { return null; }
 }
 
@@ -35,10 +46,16 @@ export function markdownHref(raw: string): string | null {
 export function MarkdownRenderer({ markdown }: { markdown: string }) {
     const tree = useMemo(() => fromMarkdown(markdown, { extensions: [gfmTable()], mdastExtensions: [gfmTableFromMarkdown()] }), [markdown]);
     const definitions = new Map<string, Definition>();
-    for (const node of tree.children) if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node);
+    // Depth-first document order preserves CommonMark's first-definition precedence. mdast has
+    // already normalized identifiers consistently on both definitions and reference nodes.
+    const collectDefinitions = (node: Nodes) => {
+        if (node.type === 'definition' && !definitions.has(node.identifier)) definitions.set(node.identifier, node);
+        if ('children' in node) for (const child of node.children) collectDefinitions(child);
+    };
+    collectDefinitions(tree);
     const link = (target: string | undefined, content: ReactNode, title?: string | null) => {
         const href = target === undefined ? null : markdownHref(target);
-        return href ? <Link href={href} title={title ?? undefined} rel={/^https?:/.test(href) ? 'noopener noreferrer' : undefined}>{content}</Link> : content;
+        return href ? <Link href={href} title={title ?? undefined} rel={href[0] !== '/' && href[0] !== '#' ? 'noopener noreferrer' : undefined}>{content}</Link> : content;
     };
     const children = (node: Nodes): ReactNode => 'children' in node ? node.children.map((child, i) => <Fragment key={i}>{render(child)}</Fragment>) : null;
     const render = (node: Nodes): ReactNode => {

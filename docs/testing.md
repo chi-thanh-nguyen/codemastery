@@ -8461,3 +8461,140 @@ name `heizseung` and email `thangle12012006@gmail.com` for author and committer.
 The authenticated pusher remains `chi-thanh-nguyen`. Metadata is not proof of human authorship;
 this implementation/test/documentation work was AI-assisted with Codex. No signatures, owner
 reviews or academic contribution claims are fabricated. No PR #286 code was copied.
+
+## FE14 targeted IR-01/IR-02/IR-03 remediation — 26 November 2026
+
+### Baseline, provenance and scope
+
+This append preserves the original implementation verdict and A1–A4 audit above.
+The subsequent independent verdict was **REQUEST_CHANGES** at
+`e4d7eb3febfad8f89db1b9091c7931ed3308654a` (main/merge-base
+`cc6cb54ddedf226966a51c9614fc5fc5756267bb`, 21 files, +1943/-61, two commits).
+Remote PR state, both SHAs and legitimate existing heizseung author/committer
+metadata were reverified. Remediation uses an isolated shared-object clone; the
+clean main checkout, other occupied worktrees and PRs #280/#286 were preserved.
+Only additive commits and a normal fast-forward push are authorized.
+
+The previous review's `fe14-review-evidence.zip` was retrieved and inspected,
+including `evidence.json` and the four probes. Its executed evidence remains
+historical independent evidence. The executions below are **new author evidence**
+from Codex-assisted remediation; none is independent acceptance.
+
+### Findings, implementation and focused self-audit
+
+| Finding | Confirmed cause and correction | Status |
+| --- | --- | --- |
+| FE14-IR-01, P1 | Child unmount aborted sent work before the owner registered recovery. Register the operation/controller synchronously in the existing Course owner; preserve settlement across child routes, suppress child callbacks, sequence authoritative Course/graph recovery and enforce the shared runner entry barrier | FIXED_AUTHOR_VERIFIED |
+| FE14-IR-02, P2 | Inspection decoded and stripped the destination that was emitted. Separate inspected spellings from the emitted mdast URL; compare reference kind, standard-parser scheme/origin, validate encoding and retain encoded navigation data and external attributes | FIXED_AUTHOR_VERIFIED |
+| FE14-IR-03, P2 | Definition collection inspected only root children. Walk the complete AST in document order, retain first definitions and the parser's normalized identifiers; links/images use the same admission function | FIXED_AUTHOR_VERIFIED |
+
+Owner transitions are `idle -> pending -> recovery-required -> idle` on a
+causally eligible successful read. Unknown/cancelled settlement adds a persistent
+uncertainty notice; inspection permits a deliberate next attempt under CT16/CT37,
+not proof that an unobserved transaction ended. A failed read retains the obligation.
+No mutation replay, backend transaction-status contract, timeout, history blocking,
+new global state or provider is introduced. Owner/session replacement aborts old
+work and rejects its result. Whole-owner navigation keeps the existing CT16 scope;
+the fix guarantees survival across child-route changes while that owner remains.
+
+The actual entry-point test invokes all eight Course operations and both S20
+mapping operations directly during pending and recovery; every call is refused
+before dispatch. Course header, Settings, Chapter/Lesson operations, relational
+materials, PDF create/title/replace/publication and Lesson mapping share the owner.
+Other S20 multi-step operations retain their lifecycle and check its barrier.
+FE15/FE16 writes do not replace these resources and remain in their existing
+hooks; their shared selectors and FE18 reads were exercised in the regression set.
+
+D1/D1-R1/D1-R2 retain acknowledged fields, dirty drafts, causal read evidence,
+superseded-read suppression, explicit retry and course/session isolation. Tests
+that previously induced a competing header write now initiate an independent
+shared read: the new contract explicitly forbids that dependent write while
+pending. Second-save tests first prove refusal, then recover and explicitly save;
+no prior assertion is represented as an unchanged concurrent-write permission.
+A1 post-acknowledgment remount and A3/N1 graph stale/retry checks remain covered.
+
+Self-audit found and corrected a remediation regression: after moving recovery
+to the owner, the still-mounted Lesson form could adopt old fields while its
+post-settlement GET waited. Its synchronization now uses the owner's barrier.
+The new delayed-read test failed before this correction and passed afterwards.
+A second inspection retained external-link attributes when browser URL parsing
+removes scheme control characters; the rendered-anchor regression passes.
+
+### Newly executed commands and results
+
+Paths in the commands are relative to the isolated repository root. Tests were
+run with the repository's pinned dependencies (`npm --prefix frontend ci`, exit 0;
+no manifest/lockfile change). The 15000 ms test limit accommodates concurrent host
+load; it is not an application request deadline.
+
+| Exact command | Outcome |
+| --- | --- |
+| `npm --prefix frontend test -- src/shared/components/markdown.review.test.tsx src/features/instructor/course-management/pages/lifecycle.review.test.tsx` | Baseline: exit 1, 8 failed / 13 passed; five legitimate URL destinations, nested definition, sent PUT and sent PDF barriers reproduced in actual rendered DOM/component routes. The PDF app-link probe clicked behind a modal; native Back is established separately below. Temporary copied probes were removed from the checkout |
+| `E2E_MATERIAL_FILES=1 npm --prefix e2e test -- independent-fe14.review.spec.ts --project=chromium-desktop --project=webkit-desktop --workers=1` | Baseline: exit 1; 3 positive reproductions passed (PUT overwrite in Chromium/WebKit; two PDF rows in Chromium), WebKit intercepted upload failed with HTTP 400 before acceptance. All 7 owned resources finalized absent |
+| `npm --prefix frontend test -- src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/shared/components/MarkdownRenderer.test.tsx --maxWorkers=1 --testTimeout=15000` | Exit 0, 125 passed at that point. Subsequent final module runs below include three further regressions; these runs overlap |
+| `npm --prefix frontend test -- src/shared/components/MarkdownRenderer.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx --maxWorkers=1 --testTimeout=15000` | Exit 0, final 88 passed: Markdown 64, FE14 24 |
+| `npm --prefix frontend test -- src/features/instructor/course-management/hooks/assessmentHooks.test.tsx --maxWorkers=1 --testTimeout=15000` | Exit 0, final 40 passed, including actual Course/mapping entry points, failed recovery, early/superseded reads, cancellation and replacement isolation |
+| `npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx --testTimeout=15000` | Exit 0, 87 passed, including D1/D1-R1/D1-R2, N1/N6, FE15/FE16/FE18 and draft behavior |
+| `npm --prefix frontend test -- src/routes/index.test.tsx src/shared/api/httpClient.test.ts --maxWorkers=1 --testTimeout=15000` | Exit 0, 319 passed, route/session/navigation and transport regressions |
+| `npm --prefix ../negative/frontend test -- src/shared/components/MarkdownRenderer.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx -t 'FE14-IR-01 sent|FE14-IR-02|FE14-IR-03' --maxWorkers=1 --testTimeout=15000` | Isolated original-baseline negative probe with new tests: expected exit 1, 20 failed / 19 passed / 47 skipped. Includes both sent-child lifecycle cases and all five original URL failures plus recursive definitions. Production remediation sources were never reverted |
+| `npm --prefix frontend test -- src/features/instructor/course-management/pages/fe14Authoring.test.tsx -t 'preserves the acknowledged Lesson' --testTimeout=15000` | Self-audit sensitivity: exit 1 before the mounted-form barrier correction; exit 0 afterwards |
+| `npm --prefix frontend test -- src/features/instructor/course-management/pages/fe14Authoring.test.tsx -t 'CodeQL' --testTimeout=15000` | Exit 0, 1 passed; included in final FE14 24 above |
+| `npm --prefix ../negative/frontend test -- src/features/instructor/course-management/pages/fe14Authoring.test.tsx -t 'CodeQL' --testTimeout=15000` | Isolated old label helper: expected exit 1, 1 failed / 23 skipped |
+| `E2E_MATERIAL_FILES=1 npm --prefix e2e test -- instructor-authoring.spec.ts --grep 'FE14-IR-01' --project=chromium-desktop --project=webkit-desktop --workers=1` | Initial correction probe: exit 1, 3 passed / 1 failed. PUT preserved in both browsers; Chromium PDF recovery passed. WebKit intercepted upload again returned 400 before acceptance; it is not a passed lifecycle scenario |
+| `E2E_MATERIAL_FILES=1 npm --prefix e2e test -- instructor-authoring.spec.ts --project=chromium-desktop --project=webkit-desktop --workers=1` | Final: exit 0, 6 passed / 2 explicitly skipped. Both full authoring journeys and delayed PUT journeys pass; delayed PDF + failed GET/retry passes in Chromium. WebKit upload without interception returns 201 and one row. WebKit delayed multipart interception remains unqualified; its scoped skip is explicit. The other skip is the WebKit-only diagnostic under Chromium. All 7 owned resources finalized absent |
+| `npm --prefix frontend run typecheck` | Exit 0 |
+| `npm --prefix frontend run build` | Exit 0; existing >500 kB Vite chunk warning |
+| `git diff --check` | Exit 0 |
+
+Final positive frontend evidence is **534 unique tests across six suites**, not
+an addition of overlapping run counts. The prior full eight-suite inventory,
+backend suites, Firefox/mobile projects and fixture/recovery qualification were
+not rerun. The unchanged fixture's prior independent qualification is reused;
+only task-owned real integrations were started and finalized. Initial startup
+attempts hit a sandboxed symlink-cache write and missing main-checkout Markdown
+dependencies; an isolated dependency copy followed by pinned `npm ci` resolved
+those setup failures. Intermediate implementation failures were corrected before
+the final positive runs; no failed or unexecuted check is counted as PASS.
+
+### CodeQL adjudication
+
+Read-only GitHub evidence identifies check **CodeQL**, app
+`github-advanced-security` (integration 57789), check-run **139905851960**, at the
+reviewed HEAD (not an inferred PR merge commit). Conclusion: **failure**. Annotation
+and open [alert #8](https://github.com/chi-thanh-nguyen/codemastery/security/code-scanning/8)
+identify `js/incomplete-sanitization`, reported security severity high, in
+`frontend/src/features/instructor/course-management/pages/fe14Authoring.test.tsx:30`:
+`replace('*', '')` handles only the first occurrence. The dynamic analysis run
+**45818858868**, JavaScript job **139905562281**, completed successfully and its
+log confirms result upload; the failure is alert adjudication, not an analysis
+workflow/environment failure. Main's live rules require CodeQL and enforce its
+code-scanning gate; no rule was changed.
+
+Classification: **CONFIRMED_IN_SCOPE_CODE_DEFECT**, limited to test-helper
+correctness. The helper now compares the label's own text nodes, distinguishing
+literal asterisks from the nested required marker. A synthetic DOM label with two
+literal asterisks demonstrates the old failure and the corrected match. No
+production XSS, injection, credential leak or security impact is established by
+this finding. No alert is dismissed/suppressed and no scanner/CI configuration is
+changed. CodeQL on the final revision is **not author-verified PASS**: CI was not
+rerun manually, polled or awaited.
+
+### Inventory and remaining acceptance
+
+The Leader-supplied independent inventory remains historical: 38/41 implemented
+without a confirmed defect, 37/41 independently verified. All three original
+findings are now FIXED_AUTHOR_VERIFIED; that does not convert those counts into
+41/41 independent acceptance. The retrieved JSON does not contain a complete
+41-row crosswalk, so no reconstructed row mapping or new independent total is
+invented. The original 34-row author implementation inventory above is preserved
+as its own denominator. No new product checkpoint or FE08 learner scope is added.
+
+Next gate: targeted delta-focused independent review of IR-01 lifecycle/real
+integration, IR-02/IR-03 URL/reference rendering and the CodeQL helper correction,
+including the explicitly bounded WebKit delayed-multipart evidence gap. Required
+CI, CODEOWNER/protected merge and release/deployment remain separate. No merge,
+approval, Issue closure, Project write, deployment, manual CI rerun or CI wait was
+performed. PR #280 and #286 are untouched. Attribution remains the explicit
+PR-specific consensual heizseung author/committer and chi-thanh-nguyen pusher
+arrangement; implementation/tests/docs are AI-assisted, with no fabricated human
+contribution, signature or review.
