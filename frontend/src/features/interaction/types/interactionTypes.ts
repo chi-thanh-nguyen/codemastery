@@ -1,7 +1,8 @@
 /*
- * Presentation view models for in-app notifications, lesson Q&A and content reports.
- * NOT API contracts: Interaction-owned operations, visibility and delivery are
- * DEFERRED (CT10/CT11). Notifications are in-app only (no email/SMS/push).
+ * Preview presentation models for notifications, lesson Q&A and content reports.
+ * NOT API contracts: production CT11 rows are decoded by notificationApi.ts.
+ * Notification kind/target labels stay fixture metadata and are never rendered
+ * or used for notification navigation. Delivery is in-app only (no email/SMS/push).
  */
 export type NotificationKind = 'content' | 'deadline' | 'result' | 'reply' | 'recommendation';
 export interface NotificationView { id: string; kind: NotificationKind; message: string; createdAtLabel: string; dayGroup: string; read: boolean; targetLabel: string }
