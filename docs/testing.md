@@ -23,6 +23,33 @@ checks and protected integration. This records design, not newly executed tests.
 CT17's two Batch 4 operational checkpoints remain pending Leader inputs.
 Earlier dated records below retain their approval scope and history.
 
+## CO09 / CO12 synchronization verification — 26 November 2026
+
+Under the Project Leader's explicit integration task, Codex merged main
+`87344dfffbf7e6d1fec4d9affb464b4d3b4648f4` into PR #291 starting at
+`e01224c7e6728e564da0be394b51eb02c2f1766d` (merge-base `31d92889`). The two
+content conflicts were resolved by preserving both complete test contributions,
+main's publisher constructor arguments and fixed Clock, and separate CO09/CO12
+evidence sections. No new production behavior or infrastructure correction was
+introduced; reviewed CO09, integrated CO12, SH05 and PR #293 corrections remain.
+
+Executed from `backend/` with Java 25.0.4.1 and the existing disposable
+PostgreSQL/MinIO/Tomcat test infrastructure:
+
+```sh
+./mvnw verify -Dtest=CourseServiceTest -Dit.test='InteractionAdminIntegrationTest#co12*,EnrollmentIntegrationTest#co12*+instructorAuthorsOwnedContentAndLessonPublicationReconcilesLearnerCompletion+coursePublicationChangeReconcilesJoinedCompletionWithoutCascadeOrAdaptiveRewrite+learnerCompletionWaitsBehindAnInstructorLessonPublicationAndCountsTheNewRequiredSet+instructorPublicationAndAdministratorHideSerializeOnTheRootAndTheLastCommitWins,FileStorageIntegrationTest#co09AllEightOperationsAndRealStorage+co09Ir01AllEncodedBindingsAndUnreadBodyTransport+co09UnknownCommitRetainsBothObjects'
+```
+
+**PASS, exit 0:** 83 Course unit tests and 11 integration tests (5 Enrollment,
+4 FileStorage including both unknown-commit parameters, 2 Interaction/Admin),
+with zero failures, errors or skips. The combined cases preserve Lesson event
+behavior and material creation/edit/replacement/publication silence.
+`git diff --check` passed. These are integration-author checks, distinct from
+historical independent review; full-suite, frontend, release and operational
+acceptance are not claimed. Exact-new-HEAD CI, applicable CODEOWNER approval,
+resolved review threads and protected integration remain gates. Remote CI was
+not awaited or manually rerun. Historical records below are unchanged.
+
 ## CO09 protected materials qualification — 25 November 2026
 
 PR #291 delivers backend CO09.file/video/rest, all eight material operations and
@@ -247,6 +274,54 @@ verified existing associated email, with chi-thanh-nguyen as authenticated pushe
 Original contributor commits are preserved; no independent human acceptance is claimed.
 Backend code, shared transport and API persistence availability are distinct from
 FE14/learner UI, AS09, QA10, formal review, CI and operational/release acceptance.
+
+## CO12 publication producer qualification — 25 November 2026
+
+PR #290 implements CO12.event under `CT26-EVENT-2026-11-15-r1` and consumes
+`CT26-SUBSCRIPTION-2026-11-15-r1` only as the producer's transaction boundary
+(ADR012 §§8–9.1, B7-O02). CT21 authoring r1, ADR006 §§3/5, ADR005's unchanged
+Course-root guard, CT14 placement and CT39's negative global-Clock selection apply.
+The actual publication call is `CourseStructureService.setCourseLessonPublication`;
+`CourseManagementService.publishLessonPublished` checks the held root, flushes,
+reads the current Course and joined recipients, then publishes inside that unit.
+
+| Requirement | Production evidence | Executed oracle |
+|---|---|---|
+| Actual hidden-to-published Lesson of a published Course only | Structure publication calls helper only in the changed-to-published branch; helper checks Course status | `InteractionAdminIntegrationTest.co12PublicationReconcilesThenDeliversOnlyAfterCommitAndConsumerFailureIsIsolated` |
+| Reconciliation and flush precede event; recipient set is active/completed, unsigned UUID ascending, distinct and immutable | Existing JDBC reconciliation/joined query, explicit persistence flush, UUID-string ordering and event defensive copy | Same integration case; `CourseServiceTest.co12PayloadUsesOperationClockUnsignedUuidOrderAndFlushBeforeEvent` uses high-bit UUIDs and verifies order of calls |
+| UTC operation-local injectable Clock, exact microseconds, no global bean | Management constructor delegates to local Clock seam and truncates to MICROS | Fixed nanosecond Clock unit test |
+| No-op, hiding, Course publication, edits, Chapter changes and reorder are silent | Sole production helper call is the Lesson transition branch | Interaction case and `EnrollmentIntegrationTest.co12UnauthorizedForeignAndNonPublicationMutationsAreSilent` |
+| Unauthorized, missing and foreign-scoped publication has no event | Existing CT03 admission and authoritative guard precede the branch | Enrollment negative cases and affected authoring regression |
+| Rollback silence, no recipients, committed producer survives listener failure | Spring transactional event synchronization; no production subscriber is added | Two `InteractionAdminIntegrationTest#co12*` cases; test-only AFTER_COMMIT + REQUIRES_NEW probe reads published state on a separate connection before deliberately failing |
+
+Executed with Java 25.0.4.1, the Maven Wrapper and disposable DP01 PostgreSQL:
+
+```sh
+cd backend
+./mvnw -Dtest=CourseServiceTest test
+./mvnw verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test='InteractionAdminIntegrationTest#co12*,EnrollmentIntegrationTest#co12*+instructorAuthorsOwnedContentAndLessonPublicationReconcilesLearnerCompletion+coursePublicationChangeReconcilesJoinedCompletionWithoutCascadeOrAdaptiveRewrite+learnerCompletionWaitsBehindAnInstructorLessonPublicationAndCountsTheNewRequiredSet+instructorPublicationAndAdministratorHideSerializeOnTheRootAndTheLastCommitWins'
+```
+
+The unit run passed 75/75. The final integration selection passed 7/7: two event
+transaction cases in InteractionAdminIntegrationTest, the negative publication
+case and four affected authoring/reconciliation/root-serialization regressions in
+EnrollmentIntegrationTest. No failures, errors or skips remained. Earlier iterations exercised the same producer with three passing
+Course integration cases; transaction cases now live in ADR012 §19.3's dedicated
+Interaction/Admin suite. The deliberate after-commit error is expected evidence,
+not a producer failure. Tests use committed FK-safe fixtures and no shared database.
+
+The comprehensive automated audit of PR #290/#291 found no confirmed CO12
+production defect. This is author-side automated verification, not independent
+human CODEOWNER acceptance. IN15's actual production subscriber, notification
+persistence, pool-capacity operational qualification, QA and protected integration
+remain separate gates. No notification workflow, broker, outbox or global Clock
+was implemented. No remote CI run was awaited or dispatched.
+
+AI-assisted work: Codex implemented and tested the producer under the Project
+Leader's explicit instruction; an isolated automated reviewer inspected both full
+diffs. The Leader explicitly requested TamiaoNguyen author/committer metadata,
+with the verified existing associated email and the Leader's authenticated push.
+Original skeleton attribution is preserved; no human review is claimed.
 
 ## SH05 storage adapter qualification — 25 November 2026
 
