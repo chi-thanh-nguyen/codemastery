@@ -11,17 +11,18 @@ import type { B3QuestionPage, B3QuizOwned } from '../api/assessmentAuthoringApi'
 import { failureStatus, isCancelled, outcomeUnknown, useOwnedQuizzes, useQuizEditor } from './useAssessmentEditor';
 import type { OwnerRead, QuizEditorOperations } from './useAssessmentEditor';
 import { useQuestionBank, useQuestionEditor } from './useQuestionBank';
-import { useSharedCourseState } from './useCourseEditor';
+import { CourseEditorContext, useCourseOperations, useSharedCourseState } from './useCourseEditor';
 import { getOwnedCourse } from '../api/instructorCourseApi';
 import type { OwnedCourse } from '../api/instructorCourseApi';
 import type { QuestionEditorOperations } from './useQuestionBank';
 import { getOwnedSkillGraph } from '../../skill-graph-editor/api/skillGraphApi';
-import { useOwnedSkillGraph } from '../../skill-graph-editor/hooks/useSkillGraph';
+import { useOwnedSkillGraph, useSkillGraphMutations } from '../../skill-graph-editor/hooks/useSkillGraph';
+import type { OwnedSkillGraph } from '../../skill-graph-editor/api/skillGraphApi';
 import type { OwnedSkillGraphRead } from '../../skill-graph-editor/hooks/useSkillGraph';
 
 vi.mock('../api/assessmentAuthoringApi', async (original) => ({ ...await original<object>(), listQuestions: vi.fn(), listOwnedQuizzes: vi.fn(), replaceUnusedQuestion: vi.fn(), createQuiz: vi.fn() }));
 vi.mock('../../skill-graph-editor/api/skillGraphApi', () => ({ getOwnedSkillGraph: vi.fn() }));
-vi.mock('../api/instructorCourseApi', async (original) => ({ ...await original<object>(), getOwnedCourse: vi.fn() }));
+vi.mock('../api/instructorCourseApi', async (original) => ({ ...await original<object>(), getOwnedCourse: vi.fn(), updateOwnedCourse: vi.fn(), setOwnedCoursePublication: vi.fn(), createCourseChapter: vi.fn(), updateCourseChapter: vi.fn(), orderCourseChapters: vi.fn(), createCourseLesson: vi.fn(), orderChapterLessons: vi.fn(), setCourseLessonPublication: vi.fn() }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
 const courseId = '00000000-0000-4000-8000-0000000000c1';
@@ -358,4 +359,123 @@ describe('D1-R2: provider-owned Settings acknowledgment', () => {
         expect(next.out.current!.course.data?.title).toBe('New mount');
         expect(next.out.current!.settingsAcknowledgment).toBeNull();
     });
+});
+
+describe('FE14-IR-01 provider-owned sent mutation obligations', () => {
+    const ownerCourse = (): OwnedCourse => ({ id: courseId, title: 'Original', description: 'Description', prerequisiteDescription: null, publicationStatus: 'hidden', chapters: [] });
+    beforeEach(() => {
+        vi.mocked(getOwnedCourse).mockResolvedValue(ownerCourse());
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue({ courseId, skills: [], prerequisites: [], mappings: [] });
+    });
+    it('registers synchronously, rejects overlapping dependent writes and excludes a GET begun before settlement', async () => {
+        const pending = deferred<string>(), early = deferred<OwnedCourse>(), recovery = deferred<OwnedCourse>();
+        const { out } = await render(() => useSharedCourseState(courseId));
+        let sent!: Promise<string>;
+        await act(async () => { sent = out.current!.courseMutations.run(() => pending.promise, new AbortController().signal); });
+        const forbidden = vi.fn(async () => 'duplicate');
+        await expect(out.current!.courseMutations.run(forbidden, new AbortController().signal)).rejects.toMatchObject({ kind: 'cancelled' });
+        await expect(out.current!.graphMutations.run(forbidden, new AbortController().signal)).rejects.toMatchObject({ kind: 'cancelled' });
+        expect(forbidden).not.toHaveBeenCalled();
+        vi.mocked(getOwnedCourse).mockReturnValueOnce(early.promise).mockReturnValueOnce(recovery.promise);
+        await act(async () => { out.current!.course.reload(); });
+        await act(async () => early.resolve({ ...ownerCourse(), title: 'Read before commit' }));
+        expect(out.current!.course.revalidating).toBe(true);
+        await act(async () => pending.resolve('acknowledged'));
+        await expect(sent).resolves.toBe('acknowledged');
+        expect(out.current!.course.revalidating).toBe(true);
+        await expect(out.current!.courseMutations.run(forbidden, new AbortController().signal)).rejects.toMatchObject({ kind: 'cancelled' });
+        await act(async () => recovery.resolve({ ...ownerCourse(), title: 'Committed' }));
+        expect(out.current!.course.revalidating).toBe(false);
+        expect(out.current!.course.data?.title).toBe('Committed');
+    });
+    it('retains a failed recovery and explicitly retries the read without replaying the operation', async () => {
+        const { out } = await render(() => useSharedCourseState(courseId));
+        vi.mocked(getOwnedCourse).mockRejectedValueOnce(new ApiError('network', 'offline'));
+        const operation = vi.fn(async () => 'acknowledged');
+        await act(async () => { await out.current!.courseMutations.run(operation, new AbortController().signal); });
+        expect(out.current!.course.revalidating).toBe(true);
+        expect(operation).toHaveBeenCalledTimes(1);
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce({ ...ownerCourse(), title: 'Recovered' });
+        await act(async () => { out.current!.course.reload(); });
+        expect(out.current!.course.revalidating).toBe(false);
+        expect(operation).toHaveBeenCalledTimes(1);
+    });
+    it('keeps graph recovery causal through a superseded read and a failed refresh', async () => {
+        const pending = deferred<void>(), early = deferred<OwnedSkillGraph>();
+        const { out } = await render(() => useSharedCourseState(courseId));
+        let sent!: Promise<void>;
+        await act(async () => { sent = out.current!.graphMutations.run(() => pending.promise, new AbortController().signal); });
+        vi.mocked(getOwnedSkillGraph).mockReturnValueOnce(early.promise).mockRejectedValueOnce(new ApiError('network', 'offline'));
+        await act(async () => { out.current!.skillGraph.reload(); });
+        await act(async () => pending.resolve()); await sent;
+        await act(async () => early.resolve({ courseId, skills: [], prerequisites: [], mappings: [] }));
+        expect(out.current!.writesBlocked()).toBe(true);
+        await act(async () => { out.current!.skillGraph.reload(); });
+        expect(out.current!.writesBlocked()).toBe(false);
+    });
+    it('cancels explicitly, records uncertainty and inspects without replay', async () => {
+        const { out } = await render(() => useSharedCourseState(courseId));
+        const cancellation = new AbortController();
+        const operation = vi.fn((options: { signal?: AbortSignal }) => new Promise<never>((_, reject) => {
+            options.signal!.addEventListener('abort', () => reject(new ApiError('cancelled', 'stopped')));
+        }));
+        let result!: Promise<unknown>;
+        await act(async () => { result = out.current!.courseMutations.run(operation, cancellation.signal).catch(e => e); });
+        vi.mocked(getOwnedCourse).mockRejectedValueOnce(new ApiError('network', 'offline'));
+        await act(async () => cancellation.abort());
+        expect(isCancelled(await result)).toBe(true);
+        expect(out.current!.mutationUncertain).toBe(true); expect(out.current!.writesBlocked()).toBe(true);
+        await act(async () => { out.current!.course.reload(); });
+        expect(out.current!.writesBlocked()).toBe(false); expect(out.current!.mutationUncertain).toBe(true);
+        expect(operation).toHaveBeenCalledTimes(1);
+    });
+    it.each(['course', 'session'] as const)('isolates late settlement after %s replacement', async boundary => {
+        const pending = deferred<string>();
+        const { out, rerender } = await render(() => useSharedCourseState(courseId));
+        let options!: { signal?: AbortSignal; isCurrent?: () => boolean }, result!: Promise<unknown>;
+        await act(async () => { result = out.current!.courseMutations.run(o => { options = o; return pending.promise; }, new AbortController().signal).catch(e => e); });
+        if (boundary === 'session') generation = 2;
+        await rerender(() => useSharedCourseState(boundary === 'course' ? '00000000-0000-4000-8000-0000000000c2' : courseId));
+        expect(options.signal?.aborted).toBe(true); expect(options.isCurrent?.()).toBe(false);
+        const reads = vi.mocked(getOwnedCourse).mock.calls.length;
+        await act(async () => pending.resolve('Old result'));
+        expect(isCancelled(await result)).toBe(true);
+        expect(getOwnedCourse).toHaveBeenCalledTimes(reads); expect(out.current!.writesBlocked()).toBe(false);
+    });
+});
+
+
+it('FE14-IR-01 guards actual Course operations and both mapping entry points', async () => {
+    vi.mocked(getOwnedCourse).mockResolvedValue({ id: courseId, title: 'Course', description: 'Description', prerequisiteDescription: null, publicationStatus: 'hidden', chapters: [] });
+    vi.mocked(getOwnedSkillGraph).mockResolvedValue({ courseId, skills: [], prerequisites: [], mappings: [] });
+    let state!: ReturnType<typeof useSharedCourseState>;
+    const consumer: { current?: { course: ReturnType<typeof useCourseOperations>; graph: ReturnType<typeof useSkillGraphMutations> } } = {};
+    function Owner() {
+        state = useSharedCourseState(courseId);
+        return <CourseEditorContext.Provider value={state}><Probe out={consumer} use={() => ({
+            course: useCourseOperations(courseId), graph: useSkillGraphMutations(courseId, state.graphMutations, state.writesBlocked),
+        })} /></CourseEditorContext.Provider>;
+    }
+    await act(async () => root.render(<AuthContext.Provider value={auth}><Owner /></AuthContext.Provider>));
+    const pending = deferred<void>(), recovery = deferred<OwnedCourse>();
+    let sent!: Promise<void>;
+    await act(async () => { sent = state.courseMutations.run(() => pending.promise, new AbortController().signal); });
+    const exercise = async () => {
+        const { course, graph } = consumer.current!;
+        for (const attempt of [
+            () => course.updateMetadata({ title: 'No', description: 'No', prerequisiteDescription: null }),
+            () => course.setPublication('published'), () => course.createChapter('No'), () => course.updateChapter(userId, 'No'),
+            () => course.orderChapters([]), () => course.createLesson(userId, { title: 'No', contentMarkdown: null }),
+            () => course.orderLessons(userId, []), () => course.setLessonPublication(userId, 'published'),
+            () => graph.mapLesson(userId, userId), () => graph.unmapLesson(userId, userId),
+        ]) {
+            await act(async () => { await expect(attempt()).rejects.toMatchObject({ kind: 'cancelled' }); });
+        }
+    };
+    await exercise();
+    vi.mocked(getOwnedCourse).mockReturnValueOnce(recovery.promise);
+    await act(async () => pending.resolve()); await sent;
+    await exercise();
+    await act(async () => recovery.resolve({ id: courseId, title: 'Recovered', description: 'Description', prerequisiteDescription: null, publicationStatus: 'hidden', chapters: [] }));
+    expect(state.writesBlocked()).toBe(false);
 });
