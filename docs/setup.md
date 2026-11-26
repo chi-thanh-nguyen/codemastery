@@ -1,5 +1,37 @@
 # Development Setup
 
+## CO09 protected material consumer — 25 November 2026
+
+PR #291 implements text/canonical external-video authoring and protected PDF material
+create/title/replace/publication/download through the existing SH05 FileStorage adapter.
+The backend keeps MinIO private and streams authorized attachments; it exposes no
+object key, filename or storage URL in material JSON metadata. PDF downloads carry
+attachment disposition with UTF-8 filename, exact length, no-store and nosniff.
+
+Existing MAX_UPLOAD_SIZE configures both multipart/request limits and the per-file
+check (1..2147483647 bytes); the 20MB fallback remains local configuration, not policy.
+Multipart resolution is lazy. Exact material URL rules authenticate first; CT03 and
+type/ancestry admission precede body/part access. The ordered form filter bypasses only
+these routes so a wrong-media form PUT cannot parse before admission. Rejected unread
+uploads use Connection: close; an ingress/client can observe a transport reset, which
+is an unknown upload outcome, never a reason for automatic retry. Cross-origin
+responses expose Content-Disposition. JSON callers and unrelated URL rules remain intact.
+
+Storage configuration validates when the actual S3 bean is consumed; relational-only
+operations do not invent storage credentials. Upload write transactions are owned by
+the operation, begin after storage finishes and recheck under the Course root. Unknown
+commit outcome retains both objects; no background cleanup or key reuse is introduced.
+Download admission/metadata use a read-only REPEATABLE READ snapshot, ending before
+storage opens and before synchronous streaming. Checked resource closure is preserved.
+
+Shared HTTP transport now supports raw FormData and authenticated Blob downloads,
+including unknown upload outcomes and filename* parsing. The production material editor
+and Learner file widget are separate downstream work; no route/UI integration is claimed.
+Runtime privileges require the consumer-specific r13 deployment matrix. Actual VM
+values, explicit upload limit, tmpfs budget, ingress framing margin, private identity,
+operational qualification and any applicable risk acceptance remain operator/Leader gates.
+See [testing evidence](testing.md#co09-protected-materials-qualification--25-november-2026).
+
 ## Purpose and Current Scope
 
 This document describes the current development setup contract, based on

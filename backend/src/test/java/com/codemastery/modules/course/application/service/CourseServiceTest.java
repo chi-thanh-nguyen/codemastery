@@ -805,6 +805,114 @@ class CourseServiceTest {
         verifyNoInteractions(repository);
     }
 
+    @Test void co09ClosedShapesCanonicalVideoAndUtf8Filenames() {
+        var requests = com.codemastery.modules.course.api.dto.CourseStructureRequests.class;
+        assertTrue(com.codemastery.modules.course.api.dto.CourseStructureRequests.relationalMaterialWrite("{\"title\":\"T\",\"materialType\":\"text\",\"textContent\":\"  code\"}").isPresent());
+        for (String json : List.of("{}", "{\"title\":\"T\",\"materialType\":\"text\",\"textContent\":null}",
+                "{\"title\":\"T\",\"title\":\"Duplicate\",\"materialType\":\"text\",\"textContent\":\"x\"}",
+                "{\"title\":\"T\",\"materialType\":\"file\",\"textContent\":\"x\"}",
+                "{\"title\":\"T\",\"materialType\":\"text\",\"textContent\":\"x\",\"externalVideoUrl\":null}")) {
+            assertTrue(com.codemastery.modules.course.api.dto.CourseStructureRequests.relationalMaterialWrite(json).isEmpty());
+        }
+        String canonical = "https://www.youtube-nocookie.com/embed/a_Z-09";
+        assertEquals(canonical, LearningMaterialService.canonicalVideo(" " + canonical + " "));
+        for (String invalid : List.of(canonical+"?x=1",canonical+"#x",canonical+"/more",canonical.replace("https:","http:"),
+                canonical.replace(".com", ".com.evil.test"), canonical.replace(".com", ".com:443"), canonical.replace("www.", "user@www."),
+                canonical.replace("a_Z", "%61_Z"), "<iframe>"+canonical, "\t"+canonical, canonical+"\n")) {
+            assertThrows(com.codemastery.common.exception.BusinessRuleException.class,()->LearningMaterialService.canonicalVideo(invalid));
+        }
+        LearningMaterialService.validateFilename("Bài học.PDF");
+        LearningMaterialService.validateFilename("x".repeat(251)+".pdf");
+        for (String filename : List.of("", "x.zip", "../x.pdf", "C:\\x.pdf", "x\n.pdf", "x".repeat(252)+".pdf", "中".repeat(84)+".pdf")) {
+            assertThrows(com.codemastery.common.exception.BusinessRuleException.class,()->LearningMaterialService.validateFilename(filename));
+        }
+    }
+
+    @Test void co09DownloadOwnsStreamAcrossHeadersCopyDisconnectAndCloseFailure() throws Exception {
+        var materialService = mock(LearningMaterialService.class);
+        var controller = new com.codemastery.modules.course.api.controller.CourseStructureController(mock(CourseStructureService.class), service, materialService);
+        var request = new org.springframework.mock.web.MockHttpServletRequest();
+        for (String scenario : List.of("success", "headers", "copy", "copy-and-close")) {
+            var closed = new java.util.concurrent.atomic.AtomicBoolean();
+            java.io.IOException copyFailure = new java.io.IOException("synthetic disconnect"), closeFailure = new java.io.IOException("synthetic close");
+            var input = new java.io.ByteArrayInputStream(new byte[]{37,80,68,70,45}) {
+                @Override public void close() throws java.io.IOException { closed.set(true); if (scenario.equals("copy-and-close")) throw closeFailure; super.close(); }
+            };
+            when(materialService.downloadMaterialFile(COURSE,OTHER,ACTOR)).thenReturn(new LearningMaterialService.MaterialFile("Bài.pdf","application/pdf",5,input));
+            var response = new org.springframework.mock.web.MockHttpServletResponse() {
+                @Override public void setHeader(String name, String value) { if(scenario.equals("headers")) throw new IllegalStateException("synthetic header failure"); super.setHeader(name,value); }
+                @Override public jakarta.servlet.ServletOutputStream getOutputStream() {
+                    if(!scenario.startsWith("copy")) return super.getOutputStream();
+                    return new jakarta.servlet.ServletOutputStream() {
+                        public boolean isReady(){return true;} public void setWriteListener(jakarta.servlet.WriteListener listener){}
+                        public void write(int value)throws java.io.IOException{throw copyFailure;}
+                    };
+                }
+            };
+            if (scenario.equals("success")) {
+                controller.downloadMaterialFile(COURSE.toString(),OTHER.toString(),ACTOR.toString(),request,response);
+                assertTrue(response.getHeader("Content-Disposition").contains("filename*=UTF-8''B%C3%A0i.pdf"));
+            } else if(scenario.equals("headers")) {
+                assertThrows(IllegalStateException.class,()->controller.downloadMaterialFile(COURSE.toString(),OTHER.toString(),ACTOR.toString(),request,response));
+            } else {
+                var thrown=assertThrows(java.io.IOException.class,()->controller.downloadMaterialFile(COURSE.toString(),OTHER.toString(),ACTOR.toString(),request,response));
+                assertSame(copyFailure,thrown);
+                if(scenario.equals("copy-and-close"))assertArrayEquals(new Throwable[]{closeFailure},thrown.getSuppressed());
+            }
+            assertTrue(closed.get(),scenario);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"create", "update", "publication", "file-title", "file-publication"})
+    void co09JsonAdmissionNeverReadsARejectedBody(String operation) throws Exception {
+        var access = mock(CourseAccessService.class);
+        var materials = mock(LearningMaterialService.class);
+        var controller = new com.codemastery.modules.course.api.controller.CourseStructureController(
+                mock(CourseStructureService.class), access, materials);
+        var request = mock(jakarta.servlet.http.HttpServletRequest.class);
+        when(request.getContentType()).thenReturn("application/json");
+        var denied = new ResourceNotFoundException("Resource not available");
+        switch (operation) {
+            case "create" -> doThrow(denied).when(access).requireLessonOwnership(COURSE, LESSON);
+            case "update", "publication" -> doThrow(denied).when(materials).requireOwnedRelational(COURSE, LESSON, MATERIAL);
+            default -> doThrow(denied).when(materials).requireOwnedFile(COURSE, LESSON, MATERIAL);
+        }
+        assertSame(denied, assertThrows(ResourceNotFoundException.class, () -> {
+            switch (operation) {
+                case "create" -> controller.createRelationalMaterial(COURSE.toString(), LESSON.toString(), request);
+                case "update" -> controller.updateRelationalMaterial(COURSE.toString(), LESSON.toString(), MATERIAL.toString(), request);
+                case "publication" -> controller.setRelationalMaterialPublication(COURSE.toString(), LESSON.toString(), MATERIAL.toString(), request);
+                case "file-title" -> controller.updateFileMaterialTitle(COURSE.toString(), LESSON.toString(), MATERIAL.toString(), request);
+                default -> controller.setFileMaterialPublication(COURSE.toString(), LESSON.toString(), MATERIAL.toString(), request);
+            }
+        }));
+        verify(request, never()).getInputStream();
+        verify(request, never()).getReader();
+        if (operation.equals("update") || operation.equals("publication")) {
+            verify(materials).requireOwnedRelational(COURSE, LESSON, MATERIAL);
+        } else if (operation.startsWith("file-")) {
+            verify(materials).requireOwnedFile(COURSE, LESSON, MATERIAL);
+        }
+        verifyNoMoreInteractions(materials);
+    }
+
+    @Test void co09TitleCloseFailureNeverAcquiresFileStream() throws Exception {
+        var request = mock(org.springframework.web.multipart.MultipartHttpServletRequest.class);
+        var title = mock(jakarta.servlet.http.Part.class); var file = mock(jakarta.servlet.http.Part.class);
+        when(title.getName()).thenReturn("title"); when(file.getName()).thenReturn("file");
+        when(file.getSubmittedFileName()).thenReturn("slides.pdf");
+        when(request.getParts()).thenReturn(List.of(title,file));
+        when(title.getInputStream()).thenReturn(new java.io.ByteArrayInputStream("Title".getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+            @Override public void close() throws java.io.IOException { throw new java.io.IOException("synthetic title close"); }
+        });
+        var method = com.codemastery.modules.course.api.controller.CourseStructureController.class.getDeclaredMethod("fileMaterialUpload",org.springframework.web.multipart.MultipartHttpServletRequest.class);
+        method.setAccessible(true);
+        var thrown = assertThrows(java.lang.reflect.InvocationTargetException.class,()->method.invoke(null,request));
+        assertInstanceOf(com.codemastery.common.exception.BusinessRuleException.class,thrown.getCause());
+        verify(file,never()).getInputStream();
+    }
+
     @Test void co12PayloadUsesOperationClockUnsignedUuidOrderAndFlushBeforeEvent() {
         var joined = mock(com.codemastery.modules.course.domain.repository.EnrollmentRepository.class);
         var events = mock(org.springframework.context.ApplicationEventPublisher.class);

@@ -14,7 +14,7 @@ export interface ProblemDetail {
     instance: string;
     errors?: ProblemDetailError[];
 }
-export type ApiErrorKind = 'http' | 'protocol' | 'network' | 'cancelled' | 'configuration' | 'validation';
+export type ApiErrorKind = 'unknown-outcome' | 'http' | 'protocol' | 'network' | 'cancelled' | 'configuration' | 'validation';
 /** Safe local representations; never raw response diagnostics. */
 export class ApiError extends Error {
     constructor(
