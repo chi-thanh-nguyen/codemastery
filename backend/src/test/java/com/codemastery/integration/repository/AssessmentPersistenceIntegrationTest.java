@@ -2209,6 +2209,90 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                 jdbc.update("DELETE FROM users WHERE id=?", otherInstructor);
             }
         }
+
+        @Autowired
+        private org.springframework.context.ConfigurableApplicationContext eventBusContext;
+
+        @Test
+        void manualSubmitAndExpiryPublishValidatedQuizSubmittedEventOnceAfterFlushingAndRollbackOnListenerFailure() {
+            java.util.List<com.codemastery.modules.assessment.application.event.QuizSubmittedEvent> captured =
+                    new java.util.concurrent.CopyOnWriteArrayList<>();
+            java.util.concurrent.atomic.AtomicBoolean listenerActive = new java.util.concurrent.atomic.AtomicBoolean(true);
+            java.util.concurrent.atomic.AtomicBoolean throwOnEvent = new java.util.concurrent.atomic.AtomicBoolean(false);
+            java.util.concurrent.atomic.AtomicBoolean sawActiveTx = new java.util.concurrent.atomic.AtomicBoolean(false);
+            java.util.concurrent.atomic.AtomicReference<com.codemastery.modules.assessment.application.service.AttemptService.LatestSkillEvidence> evidenceInListener =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            UUID expectedCourse = courseId;
+            eventBusContext.addApplicationListener(
+                    new org.springframework.context.ApplicationListener<org.springframework.context.PayloadApplicationEvent<?>>() {
+                        @Override
+                        public void onApplicationEvent(org.springframework.context.PayloadApplicationEvent<?> payloadEvent) {
+                            if (!listenerActive.get()) {
+                                return;
+                            }
+                            if (!(payloadEvent.getPayload() instanceof com.codemastery.modules.assessment.application.event.QuizSubmittedEvent event)
+                                    || !expectedCourse.equals(event.courseId())) {
+                                return;
+                            }
+                            sawActiveTx.set(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+                            evidenceInListener.set(live.readLatestSkillEvidence(
+                                    event.courseId(), event.learnerId(), java.util.Set.of(skillId)));
+                            captured.add(event);
+                            if (throwOnEvent.get()) {
+                                throw new IllegalStateException("simulated adaptive failure");
+                            }
+                        }
+                    });
+            try {
+                asLearner();
+                var first = live.start(courseId, quizId).attempt();
+                live.saveAnswers(courseId, quizId, first.attemptId(), answers(false));
+                assertEquals(0, captured.size());
+
+                var submitted = live.submit(courseId, quizId, first.attemptId(), answers(true));
+                assertEquals(1, captured.size());
+                assertTrue(sawActiveTx.get());
+                org.junit.jupiter.api.Assertions.assertNotNull(evidenceInListener.get());
+                assertTrue(evidenceInListener.get().bySkill().containsKey(skillId));
+                var event = captured.getFirst();
+                assertEquals(first.attemptId(), event.attemptId());
+                assertEquals(learner, event.learnerId());
+                assertEquals(courseId, event.courseId());
+                assertEquals(quizId, event.quizId());
+                assertEquals(1, event.attemptNumber());
+                assertEquals(submitted.submittedAt(), event.submittedAt());
+                assertEquals(2, event.answers().size());
+
+                live.submit(courseId, quizId, first.attemptId(), answers(false));
+                assertEquals(1, captured.size());
+
+                var second = live.start(courseId, quizId).attempt();
+                Instant pastStart = second.startedAt().minusSeconds(600);
+                Instant pastExpiry = second.startedAt().minusSeconds(60);
+                jdbc.update("UPDATE attempts SET started_at=?, expires_at=? WHERE id=?",
+                        java.sql.Timestamp.from(pastStart), java.sql.Timestamp.from(pastExpiry), second.attemptId());
+                live.finalizeExpired(second.attemptId());
+                assertEquals(2, captured.size());
+                assertEquals(second.attemptId(), captured.get(1).attemptId());
+                assertEquals(pastExpiry, captured.get(1).submittedAt());
+
+                live.finalizeExpired(second.attemptId());
+                assertEquals(2, captured.size());
+
+                var third = live.start(courseId, quizId).attempt();
+                live.saveAnswers(courseId, quizId, third.attemptId(), answers(false));
+                throwOnEvent.set(true);
+                assertThrows(IllegalStateException.class,
+                        () -> live.submit(courseId, quizId, third.attemptId(), answers(true)));
+                assertNull(jdbc.queryForObject(
+                        "SELECT submitted_at FROM attempts WHERE id=?", java.sql.Timestamp.class, third.attemptId()));
+                assertEquals(2, jdbc.queryForObject(
+                        "SELECT count(*) FROM attempt_answers WHERE attempt_id=? AND correct IS NULL",
+                        Integer.class, third.attemptId()));
+            } finally {
+                listenerActive.set(false);
+            }
+        }
     }
 
 }

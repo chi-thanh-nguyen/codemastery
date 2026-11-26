@@ -56,6 +56,8 @@ import org.springframework.security.access.AccessDeniedException;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import com.codemastery.modules.assessment.application.event.QuizSubmittedEvent;
+import com.codemastery.modules.assessment.application.event.QuizSubmittedEvent.AnswerEvidence;
 import com.codemastery.modules.assessment.application.scheduler.AttemptAutoSubmitScheduler;
 import com.codemastery.modules.assessment.application.service.AttemptService;
 import com.codemastery.modules.assessment.application.service.AttemptService.AnswerInput;
@@ -81,7 +83,10 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Set;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.ApplicationEventPublisher;
 
 /**
  * ADR008 §5 placement for CT23 quiz authoring and publication (AS06; ADR007 §§5–7, B3-O01/O03).
@@ -907,17 +912,28 @@ class TimedAttempts {
                 java.util.Map.entry("readMyPlacementQuizId", java.util.Set.of(adaptive + "mastery/PlacementDiagnosticService.java")));
         try (var files = java.nio.file.Files.walk(root)) {
             for (var file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
-                var scan = scanAssessmentCalls(java.nio.file.Files.readString(file));
+                String code = java.nio.file.Files.readString(file);
+                var scan = scanAssessmentCalls(code);
                 String relative = root.relativize(file).toString().replace('\\', '/');
                 for (var entry : allowed.entrySet()) if (scan.calls().contains(entry.getKey())) {
                     assertTrue(entry.getValue().contains(relative), file + ": " + entry.getKey());
                 }
                 if (relative.startsWith(assessment + "api/")) {
                     for (String forbidden : List.of("LatestSkillEvidence", "SkillEvidence", "LearnerAttemptSummary",
-                            "readLatestSkillEvidence", "readMyLatestSkillEvidence",
+                            "QuizSubmittedEvent", "readLatestSkillEvidence", "readMyLatestSkillEvidence",
                             "readOwnedLatestSkillEvidence", "listLearnerAttemptsForOwner")) {
                         assertFalse(scan.identifiers().contains(forbidden), file + " exposes " + forbidden);
                     }
+                }
+                if ("QuizSubmittedEvent.java".equals(file.getFileName().toString())) {
+                    assertFalse(code.contains("modules.adaptive"), file + ": event contract must stay decoupled from adaptive");
+                    assertFalse(code.contains("modules.interaction"), file + ": event contract must stay decoupled from interaction");
+                }
+                if ("AttemptService.java".equals(file.getFileName().toString())) {
+                    assertFalse(code.contains("QuizSubmittedEventListener"), file + ": publisher must not reference adaptive listener");
+                    assertFalse(code.contains("modules.adaptive.application.listener"), file + ": publisher must not import adaptive listeners");
+                    assertFalse(code.contains("modules.adaptive.domain"), file + ": publisher must not import adaptive domain");
+                    assertFalse(code.contains("modules.interaction"), file + ": publisher must not import interaction types");
                 }
             }
         }
@@ -1071,6 +1087,285 @@ class TimedAttempts {
         @Override
         public Instant instant() {
             return instant;
+        }
+    }
+
+    @Nested
+    class QuizSubmittedEventContract {
+
+        @Test
+        void quizSubmittedEventEnforcesCt08SchemaImmutabilityAndInvariants() {
+            Instant startedAt = Instant.parse("2026-11-26T10:00:00Z");
+            Instant expiresAt = Instant.parse("2026-11-26T10:10:00Z");
+            List<String> eventFields = java.util.Arrays.stream(QuizSubmittedEvent.class.getRecordComponents())
+                    .map(c -> c.getType().getSimpleName() + " " + c.getName())
+                    .toList();
+            assertEquals(List.of(
+                    "UUID attemptId",
+                    "UUID learnerId",
+                    "UUID courseId",
+                    "UUID quizId",
+                    "String quizKind",
+                    "int attemptNumber",
+                    "Instant startedAt",
+                    "Instant expiresAt",
+                    "Instant submittedAt",
+                    "List answers"), eventFields);
+            List<String> itemFields = java.util.Arrays.stream(AnswerEvidence.class.getRecordComponents())
+                    .map(c -> c.getType().getSimpleName() + " " + c.getName())
+                    .toList();
+            assertEquals(List.of(
+                    "UUID questionId",
+                    "int position",
+                    "UUID skillId",
+                    "boolean correct"), itemFields);
+
+            AnswerEvidence first = new AnswerEvidence(Q1, 1, SKILL, true);
+            AnswerEvidence third = new AnswerEvidence(Q2, 3, SKILL, false);
+            List<AnswerEvidence> callerList = new ArrayList<>(List.of(first, third));
+
+            for (String kind : List.of("practice", "diagnostic", "test")) {
+                QuizSubmittedEvent boundaryStart = new QuizSubmittedEvent(
+                        UUID.randomUUID(), learnerId, COURSE, QUIZ, kind, 1,
+                        startedAt, expiresAt, startedAt, callerList);
+                QuizSubmittedEvent boundaryEnd = new QuizSubmittedEvent(
+                        UUID.randomUUID(), learnerId, COURSE, QUIZ, kind, 2,
+                        startedAt, expiresAt, expiresAt, callerList);
+                assertEquals(startedAt, boundaryStart.submittedAt());
+                assertEquals(expiresAt, boundaryEnd.submittedAt());
+                assertEquals(List.of(first, third), boundaryEnd.answers());
+            }
+
+            QuizSubmittedEvent defensive = new QuizSubmittedEvent(
+                    UUID.randomUUID(), learnerId, COURSE, QUIZ, "practice", 1,
+                    startedAt, expiresAt, startedAt.plusSeconds(60), callerList);
+            callerList.clear();
+            assertEquals(2, defensive.answers().size());
+            assertThrows(UnsupportedOperationException.class, () -> defensive.answers().clear());
+
+            UUID id = UUID.randomUUID();
+            assertThrows(NullPointerException.class, () -> new QuizSubmittedEvent(
+                    null, learnerId, COURSE, QUIZ, "practice", 1, startedAt, expiresAt, startedAt, List.of(first)));
+            assertThrows(NullPointerException.class, () -> new QuizSubmittedEvent(
+                    id, null, COURSE, QUIZ, "practice", 1, startedAt, expiresAt, startedAt, List.of(first)));
+            assertThrows(NullPointerException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, null, QUIZ, "practice", 1, startedAt, expiresAt, startedAt, List.of(first)));
+            assertThrows(NullPointerException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, null, "practice", 1, startedAt, expiresAt, startedAt, List.of(first)));
+            assertThrows(NullPointerException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, null, 1, startedAt, expiresAt, startedAt, List.of(first)));
+            assertThrows(NullPointerException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "practice", 1, null, expiresAt, startedAt, List.of(first)));
+            assertThrows(NullPointerException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "practice", 1, startedAt, null, startedAt, List.of(first)));
+            assertThrows(NullPointerException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "practice", 1, startedAt, expiresAt, null, List.of(first)));
+            assertThrows(NullPointerException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "practice", 1, startedAt, expiresAt, startedAt, null));
+            assertThrows(IllegalArgumentException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "Practice", 1, startedAt, expiresAt, startedAt, List.of(first)));
+            assertThrows(IllegalArgumentException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "exam", 1, startedAt, expiresAt, startedAt, List.of(first)));
+            assertThrows(IllegalArgumentException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "practice", 0, startedAt, expiresAt, startedAt, List.of(first)));
+            assertThrows(IllegalArgumentException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "practice", 1, startedAt, startedAt, startedAt, List.of(first)));
+            assertThrows(IllegalArgumentException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "practice", 1, startedAt, expiresAt, startedAt.minusMillis(1), List.of(first)));
+            assertThrows(IllegalArgumentException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "practice", 1, startedAt, expiresAt, expiresAt.plusMillis(1), List.of(first)));
+            assertThrows(IllegalArgumentException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "practice", 1, startedAt, expiresAt, startedAt, List.of()));
+            List<AnswerEvidence> withNull = new ArrayList<>();
+            withNull.add(first);
+            withNull.add(null);
+            assertThrows(NullPointerException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "practice", 1, startedAt, expiresAt, startedAt, withNull));
+            assertThrows(IllegalArgumentException.class, () -> new AnswerEvidence(Q1, 0, SKILL, true));
+            assertThrows(NullPointerException.class, () -> new AnswerEvidence(null, 1, SKILL, true));
+            assertThrows(NullPointerException.class, () -> new AnswerEvidence(Q1, 1, null, true));
+            assertThrows(IllegalArgumentException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "practice", 1, startedAt, expiresAt, startedAt,
+                    List.of(first, new AnswerEvidence(Q1, 2, SKILL, false))));
+            assertThrows(IllegalArgumentException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "practice", 1, startedAt, expiresAt, startedAt,
+                    List.of(first, new AnswerEvidence(Q2, 1, SKILL, false))));
+            assertThrows(IllegalArgumentException.class, () -> new QuizSubmittedEvent(
+                    id, learnerId, COURSE, QUIZ, "practice", 1, startedAt, expiresAt, startedAt,
+                    List.of(third, first)));
+        }
+
+        @Test
+        void manualSubmitPublishesOnceAfterPersistenceWithGapsAndIgnoresDuplicateSubmit() {
+            ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+            AttemptService publishedService = new AttemptService(
+                    attemptRepo, quizRepo, new QuizGradingService(), access, identities,
+                    attemptGuard, attemptSkills, clock, publisher);
+
+            UUID attemptId = UUID.randomUUID();
+            Instant startedAt = Instant.parse("2026-11-26T10:00:00Z");
+            Instant expiresAt = Instant.parse("2026-11-26T10:10:00Z");
+            clock.advanceSeconds(300);
+
+            Quiz published = new Quiz(QUIZ, COURSE, "Mastery Check", "test", 600, "published");
+            Attempt active = new Attempt(attemptId, learnerId, QUIZ, 2, startedAt, expiresAt, null, null);
+            AttemptAnswer a1 = new AttemptAnswer(UUID.randomUUID(), attemptId, Q1, 1, new Boolean[] {false, false}, null);
+            AttemptAnswer a2 = new AttemptAnswer(UUID.randomUUID(), attemptId, Q2, 3, new Boolean[] {false, false, false}, null);
+
+            when(quizRepo.findInCourseForUpdate(QUIZ, COURSE)).thenReturn(Optional.of(published));
+            when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ, twoQuestions()));
+            when(attemptRepo.findInQuizForUpdate(attemptId, QUIZ)).thenReturn(Optional.of(active));
+            when(attemptRepo.findAnswersInPositionOrderForUpdate(attemptId)).thenReturn(List.of(a1, a2));
+            when(attemptRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            org.mockito.Mockito.doAnswer(inv -> {
+                verify(attemptRepo).updateAnswers(anyList());
+                verify(attemptRepo).save(any());
+                return null;
+            }).when(publisher).publishEvent(any(Object.class));
+
+            AnswersInput submission = new AnswersInput(List.of(
+                    new AnswerInput(Q2, List.of(true, false, false)),
+                    new AnswerInput(Q1, List.of(false, true))));
+            publishedService.submit(COURSE, QUIZ, attemptId, submission);
+
+            ArgumentCaptor<QuizSubmittedEvent> eventCaptor = ArgumentCaptor.forClass(QuizSubmittedEvent.class);
+            verify(publisher, times(1)).publishEvent(eventCaptor.capture());
+            QuizSubmittedEvent emitted = eventCaptor.getValue();
+            assertEquals(attemptId, emitted.attemptId());
+            assertEquals(learnerId, emitted.learnerId());
+            assertEquals(COURSE, emitted.courseId());
+            assertEquals(QUIZ, emitted.quizId());
+            assertEquals("test", emitted.quizKind());
+            assertEquals(2, emitted.attemptNumber());
+            assertEquals(startedAt, emitted.startedAt());
+            assertEquals(expiresAt, emitted.expiresAt());
+            assertEquals(Instant.parse("2026-11-26T10:05:00Z"), emitted.submittedAt());
+            assertEquals(List.of(
+                    new AnswerEvidence(Q1, 1, SKILL, true),
+                    new AnswerEvidence(Q2, 3, SKILL, false)), emitted.answers());
+
+            Attempt submitted = new Attempt(attemptId, learnerId, QUIZ, 2, startedAt, expiresAt,
+                    Instant.parse("2026-11-26T10:05:00Z"), new BigDecimal("50.00"));
+            AttemptAnswer g1 = new AttemptAnswer(a1.id(), attemptId, Q1, 1, new Boolean[] {false, true}, true);
+            AttemptAnswer g2 = new AttemptAnswer(a2.id(), attemptId, Q2, 3, new Boolean[] {true, false, false}, false);
+            when(attemptRepo.findInQuizForUpdate(attemptId, QUIZ)).thenReturn(Optional.of(submitted));
+            when(attemptRepo.findAnswersInPositionOrderForUpdate(attemptId)).thenReturn(List.of(g1, g2));
+
+            publishedService.submit(COURSE, QUIZ, attemptId, submission);
+            verify(publisher, times(1)).publishEvent(any(Object.class));
+        }
+
+        @Test
+        void finalizeExpiredPublishesOnceWithLogicalExpiresAtAndDoesNotRepublishOrPublishNonSubmissions() {
+            ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+            AttemptService publishedService = new AttemptService(
+                    attemptRepo, quizRepo, new QuizGradingService(), access, identities,
+                    attemptGuard, attemptSkills, clock, publisher);
+
+            Quiz hiddenDiag = new Quiz(QUIZ, COURSE, "Diag", "diagnostic", 600, "hidden");
+            when(quizRepo.findInCourse(QUIZ, COURSE)).thenReturn(Optional.of(new Quiz(QUIZ, COURSE, "Diag", "diagnostic", 600, "published")));
+            when(quizRepo.findInCourseForUpdate(QUIZ, COURSE)).thenReturn(Optional.of(new Quiz(QUIZ, COURSE, "Diag", "diagnostic", 600, "published")));
+            when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ, twoQuestions()));
+            when(attemptRepo.findUnsubmittedByQuizAndLearner(QUIZ, learnerId)).thenReturn(Optional.empty());
+            when(attemptRepo.findMaxAttemptNumber(QUIZ, learnerId)).thenReturn(0);
+            when(attemptRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            StartOutcome started = publishedService.start(COURSE, QUIZ);
+            Attempt active = new Attempt(started.attempt().attemptId(), learnerId, QUIZ, 1,
+                    started.attempt().startedAt(), started.attempt().expiresAt(), null, null);
+            AttemptAnswer a1 = new AttemptAnswer(UUID.randomUUID(), active.id(), Q1, 1, new Boolean[] {false, false}, null);
+            AttemptAnswer a2 = new AttemptAnswer(UUID.randomUUID(), active.id(), Q2, 3, new Boolean[] {false, false, false}, null);
+            when(attemptRepo.findInQuizForUpdate(active.id(), QUIZ)).thenReturn(Optional.of(active));
+            when(attemptRepo.findAnswersInPositionOrderForUpdate(active.id())).thenReturn(List.of(a1, a2));
+            when(attemptRepo.findInQuizForLearner(active.id(), QUIZ, learnerId)).thenReturn(Optional.of(active));
+            when(attemptRepo.findAnswersInPositionOrder(active.id())).thenReturn(List.of(a1, a2));
+            when(attemptRepo.countByQuizAndLearner(QUIZ, learnerId)).thenReturn(1L);
+            when(attemptRepo.findPageByQuizAndLearner(QUIZ, learnerId, 0, 20)).thenReturn(List.of(active));
+
+            publishedService.saveAnswers(COURSE, QUIZ, active.id(), new AnswersInput(List.of(
+                    new AnswerInput(Q1, List.of(false, true)),
+                    new AnswerInput(Q2, List.of(true, true, false)))));
+            readTx.execute(status -> publishedService.read(COURSE, QUIZ, active.id()));
+            readTx.execute(status -> publishedService.history(COURSE, QUIZ, 0, 20));
+            assertConflict(() -> readTx.execute(status -> publishedService.readResult(COURSE, QUIZ, active.id())));
+
+            when(attemptRepo.findById(active.id())).thenReturn(Optional.of(active));
+            when(quizRepo.findById(QUIZ)).thenReturn(Optional.of(hiddenDiag));
+            when(quizRepo.findInCourseForUpdate(QUIZ, COURSE)).thenReturn(Optional.of(hiddenDiag));
+            publishedService.finalizeExpired(active.id());
+            verify(publisher, never()).publishEvent(any(Object.class));
+
+            clock.advanceSeconds(700);
+            when(attemptRepo.findAnswersInPositionOrderForUpdate(active.id())).thenReturn(List.of(
+                    new AttemptAnswer(a1.id(), active.id(), Q1, 1, new Boolean[] {false, true}, null),
+                    new AttemptAnswer(a2.id(), active.id(), Q2, 3, new Boolean[] {true, true, false}, null)));
+            org.mockito.Mockito.doAnswer(inv -> {
+                verify(attemptRepo, times(2)).updateAnswers(anyList());
+                verify(attemptRepo, times(2)).save(any());
+                return null;
+            }).when(publisher).publishEvent(any(Object.class));
+
+            publishedService.finalizeExpired(active.id());
+            ArgumentCaptor<QuizSubmittedEvent> eventCaptor = ArgumentCaptor.forClass(QuizSubmittedEvent.class);
+            verify(publisher, times(1)).publishEvent(eventCaptor.capture());
+            QuizSubmittedEvent emitted = eventCaptor.getValue();
+            assertEquals("diagnostic", emitted.quizKind());
+            assertEquals(active.expires_at(), emitted.submittedAt());
+            assertEquals(List.of(
+                    new AnswerEvidence(Q1, 1, SKILL, true),
+                    new AnswerEvidence(Q2, 3, SKILL, true)), emitted.answers());
+
+            Attempt alreadySubmitted = new Attempt(active.id(), learnerId, QUIZ, 1,
+                    active.started_at(), active.expires_at(), active.expires_at(), new BigDecimal("100.00"));
+            when(attemptRepo.findInQuizForUpdate(active.id(), QUIZ)).thenReturn(Optional.of(alreadySubmitted));
+            publishedService.finalizeExpired(active.id());
+            verify(publisher, times(1)).publishEvent(any(Object.class));
+        }
+
+        @Test
+        void doesNotPublishOnGradingFailureAndPropagatesListenerExceptionFromSubmitAndExpiry() {
+            ApplicationEventPublisher failingPublisher = mock(ApplicationEventPublisher.class);
+            QuizGradingService failingGrader = mock(QuizGradingService.class);
+            when(failingGrader.grade(anyList())).thenThrow(new IllegalStateException("grader failure"));
+
+            UUID attemptId = UUID.randomUUID();
+            Instant startedAt = Instant.parse("2026-11-26T10:00:00Z");
+            Instant expiresAt = Instant.parse("2026-11-26T10:10:00Z");
+            Attempt active = new Attempt(attemptId, learnerId, QUIZ, 1, startedAt, expiresAt, null, null);
+            AttemptAnswer a1 = new AttemptAnswer(UUID.randomUUID(), attemptId, Q1, 1, new Boolean[] {false, true}, null);
+            AttemptAnswer a2 = new AttemptAnswer(UUID.randomUUID(), attemptId, Q2, 3, new Boolean[] {true, true, false}, null);
+
+            when(quizRepo.findInCourseForUpdate(QUIZ, COURSE)).thenReturn(Optional.of(quiz("published")));
+            when(quizRepo.findById(QUIZ)).thenReturn(Optional.of(quiz("published")));
+            when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ, twoQuestions()));
+            when(attemptRepo.findById(attemptId)).thenReturn(Optional.of(active));
+            when(attemptRepo.findInQuizForUpdate(attemptId, QUIZ)).thenReturn(Optional.of(active));
+            when(attemptRepo.findAnswersInPositionOrderForUpdate(attemptId)).thenReturn(List.of(a1, a2));
+            when(attemptRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+            AttemptService brokenGraderService = new AttemptService(
+                    attemptRepo, quizRepo, failingGrader, access, identities,
+                    attemptGuard, attemptSkills, clock, failingPublisher);
+            AnswersInput submission = new AnswersInput(List.of(
+                    new AnswerInput(Q1, List.of(false, true)),
+                    new AnswerInput(Q2, List.of(true, true, false))));
+            assertThrows(IllegalStateException.class, () -> brokenGraderService.submit(COURSE, QUIZ, attemptId, submission));
+            verify(failingPublisher, never()).publishEvent(any(Object.class));
+
+            org.mockito.Mockito.doThrow(new IllegalStateException("listener boom")).when(failingPublisher).publishEvent(any(Object.class));
+            AttemptService listenerFailureService = new AttemptService(
+                    attemptRepo, quizRepo, new QuizGradingService(), access, identities,
+                    attemptGuard, attemptSkills, clock, failingPublisher);
+
+            clock.advanceSeconds(60);
+            IllegalStateException submitErr = assertThrows(IllegalStateException.class,
+                    () -> listenerFailureService.submit(COURSE, QUIZ, attemptId, submission));
+            assertEquals("listener boom", submitErr.getMessage());
+
+            clock.advanceSeconds(600);
+            IllegalStateException expiryErr = assertThrows(IllegalStateException.class,
+                    () -> listenerFailureService.finalizeExpired(attemptId));
+            assertEquals("listener boom", expiryErr.getMessage());
         }
     }
 }
