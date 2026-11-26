@@ -7799,3 +7799,25 @@ Author-side evidence only, not independent review.
 AI-assisted work: Claude Code reproduced both findings, corrected the Wrappers
 and documentation, wrote the regression and ran these checks under the Leader's
 remediation task.
+
+### PR #293 VM test file renames — 26 November 2026
+
+Three VM test files were renamed under the Leader's naming-standardization
+instruction
+([inventory record](repository-structure.md#bounded-vm-test-file-renames--26-november-2026)):
+`test-phase5-recovery-roundtrip.sh` to `test-recovery-roundtrip.sh`,
+`test-phase5-ssh-gates.sh` to `test-ssh-deployment-gates.sh`, and
+`test_phase5_units.py` to `test_deployment_recovery_units.py`, all under
+`infrastructure/vm/tests/`. Git records each as a rename with unchanged
+content apart from its own run instruction and the unit test's two script names.
+The dated records above keep the former names; use the new paths to run them.
+
+| Command | Result |
+| --- | --- |
+| `CODEMASTERY_OPENSSL=<OpenSSL 3> python3 -m unittest -v infrastructure/vm/tests/test_deployment_recovery_units.py`, macOS arm64 | 48 tests pass, none skipped, including the resource-name case that reads both renamed scripts |
+| `bash infrastructure/vm/tests/test-ssh-deployment-gates.sh`, Docker Desktop 29.8.1 | 3 PASS and 23 expected-refusal lines, `PHASE5_SSH_GATES_PASS`, exit 0 |
+| `bash infrastructure/vm/tests/test-recovery-roundtrip.sh` (helper-container tar), same host | 20 PASS and 10 expected-refusal lines, `PHASE5_RECOVERY_ROUNDTRIP_PASS`, exit 0 |
+| `bash -n` on every VM test, `cd` and host script; `py_compile`; YAML parse of `ci-vm.yml` and `deploy.yml`; `git diff --check` | Pass |
+
+The host GNU tar mode of the recovery test runs as root in CI only. Job names,
+step names, required checks and the completion markers are unchanged.

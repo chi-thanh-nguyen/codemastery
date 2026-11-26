@@ -8,7 +8,7 @@
 #   verification and an isolated PostgreSQL restore -> MinIO restore into a fresh volume and
 #   a server boot with the same identity -> fault injection (writer exclusion, lock
 #   contention, corrupt/forged/replayed sets).
-# Run from the repository root:  bash infrastructure/vm/tests/test-phase5-recovery-roundtrip.sh
+# Run from the repository root:  bash infrastructure/vm/tests/test-recovery-roundtrip.sh
 # Needs Docker and OpenSSL 3 (`openssl` on Ubuntu; CODEMASTERY_OPENSSL elsewhere).
 set -Eeuo pipefail
 export CODEMASTERY_OPENSSL="${CODEMASTERY_OPENSSL:-openssl}"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Unit tests for the ADR017 SSH deployment and recovery tooling (stdlib unittest).
 
-Run from the repository root:  python3 -m unittest -v infrastructure/vm/tests/test_phase5_units.py
+Run from the repository root:  python3 -m unittest -v infrastructure/vm/tests/test_deployment_recovery_units.py
 Cryptographic cases need OpenSSL 3 (`openssl` on Ubuntu, or CODEMASTERY_OPENSSL on macOS);
 they are skipped, and say so, when only LibreSSL is available.
 """
@@ -72,8 +72,8 @@ def release_inventory():
 class FixtureResourceNames(unittest.TestCase):
     def test_use_the_decimal_checksum_field_for_docker_resource_names(self):
         for script, variable, prefix in (
-            ("test-phase5-ssh-gates.sh", "name", "cm-sshgate-"),
-            ("test-phase5-recovery-roundtrip.sh", "project", "cmrt"),
+            ("test-ssh-deployment-gates.sh", "name", "cm-sshgate-"),
+            ("test-recovery-roundtrip.sh", "project", "cmrt"),
         ):
             with open(os.path.join(ROOT, "infrastructure", "vm", "tests", script)) as source:
                 assignment = next(line for line in source if line.startswith(f"{variable}="))
