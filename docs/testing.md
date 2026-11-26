@@ -10016,3 +10016,187 @@ FE14/FE28 coexistence, shared fixture supersession, prospective AS08 impact,
 real-storage evidence and the retained responsive/environment failures. Author
 checks do not close independent CODEOWNER, required-CI, protected integration,
 operational, security or release gates.
+
+
+## FE14 IR-05/IR-06 narrow remediation — 27 November 2026
+
+### Authority, baseline and preserved evidence
+
+The Project Leader explicitly authorized confirmation, narrow remediation, focused
+verification, attribution, commit/push and a factual PR #279 description update.
+`CLAUDE.md` and `CLAUDE_SESSION_CONTEXT_GUIDE.md` were read from the original
+project workspace; both were accessible. Work used a separate clone, preserving
+that workspace and the earlier incomplete macOS inventory. Current source and
+scoped effective ADR/DESIGN contracts govern behavior; the supplied review and
+its JSON/ZIP are historical independent evidence, not new approval.
+
+Starting published HEAD `615a0cb86f0c88cfd0db5c9959e4065e5a03433f`, tree
+`f73e77650143ee753dc18a4774bed2d66ace7050`, main/merge-base
+`114aeec3c6ec5a14eeaa0cf556774e87a7136a8c`: 9 ahead / 0 behind, 24 files
++3139/-129. No intervening delta or additional main integration was needed.
+Code/test remediation commit `a78c34db225d6256c6ae7777ebc43728343ca200`, tree
+`38673ebdac309e6bf888dfe9836fb6dd30e7e101`, descends normally from that HEAD.
+Subsequent documentation commits change only this appended record. Existing
+failed runs, author evidence and independent closures remain historical.
+
+### Confirmed causes and smallest corrections
+
+| Finding | Correction and contract preservation | Author disposition |
+| --- | --- | --- |
+| FE14-IR-05, P2 | Replace the unanchored regex suffix search in production `youtubeEmbedAddress` with two bounded, disjoint scans and `slice`. Each outer ASCII U+0020 is visited at most once; slicing is bounded by input length. URL parsing, exact serialization/origin/path, credential/port/query/fragment rejection, payload and error messages are unchanged. No Unicode trim, input cap, scanner suppression or dependency change | FIXED_AUTHOR_VERIFIED |
+| FE14-IR-06, P2 | The FE14 spec waits for the visible banner and its `Theme:` button at widths >=900, or zero such buttons below 900, before strict overflow sampling. AppHeader's React `desktop` uses the approved MUI `md` breakpoint; DESIGN puts the compact Theme control in the drawer. Both directions use bounded Playwright assertions. `expectNoPageOverflow` remains byte-identical (`scrollWidth <= clientWidth`) | FIXED_AUTHOR_VERIFIED, five-project execution limited by Firefox launch |
+
+Only MaterialForm, its existing API/admission and production authoring test
+files, the existing FE14 E2E spec and this testing record change. No production
+header, shared assertion, lifecycle/storage fixture, CI/Dockerfile, dependency,
+route, policy, normative contract or PR #286 change.
+
+### IR-05 behavior, performance and Sonar
+
+Before editing, lifecycle-controlled production probes at original HEAD reproduced
+120,041-character input (`https://www.youtube-nocookie.com/embed/x`, 120,000 ASCII
+spaces, `!`): synchronous submit took 1911.9 ms in Chromium and 4886 ms in WebKit.
+The corrected full production journey observed 0.9/1.0 ms on the desktop projects
+and 0.8/2.0 ms on Chromium/WebKit mobile, respectively; invalid input dispatched
+zero material writes and exposed the existing accessible field error. The same
+journey then sent a canonical, ASCII-space-normalized video POST with HTTP 201
+and exercised existing editing. Measurements are bounded observations, not
+portable performance guarantees or machine-dependent CI thresholds.
+
+An isolated source-extraction probe compared actual original/corrected functions:
+10k/30k/60k/120k internal-space runs took 39.42/328.00/1303.10/5132.14 ms before,
+and 0.077/0.123/0.235/0.921 ms after. The original production form/function is the
+performance negative control; the correction removes its repeated suffix search.
+A deterministic differential probe checked 49,164 inputs (U+0000..U+3000 in four
+placements, plus outer-space controls): all admission results matched the original.
+Committed tests cover canonical values, ASCII padding, disallowed forms and
+controls, large malformed/all-space/padded values, no dispatch, linked errors,
+and canonical create/edit payloads. They impose no millisecond/ratio oracle.
+
+Live Sonar at original HEAD returned issue `AaIXzm3cFLI6oz5TFngP`,
+`typescript:S8786`, OPEN, line 66, despite a successful Quality Gate.
+Disposition: **S8786_ROOT_CAUSE_REMEDIATED_AUTHOR_VERIFIED**. No NOSONAR,
+false-positive/risk acceptance, exclusion or scanner configuration change.
+Final exact-head scanner status must be read separately; this record does not
+claim official remote closure before matching analysis exists.
+
+### IR-06 geometry and negative controls
+
+Baseline Chromium and WebKit resize-frame observations independently reproduced
+377/360 overflow while CSS was compact but the desktop Theme control remained;
+settled and initial compact layouts fit. This confirms a test synchronization
+defect with the pre-existing shared-header transition dependency, not persistent
+layout failure. No production header correction was warranted.
+
+After synchronization, all four executing projects recorded exact equality of
+scroll/client width at 360, 768, 1024, 1280 and 1440, with desktop Theme counts
+0, 0, 1, 1, 1. All 28 width/Dark/System screenshots were reached. Keyboard mapping
+and subsequent Dark/System assertions remain intact, with no sleep, geometry
+polling, tolerance, retry, removed width or new capability/browser skip.
+
+Disposable probes copied the committed responsive helper verbatim. In both
+Chromium and WebKit: (1) repeated desktop/compact transitions passed with exact
+geometry; (2) after mode synchronization succeeded, an injected 5000px-wide element
+still failed the unchanged strict assertion at 360 and 1280. These four probes
+passed. Initial incomplete-mode injection removed a React-owned node and caused
+two probe failures on the subsequent transition (initial run: exit 1, 4 PASS /
+2 FAIL). This diagnostic is retained, not counted as a product regression or a pass.
+The injection was corrected to hide, then restore, the desktop control without
+removing React-owned DOM. A separate focused rerun (exit 0, 2 PASS) confirmed that
+a never-visible desktop control and a stale visible compact control both fail the
+same bounded mode assertion. No full journey was retried to obtain a pass.
+
+```bash
+(unset E2E_MATERIAL_FILES E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD
+ E2E_WORKERS=1 npm --prefix e2e test -- ir06-negative.probe.spec.ts --project=chromium-desktop --project=webkit-desktop)
+# initial disposable probe: exit 1, 4 PASS / 2 invalid-injection FAIL
+(unset E2E_MATERIAL_FILES E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD
+ E2E_WORKERS=1 npm --prefix e2e test -- ir06-negative.probe.spec.ts --grep 'incomplete responsive mode' --project=chromium-desktop --project=webkit-desktop)
+# corrected incomplete-mode probe: exit 0, 2 PASS
+```
+
+Temporary probes/faults are retained in the evidence archive and removed from the
+checkout. Test source and production source remained at the code commit above.
+
+### Executed commands and matrix
+
+Commands below ran from the isolated repository; overlapping runs are not added
+together as unique coverage. Dependencies came from both existing lockfiles.
+
+| Command | Actual result |
+| --- | --- |
+| `npm --prefix frontend ci`; `npm --prefix e2e ci` | Both exit 0; no manifest/lock change |
+| `npm --prefix frontend test -- src/features/instructor/course-management/api/instructorCourseApi.test.ts src/features/instructor/course-management/pages/fe14Authoring.test.tsx --maxWorkers=1 --testTimeout=15000` | Exit 0, 82 PASS / 2 suites, subsumed by next run |
+| `npm --prefix frontend test -- src/features/instructor/course-management/api/instructorCourseApi.test.ts src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/shared/components/MarkdownRenderer.test.tsx --maxWorkers=1 --testTimeout=15000` | Exit 0, 186 PASS / 4 suites; includes IR-01/02/03, CodeQL helper, causal/consumer protections |
+| `npm --prefix frontend run build` | Exit 0; includes typecheck; existing large-chunk advisory |
+| `node work/complexity-probe.mjs` and `node work/semantics-probe.mjs` from task workspace | Exit 0 after correcting disposable harness module/path setup; observations above |
+| Default full matrix command below | Exit 1: 12 PASS, 4 expected SKIP, 4 Firefox launch FAIL; no application assertion failures or unexpected storage-capability skips |
+| `git diff --check` | Exit 0 |
+
+```bash
+(unset E2E_MATERIAL_FILES E2E_BASE_URL E2E_API_URL E2E_BACKEND_IMAGE E2E_POSTGRES_IMAGE E2E_USERNAME E2E_PASSWORD
+ E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts)
+```
+
+| Project | Full authoring/PDF | Committed PUT/remount | Delayed PDF/recovery | Direct WebKit PDF |
+| --- | --- | --- | --- | --- |
+| chromium-desktop | PASS | PASS | PASS | Expected SKIP |
+| firefox-desktop | Launch FAIL | Launch FAIL | Launch FAIL | Launch FAIL before applicability |
+| webkit-desktop | PASS | PASS | Expected SKIP | PASS |
+| chromium-mobile | PASS | PASS | PASS | Expected SKIP |
+| webkit-mobile | PASS | PASS | Expected SKIP | PASS |
+
+Firefox reports `Could not find profile folder` before application assertions.
+No launch workaround, skip or app change was introduced. The qualified-environment
+oracle remains 15 PASS / 5 expected SKIP; the local 12/4/4 result does not satisfy
+it. No hosted workflow was dispatched, rerun or awaited. Available original-HEAD
+GitHub checks were successful; they are not final-remediation-HEAD evidence.
+
+Default shared provisioning enabled real MinIO without caller opt-in. Passed
+journeys executed actual PDF acceptance, title/replace/download-byte and filename
+checks, publication/hide, protected transport, committed PUT settlement/remount,
+failed recovery/manual retry and one-row PDF recovery. WebKit direct transport
+remains separate from its legitimate delayed-interception skip. Existing tests
+retain real backend/storage operations; no mocks replace them.
+
+Lifecycle runs: baseline `cm-e2e-1a219525874-1d457e`, full matrix
+`cm-e2e-1a21954fbbf-406d68`, initial negative probes
+`cm-e2e-1a21956faf2-6068f4`, corrected mode probes
+`cm-e2e-1a21958a196-8eae92`. Every run completed with all seven owned Docker
+resources verified absent, temporary builds removed and owned processes gone.
+Final recovery via `npm --prefix e2e run stack:down` confirmed absence (exit 0).
+The earlier incomplete macOS inventory is preserved; no broad cleanup, forced
+registry edits or lifecycle fencing bypass occurred.
+
+### Self-audit, inventory and next gate
+
+Full remediation delta inspection preserves IR-01–04, CodeQL #8, D1/D1-R1/D1-R2,
+A1/A2/A3/N1, provider-owned sent-write settlement, cross-unmount recovery, causal
+Course/graph reads, Markdown URL fidelity/recursive definitions, IR-04 storage
+admission, FE14/FE28 coexistence, shared fixture supersession and AS08 integration.
+Their production sources are unchanged. No exactly-once, idempotency, transaction
+ordering or new cancellation guarantee is introduced.
+
+The historical independent inventory remains **39/41 VERIFIED_COMPLETE,
+1/41 IMPLEMENTED_NOT_FULLY_VERIFIED (Q02), 1/41 DEFECTIVE (U02)**. Author evidence
+supports removing U02's IR-05 defect and fixing Q02's responsive synchronization
+portion, not an automatic independent 41/41 upgrade or accessibility acceptance.
+Native 200% zoom, assistive technology and broader QA remain NOT RUN here.
+ADR013 CT19 bucket/explicit-limit discrepancy remains the shared-fixture/FE25
+owner's obligation; no FE14-specific provisioning or production upload policy change.
+
+Overall: **REMEDIATION_IMPLEMENTED_VERIFICATION_LIMITED**, due to unexecuted
+Firefox application assertions and pending final exact-head external analysis.
+Next: **Final Narrow Delta-focused Independent Review — FE14-IR-05 & FE14-IR-06,
+Sonar S8786 Resolution and Responsive Regression Preservation**, comparing
+`615a0cb86f0c88cfd0db5c9959e4065e5a03433f` to final published remediation HEAD.
+Preserve prior closures unless that delta affects them. If unchanged source only
+needs qualified Firefox/scanner execution, use a focused verification follow-up,
+not another comprehensive FE14 review.
+
+Raw author/committer of `aba5e9ce879ef272e1ad4f2ded827ed7828ad6b3` verified as
+`heizseung <thangle12012006@gmail.com>`; new commits use that explicitly consensual
+PR-specific attribution via process-scoped settings. Authenticated pusher is
+`chi-thanh-nguyen`. Codex assisted source/tests/docs; metadata does not establish
+human contribution or independent approval. Refs #199; bounded Refs #193
+(shared renderer retained). No approve/merge, Issue close, Project write or deploy.
