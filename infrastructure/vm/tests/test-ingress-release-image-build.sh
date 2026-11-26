@@ -19,11 +19,11 @@ build_image() {
 build_image --target release --build-arg PUBLIC_ORIGIN=https://ingress.codemastery.test \
   -t "$FRONTEND_RELEASE_IMAGE" frontend
 build_image -t "$FRONTEND_LOCAL_IMAGE" frontend
-backend_cache=()
 if [[ -n "${CODEMASTERY_MAVEN_LAYER_CACHE:-}" ]]; then
-  backend_cache=(--cache-from "type=local,src=$CODEMASTERY_MAVEN_LAYER_CACHE")
+  build_image --cache-from "type=local,src=$CODEMASTERY_MAVEN_LAYER_CACHE" -t "$BACKEND_IMAGE" backend
+else
+  build_image -t "$BACKEND_IMAGE" backend
 fi
-build_image "${backend_cache[@]}" -t "$BACKEND_IMAGE" backend
 bash infrastructure/vm/tests/test-java-truststore.sh "$BACKEND_IMAGE"
 docker image inspect --format 'release frontend: user {{.Config.User}}, healthcheck {{json .Config.Healthcheck.Test}}' \
   "$FRONTEND_RELEASE_IMAGE"

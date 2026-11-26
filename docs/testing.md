@@ -8844,6 +8844,23 @@ The final author-side self-audit checked the complete diff against main, unchang
 required checks and runtime/security contracts, every backend Docker build
 consumer, cache input/ref boundaries, exact verifier status and sentinel controls,
 MinIO credentials/volume ownership and failure recovery, and integration with the
-recorded active revisions. It found no further implementation correction after
-the CT38 Compose-input fix and explicit BuildKit image pin. This is an author
+recorded active revisions. It additionally reproduced and corrected the optional-cache empty-array failure
+under Bash 3.2 with nounset enabled. The committed shell consumer blocks now run
+without a cache, with an explicitly empty cache input and with a spaced cache
+path under the available native Bash versions; the regression failed four cold/
+empty cases before the fix and passes after it. This is an author
 audit, not independent approval.
+
+A final readback found newer PR #279 `b6763a36fb7ef7562a93bc6a19f2f6726cdf1eac`
+and PR #298 `b92606b7ff3f9dc41fdcb2bf6bd91b5330da6f5e`. Both were fetched and
+reintegrated in separate disposable worktrees. Latest #279 repeats 14 passes,
+five existing browser skips and the same WebKit 377/360 overflow after file
+operations, with complete teardown. Its new storage opt-in guards do not skip
+the PDF cases because successful owned setup publishes the capability. Latest
+#298 lifecycle-managed discovery again lists 135 cases and recovers completely;
+its changed adaptive UI journeys remain unexecuted in this qualification.
+
+The final release-tooling suite includes the cold/empty/warm optional-cache
+consumer regression (96 tests total). This follow-up preserves the existing
+Bash 3.2 command path without a cache and tests argument boundaries directly from
+the committed production shell, with Docker replaced only by an argument recorder.

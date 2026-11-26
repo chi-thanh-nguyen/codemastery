@@ -5757,3 +5757,8 @@ new libxml2 findings are reported. This is not a zero-finding or release-admitte
 frontend. A separately qualified Nginx/module security update or the effective
 release authority's exact-artifact disposition remains necessary; this CI
 availability repair does not apply a scanner exception or accept that risk.
+
+The optional cache argument is conditional in the release and ingress shell
+consumers. It uses no empty array expansion under nounset, preserving the
+operator's Bash 3.2 path when the CI-only input is absent. A regression executes
+the actual consumer shell for absent, empty and spaced paths on native Bash.
