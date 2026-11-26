@@ -1920,7 +1920,73 @@ async function runFE28RemediationEngine(playwright, engine, baseUrl) {
         await page.route('**/api/me/notifications?*', handler, { times: 1 });
         return { release, hit };
     };
+    const holdCount = async (page) => {
+        let release;
+        const wait = new Promise((resolve) => { release = resolve; });
+        const hit = page.waitForRequest('**/api/me/notifications/unread-count');
+        await page.route('**/api/me/notifications/unread-count', async (route) => { await wait; await route.fallback().catch(() => undefined); }, { times: 1 });
+        return { release, hit };
+    };
+    const keyboardFocus = async (page, target) => {
+        await target.focus(); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab');
+        assert(await target.evaluate((node) => node === document.activeElement), 'keyboard traversal reaches the intended control');
+    };
     try {
+        if (!baseline) await check('IR-FE28-D01 focused bell survives delayed count transitions and reconciliation', async () => {
+            const x = await fresh({ width: 360, size: 999 }); const { page, api } = x; let hold;
+            const verify = async (original, count, flow) => {
+                await page.getByRole('link', { name: count ? `Notifications, ${count} unread` : 'Notifications', exact: true }).waitFor();
+                const bell = page.locator('header a[href="/notifications"]');
+                const same = await bell.evaluate((node, old) => node === old && old.isConnected, original), focus = await focused(page);
+                result.focus.push({ scenario: 'IR-FE28-D01', flow, count, same, ...focus });
+                assert(same && focus.tag === 'A' && focus.label === (count ? `Notifications, ${count} unread` : 'Notifications'), JSON.stringify(focus));
+                assert(focus.visible && focus.outline !== 'none', 'asynchronous count updates preserve the visible bell focus');
+                assert.equal(await bell.getAttribute('aria-current'), new URL(page.url()).pathname === '/notifications' ? 'page' : null);
+                await page.keyboard.press('Tab'); assert.match((await focused(page)).label, /^Account menu,/, 'Tab continues to the next utility, without repeating the bell');
+                await original.dispose();
+            };
+            try {
+                // Settle bootstrap before installing a one-shot hold for the next supported refresh.
+                await page.getByRole('link', { name: 'Notifications, 999 unread', exact: true }).waitFor();
+                for (const count of [1000, 999, 1000, 0, 1000, null, 1000, 1001, 1100]) {
+                    if (count === null) api.state.fail.set('/me/notifications/unread-count', 500);
+                    else api.state.notifications = Array.from({ length: count }, (_, i) => notice(i + 1));
+                    hold = await holdCount(page);
+                    await page.locator(new URL(page.url()).pathname === '/notifications' ? 'header a[aria-label="CodeMastery home"]' : 'header a[href="/notifications"]').click();
+                    await hold.hit; await page.waitForFunction(() => document.activeElement?.tagName === 'H1');
+                    const bell = page.locator('header a[href="/notifications"]'); await keyboardFocus(page, bell);
+                    const original = await bell.elementHandle(); hold.release(); await verify(original, count, 'route refresh');
+                    api.state.fail.delete('/me/notifications/unread-count');
+                }
+                await ready(page); hold = await holdCount(page);
+                await keyboardFocus(page, page.getByRole('button', { name: 'Mark all as read', exact: true })); await page.keyboard.press('Space');
+                await hold.hit; await ready(page);
+                const bell = page.locator('header a[href="/notifications"]'); await keyboardFocus(page, bell);
+                const original = await bell.elementHandle(); hold.release(); await verify(original, 0, 'mark-all reconciliation');
+                assert.equal(api.state.requests.filter((request) => request.startsWith('PUT ')).length, 1, 'one explicit mutation, no replay');
+                await shot(page, 'D01-after-count-reconciliation');
+            } finally { hold?.release(); await x.close('D01-count-focus'); }
+        });
+        if (!baseline) await check('IR-FE28-D02 compact Home has a 44px target and operable edges', async () => {
+            for (const role of ['Learner', 'Instructor']) for (const preference of ['light', 'dark']) {
+                const x = await fresh({ width: 360, role, preference, count: 1000 });
+                try {
+                    await x.page.getByRole('link', { name: 'Notifications, 1000 unread', exact: true }).waitFor();
+                    for (const width of [320, 360, 389, 390, 400]) {
+                        await x.page.setViewportSize({ width, height: 900 }); await open(x.page);
+                        const geometry = await x.page.getByRole('link', { name: 'CodeMastery home', exact: true }).evaluate((home) => {
+                            const r = home.getBoundingClientRect(), point = { x: r.x + r.width / 2, y: r.y + 1 };
+                            return { x: r.x, y: r.y, width: r.width, height: r.height, point, hit: document.elementFromPoint(point.x, point.y)?.closest('a') === home };
+                        });
+                        result.measurements.push({ track: 'home-target', role, preference, width, count: 1000, home: geometry });
+                        assert(geometry.width >= 44 && geometry.height >= 44 && geometry.hit, JSON.stringify(geometry));
+                        await x.page.mouse.click(geometry.point.x, geometry.point.y);
+                        await x.page.waitForURL((url) => url.pathname === (role === 'Learner' ? '/home' : '/teach'));
+                        if (width === 360) await x.page.locator('header').first().screenshot({ path: path.join(dir, `D02-${role}-${preference}-360.png`) });
+                    }
+                } finally { await x.close(`D02-home-${role}-${preference}`); }
+            }
+        });
         const themes = baseline ? ['light'] : ['light', 'dark', 'system'];
         for (const role of baseline ? ['Learner'] : ['Learner', 'Instructor']) for (const preference of themes) {
             await check(`IR-FE28-01 ${role} ${preference}: count geometry, hit testing and native navigation`, async () => {

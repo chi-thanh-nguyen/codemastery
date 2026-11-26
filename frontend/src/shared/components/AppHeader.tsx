@@ -304,7 +304,7 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
             <Box sx={{ flexShrink: 0, minWidth: 0, display: 'flex' }}>
                 {brandHref ? <ButtonBase component="a" href={brandHref} aria-label="CodeMastery home"
                     onClick={(event: MouseEvent) => { if (!onBrandSelect || !isPlainClick(event)) return; event.preventDefault(); onBrandSelect(); }}
-                    sx={{ borderRadius: `${radius.sm}px`, p: .5 }}>{brand}</ButtonBase> : brand}
+                    sx={{ borderRadius: `${radius.sm}px`, p: .5, minWidth: 44, minHeight: 44 }}>{brand}</ButtonBase> : brand}
             </Box>
             {navItems.length > 0 && <Box component="nav" aria-label="Main navigation" sx={{ display: { xs: 'none', md: 'flex' }, flex: '1 0 auto', justifyContent: 'center', minWidth: 'max-content' }}>
                 <Box component="ul" sx={{ display: 'flex', gap: denseNavigation ? 0 : .5, m: 0, p: 0, listStyle: 'none' }}>
@@ -392,19 +392,20 @@ export function HeaderIconButton({ label, icon, badge, onClick, href, current = 
     const wideBadge = !!badge && String(badge).length >= 4;
     const button = <Tooltip title={label}>
         <IconButton aria-label={name} aria-current={current ? 'page' : undefined} onClick={onClick} {...(href ? { component: 'a', href } : {})}
-            sx={{ position: 'relative', flexShrink: 0, ...(wideBadge ? { gridArea: 'utility', justifySelf: 'center' } : {}),
+            sx={{ position: 'relative', flexShrink: 0, gridArea: 'utility', justifySelf: 'center',
                 color: 'common.white', bgcolor: current ? roles.chrome.raised : undefined, '&:hover': { bgcolor: roles.chrome.raised } }}>
             <PresentationIcon name={icon} sx={wideBadge ? { fontSize: 20 } : undefined} />
             {!!badge && !wideBadge && <Box component="span" aria-hidden sx={{ position: 'absolute', top: 0, right: 0, minWidth: 20, height: 20, px: .5, borderRadius: `${radius.pill}px`,
                 bgcolor: roles.brand.badge, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: '20px', textAlign: 'center', border: `2px solid ${roles.bg.frame}`, boxSizing: 'content-box' }}>{badge}</Box>}
         </IconButton>
     </Tooltip>;
-    return wideBadge ? <Box component="span" data-wide-header-badge sx={{ display: 'inline-grid', gridTemplateAreas: '"utility"', minWidth: 44, height: 44, flexShrink: 0 }}>
+    // Keep the anchor's ancestry stable when an asynchronous count crosses the badge threshold.
+    return <Box component="span" data-wide-header-badge={wideBadge ? '' : undefined} sx={{ display: 'inline-grid', gridTemplateAreas: '"utility"', minWidth: 44, height: 44, flexShrink: 0 }}>
         {button}
         {/* Above the glyph, inside reserved horizontal space and the compact bar's height.
             Pointer transparency supplements containment; it is not the overlap fix. */}
-        <Box component="span" aria-hidden sx={{ gridArea: 'utility', alignSelf: 'start', justifySelf: 'end', transform: 'translateY(-8px)', pointerEvents: 'none',
+        {wideBadge && <Box component="span" aria-hidden sx={{ gridArea: 'utility', alignSelf: 'start', justifySelf: 'end', transform: 'translateY(-8px)', pointerEvents: 'none',
             minWidth: 20, px: .5, borderRadius: `${radius.pill}px`, bgcolor: roles.brand.badge, color: 'common.white',
-            fontSize: '0.8125rem', fontWeight: 600, lineHeight: '16px', whiteSpace: 'nowrap', border: `2px solid ${roles.bg.frame}` }}>{badge}</Box>
-    </Box> : button;
+            fontSize: '0.8125rem', fontWeight: 600, lineHeight: '16px', whiteSpace: 'nowrap', border: `2px solid ${roles.bg.frame}` }}>{badge}</Box>}
+    </Box>;
 }

@@ -8637,3 +8637,77 @@ is reused; no full frontend/backend/E2E/infrastructure suite was repeated. CI wa
 polled or awaited. Native browser zoom, screen readers and physical devices remain
 unverified. The next independent review should assess only this complete delta and
 its relevant header/focus/shared-consumer regressions against `35b9212`.
+
+## FE28 final delta header remediation — 26 November 2026
+
+The Project Leader authorized fixing the two header regressions identified by
+this session's independent delta review of PR #280, then committing and pushing
+the result to the existing PR. Parent revision is
+`fe874324b99a5be466219c618be9dc4906f0c13f`; main/merge-base is
+`cc6cb54ddedf226966a51c9614fc5fc5756267bb`. Codex performed the implementation and
+verification below. These are author verification results, not independent
+acceptance, CODEOWNER approval, QA sign-off or release authorization.
+
+- **IR-FE28-D01:** HeaderIconButton now keeps the same grid wrapper, Tooltip and
+  anchor ancestry for every count. Only badge content, its wide-state attribute
+  and presentation change. A count refresh can no longer replace the focused
+  anchor when crossing 999/1000, zero or unknown. Intrinsic count reservation,
+  the 44px circle, full accessible count and native handlers are preserved.
+  No asynchronous focus restoration, new callback or session state is added.
+- **IR-FE28-D02:** the Home ButtonBase has a minimum 44px width and height. The
+  existing artwork scale, padding and responsive wordmark policy remain intact.
+  This supplies the missing target area for the compact lockup at 360–389px and
+  also covers the pre-existing narrower mark-only state. Real edge clicks verify
+  the target; no invisible-extension assumption is used.
+
+Regression evidence was collected before runtime edits: eight new component
+outcomes produced six failures on branch changes and two passing within-wide
+controls. The new production-browser D01/D02 cases failed on the unmodified
+`fe87432` artifact in Chromium, WebKit and Firefox (six expected failures).
+After the fix, all eight component cases pass, including exact anchor identity,
+focus, current/name state and action dispatch. Browser D01 holds supported
+route-refresh and mark-all reconciliation count reads, places real keyboard
+focus on the bell, then releases threshold/zero/unknown and within-wide updates.
+It checks identity, visible focus and Tab continuation to Account, with one
+explicit PUT and no replay. D02 checks actual 44px geometry, edge hit testing
+and navigation at 320/360/389/390/400px for both roles and Light/Dark.
+
+Validation from the isolated frontend:
+
+```bash
+npm test -- src/features/interaction src/routes/index.test.tsx src/shared/components/presentation.test.tsx src/shared/components/presentation.browser.test.ts
+npm run typecheck
+VITE_API_BASE_URL=/api npm run build -- --outDir <external-build-directory>
+node --check src/shared/components/presentation.browser.cjs
+npm run test:browser -- --fe28 --playwright <installed-module> --url <owned-production-url> --out <external-directory> --engine chromium,webkit,firefox
+npm run test:browser -- --fe28-remediation --case IR-FE28 --playwright <installed-module> --url <owned-production-url> --out <external-directory> --engine chromium,webkit,firefox
+npm run test:browser -- --fe28-remediation --case supplemental --playwright <installed-module> --url <owned-production-url> --out <external-directory> --engine chromium,webkit,firefox
+```
+
+Results: **370/370 selected Vitest tests pass**, typecheck, production build,
+syntax and diff checks pass (the existing large-chunk advisory remains).
+**90 browser checks pass**: 57 existing FE28 checks plus 24 focused header cases
+and 9 supplemental containment/native-navigation/diagnostic cases. Each of
+Chromium 153.0.8010.12, WebKit 26.6 and Firefox 155.0 passes all 30 selected checks.
+There are 1,884 header/containment measurements, including 60 compact Home target
+measurements (minimum 44 by 44), and 30 delayed count-transition focus receipts.
+All preserve the anchor and meaningful keyboard continuation. No uncaught page
+errors or fixture corrections occurred in these runs. `--case` excludes unchanged
+scenarios deliberately; skipped selection entries are not counted as test passes.
+
+The existing cached Playwright 1.63.0 Linux arm64 image was used with non-root
+UID 501:20, network none and an owned loopback production server. Controlled REST
+doubles supply synthetic sessions/data; this is not a new real-backend run.
+No production infrastructure, real credentials, dependencies or browser security
+settings changed. Builds, traces, screenshots and source/artifact hashes remain
+outside the tracked repository. Representative compact headers, MAX_SAFE at320px
+and keyboard continuation screenshots were inspected.
+
+The runtime delta is confined to AppHeader. Notification hook/API/row/page,
+routes, PaginationBar, auth/HTTP, backend, contracts and manifests are unchanged.
+The previous FE28-R01 browser closure and session/route isolation evidence at
+`fe87432` is retained with that revision; unchanged full focus/browser/backend
+matrices were not repeated. The selected component regressions and production
+journey still run. No CI query/wait/dispatch, GitHub review submission, merge,
+Issue/Project change or deployment was performed. Independent QA, CODEOWNER,
+required CI at the integration revision and protected merge remain separate.
