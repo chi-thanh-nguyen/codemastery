@@ -635,7 +635,10 @@ class TimedAttempts {
     private CourseAccessService access;
     private UserAccountService identities;
     private MutableClock clock;
+    private org.springframework.transaction.support.TransactionTemplate readTx;
     private AttemptService attemptService;
+    private CourseManagementService attemptGuard;
+    private SkillGraphService attemptSkills;
 
     private final UUID learnerId = UUID.fromString("00000000-0000-0000-0000-00000000e001");
 
@@ -646,8 +649,27 @@ class TimedAttempts {
         access = mock(CourseAccessService.class);
         identities = mock(UserAccountService.class);
         clock = new MutableClock(Instant.parse("2026-11-26T10:00:00Z"));
+        CourseManagementService guard = mock(CourseManagementService.class);
+        attemptGuard = guard;
+        org.springframework.transaction.support.TransactionTemplate tx = new org.springframework.transaction.support.TransactionTemplate(
+                new org.springframework.transaction.support.AbstractPlatformTransactionManager() {
+                    @Override protected Object doGetTransaction() { return new Object(); }
+                    @Override protected void doBegin(Object transaction, org.springframework.transaction.TransactionDefinition definition) {}
+                    @Override protected void doCommit(org.springframework.transaction.support.DefaultTransactionStatus status) {}
+                    @Override protected void doRollback(org.springframework.transaction.support.DefaultTransactionStatus status) {}
+                });
+        readTx = new org.springframework.transaction.support.TransactionTemplate(tx.getTransactionManager());
+        readTx.setReadOnly(true);
+        readTx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+        lenient().when(guard.withLearnerAssessmentWrite(eq(COURSE), any())).thenAnswer(
+                call -> tx.execute(status -> call.<Supplier<?>>getArgument(1).get()));
+        lenient().when(guard.withAssessmentExpiryWrite(eq(COURSE), any())).thenAnswer(
+                call -> tx.execute(status -> call.<Supplier<?>>getArgument(1).get()));
+        SkillGraphService skillGraph = mock(SkillGraphService.class);
+        attemptSkills = skillGraph;
         attemptService = new AttemptService(
-                attemptRepo, quizRepo, new QuizGradingService(), access, identities, null, clock);
+                attemptRepo, quizRepo, new QuizGradingService(), access, identities, guard, skillGraph, clock);
         lenient().when(identities.requireCurrentIdentity())
                 .thenReturn(new CurrentIdentity(learnerId, UserAccountService.IdentityRole.LEARNER));
     }
@@ -706,6 +728,8 @@ class TimedAttempts {
 
         Quiz diagnostic = new Quiz(QUIZ, COURSE, "Diag", "diagnostic", 600, "published");
         when(quizRepo.findInCourse(QUIZ, COURSE)).thenReturn(Optional.of(diagnostic));
+        when(quizRepo.findInCourseForUpdate(QUIZ, COURSE)).thenReturn(Optional.of(diagnostic));
+        when(attemptRepo.hasBlockingDiagnosticAttempt(COURSE,learnerId,QUIZ)).thenReturn(true);
         assertConflict(() -> attemptService.start(COURSE, QUIZ));
     }
 
@@ -822,25 +846,124 @@ class TimedAttempts {
         when(quizRepo.findInCourse(QUIZ, COURSE)).thenReturn(Optional.of(quiz("published")));
         when(attemptRepo.findInQuizForLearner(attemptId, QUIZ, learnerId)).thenReturn(Optional.of(unsubmitted));
 
-        assertConflict(() -> attemptService.readResult(COURSE, QUIZ, attemptId));
+        assertConflict(() -> readTx.execute(status -> attemptService.readResult(COURSE, QUIZ, attemptId)));
 
         clock.advanceSeconds(601);
         when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ, twoQuestions()));
         when(attemptRepo.findAnswersInPositionOrder(attemptId)).thenReturn(List.of(
                 new AttemptAnswer(UUID.randomUUID(), attemptId, Q1, 1, new Boolean[] {false, false}, null),
                 new AttemptAnswer(UUID.randomUUID(), attemptId, Q2, 3, new Boolean[] {false, false, false}, null)));
-        AttemptRead read = attemptService.read(COURSE, QUIZ, attemptId);
+        AttemptRead read = readTx.execute(status -> attemptService.read(COURSE, QUIZ, attemptId));
         assertEquals("overdue", assertInstanceOf(AttemptView.class, read).status());
 
         when(attemptRepo.countByQuizAndLearner(QUIZ, learnerId)).thenReturn(1L);
         when(attemptRepo.findPageByQuizAndLearner(QUIZ, learnerId, 0, 20)).thenReturn(List.of(unsubmitted));
-        PageResponse<AttemptSummary> page = attemptService.history(COURSE, QUIZ, 0, 20);
+        PageResponse<AttemptSummary> page = readTx.execute(status -> attemptService.history(COURSE, QUIZ, 0, 20));
         assertEquals("overdue", page.content().getFirst().status());
         assertNull(page.content().getFirst().submittedAt());
         assertNull(page.content().getFirst().scorePercentage());
 
         doThrow(new ResourceNotFoundException("Denied")).when(access).requireLearnerCourseAccess(COURSE);
         assertThrows(ResourceNotFoundException.class, () -> attemptService.start(COURSE, QUIZ));
+    }
+
+    @Test
+    void closedAnswerParserRejectsCoercionDuplicatesUnknownMembersAndTrailingTokens() {
+        String valid = "{\"answers\":[{\"questionId\":\"" + Q1 + "\",\"selectedOptions\":[true,false]}]}";
+        assertTrue(com.codemastery.modules.assessment.api.dto.SubmitAttemptRequest.AnswersWriteRequest.parse(
+                valid.getBytes(java.nio.charset.StandardCharsets.UTF_8)).isPresent());
+        for (String invalid : List.of(valid + " {}", valid.replace("true", "1"), valid.replace("true", "\"true\""),
+                valid.replace("true", "null"), valid.replace(Q1.toString(), "1-1-1-1-1"),
+                valid.replace("\"answers\":", "\"answers\":[],\"answers\":"),
+                valid.replace("\"questionId\":", "\"extra\":true,\"questionId\":"), "null", "[]", "{", "")) {
+            assertTrue(com.codemastery.modules.assessment.api.dto.SubmitAttemptRequest.AnswersWriteRequest.parse(
+                    invalid.getBytes(java.nio.charset.StandardCharsets.UTF_8)).isEmpty(), invalid);
+        }
+    }
+
+    @Test
+    void assessmentCompanionAndGuardCallersStayInsideTheirApprovedAllowlist() throws Exception {
+        var root = java.nio.file.Path.of("src", "main", "java");
+        java.util.Map<String,java.util.Set<String>> allowed = java.util.Map.of(
+                ".requireAssessmentSkillsInCourse(", java.util.Set.of("AttemptService.java"),
+                ".withLearnerAssessmentWrite(", java.util.Set.of("AttemptService.java"),
+                ".withAssessmentExpiryWrite(", java.util.Set.of("AttemptService.java"),
+                ".finalizeExpired(", java.util.Set.of("AttemptAutoSubmitScheduler.java"),
+                ".readLatestSkillEvidence(", java.util.Set.of("MasteryUpdateService.java"),
+                ".readMyLatestSkillEvidence(", java.util.Set.of("MasteryQueryService.java"),
+                ".readQuizOutcome(", java.util.Set.of("PlatformMetricsService.java", "AttemptService.java"),
+                ".readMyPlacementQuizId(", java.util.Set.of("PlacementDiagnosticService.java"));
+        try(var files=java.nio.file.Files.walk(root)) {
+            for(var file:files.filter(path->path.toString().endsWith(".java")).toList()) {
+                String code=java.nio.file.Files.readString(file);
+                for(var entry:allowed.entrySet()) if(code.contains(entry.getKey())) {
+                    assertTrue(entry.getValue().contains(file.getFileName().toString()), file+": "+entry.getKey());
+                }
+            }
+        }
+    }
+
+    @Test
+    void maxAttemptNumberAndRegressedClockCannotCreateOrMutateAnAttempt() {
+        when(quizRepo.findInCourse(QUIZ, COURSE)).thenReturn(Optional.of(quiz("published")));
+        when(quizRepo.findInCourseForUpdate(QUIZ, COURSE)).thenReturn(Optional.of(quiz("published")));
+        when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ, twoQuestions()));
+        when(attemptRepo.findMaxAttemptNumber(QUIZ,learnerId)).thenReturn(Integer.MAX_VALUE);
+        assertConflict(()->attemptService.start(COURSE,QUIZ));
+        Attempt future = new Attempt(UUID.randomUUID(), learnerId, QUIZ, 1,
+                clock.instant().plusSeconds(1),clock.instant().plusSeconds(600),null,null);
+        when(attemptRepo.findUnsubmittedByQuizAndLearner(QUIZ,learnerId)).thenReturn(Optional.of(future));
+        when(attemptRepo.findAnswersInPositionOrder(future.id())).thenReturn(List.of(
+                new AttemptAnswer(UUID.randomUUID(),future.id(),Q1,1,new Boolean[]{false,false},null),
+                new AttemptAnswer(UUID.randomUUID(),future.id(),Q2,3,new Boolean[]{false,false,false},null)));
+        assertThrows(IllegalStateException.class,()->attemptService.start(COURSE,QUIZ));
+        verify(attemptRepo,never()).save(any());
+    }
+
+    @Test
+    void incorrectProviderScoreOrPerQuestionCorrectnessFailsBeforeAnyWrite() {
+        UUID id=UUID.randomUUID();
+        Attempt active=new Attempt(id,learnerId,QUIZ,1,clock.instant(),clock.instant().plusSeconds(600),null,null);
+        when(quizRepo.findInCourseForUpdate(QUIZ,COURSE)).thenReturn(Optional.of(quiz("published")));
+        when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ,twoQuestions()));
+        when(attemptRepo.findInQuizForUpdate(id,QUIZ)).thenReturn(Optional.of(active));
+        when(attemptRepo.findAnswersInPositionOrderForUpdate(id)).thenReturn(List.of(
+                new AttemptAnswer(UUID.randomUUID(),id,Q1,1,new Boolean[]{false,false},null),
+                new AttemptAnswer(UUID.randomUUID(),id,Q2,3,new Boolean[]{false,false,false},null)));
+        QuizGradingService provider=mock(QuizGradingService.class);
+        when(provider.grade(anyList())).thenReturn(
+                new QuizGradingService.Grade(new BigDecimal("100.00"),List.of(
+                    new QuizGradingService.GradedItem(Q1,true),new QuizGradingService.GradedItem(Q2,false))),
+                new QuizGradingService.Grade(new BigDecimal("50.00"),List.of(
+                    new QuizGradingService.GradedItem(Q1,false),new QuizGradingService.GradedItem(Q2,true))));
+        AttemptService checked=new AttemptService(attemptRepo,quizRepo,provider,access,identities,attemptGuard,attemptSkills,clock);
+        AnswersInput input=new AnswersInput(List.of(new AnswerInput(Q1,List.of(false,true)),new AnswerInput(Q2,List.of(false,false,false))));
+        assertThrows(IllegalStateException.class,()->checked.submit(COURSE,QUIZ,id,input));
+        assertThrows(IllegalStateException.class,()->checked.submit(COURSE,QUIZ,id,input));
+        verify(attemptRepo,never()).save(any());verify(attemptRepo,never()).updateAnswers(anyList());
+    }
+
+    @Test
+    void executionOnlyReadRejectsBeforeAnyRepositoryAccess() {
+        assertThrows(IllegalStateException.class,
+                ()->attemptService.readLatestSkillEvidence(COURSE,learnerId,java.util.Set.of(SKILL)));
+        verifyNoInteractions(attemptRepo,quizRepo);
+    }
+
+    @Test
+    void failedEarliestCandidateCannotStarveEqualDeadlineKeysetSuccessors() {
+        Instant due=clock.instant();
+        Attempt first=new Attempt(UUID.fromString("00000000-0000-0000-0000-000000000001"),learnerId,QUIZ,1,
+                due.minusSeconds(60),due,null,null);
+        Attempt second=new Attempt(UUID.fromString("00000000-0000-0000-0000-000000000002"),learnerId,QUIZ,2,
+                due.minusSeconds(60),due,null,null);
+        AttemptService finalizer=mock(AttemptService.class);
+        doThrow(new IllegalStateException("fixture diagnostic must not be logged")).when(finalizer).finalizeExpired(first.id());
+        when(attemptRepo.findDueUnsubmitted(due,null,null,1)).thenReturn(List.of(first));
+        when(attemptRepo.findDueUnsubmitted(due,due,first.id(),1)).thenReturn(List.of(second));
+        when(attemptRepo.findDueUnsubmitted(due,due,second.id(),1)).thenReturn(List.of());
+        assertEquals(1,new AttemptAutoSubmitScheduler(attemptRepo,finalizer,1,1,clock).runPass());
+        verify(finalizer).finalizeExpired(second.id());
     }
 
     private static final class MutableClock extends Clock {

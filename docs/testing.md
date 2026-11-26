@@ -8341,3 +8341,177 @@ acceptance, release admission or deployment authorization.
 
 AI-assisted work: OpenAI Codex reproduced the test gap, corrected and qualified
 the harness, and prepared the issue-level analysis under the Leader's instruction.
+
+## AS08 completion and remediation-author audit — 26 November 2026
+
+**AS08_OWNED_CODE_COMPLETE_INTEGRATION_BLOCKED**, PR #296, branch
+`feat/as08-timed-attempts`. This is an implementation-author self-audit, not an
+independent review, CODEOWNER approval, US-06 acceptance or release qualification.
+Initial remote HEAD `329bcf45587be0d783675dca9fb2b1c7b825674f`; current-main and
+merge-base at implementation start `cc6cb54ddedf226966a51c9614fc5fc5756267bb`.
+The original two commits remain intact. Final commit identity is recorded by Git
+and the PR; no self-referential commit SHA is fabricated in this file.
+
+Authority: the Project Leader's explicit AS08 full-completion task authorizes
+AS08 implementation, eligible cohesive upstream additions below approximately
+20%, supporting files, bounded necessary technical decisions, self-audit,
+commit/push and a PR-body update. It excludes merge, Issue closure, deployment,
+operational acceptance and substantial upstream implementation. Effective sources:
+ADR005 (CT03 root, evidence tuple, settings barrier), ADR007 (CT23/CT04/CT38),
+ADR011 §§3–5/11–12 (CT22/CT08/CT25/CT33), ADR012 §13/19.2 (CT13 and privilege
+ceiling), ADR013 §19 (fixed full-Quiz capture retained), ADR014 (current trusted
+identity/session), and the CT14/CT39 placements/local Clock decisions. The
+ADR011 §17 dynamic practice-capture amendment remains unadopted.
+
+### Checkpoint inventory and completion evidence
+
+`PARTIAL` and `MISSING` below describe the initial PR HEAD, not an historical
+Issue checkbox. `COMPLETE` in the final-code column means the owning code is
+implemented and executed by the indicated focused tests; it does not make an
+unconsumed cross-module seam an integrated user capability.
+
+| Checkpoint | Authority | Initial | Final code / exact location | Executed evidence / remaining gate |
+|---|---|---|---|---|
+| AS08.attempt | ADR007 §8 | PARTIAL | COMPLETE — `AttemptService.start`, Attempt repositories | concurrent first start 201/200, committed retake number, int exhaustion and unchanged timer |
+| AS08.answers | ADR007 §9 | PARTIAL | COMPLETE — `saveAnswers`, `validateAndCanonicalizeAnswers`, `SubmitAttemptRequest` | complete replacement, duplicate/type/UUID rejection, no late masks |
+| AS08.expiry | ADR007 §10 | PARTIAL | COMPLETE — `finalizeExpired` | logical submittedAt, saved masks, hidden/LEFT/locked cleanup, repeated cleanup |
+| AS08.scheduler | ADR007 §3.2/10 | MISSING configuration/activation | COMPLETE — `AppConfig.QuizExpirySettings`, application.yml, `AttemptAutoSubmitScheduler` | eager invalid/missing-input refusal including disabled; actual scheduled invocation; multi-page poison-row isolation; production tuning remains operator-owned |
+| AS08.grade | ADR007 §9, AS04 | PARTIAL | COMPLETE — `gradeAndFinalize`, `requireCapturedAnswers` | actual AS04 grading and rounding; incorrect provider score/correctness refused; stored corruption refused |
+| AS08.results | ADR007 §11 | PARTIAL | COMPLETE — `read`, `readResult`, `readOwnedResult`, `AttemptResponses` | own/owner submitted projections, active-result 409, foreign concealment, no keys |
+| AS08.history | ADR007 §11 | PARTIAL | COMPLETE — `history`, `findPageByQuizAndLearner` | deterministic number-descending paging/count, derived overdue status, coherent RR snapshot |
+| AS08.rest | ADR007 §13, CT01/03/18 | PARTIAL | COMPLETE — `QuizAttemptController`, `SecurityConfig` | real JWT/session and PostgreSQL stack; 401/403/404/400, exact routes, no-store on errors/success, closed JSON |
+| AS08.persistence | V004, ADR007 §9/13 | PARTIAL | COMPLETE — Attempt adapters/entities | real flush/rollback, mutable-column updates, microseconds/timestamptz, role r15 allows writes and denies immutable rewrites/DELETE |
+| AS08.guard | ADR007 §3.1, ADR005 §13.3 | MISSING | COMPLETE — Course `withLearnerAssessmentWrite` / `withAssessmentExpiryWrite` | actual Course root before Quiz/Attempt/answers; post-wait LEFT denial, definition winner re-read, manual/save/expiry races, explicit test statement deadline/rollback; existing guard regressions reused unchanged |
+| AS08.evidence.execution | ADR011 §12 | MISSING | COMPLETE — `readLatestSkillEvidence`, `ExecutionScope`, `findLatestEvidenceCandidates` | correct tuple/counts, missing capture/membership fail closed; marker rejects wrong Course/thread/physical transaction/after-return and start/ordinary guard; production AD13 caller absent |
+| AS08.evidence.self | ADR011 §12 | MISSING | COMPLETE — `readMyLatestSkillEvidence` | trusted self only, LEFT/other-role denial, RR join, latest diagnostic/hidden evidence; map consumer remains separate |
+| AS08.reporting | ADR012 §13 | MISSING | COMPLETE — `readQuizOutcome`, set-based adapter aggregate | latest per learner/Quiz, diagnostics excluded, hidden practice/test included, exact pair mean/null; Admin composition remains separate |
+| AS08.settings-barrier | ADR005 §13.2 | MISSING | COMPLETE — `hasSubmittedAttempts`, `hasSubmittedInCourse` | owner-only conservative existence probe under shared root; actual AD08 threshold-edit integration absent |
+| AS08.diagnostic-gate | ADR011 §11 | MISSING (unconditional rejection) | COMPLETE — `requireDiagnosticAdmission`, `hasBlockingDiagnosticAttempt` | first start/same active resume, overdue and submitted refusal, two different diagnostic starts serialize to one winner |
+| AS08.placement-projection | ADR011 §11 | MISSING | COMPLETE — `readMyPlacementQuizId`, `findPlacementQuizId` | server title-C/UUID choice, same active resume, null after expiry/submission; only PlacementDiagnosticService may consume; AD10 caller absent |
+| AS08.contract-sync | CT04 bindings, CT38, CT17 ceiling | MISSING | COMPLETE — OpenAPI seven operations, `.env.example`, setup/deployment records, Compose, existing startup fixtures | schemas and request/response contracts retained; implementation metadata explicitly records integration blockers; no frontend runtime attempt client exists to synchronize |
+| AS08.focused-test-source | CT14/ADR007 §14 | PARTIAL (mock-only timed tests) | COMPLETE — `AttemptServiceTest`, `AppConfigTest`, `AssessmentPersistenceIntegrationTest.TimedAttemptRuntime` | unit/configuration + actual Spring/PostgreSQL/security/concurrency/role tests; independent QA04 atomic-event acceptance not claimed |
+
+There are **18 applicable AS08-owned code checkpoints, 18 implemented** (100% of
+this explicit code inventory). This is not a 100% integrated-AS08 or US-06 claim.
+The full required implementation/integration percentage is not defensible: the
+remaining Issues contain unequal orchestration, security, persistence and
+acceptance work. In particular, publication, owner-insight consumption, atomic
+Adaptive execution and client workflows cannot be counted as completed by these
+published/locally tested methods. Exact deferred capabilities are listed below.
+
+### Upstream assessment and bounded additions
+
+Remote main, PR branch and all fetched remote integration refs were inspected.
+AS12 event/listener/orchestration scaffolds remain empty; neither AS16 owner method
+is present on another fetched branch. No upstream PR or unrelated commit is imported.
+Percentages are functional/complexity estimates, not LOC ratios, and additions
+are aggregated per owning Issue.
+
+| Owner / exact contract | Full implementation denominator | Missing slice / estimate | Decision and effect |
+|---|---|---|---|
+| CO14 #177 / ADR005 guard and ADR007 §3.1 | settings read/write handoff and compare-and-set, ownership, both lock entries, actual transaction compatibility/joining/refresh/savepoint/rollback enforcement and focused tests | two Assessment admission adapters reusing the existing enforcement, approximately 10–15% | IMPLEMENTED, no new lock identity or schema; original Instructor/NOWAIT behavior unchanged |
+| AD07 #165 / CT40, ADR007 §16 companion | graph repositories, skill CRUD, DAG/prerequisite mutations, lesson mappings, ancestry, locking, REST/security and tests | assertion-only Course-skill validation plus allowlist/negative tests, approximately 3–5% | IMPLEMENTED under delegated technical authority; existing owner-only projections unchanged |
+| CT38 #21 / ADR007 §3.2 | existing configuration contract plus the AS08 feature-owned binding | the three already-approved inputs, strict validation and scheduler activation | AS08-owned support implemented; no production values selected |
+| CT17 #70 / ADR012 §19.2 | 27-relation runtime matrix, provisioning/containment/consumer verification and deployment gates | two existing relation rows and exact consumer tests, approximately 5–10% of the runtime-privilege slice (less of CT17 as a whole) | IMPLEMENTED as r15, inside the exact ceiling; no applied migration or real shared-system grant changed |
+| AS12 #161 / ADR007 §12, ADR011 §§4–5 | immutable validated event artifact AND complete persisted/flushed producer, transition-only publication, synchronous failure/rollback tests | both principal checkpoints absent, approximately 100% | DEFERRED, above threshold; event file stays empty, no dummy listener/publication or integrated mastery claim |
+| AS16 #162 / ADR011 §12/14 | owner insight evidence/read admission with same-snapshot joined membership, result projection, submitted attempt paging and tests | `readOwnedLatestSkillEvidence`, `listLearnerAttemptsForOwner`, membership integration and tests; approximately 70–100% of the owner slice | DEFERRED, material scope above threshold; AS08 learner/owner single-result HTTP endpoints remain delivered |
+| AD13 #169 / ADR011 §§3–5 | listener, authoritative latest-evidence/mastery update, atomic Course progress, decision/recommendation history and all-or-nothing tests | all four AD13 functional checkpoints absent, approximately 100% | DEFERRED; AS08 result persistence is only the Assessment-local unit, not the required whole atomic flow |
+| CO15 #178 / ADR011 §3 | Course execution snapshot, monotonic mastery skips, Enrollment/progress transaction participant and tests | no missing code needed here, 0% addition | REUSE current main implementation; actual AS12→AD13→CO15 integration remains blocked |
+| AD08 #166 / ADR005 settings/freeze | enablement/readiness validation, settings handoff/ETag/If-Match and threshold freeze, REST and tests | settings consumer is empty; implementing it is approximately 100% of AD08 | DEFERRED; AS08 provides the submitted-history probe and shared root, not a fabricated settings endpoint |
+| AD10 #167 / ADR011 §11 | diagnostic guidance/initialization/skip composition, approved evidence consumer and tests | its application consumer is empty; material whole-use-case work, approximately 100% | DEFERRED; Assessment diagnostic start/projection implemented without claiming guidance or initialization |
+| Frontend FE09/FE10, Adaptive maps/insights and Admin reporting | their complete owning user workflows | actual consumers, save-before-submit, current-session decoders/views and composition | OUTSIDE AS08; `quizApi.ts` is empty, preview view types are not API DTOs; no mock production client or browser acceptance claim |
+
+### Technical selections and audit disposition
+
+The only new material interface selection is **AS08-ANCESTRY-2026-11-26-r1**,
+recorded with alternatives, authority and exclusions in ADR007 §16. A real
+PostgreSQL test showed that calling the existing Instructor-only skill projection
+from a Learner/actorless path denies valid attempts. The narrow assertion returns
+no graph data and preserves that settled owner boundary. Root identity, READ
+COMMITTED write propagation, REPEATABLE READ snapshots, local UTC clocks,
+fixed full membership, exact masks and the approved evidence tuple remain unchanged.
+CT17 r15 is a bounded existing-ceiling realization, not a new privilege policy.
+Runtime deadlines use explicit synthetic test budgets; no production timeout,
+resource, credential, risk or deployment decision is invented.
+
+| Finding | Severity | Evidence / impact | Remediation and verification |
+|---|---|---|---|
+| F01 root missing | P1 | initial `AttemptService.withLearnerAssessmentWrite` / `withAssessmentExpiryWrite` used only TransactionTemplate; no shared physical root | Course-owned entries and real wait/recheck/start/definition/terminal race tests; existing guard regression suite |
+| F02 scheduler configuration/activation | P1 | scheduler properties unbound, no scheduling activation, disabled mode skipped validation | eager AppConfig settings, explicit inputs, actual @Scheduled invocation and keyset poison-row tests |
+| F03 AS12 event/publication absent | P1 integration blocker | empty `QuizSubmittedEvent.java`, no persisted/flushed publication | DEFERRED at approximately 100% AS12; no event/schema/consumer acceptance claimed |
+| F04 public result reads missing | P2 | no CT33/CT13 Assessment projections | execution/self/reporting/placement projections delivered and exercised; AS16 owner reads remain upstream-blocked |
+| F05 runtime/API boundary | P1 | Attempt routes default-denied; parser accepted duplicate/trailing JSON and noncanonical UUIDs; metadata remained unimplemented | exact security methods/roles, strict Jackson 3 byte parser, admitted body validation, no-store and real HTTP regression; OpenAPI synchronized |
+| F06 persistence verification/privileges | P1 | original timed tests bypassed transaction enforcement; runtime role could not read/write Attempt data | real Spring/PG role/rollback/concurrency tests; dynamic mutable-column updates; r15 containment contract |
+| F07 capture/provider integrity | P1 | initial service could grade an incomplete captured subset and accepted incorrect provider flags/percentage | exact full frozen membership/position/ancestry and persisted-mask/correctness/score validation; incorrect-provider and corruption tests |
+| F08 owner-only ancestry reuse | P1 | real Learner start returned 403 when an owner-only SkillGraph projection was reused | ADR007 §16 assertion companion, admitted snapshot/held-root contract, foreign/no-transaction negatives and allowlist |
+| F09 lost membership looked like absent evidence | P1 | latest candidate query based only on membership could return Unknown after membership loss | union of frozen membership and captured skill candidates, full selected-capture validation; deletion reproducer now refuses |
+| F10 effective CT25 missed | P2 | initial `rejectDiagnostic` always returned 409 despite later ADR011 §11 approval | conditional one-time gate and server-chosen placement projection, diagnostic history/expiry and concurrent cross-Quiz tests |
+
+No confirmed unresolved in-scope P0–P3 remains after remediation. F03, AS16 and the
+other named substantial dependencies remain explicit external blockers. This
+statement covers the complete effective PR diff and AS08 runtime, not just the
+follow-up delta; it is still an author audit. Test-source mistakes (proxy spy
+unwrapping, a gapped fixture used with canonical AS06 authoring, and an allowlist
+scanner confusing a private repository delegation with a cross-module call) were
+corrected; they are not reported as product findings or successful test runs.
+
+### Verification and retained gates
+
+All commands below run in `backend/` unless otherwise stated. Focused runs compile
+main and test sources; no full unrelated suite, browser/E2E journey, deployment,
+workflow dispatch or post-push CI wait is performed. PostgreSQL is the existing
+Testcontainers hardened PostgreSQL 17.11 image and real V001–V009 migrations.
+The default test profile disables expiry with explicit case inputs; the scheduler
+activation test separately proves real task registration and invocation.
+
+Final suite reports represent **254 distinct unit tests and 158 PostgreSQL integration
+tests, zero current failures/errors/skips**, obtained across focused runs rather than
+one repository-wide verify. Reuse is limited to unchanged dependencies: AS05 (88),
+AD07 (56), AS04 (12), AppConfig (42) and Course-guard integration (110). Final AS08
+runs execute AttemptServiceTest (56) and AssessmentPersistenceIntegrationTest (48,
+including 19 AS08 runtime cases). The latter also preserves its 29 existing mapping/
+repository cases. No duplicate run is counted twice.
+
+| Exact command | Actual outcome / revision scope |
+|---|---|
+| `./mvnw -B -q -DskipTests compile` | PASS; subsequent test-compile goals compile the final main/test code |
+| `./mvnw -B -q test -Dtest='AttemptServiceTest,QuizGradingServiceTest,AppConfigTest'` | PASS after sandbox access and test input corrections; later source changes verified below |
+| `./mvnw -B -q verify -Dtest='AttemptServiceTest,QuizGradingServiceTest,AppConfigTest,QuestionBankServiceTest*,SkillGraphTest*' -Dit.test='AssessmentPersistenceIntegrationTest,AdaptiveLearningFlowIntegrationTest'` | This run was RED only for the allowlist test's repository-call false positive (253 unit cases, 1 failure); its 198 unchanged AS04/AS05/AD07/config cases passed. No claim this entire command passed |
+| `./mvnw -B -q test-compile surefire:test failsafe:integration-test failsafe:verify -Dtest='AttemptServiceTest' -Dit.test='AssessmentPersistenceIntegrationTest,AdaptiveLearningFlowIntegrationTest'` | PASS after the allowlist correction; real existing Course guard regression report: 110 passing cases. Later AS08-only changes do not change that guard or its dependencies |
+| `./mvnw -B -q test-compile surefire:test failsafe:integration-test failsafe:verify -Dtest='AttemptServiceTest' -Dit.test='AssessmentPersistenceIntegrationTest'` | PASS on the final code, after the full-diff audit's membership correction and CT25 implementation: 56 unit and 48 PostgreSQL cases |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` (repository root) | PASS: all 27 relations match the retained revisions plus exactly two r15 rows; malformed matrix cases refused |
+| Per-file `bash -n <path>` over the eight modified VM scripts (repository root) | PASS; syntax only, not execution of a live deployment/VM |
+| `docker compose --env-file <temporary-synthetic-file> -f infrastructure/docker-compose.yml config --quiet` (repository root) | PASS; explicit synthetic inputs, temporary file removed, no service started |
+| Read-only Python OpenAPI audit (repository root) | PASS: JSON parses, 946 internal refs resolve, exactly seven operation metadata/descriptions change, every component/schema/response/security definition remains identical to initial PR HEAD |
+| `git diff --check` (repository root) | PASS |
+
+The final commands execute the final production/test code; later changes are English
+records and comments only. Test revision is the follow-up commit containing this
+record. The earlier real ancestry failure exposed F08 and was remediated before the
+final pass. No unexecuted event constructor, listener, seeded SD04, browser or whole
+Adaptive-flow test is reported as passed.
+
+The original sandbox could not attach Mockito's agent or reach the Docker socket;
+focused verification was rerun with authorized local access. Subsequent essential
+PostgreSQL tests executed, so those transient failures are not remaining environment
+blockers. Initial red test runs are retained as debugging evidence and never counted
+as passes. Production pool/load, enabled multi-instance timeliness and real deployment
+statement/transaction budgets are not qualified by these controlled cases.
+
+Remaining gates: AS12 producer and AD13 synchronous consumer with the approved
+Interaction phase; real whole-unit result/mastery/progress/recommendation rollback
+and independent QA04; AS16 owner reads and their joined-member Course handoff;
+AD08 settings and AD10/map/Admin/frontend consumers; SD04 seeded score acceptance;
+independent CODEOWNER/last-contribution review, required CI and protected integration;
+operator-selected scheduler/deadline/pool values and runtime provisioning; separate
+release/deployment authorization. No Issue is closed, no PR merged/approved and no
+operational risk accepted.
+
+AI disclosure and attribution: OpenAI Codex performed this follow-up implementation,
+test authoring and author self-audit under @chi-thanh-nguyen's instruction. Original
+commit objects identify `minhtan29042006 <tan.buikhmt0429@hcmut.edu.vn>`, but no
+identity-holder authorization for attributing these new contributions to that person
+was available. CONTRIBUTING.md requires attributable genuine contributions. Follow-up
+commits therefore use the performing maintainer's verified existing Git identity;
+authenticated CLI/pusher is `chi-thanh-nguyen`. No global Git config, credential,
+existing commit, signature or original contribution attribution is rewritten.

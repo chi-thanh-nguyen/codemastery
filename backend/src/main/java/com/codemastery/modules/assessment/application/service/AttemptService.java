@@ -3,6 +3,7 @@ package com.codemastery.modules.assessment.application.service;
 import com.codemastery.common.api.PageResponse;
 import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.ResourceNotFoundException;
+import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService;
 import com.codemastery.modules.assessment.application.service.QuizGradingService.Grade;
 import com.codemastery.modules.assessment.application.service.QuizGradingService.GradedItem;
 import com.codemastery.modules.assessment.application.service.QuizGradingService.GradingItem;
@@ -11,11 +12,13 @@ import com.codemastery.modules.assessment.domain.model.AttemptAnswer;
 import com.codemastery.modules.assessment.domain.model.Question;
 import com.codemastery.modules.assessment.domain.model.Quiz;
 import com.codemastery.modules.assessment.domain.repository.AttemptRepository;
-import com.codemastery.modules.assessment.domain.repository.QuizRepository;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository.Member;
+import com.codemastery.modules.assessment.domain.repository.QuizRepository;
 import com.codemastery.modules.auth.application.service.UserAccountService;
 import com.codemastery.modules.course.application.service.CourseAccessService;
+import com.codemastery.modules.course.application.service.CourseManagementService;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -25,6 +28,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -34,11 +38,11 @@ import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * CT04 timed quiz attempts: start, answer save, manual submit, expiry finalization and result/history
@@ -127,7 +131,8 @@ public class AttemptService {
     private final QuizGradingService gradingService;
     private final CourseAccessService courseAccess;
     private final UserAccountService identities;
-    private final TransactionTemplate readCommittedTx;
+    private final CourseManagementService courseGuard;
+    private final SkillGraphService skillGraph;
     private final Clock clock;
 
     @Autowired
@@ -136,8 +141,8 @@ public class AttemptService {
                           QuizGradingService gradingService,
                           CourseAccessService courseAccess,
                           UserAccountService identities,
-                          PlatformTransactionManager transactionManager) {
-        this(attempts, quizzes, gradingService, courseAccess, identities, transactionManager, Clock.systemUTC());
+                          CourseManagementService courseGuard, SkillGraphService skillGraph) {
+        this(attempts, quizzes, gradingService, courseAccess, identities, courseGuard, skillGraph, Clock.systemUTC());
     }
 
     public AttemptService(AttemptRepository attempts,
@@ -145,7 +150,7 @@ public class AttemptService {
                           QuizGradingService gradingService,
                           CourseAccessService courseAccess,
                           UserAccountService identities,
-                          PlatformTransactionManager transactionManager,
+                          CourseManagementService courseGuard, SkillGraphService skillGraph,
                           Clock clock) {
         this.attempts = Objects.requireNonNull(attempts, "attempts");
         this.quizzes = Objects.requireNonNull(quizzes, "quizzes");
@@ -153,13 +158,108 @@ public class AttemptService {
         this.courseAccess = Objects.requireNonNull(courseAccess, "courseAccess");
         this.identities = Objects.requireNonNull(identities, "identities");
         this.clock = Objects.requireNonNull(clock, "clock");
-        if (transactionManager == null) {
-            this.readCommittedTx = null;
-        } else {
-            TransactionTemplate tx = new TransactionTemplate(transactionManager);
-            tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
-            tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRED);
-            this.readCommittedTx = tx;
+        this.courseGuard = Objects.requireNonNull(courseGuard, "courseGuard");
+        this.skillGraph = Objects.requireNonNull(skillGraph, "skillGraph");
+    }
+
+    public record SkillEvidence(UUID skillId, UUID attemptId, UUID quizId, int attemptNumber,
+            Instant startedAt, Instant submittedAt, int correctCount, int totalCount, BigDecimal scorePercentage) {}
+    public record LatestSkillEvidence(UUID courseId, UUID learnerId, Map<UUID, SkillEvidence> bySkill) {
+        public LatestSkillEvidence { bySkill = Map.copyOf(bySkill); }
+    }
+    public record QuizOutcome(UUID courseId, long scoredLearnerQuizPairs, BigDecimal averageQuizScore) {}
+
+    /** ADR005 §13.2: conservative owner-only settings barrier, including malformed submitted history. */
+    @Transactional(readOnly = true)
+    public boolean hasSubmittedAttempts(UUID courseId) {
+        requireId(courseId);
+        courseAccess.requireCourseOwnership(courseId);
+        return attempts.hasSubmittedInCourse(courseId);
+    }
+
+    /** ADR011 §12: only MasteryUpdateService may consume this inside submission's guarded callback. */
+    public LatestSkillEvidence readLatestSkillEvidence(UUID courseId, UUID learnerId, Set<UUID> skillIds) {
+        requireExecutionScope(courseId); // before even a scope or history query
+        return latestSkillEvidence(courseId, learnerId, skillIds);
+    }
+
+    /** ADR011 §12: self-only learner map projection; joins the caller's coherent snapshot. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY,
+            readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public LatestSkillEvidence readMyLatestSkillEvidence(UUID courseId, Set<UUID> skillIds) {
+        requireReportingSnapshot();
+        requireId(courseId);
+        courseAccess.requireLearnerCourseAccess(courseId);
+        return latestSkillEvidence(courseId, requireSelfLearnerId(), skillIds);
+    }
+
+    /** ADR011 §11: only PlacementDiagnosticService; no mastery, policy or UI offer is invented. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY,
+            readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public UUID readMyPlacementQuizId(UUID courseId) {
+        requireReportingSnapshot();
+        requireId(courseId);
+        courseAccess.requireLearnerCourseAccess(courseId);
+        return attempts.findPlacementQuizId(courseId, requireSelfLearnerId(), currentMicros());
+    }
+
+    private LatestSkillEvidence latestSkillEvidence(UUID courseId, UUID learnerId, Set<UUID> skillIds) {
+        requireId(learnerId);
+        Set<UUID> requested = Set.copyOf(skillIds);
+        Map<UUID, SkillEvidence> result = new LinkedHashMap<>();
+        Map<UUID, List<AttemptAnswer>> answerCache = new HashMap<>();
+        Map<UUID, Map<UUID, Member>> definitionCache = new HashMap<>();
+        for (var candidate : attempts.findLatestEvidenceCandidates(courseId, learnerId, requested)) {
+            if (!requested.contains(candidate.skillId()) || result.containsKey(candidate.skillId())) {
+                throw new IllegalStateException("Invalid latest-evidence projection");
+            }
+            Quiz quiz = quizzes.findInCourse(candidate.quizId(), courseId).orElseThrow(AttemptService::unavailable);
+            requireStoredQuizStructure(courseId, quiz);
+            Attempt attempt = attempts.findInQuizForLearner(candidate.attemptId(), quiz.id(), learnerId)
+                    .orElseThrow(() -> new IllegalStateException("Missing authoritative evidence"));
+            requireStoredAttempt(quiz.id(), learnerId, attempt);
+            Map<UUID, Member> definitions = definitionCache.computeIfAbsent(quiz.id(),
+                    id -> loadQuestionsForAttempt(courseId, id));
+            List<AttemptAnswer> answers = answerCache.computeIfAbsent(attempt.id(), attempts::findAnswersInPositionOrder);
+            if (attempt.submitted_at() == null) throw new IllegalStateException("Evidence is not submitted");
+            requireCapturedAnswers(attempt, answers, definitions);
+            int total = 0;
+            int correct = 0;
+            for (AttemptAnswer answer : answers) {
+                if (candidate.skillId().equals(question(definitions, answer.question_id()).skill_id())) {
+                    total++;
+                    if (answer.is_correct()) correct++;
+                }
+            }
+            if (total == 0) throw new IllegalStateException("Evidence omitted requested skill");
+            result.put(candidate.skillId(), new SkillEvidence(candidate.skillId(), attempt.id(), quiz.id(),
+                    attempt.attempt_number(), attempt.started_at(), attempt.submitted_at(), correct, total,
+                    BigDecimal.valueOf(correct).multiply(HUNDRED_SCORE)
+                        .divide(BigDecimal.valueOf(total), 2, RoundingMode.HALF_UP)));
+        }
+        return new LatestSkillEvidence(courseId, learnerId, result);
+    }
+
+    /** ADR012 §13.2: only PlatformMetricsService, after trusted joined IDs, in its RR snapshot. */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY,
+            readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public QuizOutcome readQuizOutcome(UUID courseId, Set<UUID> learnerIds) {
+        requireReportingSnapshot();
+        requireId(courseId);
+        var outcome = attempts.readQuizOutcome(courseId, Set.copyOf(learnerIds));
+        if (outcome == null || outcome.scoredLearnerQuizPairs() < 0
+                || (outcome.scoredLearnerQuizPairs() == 0) != (outcome.averageQuizScore() == null)) {
+            throw new IllegalStateException("Invalid Quiz outcome projection");
+        }
+        return new QuizOutcome(courseId, outcome.scoredLearnerQuizPairs(), outcome.averageQuizScore());
+    }
+
+    private static void requireReportingSnapshot() {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isCurrentTransactionReadOnly()
+                || !Integer.valueOf(TransactionDefinition.ISOLATION_REPEATABLE_READ).equals(
+                        TransactionSynchronizationManager.getCurrentTransactionIsolationLevel())) {
+            throw new IllegalStateException("Read requires the caller's read-only REPEATABLE READ snapshot");
         }
     }
 
@@ -170,17 +270,16 @@ public class AttemptService {
         courseAccess.requireLearnerCourseAccess(courseId);
         UUID learnerId = requireSelfLearnerId();
 
-        Quiz precheckQuiz = requirePublishedQuiz(courseId, quizId);
-        rejectDiagnostic(precheckQuiz);
+        requirePublishedQuiz(courseId, quizId);
 
         return withLearnerAssessmentWrite(courseId, () -> {
             courseAccess.requireLearnerCourseAccess(courseId);
             Quiz quiz = quizzes.findInCourseForUpdate(quizId, courseId).orElseThrow(AttemptService::unavailable);
             requirePublishedQuizState(courseId, quiz);
-            rejectDiagnostic(quiz);
+            requireDiagnosticAdmission(courseId, quiz);
 
-            List<Member> members = requireValidQuizMembers(quizId);
-            Map<UUID, Question> questionsById = mapQuestions(members);
+            List<Member> members = requireValidQuizMembers(courseId, quizId);
+            Map<UUID, Member> questionsById = mapQuestions(members);
 
             Instant now = currentMicros();
             Attempt existing = attempts.findUnsubmittedByQuizAndLearner(quizId, learnerId).orElse(null);
@@ -233,6 +332,7 @@ public class AttemptService {
     /** Reads an active/overdue captured view or immutable submitted result; never mutates. */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public AttemptRead read(UUID courseId, UUID quizId, UUID attemptId) {
+        requireReportingSnapshot();
         requireId(courseId);
         requireId(quizId);
         requireId(attemptId);
@@ -244,7 +344,7 @@ public class AttemptService {
                 .orElseThrow(AttemptService::unavailable);
         requireStoredAttempt(quizId, learnerId, attempt);
 
-        Map<UUID, Question> questionsById = loadQuestionsForAttempt(quizId);
+        Map<UUID, Member> questionsById = loadQuestionsForAttempt(courseId, quizId);
         List<AttemptAnswer> answers = attempts.findAnswersInPositionOrder(attempt.id());
         if (attempt.submitted_at() != null) {
             return toAttemptResult(courseId, attempt, answers, questionsById);
@@ -274,7 +374,8 @@ public class AttemptService {
             requireStoredAttempt(quizId, learnerId, attempt);
 
             List<AttemptAnswer> capturedAnswers = attempts.findAnswersInPositionOrderForUpdate(attempt.id());
-            Map<UUID, Question> questionsById = loadQuestionsForAttempt(quizId);
+            Map<UUID, Member> questionsById = loadQuestionsForAttempt(courseId, quizId);
+            requireCapturedAnswers(attempt, capturedAnswers, questionsById);
             Map<UUID, List<Boolean>> validatedMasks =
                     validateAndCanonicalizeAnswers(input, capturedAnswers, questionsById);
 
@@ -312,7 +413,7 @@ public class AttemptService {
         UUID learnerId = requireSelfLearnerId();
         requireNonEmptyInputShape(input);
 
-        return withLearnerAssessmentWrite(courseId, () -> {
+        return withLearnerAssessmentWrite(courseId, () -> inExecutionScope(courseId, () -> {
             courseAccess.requireLearnerCourseAccess(courseId);
             Quiz quiz = quizzes.findInCourseForUpdate(quizId, courseId).orElseThrow(AttemptService::unavailable);
             requirePublishedQuizState(courseId, quiz);
@@ -325,7 +426,8 @@ public class AttemptService {
             requireStoredAttempt(quizId, learnerId, attempt);
 
             List<AttemptAnswer> capturedAnswers = attempts.findAnswersInPositionOrderForUpdate(attempt.id());
-            Map<UUID, Question> questionsById = loadQuestionsForAttempt(quizId);
+            Map<UUID, Member> questionsById = loadQuestionsForAttempt(courseId, quizId);
+            requireCapturedAnswers(attempt, capturedAnswers, questionsById);
             Map<UUID, List<Boolean>> validatedMasks =
                     validateAndCanonicalizeAnswers(input, capturedAnswers, questionsById);
 
@@ -342,12 +444,13 @@ public class AttemptService {
             }
 
             return gradeAndFinalize(courseId, attempt, capturedAnswers, questionsById, validatedMasks, now);
-        });
+        }));
     }
 
     /** Learner read of own submitted result; 409 before submission (including overdue). */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public AttemptResult readResult(UUID courseId, UUID quizId, UUID attemptId) {
+        requireReportingSnapshot();
         requireId(courseId);
         requireId(quizId);
         requireId(attemptId);
@@ -362,7 +465,7 @@ public class AttemptService {
             throw new BusinessRuleException(HttpStatus.CONFLICT, "Attempt result is not available before submission");
         }
 
-        Map<UUID, Question> questionsById = loadQuestionsForAttempt(quizId);
+        Map<UUID, Member> questionsById = loadQuestionsForAttempt(courseId, quizId);
         List<AttemptAnswer> answers = attempts.findAnswersInPositionOrder(attempt.id());
         return toAttemptResult(courseId, attempt, answers, questionsById);
     }
@@ -370,6 +473,7 @@ public class AttemptService {
     /** Owning Instructor read of a submitted result in their Course (hidden quiz allowed); no keys. */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public AttemptResult readOwnedResult(UUID courseId, UUID quizId, UUID attemptId) {
+        requireReportingSnapshot();
         requireId(courseId);
         requireId(quizId);
         requireId(attemptId);
@@ -384,7 +488,7 @@ public class AttemptService {
             throw new BusinessRuleException(HttpStatus.CONFLICT, "Attempt result is not available before submission");
         }
 
-        Map<UUID, Question> questionsById = loadQuestionsForAttempt(quizId);
+        Map<UUID, Member> questionsById = loadQuestionsForAttempt(courseId, quizId);
         List<AttemptAnswer> answers = attempts.findAnswersInPositionOrder(attempt.id());
         return toAttemptResult(courseId, attempt, answers, questionsById);
     }
@@ -392,6 +496,7 @@ public class AttemptService {
     /** Learner's own attempts on a published quiz ordered by {@code attempt_number DESC}. */
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PageResponse<AttemptSummary> history(UUID courseId, UUID quizId, int page, int size) {
+        requireReportingSnapshot();
         requireId(courseId);
         requireId(quizId);
         PageResponse.validateRequest(page, size);
@@ -431,7 +536,8 @@ public class AttemptService {
     public void finalizeExpired(UUID attemptId) {
         requireId(attemptId);
         Attempt lookupAttempt = attempts.findById(attemptId).orElse(null);
-        if (lookupAttempt == null || lookupAttempt.submitted_at() != null) {
+        if (lookupAttempt == null || lookupAttempt.submitted_at() != null
+                || currentMicros().isBefore(lookupAttempt.expires_at())) {
             return;
         }
         Quiz lookupQuiz = quizzes.findById(lookupAttempt.quiz_id()).orElse(null);
@@ -441,7 +547,7 @@ public class AttemptService {
         UUID courseId = lookupQuiz.course_id();
         UUID quizId = lookupQuiz.id();
 
-        withAssessmentExpiryWrite(courseId, () -> {
+        withAssessmentExpiryWrite(courseId, () -> inExecutionScope(courseId, () -> {
             Quiz lockedQuiz = quizzes.findInCourseForUpdate(quizId, courseId)
                     .orElseThrow(() -> new IllegalStateException("Quiz vanished during expiry finalization"));
             requireStoredQuizStructure(courseId, lockedQuiz);
@@ -456,11 +562,11 @@ public class AttemptService {
             }
 
             List<AttemptAnswer> capturedAnswers = attempts.findAnswersInPositionOrderForUpdate(attemptId);
-            Map<UUID, Question> questionsById = loadQuestionsForAttempt(quizId);
+            Map<UUID, Member> questionsById = loadQuestionsForAttempt(courseId, quizId);
 
             Map<UUID, List<Boolean>> savedMasks = new HashMap<>(capturedAnswers.size());
             for (AttemptAnswer answer : capturedAnswers) {
-                Question q = questionsById.get(answer.question_id());
+                Question q = question(questionsById, answer.question_id());
                 if (q == null || answer.selected_options() == null
                         || answer.selected_options().length != q.options().length) {
                     throw new IllegalStateException("Stored attempt answer violates V004");
@@ -478,39 +584,66 @@ public class AttemptService {
             gradeAndFinalize(courseId, lockedAttempt, capturedAnswers, questionsById, savedMasks,
                     lockedAttempt.expires_at());
             return null;
-        });
+        }));
     }
 
-    /**
-     * READ COMMITTED write unit for Learner assessment mutations (CT03.assessment-guard, ADR007 §3.1).
-     */
-    protected <T> T withLearnerAssessmentWrite(UUID courseId, Supplier<T> work) {
-        return runInReadCommitted(work);
+    private <T> T withLearnerAssessmentWrite(UUID courseId, Supplier<T> work) {
+        return courseGuard.withLearnerAssessmentWrite(courseId, work);
     }
 
-    /**
-     * READ COMMITTED write unit for internal expiry finalization (CT03.assessment-guard, ADR007 §3.1).
-     */
-    protected <T> T withAssessmentExpiryWrite(UUID courseId, Supplier<T> work) {
-        return runInReadCommitted(work);
+    private <T> T withAssessmentExpiryWrite(UUID courseId, Supplier<T> work) {
+        return courseGuard.withAssessmentExpiryWrite(courseId, work);
     }
 
-    private <T> T runInReadCommitted(Supplier<T> work) {
-        if (readCommittedTx == null) {
-            return work.get();
+    /** ADR011 §12: package-private key, bound only by submit/expiry inside the held Course guard. */
+    static final class ExecutionScope implements TransactionSynchronization {
+        final UUID courseId;
+        ExecutionScope(UUID courseId) { this.courseId = courseId; }
+        @Override public void afterCompletion(int status) {
+            if (TransactionSynchronizationManager.getResource(ExecutionScope.class) == this) {
+                TransactionSynchronizationManager.unbindResource(ExecutionScope.class);
+            }
         }
-        return readCommittedTx.execute(status -> work.get());
+    }
+
+    private static <T> T inExecutionScope(UUID courseId, Supplier<T> work) {
+        if (TransactionSynchronizationManager.hasResource(ExecutionScope.class)) {
+            throw new IllegalStateException("Nested Assessment execution scope");
+        }
+        ExecutionScope scope = new ExecutionScope(courseId);
+        TransactionSynchronizationManager.bindResource(ExecutionScope.class, scope);
+        try {
+            TransactionSynchronizationManager.registerSynchronization(scope);
+            requireExecutionScope(courseId);
+            return work.get();
+        } finally {
+            if (TransactionSynchronizationManager.getResource(ExecutionScope.class) == scope) {
+                TransactionSynchronizationManager.unbindResource(ExecutionScope.class);
+            }
+        }
+    }
+
+    static void requireExecutionScope(UUID courseId) {
+        Object resource = TransactionSynchronizationManager.getResource(ExecutionScope.class);
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()
+                || TransactionSynchronizationManager.isCurrentTransactionReadOnly()
+                || !Integer.valueOf(TransactionDefinition.ISOLATION_READ_COMMITTED).equals(
+                        TransactionSynchronizationManager.getCurrentTransactionIsolationLevel())
+                || !(resource instanceof ExecutionScope scope) || !scope.courseId.equals(courseId)
+                // Custom resources survive suspension; the synchronization identifies this physical unit.
+                || !TransactionSynchronizationManager.getSynchronizations().contains(scope)) {
+            throw new IllegalStateException("Assessment read requires this Course's submission execution scope");
+        }
     }
 
     private AttemptResult gradeAndFinalize(UUID courseId,
                                            Attempt attempt,
                                            List<AttemptAnswer> capturedAnswers,
-                                           Map<UUID, Question> questionsById,
+                                           Map<UUID, Member> questionsById,
                                            Map<UUID, List<Boolean>> masksByQuestionId,
                                            Instant submittedAt) {
-        if (capturedAnswers.isEmpty()) {
-            throw new IllegalStateException("Captured attempt has no answers");
-        }
+        requireCapturedAnswers(attempt, capturedAnswers, questionsById);
         List<GradingItem> gradingItems = new ArrayList<>(capturedAnswers.size());
         int prevPosition = 0;
         for (AttemptAnswer answer : capturedAnswers){
@@ -518,7 +651,7 @@ public class AttemptService {
                 throw new IllegalStateException("Captured attempt positions must be positive and strictly increasing");
             }
             prevPosition = answer.position();
-            Question question = questionsById.get(answer.question_id());
+            Question question = question(questionsById, answer.question_id());
             if (question == null) {
                 throw new IllegalStateException("Captured question missing from quiz");
             }
@@ -538,11 +671,19 @@ public class AttemptService {
             throw new IllegalStateException("Grading provider returned invalid output");
         }
 
+        long correctCount = gradingItems.stream().filter(item -> item.selectedOptions().equals(item.correctOptions())).count();
+        BigDecimal expectedScore = BigDecimal.valueOf(correctCount).multiply(HUNDRED_SCORE)
+                .divide(BigDecimal.valueOf(gradingItems.size()), 2, RoundingMode.HALF_UP);
+        if (grade.scorePercentage().scale() != 2 || !expectedScore.equals(grade.scorePercentage())) {
+            throw new IllegalStateException("Grading percentage differs from authoritative exact masks");
+        }
         List<AttemptAnswer> gradedAnswers = new ArrayList<>(capturedAnswers.size());
         for (int index = 0; index < capturedAnswers.size(); index++) {
             AttemptAnswer existing = capturedAnswers.get(index);
             GradedItem gradedItem = grade.items().get(index);
-            if (gradedItem == null || !existing.question_id().equals(gradedItem.questionId())) {
+            if (gradedItem == null || !existing.question_id().equals(gradedItem.questionId())
+                    || gradedItem.correct() != gradingItems.get(index).selectedOptions().equals(
+                            gradingItems.get(index).correctOptions())) {
                 throw new IllegalStateException("Grading output order/IDs mismatch captured answers");
             }
             List<Boolean> selected = masksByQuestionId.get(existing.question_id());
@@ -572,15 +713,16 @@ public class AttemptService {
 
     private Map<UUID, List<Boolean>> validateAndCanonicalizeAnswers(AnswersInput input,
                                                                     List<AttemptAnswer> capturedAnswers,
-                                                                    Map<UUID, Question> questionsById) {
+                                                                    Map<UUID, Member> questionsById) {
         requireNonEmptyInputShape(input);
+        if (capturedAnswers.isEmpty()) throw new IllegalStateException("Missing captured answers");
         if (input.answers().size() != capturedAnswers.size()) {
             throw new BusinessRuleException("Answers must match captured quiz questions exactly");
         }
 
         Map<UUID, Question> capturedQuestions = new HashMap<>(capturedAnswers.size());
         for (AttemptAnswer captured : capturedAnswers) {
-            Question question = questionsById.get(captured.question_id());
+            Question question = question(questionsById, captured.question_id());
             if (question == null) {
                 throw new IllegalStateException("Captured question definition is missing");
             }
@@ -645,50 +787,87 @@ public class AttemptService {
         }
     }
 
-    private static void rejectDiagnostic(Quiz quiz) {
-        if (DIAGNOSTIC.equals(quiz.kind())) {
-            throw new BusinessRuleException(HttpStatus.CONFLICT, "Diagnostic quiz start is not available");
+    private void requireDiagnosticAdmission(UUID courseId, Quiz quiz) {
+        if (DIAGNOSTIC.equals(quiz.kind())
+                && attempts.hasBlockingDiagnosticAttempt(courseId, requireSelfLearnerId(), quiz.id())) {
+            throw new BusinessRuleException(HttpStatus.CONFLICT, "Diagnostic attempt is no longer available");
         }
     }
 
-    private List<Member> requireValidQuizMembers(UUID quizId) {
+    private List<Member> requireValidQuizMembers(UUID courseId, UUID quizId) {
         List<Member> members = quizzes.findMembers(List.of(quizId)).getOrDefault(quizId, List.of());
-        if (members.isEmpty()) {
-            throw new IllegalStateException("Published quiz has no membership questions");
-        }
-        int prevPosition = 0;
+        if (members.isEmpty()) throw new IllegalStateException("Published quiz has no membership questions");
+        int previous = 0;
+        Set<UUID> ids = new HashSet<>();
         for (Member member : members) {
-            if (member.position() <= prevPosition) {
-                throw new IllegalStateException("Stored quiz membership positions must be positive and strictly increasing");
+            if (member == null || member.position() <= previous
+                    || !ids.add(QuestionSelectionService.requireValidDefinition(member.question()).id())) {
+                throw new IllegalStateException("Invalid frozen Quiz membership");
             }
-            prevPosition = member.position();
-            QuestionSelectionService.requireValidDefinition(member.question());
+            previous = member.position();
         }
+        skillGraph.requireAssessmentSkillsInCourse(courseId, members.stream().map(member -> member.question().skill_id())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet()));
         return members;
     }
 
-    private Map<UUID, Question> loadQuestionsForAttempt(UUID quizId) {
-        List<Member> members = quizzes.findMembers(List.of(quizId)).getOrDefault(quizId, List.of());
-        return mapQuestions(members);
+    private Map<UUID, Member> loadQuestionsForAttempt(UUID courseId, UUID quizId) {
+        return mapQuestions(requireValidQuizMembers(courseId, quizId));
     }
 
-    private static Map<UUID, Question> mapQuestions(List<Member> members) {
-        Map<UUID, Question> byId = new HashMap<>(members.size());
-        for (Member member : members) {
-            Question q = QuestionSelectionService.requireValidDefinition(member.question());
-            byId.put(q.id(), q);
-        }
+    private static Map<UUID, Member> mapQuestions(List<Member> members) {
+        Map<UUID, Member> byId = new LinkedHashMap<>();
+        for (Member member : members) byId.put(member.question().id(), member);
         return byId;
+    }
+
+    private static Question question(Map<UUID, Member> definitions, UUID id) {
+        Member member = definitions.get(id);
+        return member == null ? null : member.question();
+    }
+
+    private static void requireCapturedAnswers(Attempt attempt, List<AttemptAnswer> answers,
+                                               Map<UUID, Member> definitions) {
+        if (answers.isEmpty() || answers.size() != definitions.size()) {
+            throw new IllegalStateException("Attempt capture differs from frozen Quiz membership");
+        }
+        int previous = 0;
+        Set<UUID> seen = new HashSet<>();
+        int correct = 0;
+        for (AttemptAnswer answer : answers) {
+            Member member = definitions.get(answer.question_id());
+            Question q = member == null ? null : member.question();
+            if (answer.id() == null || !attempt.id().equals(answer.attempt_id()) || q == null
+                    || !seen.add(q.id()) || answer.position() == null || answer.position() <= previous
+                    || answer.position() != member.position() || answer.selected_options() == null
+                    || answer.selected_options().length != q.options().length
+                    || Arrays.stream(answer.selected_options()).anyMatch(Objects::isNull)
+                    || !"multiple_choice".equals(q.kind())
+                        && Arrays.stream(answer.selected_options()).filter(Boolean.TRUE::equals).count() > 1
+                    || (attempt.submitted_at() == null) != (answer.is_correct() == null)) {
+                throw new IllegalStateException("Invalid persisted Attempt capture");
+            }
+            previous = answer.position();
+            if (attempt.submitted_at() != null) {
+                boolean exact = Arrays.equals(answer.selected_options(), q.correct_options());
+                if (exact != answer.is_correct()) throw new IllegalStateException("Stored grading differs from exact masks");
+                if (exact) correct++;
+            }
+        }
+        if (attempt.submitted_at() != null && attempt.score_percentage().compareTo(
+                BigDecimal.valueOf(correct).multiply(HUNDRED_SCORE)
+                    .divide(BigDecimal.valueOf(answers.size()), 2, RoundingMode.HALF_UP)) != 0) {
+            throw new IllegalStateException("Stored score differs from captured grading");
+        }
     }
 
     private static AttemptView toAttemptView(UUID courseId,
                                              Attempt attempt,
                                              List<AttemptAnswer> answers,
-                                             Map<UUID, Question> questionsById,
+                                             Map<UUID, Member> questionsById,
                                              Instant now) {
-        if (answers.isEmpty()) {
-            throw new IllegalStateException("Captured attempt has no answers");
-        }
+        requireCapturedAnswers(attempt, answers, questionsById);
+        if (now.isBefore(attempt.started_at())) throw new IllegalStateException("Server clock regressed before attempt start");
         List<AttemptQuestionView> questionViews = new ArrayList<>(answers.size());
         int prevPosition = 0;
         for (AttemptAnswer answer : answers) {
@@ -696,7 +875,7 @@ public class AttemptService {
                 throw new IllegalStateException("Captured attempt positions must be positive and strictly increasing");
             }
             prevPosition = answer.position();
-            Question q = questionsById.get(answer.question_id());
+            Question q = question(questionsById, answer.question_id());
             if (q == null || answer.selected_options() == null
                     || answer.selected_options().length != q.options().length) {
                 throw new IllegalStateException("Stored attempt answer violates V004");
@@ -726,10 +905,11 @@ public class AttemptService {
     private static AttemptResult toAttemptResult(UUID courseId,
                                                  Attempt attempt,
                                                  List<AttemptAnswer> answers,
-                                                 Map<UUID, Question> questionsById) {
+                                                 Map<UUID, Member> questionsById) {
         if (attempt.submitted_at() == null || attempt.score_percentage() == null || answers.isEmpty()) {
             throw new IllegalStateException("Submitted attempt violates V004");
         }
+        requireCapturedAnswers(attempt, answers, questionsById);
         List<GradedAnswerView> gradedViews = new ArrayList<>(answers.size());
         int prevPosition = 0;
         for (AttemptAnswer answer : answers) {
@@ -737,7 +917,7 @@ public class AttemptService {
                 throw new IllegalStateException("Captured attempt positions must be positive and strictly increasing");
             }
             prevPosition = answer.position();
-            Question q = questionsById.get(answer.question_id());
+            Question q = question(questionsById, answer.question_id());
             if (q == null || answer.selected_options() == null
                     || answer.selected_options().length != q.options().length
                     || answer.is_correct() == null) {
@@ -780,7 +960,11 @@ public class AttemptService {
                 || attempt.attempt_number() == null || attempt.attempt_number() < 1
                 || attempt.started_at() == null || attempt.expires_at() == null
                 || !attempt.expires_at().isAfter(attempt.started_at())
-                || (attempt.submitted_at() == null) != (attempt.score_percentage() == null)) {
+                || (attempt.submitted_at() == null) != (attempt.score_percentage() == null)
+                || attempt.submitted_at() != null && (attempt.submitted_at().isBefore(attempt.started_at())
+                    || attempt.submitted_at().isAfter(attempt.expires_at())
+                    || attempt.score_percentage().compareTo(ZERO_SCORE) < 0
+                    || attempt.score_percentage().compareTo(HUNDRED_SCORE) > 0)) {
             throw new IllegalStateException("Stored attempt violates V004");
         }
     }
@@ -789,6 +973,9 @@ public class AttemptService {
         var identity = identities.requireCurrentIdentity();
         if (identity == null || identity.userId() == null) {
             throw new IllegalStateException("Missing current identity");
+        }
+        if (identity.role() != UserAccountService.IdentityRole.LEARNER) {
+            throw new org.springframework.security.access.AccessDeniedException("Access denied");
         }
         return identity.userId();
     }

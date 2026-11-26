@@ -3,6 +3,8 @@ package com.codemastery.modules.assessment.domain.repository;
 import com.codemastery.modules.assessment.domain.model.Attempt;
 import com.codemastery.modules.assessment.domain.model.AttemptAnswer;
 import java.time.Instant;
+import java.math.BigDecimal;
+import java.util.Set;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -12,6 +14,16 @@ import java.util.UUID;
  * (CT04, ADR007 §§8–11, §13).
  */
 public interface AttemptRepository {
+
+    record EvidenceCandidate(UUID skillId, UUID attemptId, UUID quizId) {}
+    record Outcome(long scoredLearnerQuizPairs, BigDecimal averageQuizScore) {}
+
+    boolean hasSubmittedInCourse(UUID courseId);
+    boolean hasBlockingDiagnosticAttempt(UUID courseId, UUID learnerId, UUID quizId);
+    UUID findPlacementQuizId(UUID courseId, UUID learnerId, Instant now);
+    List<EvidenceCandidate> findLatestEvidenceCandidates(UUID courseId, UUID learnerId, Set<UUID> skillIds);
+    Outcome readQuizOutcome(UUID courseId, Set<UUID> learnerIds);
+
 
     /** Inserts a new attempt or updates terminal submission fields on an existing attempt. */
     Attempt save(Attempt attempt);

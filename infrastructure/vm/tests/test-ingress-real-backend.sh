@@ -40,6 +40,7 @@ fi
 password="$(openssl rand -hex 16)"
 { printf 'DB_HOST=postgres\nDB_PORT=5432\nDB_NAME=codemastery\nDB_USER=cm_ci\nDB_PASSWORD=%s\n' "$password"
   printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=%s\n' "$(openssl rand -hex 32)" "$origin"
+  printf 'APP_QUIZ_AUTO_SUBMIT_ENABLED=false\nAPP_QUIZ_AUTO_SUBMIT_DELAY_MS=1000\nAPP_QUIZ_AUTO_SUBMIT_BATCH_SIZE=2\n'
   printf 'SPRING_PROFILES_ACTIVE=prod\nSERVER_FORWARD_HEADERS_STRATEGY=NONE\n'
   printf 'STORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\n'
 } > "$work/backend.env"

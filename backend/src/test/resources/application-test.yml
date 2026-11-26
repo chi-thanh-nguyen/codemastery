@@ -11,3 +11,11 @@ codemastery:
       smtp-host: smtp.codemastery.test
       smtp-username: test-smtp-user
       smtp-password: test-smtp-password
+
+# Explicit test-case values; disabled in the shared suite, activated only by focused scheduler tests.
+app:
+  quiz:
+    auto-submit:
+      enabled: false
+      delay-ms: 1000
+      batch-size: 2

@@ -25,7 +25,7 @@ public interface AttemptJpaRepository extends JpaRepository<AttemptEntity, UUID>
     Optional<AttemptEntity> lockInQuiz(@Param("attemptId") UUID attemptId, @Param("quizId") UUID quizId);
 
     @Query(value = "SELECT * FROM public.attempts WHERE quiz_id = :quizId AND user_id = :userId "
-            + "AND submitted_at IS NULL ORDER BY attempt_number DESC LIMIT 1", nativeQuery = true)
+            + "AND submitted_at IS NULL ORDER BY attempt_number DESC", nativeQuery = true)
     Optional<AttemptEntity> findUnsubmittedByQuizAndLearner(@Param("quizId") UUID quizId,
                                                             @Param("userId") UUID userId);
 

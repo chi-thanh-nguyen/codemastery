@@ -12,7 +12,7 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
+import com.codemastery.common.config.AppConfig.QuizExpirySettings;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -39,9 +39,8 @@ public class AttemptAutoSubmitScheduler {
     public AttemptAutoSubmitScheduler(
             AttemptRepository attempts,
             AttemptService attemptService,
-            @Value("${app.quiz.auto-submit.delay-ms}") int delayMs,
-            @Value("${app.quiz.auto-submit.batch-size}") int batchSize) {
-        this(attempts, attemptService, delayMs, batchSize, Clock.systemUTC());
+            QuizExpirySettings settings) {
+        this(attempts, attemptService, settings.delayMs(), settings.batchSize(), Clock.systemUTC());
     }
 
     public AttemptAutoSubmitScheduler(
@@ -86,7 +85,8 @@ public class AttemptAutoSubmitScheduler {
                     attemptService.finalizeExpired(candidate.id());
                     processed++;
                 } catch (RuntimeException ex) {
-                    log.error("Failed to finalize overdue attemptId={}", candidate.id(), ex);
+                    log.error("Failed to finalize overdue attemptId={}; failureType={}",
+                            candidate.id(), ex.getClass().getSimpleName());
                 }
             }
             if (batch.size() < batchSize) {

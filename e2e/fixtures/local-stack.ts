@@ -415,7 +415,8 @@ export default async function globalSetup() {
         const backend = `${runId}-backend`;
         const backendIntent = intend({ kind: 'container', name: backend, image: backendImage, role: 'backend', volumes: 'pending' });
         const backendId = await docker(['run', '-d', '--name', backend, ...runLabels(runId), '--network', network, '-p', `127.0.0.1:${backendPort}:8080`,
-            '-e', 'DB_HOST=postgres', '-e', 'DB_PORT=5432', '-e', 'DB_NAME', '-e', 'DB_USER', '-e', 'DB_PASSWORD', '-e', 'JWT_SECRET',
+            '-e', 'APP_QUIZ_AUTO_SUBMIT_ENABLED=false', '-e', 'APP_QUIZ_AUTO_SUBMIT_DELAY_MS=1000',
+            '-e', 'APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE=2', '-e', 'DB_HOST=postgres', '-e', 'DB_PORT=5432', '-e', 'DB_NAME', '-e', 'DB_USER', '-e', 'DB_PASSWORD', '-e', 'JWT_SECRET',
             '-e', 'STORAGE_ACCESS_KEY', '-e', 'STORAGE_SECRET_KEY', '-e', `CORS_ALLOWED_ORIGINS=${baseUrl}`, '-e', 'SERVER_PORT=8080', backendImage],
         { DB_NAME: secrets.POSTGRES_DB, DB_USER: secrets.POSTGRES_USER, DB_PASSWORD: secrets.POSTGRES_PASSWORD, JWT_SECRET: secrets.JWT_SECRET,
             STORAGE_ACCESS_KEY: secrets.STORAGE_ACCESS_KEY, STORAGE_SECRET_KEY: secrets.STORAGE_SECRET_KEY });

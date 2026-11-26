@@ -1025,4 +1025,437 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                 id, "as01-" + id + "@example.test", "fixture-not-used-for-authentication", "AS01 fixture", role, "active");
         return id;
     }
+    /** AS08 author verification: real Spring guard, repositories, PostgreSQL and security chain. */
+    @org.junit.jupiter.api.Nested
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    class TimedAttemptRuntime {
+        @Autowired com.codemastery.modules.assessment.application.service.AttemptService live;
+        @Autowired com.codemastery.modules.assessment.application.service.QuizGradingService grading;
+        @Autowired com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService skillGraph;
+        @Autowired com.codemastery.modules.course.application.service.CourseAccessService access;
+        @Autowired com.codemastery.modules.course.application.service.CourseManagementService guard;
+        @Autowired com.codemastery.modules.auth.application.service.UserAccountService identities;
+        @Autowired org.springframework.web.context.WebApplicationContext web;
+        @Autowired com.codemastery.modules.auth.infrastructure.security.JwtTokenProvider tokens;
+        @Autowired javax.sql.DataSource dataSource;
+        UUID owner, learner, foreignLearner, admin, courseId, skillId, quizId, q1, q2;
+        final Instant now = Instant.parse("2030-01-01T00:00:00.123456Z");
+
+        @org.junit.jupiter.api.BeforeEach
+        void createAttemptFixtures() {
+            owner = user("instructor"); learner = user("learner"); foreignLearner = user("learner"); admin = user("admin");
+            courseId = UUID.randomUUID(); skillId = UUID.randomUUID(); quizId = UUID.randomUUID();
+            q1 = UUID.randomUUID(); q2 = UUID.randomUUID();
+            jdbc.update("INSERT INTO courses (id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES (?,?,'Timed','Fixture','published',false)", courseId, owner);
+            jdbc.update("INSERT INTO enrollments (id,user_id,course_id,status) VALUES (?,?,?,'active')", UUID.randomUUID(), learner, courseId);
+            jdbc.update("INSERT INTO enrollments (id,user_id,course_id,status) VALUES (?,?,?,'completed')", UUID.randomUUID(), foreignLearner, courseId);
+            jdbc.update("INSERT INTO skills (id,course_id,name) VALUES (?,?,'Timed skill')", skillId, courseId);
+            for (UUID question : List.of(q1,q2)) jdbc.update("INSERT INTO questions VALUES (?,?,'Choose','single_choice','easy',ARRAY['A','B'],ARRAY[true,false])", question, skillId);
+            addQuiz(quizId, "practice");
+        }
+
+        void addQuiz(UUID id, String kind) {
+            jdbc.update("INSERT INTO quizzes VALUES (?,?,'Timed quiz',?,60,'published')", id, courseId, kind);
+            jdbc.update("INSERT INTO quiz_questions VALUES (?,?,?,1)", UUID.randomUUID(), id, q1);
+            jdbc.update("INSERT INTO quiz_questions VALUES (?,?,?,3)", UUID.randomUUID(), id, q2);
+        }
+
+        @org.junit.jupiter.api.AfterEach
+        void deleteAttemptFixtures() {
+            org.springframework.security.core.context.SecurityContextHolder.clearContext();
+            jdbc.update("DELETE FROM attempt_answers WHERE attempt_id IN (SELECT a.id FROM attempts a JOIN quizzes q ON q.id=a.quiz_id WHERE q.course_id=?)", courseId);
+            jdbc.update("DELETE FROM attempts WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=?)", courseId);
+            jdbc.update("DELETE FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=?)", courseId);
+            jdbc.update("DELETE FROM quizzes WHERE course_id=?", courseId);
+            jdbc.update("DELETE FROM questions WHERE skill_id=?", skillId);
+            jdbc.update("DELETE FROM skills WHERE id=?", skillId);
+            jdbc.update("DELETE FROM enrollments WHERE course_id=?", courseId);
+            jdbc.update("DELETE FROM courses WHERE id=?", courseId);
+            for (UUID id : List.of(owner,learner,foreignLearner,admin)) {
+                jdbc.update("DELETE FROM refresh_sessions WHERE user_id=?", id);
+                jdbc.update("DELETE FROM users WHERE id=?", id);
+            }
+        }
+
+        void as(UUID user, com.codemastery.modules.auth.domain.model.Role role) {
+            var principal = new com.codemastery.modules.auth.infrastructure.security.AuthenticatedUser(user,role);
+            org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                    org.springframework.security.authentication.UsernamePasswordAuthenticationToken.authenticated(
+                            principal, null, principal.getAuthorities()));
+        }
+        void asLearner() { as(learner,com.codemastery.modules.auth.domain.model.Role.LEARNER); }
+        void asOwner() { as(owner,com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR); }
+        com.codemastery.modules.assessment.application.service.AttemptService at(Instant instant) {
+            return new com.codemastery.modules.assessment.application.service.AttemptService(attemptRepository, quizRepository,
+                    grading, access, identities, guard, skillGraph, java.time.Clock.fixed(instant,java.time.ZoneOffset.UTC));
+        }
+        com.codemastery.modules.assessment.application.service.AttemptService.AnswersInput answers(boolean correct) {
+            return new com.codemastery.modules.assessment.application.service.AttemptService.AnswersInput(List.of(
+                    new com.codemastery.modules.assessment.application.service.AttemptService.AnswerInput(q2,List.of(false,false)),
+                    new com.codemastery.modules.assessment.application.service.AttemptService.AnswerInput(q1,List.of(correct,false))));
+        }
+        <T> T snapshot(java.util.function.Supplier<T> action) {
+            TransactionTemplate tx = new TransactionTemplate(transactionManager);
+            tx.setReadOnly(true); tx.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+            return tx.execute(status -> action.get());
+        }
+        String bearer(UUID user) {
+            UUID session=UUID.randomUUID();
+            jdbc.update("INSERT INTO refresh_sessions (id,user_id,created_at,expires_at) VALUES (?,?,now(),now()+interval '1 hour')",session,user);
+            return tokens.createToken(user,session);
+        }
+
+        @Test void concurrentStartsAreIdempotentAndOnlyCommittedRetakesAdvanceTheNumber() throws Exception {
+            try (ExecutorService workers=Executors.newFixedThreadPool(2)) {
+                var barrier=new java.util.concurrent.CyclicBarrier(2);
+                java.util.concurrent.Callable<com.codemastery.modules.assessment.application.service.AttemptService.StartOutcome> call=()->{
+                    asLearner(); try {barrier.await(5,TimeUnit.SECONDS);return at(now).start(courseId,quizId);}
+                    finally {org.springframework.security.core.context.SecurityContextHolder.clearContext();}
+                };
+                var a=workers.submit(call);var b=workers.submit(call);
+                var first=a.get(10,TimeUnit.SECONDS);var second=b.get(10,TimeUnit.SECONDS);
+                assertEquals(first.attempt().attemptId(),second.attempt().attemptId());
+                assertTrue(first.created()!=second.created());
+                assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM attempts WHERE quiz_id=?",Integer.class,quizId));
+                asLearner();
+                var result=at(now.plusSeconds(1)).submit(courseId,quizId,first.attempt().attemptId(),answers(true));
+                assertEquals(new BigDecimal("50.00"),result.scorePercentage());
+                assertEquals(2,at(now.plusSeconds(2)).start(courseId,quizId).attempt().attemptNumber());
+                asOwner();
+                assertTrue(live.hasSubmittedAttempts(courseId));
+                assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                        ()->quizService.update(courseId,quizId,new QuizService.QuizInput("Changed","practice",60,List.of(q1))));
+            }
+        }
+
+        @Test void exactDeadlineAndLogicalExpiryUseOnlyTheLastCommittedSavedMasks() {
+            asLearner();var attempt=at(now).start(courseId,quizId).attempt();
+            at(now.plusSeconds(59).plusNanos(999999000)).saveAnswers(courseId,quizId,attempt.attemptId(),answers(true));
+            assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                    ()->at(attempt.expiresAt()).saveAnswers(courseId,quizId,attempt.attemptId(),answers(false)));
+            assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                    ()->at(attempt.expiresAt()).submit(courseId,quizId,attempt.attemptId(),answers(false)));
+            // No identity/publication/membership is needed by internal persisted-overdue cleanup.
+            jdbc.update("UPDATE courses SET publication_status='hidden' WHERE id=?",courseId);
+            jdbc.update("UPDATE quizzes SET publication_status='hidden' WHERE id=?",quizId);
+            jdbc.update("UPDATE enrollments SET status='left' WHERE user_id=?",learner);
+            jdbc.update("UPDATE users SET account_status='locked' WHERE id=?",learner);
+            org.springframework.security.core.context.SecurityContextHolder.clearContext();
+            at(now.plusSeconds(3600)).finalizeExpired(attempt.attemptId());
+            at(now.plusSeconds(3601)).finalizeExpired(attempt.attemptId());
+            asOwner();var result=snapshot(()->live.readOwnedResult(courseId,quizId,attempt.attemptId()));
+            assertEquals(attempt.expiresAt(),result.submittedAt());assertEquals(new BigDecimal("50.00"),result.scorePercentage());
+            assertArrayEquals(new Boolean[]{true,false},attemptRepository.findAnswersInPositionOrder(attempt.attemptId()).getFirst().selected_options());
+        }
+
+        @Test void failureAfterFlushedAnswerWritesRollsBackMasksScoreAndTerminalTime() {
+            asLearner();var attempt=at(now).start(courseId,quizId).attempt();
+            com.codemastery.modules.assessment.infrastructure.persistence.repository.AttemptRepositoryImpl target =
+                    org.springframework.test.util.AopTestUtils.getUltimateTargetObject(attemptRepository);
+            var spy=org.mockito.Mockito.spy(target);
+            org.mockito.Mockito.doAnswer(call->{ call.callRealMethod();throw new IllegalStateException("Injected after flush");})
+                    .when(spy).updateAnswers(org.mockito.ArgumentMatchers.anyList());
+            var failing=new com.codemastery.modules.assessment.application.service.AttemptService(spy,quizRepository,grading,access,identities,
+                    guard,skillGraph,java.time.Clock.fixed(now.plusSeconds(1),java.time.ZoneOffset.UTC));
+            assertThrows(IllegalStateException.class,()->failing.submit(courseId,quizId,attempt.attemptId(),answers(true)));
+            Attempt persisted=attemptRepository.findById(attempt.attemptId()).orElseThrow();
+            assertNull(persisted.submitted_at());assertNull(persisted.score_percentage());
+            for (var answer:attemptRepository.findAnswersInPositionOrder(attempt.attemptId())) {
+                assertArrayEquals(new Boolean[]{false,false},answer.selected_options());assertNull(answer.is_correct());
+            }
+            assertEquals(new BigDecimal("50.00"),at(now.plusSeconds(2)).submit(courseId,quizId,attempt.attemptId(),answers(true)).scorePercentage());
+        }
+
+        @Test void missingCapturedRowsAndIncorrectStoredGradingNeverBecomePartialResults() {
+            asLearner();var attempt=at(now).start(courseId,quizId).attempt();
+            jdbc.update("DELETE FROM attempt_answers WHERE attempt_id=? AND question_id=?",attempt.attemptId(),q2);
+            assertThrows(IllegalStateException.class,()->at(now.plusSeconds(1)).submit(courseId,quizId,attempt.attemptId(),
+                    new com.codemastery.modules.assessment.application.service.AttemptService.AnswersInput(List.of(
+                    new com.codemastery.modules.assessment.application.service.AttemptService.AnswerInput(q1,List.of(true,false))))));
+            assertNull(attemptRepository.findById(attempt.attemptId()).orElseThrow().submitted_at());
+            assertThrows(IllegalStateException.class,()->at(now.plusSeconds(60)).finalizeExpired(attempt.attemptId()));
+        }
+
+        @Test void keysetPassContinuesPastAPoisonedFirstCandidateAcrossMultiplePages() {
+            asLearner();var first=at(now).start(courseId,quizId).attempt();
+            UUID secondQuiz=UUID.randomUUID(),thirdQuiz=UUID.randomUUID();addQuiz(secondQuiz,"practice");addQuiz(thirdQuiz,"test");
+            var second=at(now.plusSeconds(1)).start(courseId,secondQuiz).attempt();
+            var third=at(now.plusSeconds(2)).start(courseId,thirdQuiz).attempt();
+            jdbc.update("DELETE FROM attempt_answers WHERE attempt_id=? AND question_id=?",first.attemptId(),q2);
+            var scheduler=new com.codemastery.modules.assessment.application.scheduler.AttemptAutoSubmitScheduler(
+                    attemptRepository,at(now.plusSeconds(100)),1000,1,java.time.Clock.fixed(now.plusSeconds(100),java.time.ZoneOffset.UTC));
+            assertEquals(2,scheduler.runPass());
+            assertNull(attemptRepository.findById(first.attemptId()).orElseThrow().submitted_at());
+            assertEquals(second.expiresAt(),attemptRepository.findById(second.attemptId()).orElseThrow().submitted_at());
+            assertEquals(third.expiresAt(),attemptRepository.findById(third.attemptId()).orElseThrow().submitted_at());
+        }
+
+        @Test void learnerAdmissionIsRecheckedAfterWaitingForThePhysicalCourseRoot() throws Exception {
+            try (var blocker=dataSource.getConnection();ExecutorService worker=Executors.newSingleThreadExecutor()) {
+                blocker.setAutoCommit(false);
+                try(var statement=blocker.prepareStatement("SELECT id FROM courses WHERE id=? FOR UPDATE")) {statement.setObject(1,courseId);statement.executeQuery().close();}
+                var waiting=worker.submit(()->{asLearner();try {return at(now).start(courseId,quizId);}
+                    finally {org.springframework.security.core.context.SecurityContextHolder.clearContext();}});
+                // Observe the real lock wait rather than timing a sleep.
+                org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5)).until(()->
+                        jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'",Integer.class)>0);
+                try(var statement=blocker.prepareStatement("UPDATE enrollments SET status='left' WHERE user_id=?")) {statement.setObject(1,learner);statement.executeUpdate();}
+                blocker.commit();
+                var failure=assertThrows(java.util.concurrent.ExecutionException.class,()->waiting.get(10,TimeUnit.SECONDS));
+                assertTrue(failure.getCause() instanceof org.springframework.security.access.AccessDeniedException);
+                assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM attempts WHERE quiz_id=?",Integer.class,quizId));
+            }
+        }
+
+        @Test void manualSaveAndExpiryRacesProduceOneImmutableTerminalResult() throws Exception {
+            asLearner();var attempt=at(now).start(courseId,quizId).attempt();
+            try(ExecutorService workers=Executors.newFixedThreadPool(3)) {
+                var barrier=new java.util.concurrent.CyclicBarrier(3);
+                var manual=workers.submit(()->{asLearner();try {barrier.await(5,TimeUnit.SECONDS);
+                    return at(now.plusSeconds(59)).submit(courseId,quizId,attempt.attemptId(),answers(true));
+                    }finally {org.springframework.security.core.context.SecurityContextHolder.clearContext();}});
+                var save=workers.submit(()->{asLearner();try {barrier.await(5,TimeUnit.SECONDS);
+                    try {at(now.plusSeconds(59)).saveAnswers(courseId,quizId,attempt.attemptId(),answers(false));}
+                    catch(com.codemastery.common.exception.BusinessRuleException terminal) {assertEquals(org.springframework.http.HttpStatus.CONFLICT,terminal.getStatus());}
+                    return null;
+                    }finally {org.springframework.security.core.context.SecurityContextHolder.clearContext();}});
+                var expiry=workers.submit(()->{barrier.await(5,TimeUnit.SECONDS);at(attempt.expiresAt()).finalizeExpired(attempt.attemptId());return null;});
+                var manualResult=manual.get(10,TimeUnit.SECONDS);save.get(10,TimeUnit.SECONDS);expiry.get(10,TimeUnit.SECONDS);
+                asLearner();var repeated=at(now.plusSeconds(61)).submit(courseId,quizId,attempt.attemptId(),answers(false));
+                assertEquals(manualResult,repeated);
+                assertTrue(Set.of(now.plusSeconds(59),attempt.expiresAt()).contains(repeated.submittedAt()));
+                assertEquals(repeated.scorePercentage(),snapshot(()->live.readResult(courseId,quizId,attempt.attemptId())).scorePercentage());
+            }
+        }
+
+        @Test void firstAttemptRereadsDefinitionsCommittedByTheRootHolder() throws Exception {
+            // AS06's authoring fixture is canonical 1..N; separate AS08 cases retain legacy gaps.
+            jdbc.update("UPDATE quiz_questions SET position=2 WHERE quiz_id=? AND question_id=?",quizId,q2);
+            try(ExecutorService worker=Executors.newSingleThreadExecutor()) {
+                asOwner();
+                java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<com.codemastery.modules.assessment.application.service.AttemptService.StartOutcome>> waiting=
+                        new java.util.concurrent.atomic.AtomicReference<>();
+                guard.withCourseConfigurationWrite(courseId,()->{
+                    waiting.set(worker.submit(()->{asLearner();try{return at(now).start(courseId,quizId);}
+                        finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}}));
+                    org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5)).until(()->
+                            jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'",Integer.class)>0);
+                    quizService.publish(courseId,quizId,false);
+                    quizService.update(courseId,quizId,new QuizService.QuizInput("Replacement","test",120,List.of(q2)));
+                    quizService.publish(courseId,quizId,true);
+                    return null;
+                });
+                var captured=waiting.get().get(10,TimeUnit.SECONDS).attempt();
+                assertEquals(List.of(q2),captured.questions().stream().map(com.codemastery.modules.assessment.application.service.AttemptService.AttemptQuestionView::questionId).toList());
+                assertEquals(now.plusSeconds(120),captured.expiresAt());
+            }
+        }
+
+        @Test void explicitStatementDeadlineRollsBackAWaitingAttemptAndReleasesItsConnection() throws Exception {
+            try(var blocker=dataSource.getConnection();ExecutorService worker=Executors.newSingleThreadExecutor()) {
+                blocker.setAutoCommit(false);
+                try(var statement=blocker.prepareStatement("SELECT id FROM courses WHERE id=? FOR UPDATE")){statement.setObject(1,courseId);statement.executeQuery().close();}
+                var waiting=worker.submit(()->{asLearner();try{
+                    TransactionTemplate tx=new TransactionTemplate(transactionManager);tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+                    return tx.execute(status->{jdbc.execute("SET LOCAL statement_timeout='1000ms'");return at(now).start(courseId,quizId);});
+                    }finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}});
+                var failure=assertThrows(java.util.concurrent.ExecutionException.class,()->waiting.get(5,TimeUnit.SECONDS));
+                assertTrue(failure.getCause() instanceof org.springframework.dao.DataAccessException);
+                assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM attempts WHERE quiz_id=?",Integer.class,quizId));
+                blocker.rollback();asLearner();assertTrue(at(now).start(courseId,quizId).created());
+            }
+        }
+
+        void terminal(UUID quiz,int number,Instant start,Instant submitted,boolean first,boolean second) {
+            UUID attempt=UUID.randomUUID();
+            jdbc.update("INSERT INTO attempts VALUES (?,?,?,?,?,?,?,?)",attempt,learner,quiz,number,
+                    java.time.OffsetDateTime.ofInstant(start,java.time.ZoneOffset.UTC),java.time.OffsetDateTime.ofInstant(start.plusSeconds(60),java.time.ZoneOffset.UTC),
+                    java.time.OffsetDateTime.ofInstant(submitted,java.time.ZoneOffset.UTC),BigDecimal.valueOf((first?50:0)+(second?50:0)));
+            jdbc.update("INSERT INTO attempt_answers VALUES (?,?,?,1,ARRAY[?,false],?)",UUID.randomUUID(),attempt,q1,first,first);
+            jdbc.update("INSERT INTO attempt_answers VALUES (?,?,?,3,ARRAY[?,false],?)",UUID.randomUUID(),attempt,q2,second,second);
+        }
+
+        @Test void diagnosticOfferStartResumeExpiryAndOneTimeCompletionShareTheApprovedGate() {
+            UUID diagnostic=UUID.randomUUID(),other=UUID.randomUUID();addQuiz(diagnostic,"diagnostic");addQuiz(other,"diagnostic");
+            jdbc.update("UPDATE quizzes SET title='A diagnostic' WHERE id=?",diagnostic);
+            jdbc.update("UPDATE quizzes SET title='Z diagnostic' WHERE id=?",other);
+            asLearner();assertEquals(diagnostic,snapshot(()->live.readMyPlacementQuizId(courseId)));
+            var started=at(now).start(courseId,diagnostic).attempt();
+            assertFalse(at(now.plusSeconds(1)).start(courseId,diagnostic).created());
+            assertEquals(diagnostic,snapshot(()->live.readMyPlacementQuizId(courseId)));
+            assertThrows(com.codemastery.common.exception.BusinessRuleException.class,()->at(now.plusSeconds(1)).start(courseId,other));
+            var overdue=at(now.plusSeconds(60));
+            assertNull(snapshot(()->overdue.readMyPlacementQuizId(courseId)));
+            assertThrows(com.codemastery.common.exception.BusinessRuleException.class,()->overdue.start(courseId,diagnostic));
+            overdue.finalizeExpired(started.attemptId());
+            assertNull(snapshot(()->live.readMyPlacementQuizId(courseId)));
+            assertThrows(com.codemastery.common.exception.BusinessRuleException.class,()->at(now.plusSeconds(61)).start(courseId,diagnostic));
+        }
+
+        @Test void concurrentDifferentDiagnosticStartsCaptureOnlyOneQuizForTheLearner() throws Exception {
+            UUID first=UUID.randomUUID(),second=UUID.randomUUID();addQuiz(first,"diagnostic");addQuiz(second,"diagnostic");
+            try(ExecutorService workers=Executors.newFixedThreadPool(2)) {
+                var barrier=new java.util.concurrent.CyclicBarrier(2);
+                java.util.function.Function<UUID,java.util.concurrent.Callable<Boolean>> call=id->()->{
+                    asLearner();try {barrier.await(5,TimeUnit.SECONDS);at(now).start(courseId,id);return true;}
+                    catch(com.codemastery.common.exception.BusinessRuleException conflict){assertEquals(org.springframework.http.HttpStatus.CONFLICT,conflict.getStatus());return false;}
+                    finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}};
+                var a=workers.submit(call.apply(first));var b=workers.submit(call.apply(second));
+                assertTrue(a.get(10,TimeUnit.SECONDS)!=b.get(10,TimeUnit.SECONDS));
+                assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM attempts WHERE user_id=?",Integer.class,learner));
+            }
+        }
+
+        @Test void missingFrozenMembershipCannotSilentlyTurnCapturedEvidenceIntoUnknown() {
+            asLearner();var attempt=at(now).start(courseId,quizId).attempt();
+            at(now.plusSeconds(1)).submit(courseId,quizId,attempt.attemptId(),answers(true));
+            jdbc.update("DELETE FROM quiz_questions WHERE quiz_id=?",quizId);
+            assertThrows(IllegalStateException.class,()->snapshot(()->live.readMyLatestSkillEvidence(courseId,Set.of(skillId))));
+        }
+
+        @Test void admittedSelfEvidenceNeverAcceptsAnotherRoleOrLeftMembershipAndAncestryIsNotAnOpenRead() {
+            assertThrows(IllegalStateException.class,()->skillGraph.requireAssessmentSkillsInCourse(courseId,Set.of(skillId)));
+            asOwner();
+            assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                    ()->snapshot(()->live.readMyLatestSkillEvidence(courseId,Set.of(skillId))));
+            asLearner();
+            jdbc.update("UPDATE enrollments SET status='left' WHERE user_id=?",learner);
+            assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                    ()->snapshot(()->live.readMyLatestSkillEvidence(courseId,Set.of(skillId))));
+            assertThrows(IllegalStateException.class,()->snapshot(()->{skillGraph.requireAssessmentSkillsInCourse(courseId,Set.of(UUID.randomUUID()));return null;}));
+        }
+
+        @Test void tupleTieBreakersHiddenQuizzesDiagnosticsAndPairAveragesKeepTheirDistinctSemantics() {
+            UUID highQuiz=UUID.fromString("ffffffff-ffff-ffff-ffff-fffffffffff0"),diagnostic=UUID.randomUUID();
+            addQuiz(highQuiz,"test");addQuiz(diagnostic,"diagnostic");
+            terminal(quizId,1,now,now.plusSeconds(10),false,false);
+            terminal(highQuiz,1,now,now.plusSeconds(10),true,true);
+            terminal(highQuiz,2,now,now.plusSeconds(10),true,false);
+            asLearner();
+            var latest=snapshot(()->live.readMyLatestSkillEvidence(courseId,Set.of(skillId))).bySkill().get(skillId);
+            assertEquals(highQuiz,latest.quizId());assertEquals(2,latest.attemptNumber());
+            terminal(quizId,2,now.plusSeconds(1),now.plusSeconds(10),false,false);
+            assertEquals(quizId,snapshot(()->live.readMyLatestSkillEvidence(courseId,Set.of(skillId))).bySkill().get(skillId).quizId());
+            terminal(diagnostic,1,now.plusSeconds(2),now.plusSeconds(11),true,true);
+            jdbc.update("UPDATE quizzes SET publication_status='hidden' WHERE course_id=?",courseId);
+            assertEquals(diagnostic,snapshot(()->live.readMyLatestSkillEvidence(courseId,Set.of(skillId))).bySkill().get(skillId).quizId());
+            var outcome=snapshot(()->live.readQuizOutcome(courseId,Set.of(learner)));
+            assertEquals(2,outcome.scoredLearnerQuizPairs());assertEquals(new BigDecimal("25.00"),outcome.averageQuizScore());
+            assertEquals(0,snapshot(()->live.readQuizOutcome(courseId,Set.of(foreignLearner))).scoredLearnerQuizPairs());
+        }
+
+        @Test void submissionMarkerIsBoundOnlyToThisCallbackThreadCourseAndPhysicalTransaction() {
+            asLearner();var attempt=at(now).start(courseId,quizId).attempt();
+            var observed=new java.util.concurrent.atomic.AtomicBoolean();
+            var inspector=new com.codemastery.modules.assessment.application.service.QuizGradingService(){
+                @Override public Grade grade(List<GradingItem> items) {
+                    assertTrue(live.readLatestSkillEvidence(courseId,learner,Set.of(skillId)).bySkill().isEmpty());
+                    assertThrows(IllegalStateException.class,()->live.readLatestSkillEvidence(UUID.randomUUID(),learner,Set.of(skillId)));
+                    TransactionTemplate fresh=new TransactionTemplate(transactionManager);
+                    fresh.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                    fresh.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+                    assertThrows(IllegalStateException.class,()->fresh.execute(status->live.readLatestSkillEvidence(courseId,learner,Set.of(skillId))));
+                    try(ExecutorService worker=Executors.newSingleThreadExecutor()) {
+                        var failure=assertThrows(java.util.concurrent.ExecutionException.class,()->worker.submit(
+                                ()->live.readLatestSkillEvidence(courseId,learner,Set.of(skillId))).get(5,TimeUnit.SECONDS));
+                        assertTrue(failure.getCause() instanceof IllegalStateException);
+                    }
+                    observed.set(true);return super.grade(items);
+                }
+            };
+            var service=new com.codemastery.modules.assessment.application.service.AttemptService(attemptRepository,quizRepository,inspector,
+                    access,identities,guard,skillGraph,java.time.Clock.fixed(now.plusSeconds(1),java.time.ZoneOffset.UTC));
+            service.submit(courseId,quizId,attempt.attemptId(),answers(true));assertTrue(observed.get());
+            assertThrows(IllegalStateException.class,()->live.readLatestSkillEvidence(courseId,learner,Set.of(skillId)));
+        }
+
+        @Test void realRuntimeMatrixPermitsOnlyTheImplementedAttemptOperations() throws Exception {
+            String role="as08_"+UUID.randomUUID().toString().replace("-", "");
+            jdbc.execute("CREATE ROLE "+role+" NOLOGIN");
+            try {
+                jdbc.execute("GRANT USAGE ON SCHEMA public TO "+role);
+                String script=java.nio.file.Files.readString(java.nio.file.Path.of("..","infrastructure","vm","deploy.sh"));
+                String matrix=script.split("RUNTIME_PRIVILEGE_MATRIX='\n",2)[1].split("\n'",2)[0];
+                for(String line:matrix.split("\n")) {
+                    String[] fields=line.trim().split("\\s+");
+                    if(!fields[1].equals("-")) jdbc.execute("GRANT "+fields[1]+" ON TABLE public."+fields[0]+" TO "+role);
+                    if(!fields[2].equals("-")) jdbc.execute("GRANT "+fields[2].replace('+',',')+" ON TABLE public."+fields[0]+" TO "+role);
+                }
+                asLearner();TransactionTemplate tx=new TransactionTemplate(transactionManager);
+                tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+                var attempt=tx.execute(status->{jdbc.execute("SET LOCAL ROLE "+role);return at(now).start(courseId,quizId).attempt();});
+                var result=tx.execute(status->{jdbc.execute("SET LOCAL ROLE "+role);return at(now.plusSeconds(1)).submit(courseId,quizId,attempt.attemptId(),answers(true));});
+                assertEquals(new BigDecimal("50.00"),result.scorePercentage());
+                for(String forbidden:List.of("UPDATE public.attempts SET expires_at=expires_at WHERE false",
+                        "UPDATE public.attempt_answers SET question_id=question_id WHERE false",
+                        "DELETE FROM public.attempts WHERE false", "DELETE FROM public.attempt_answers WHERE false")) {
+                    var failure=assertThrows(org.springframework.dao.DataAccessException.class,
+                            ()->tx.execute(status->{jdbc.execute("SET LOCAL ROLE "+role);jdbc.execute(forbidden);return null;}));
+                    assertTrue(failure.getMostSpecificCause() instanceof java.sql.SQLException sql && "42501".equals(sql.getSQLState()));
+                }
+            } finally {
+                jdbc.execute("DROP OWNED BY "+role);jdbc.execute("DROP ROLE "+role);
+            }
+        }
+
+        @Test void incompatibleOuterTransactionsAndStartOrSaveDoNotGrantEvidenceExecution() {
+            asLearner();TransactionTemplate rr=new TransactionTemplate(transactionManager);rr.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+            assertThrows(IllegalStateException.class,()->rr.execute(status->at(now).start(courseId,quizId)));
+            assertThrows(IllegalStateException.class,()->live.readLatestSkillEvidence(courseId,learner,Set.of(skillId)));
+            guard.withLearnerAssessmentWrite(courseId,()->{
+                assertThrows(IllegalStateException.class,()->live.readLatestSkillEvidence(courseId,learner,Set.of(skillId)));return null;});
+            assertThrows(org.springframework.transaction.IllegalTransactionStateException.class,()->live.readQuizOutcome(courseId,Set.of(learner)));
+            assertThrows(org.springframework.transaction.IllegalTransactionStateException.class,()->live.readMyLatestSkillEvidence(courseId,Set.of(skillId)));
+        }
+
+        @Test void latestEvidenceAndReportingUseAuthoritativeTupleCountsAndLatestPairMean() {
+            asLearner();var a=at(now).start(courseId,quizId).attempt();at(now.plusSeconds(1)).submit(courseId,quizId,a.attemptId(),answers(true));
+            var b=at(now.plusSeconds(2)).start(courseId,quizId).attempt();at(now.plusSeconds(3)).submit(courseId,quizId,b.attemptId(),answers(false));
+            var evidence=snapshot(()->live.readMyLatestSkillEvidence(courseId,Set.of(skillId,UUID.randomUUID())));
+            assertEquals(Set.of(skillId),evidence.bySkill().keySet());assertEquals(b.attemptId(),evidence.bySkill().get(skillId).attemptId());
+            assertEquals(0,evidence.bySkill().get(skillId).correctCount());assertEquals(2,evidence.bySkill().get(skillId).totalCount());
+            var outcome=snapshot(()->live.readQuizOutcome(courseId,Set.of(learner)));
+            assertEquals(1,outcome.scoredLearnerQuizPairs());assertEquals(new BigDecimal("0.00"),outcome.averageQuizScore());
+            assertNull(snapshot(()->live.readQuizOutcome(courseId,Set.of())).averageQuizScore());
+            jdbc.update("UPDATE attempt_answers SET is_correct=true WHERE attempt_id=? AND question_id=?",b.attemptId(),q1);
+            assertThrows(IllegalStateException.class,()->snapshot(()->live.readMyLatestSkillEvidence(courseId,Set.of(skillId))));
+        }
+
+        @Test void httpSecurityClosedBodiesNoStoreAndResultConfidentialityUseTheRealStack() throws Exception {
+            var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup(web)
+                    .apply(org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity()).build();
+            String path="/api/courses/"+courseId+"/quizzes/"+quizId+"/attempts";
+            String learnerToken=bearer(learner),ownerToken=bearer(owner),foreignToken=bearer(foreignLearner),adminToken=bearer(admin);
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized())
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cache-Control","no-store"));
+            for(String token:List.of(ownerToken,adminToken)) mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path)
+                    .header("Authorization","Bearer "+token)).andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isForbidden());
+            var started=mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path).header("Authorization","Bearer "+learnerToken))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isCreated()).andReturn();
+            var json=tools.jackson.databind.json.JsonMapper.builder().build();String id=json.readTree(started.getResponse().getContentAsString()).get("attemptId").asString();
+            String valid="{\"answers\":[{\"questionId\":\""+q1+"\",\"selectedOptions\":[true,false]},{\"questionId\":\""+q2+"\",\"selectedOptions\":[false,false]}]}";
+            for(String body:List.of(valid+" {}",valid.replace("{\"answers\":","{\"answers\":[],\"answers\":"),
+                    valid.replace("true","\"true\""),valid.replace(q1.toString(),"1-1-1-1-1"),valid.replace(q2.toString(),q1.toString()),
+                    valid.replace("true","null"))) {
+                mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put(path+"/"+id+"/answers")
+                        .header("Authorization","Bearer "+learnerToken).contentType("application/json").content(body))
+                        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest())
+                        .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cache-Control","no-store"));
+            }
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path+"/"+id).header("Authorization","Bearer "+foreignToken))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isNotFound());
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(path+"/"+id+"/submission")
+                    .header("Authorization","Bearer "+learnerToken).contentType("application/json").content(valid))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.scorePercentage").value(50))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.answers[0].correctOptions").doesNotExist());
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path+"?size=1&page=0&page=1").header("Authorization","Bearer "+learnerToken))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isBadRequest());
+            jdbc.update("UPDATE users SET account_status='locked' WHERE id=?",learner);
+            mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get(path).header("Authorization","Bearer "+learnerToken))
+                    .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized());
+        }
+    }
+
 }
