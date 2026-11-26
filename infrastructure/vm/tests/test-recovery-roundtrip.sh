@@ -8,14 +8,14 @@
 #   verification and an isolated PostgreSQL restore -> MinIO restore into a fresh volume and
 #   a server boot with the same identity -> fault injection (writer exclusion, lock
 #   contention, corrupt/forged/replayed sets).
-# Run from the repository root:  bash infrastructure/vm/tests/test-phase5-recovery-roundtrip.sh
+# Run from the repository root:  bash infrastructure/vm/tests/test-recovery-roundtrip.sh
 # Needs Docker and OpenSSL 3 (`openssl` on Ubuntu; CODEMASTERY_OPENSSL elsewhere).
 set -Eeuo pipefail
 export CODEMASTERY_OPENSSL="${CODEMASTERY_OPENSSL:-openssl}"
 OPENSSL="${CODEMASTERY_OPENSSL}"
 "${OPENSSL}" version | grep -q '^OpenSSL 3\.' || { echo "OpenSSL 3 is required (CODEMASTERY_OPENSSL)." >&2; exit 1; }
 PY="${PYTHON:-python3}"
-project="cmrt$(printf '%s' "${GITHUB_RUN_ID:-local}$$" | cksum | cut -c1-8)"
+project="cmrt$(printf '%s' "${GITHUB_RUN_ID:-local}$$" | cksum | awk '{print $1}')"
 network="${project}_default"
 PG_IMAGE="${PG_IMAGE:-postgres:17.11-bookworm}"
 # The release's minimal MinIO server (no baked MINIO_* settings, UID 65532), built from its pinned source.

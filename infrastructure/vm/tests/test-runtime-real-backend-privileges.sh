@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
 # CI regression test for job "VM runtime privileges with the real backend" (deployment-script-runtime),
 # step "Exercise real Auth, catalogue and membership under the approved matrix" in .github/workflows/ci-vm.yml.
-# Body moved verbatim from that step's former inline `run:` script.
 # CI runs it from the repository root, where its relative paths resolve:
 #   bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
 set -euo pipefail
+count_permission_errors() {
+  grep -ciE 'permission denied|SQLState:[[:space:]]*42501([^[:alnum:]_]|$)' || [[ $? == 1 ]]
+}
+export -f count_permission_errors
+# Match the PostgreSQL diagnostic, including the SQLState form Hibernate logs.
+# The same digits can occur in timestamps and correlation IDs.
+[[ "$(printf '%s\n' '2026-11-25T08:39:11.263425019Z' 'SQLState: 425012' \
+  'SQL Error: 0, SQLState: 42501' 'ERROR: permission denied for table courses' \
+  | count_permission_errors)" == 2 ]]
+
 script=infrastructure/vm/deploy.sh
 work="$(mktemp -d)"
 suffix="${GITHUB_RUN_ID:-local}-$$"
@@ -510,7 +519,8 @@ check "old password no longer signs in" "$STATUS" 401
 call POST /api/auth/login "" "{\"email\":\"learner.b@example.test\",\"password\":\"$new_password\"}"
 check "new password signs in (ordinary sign-in, no JWT from reset)" "$STATUS" 200
 
-check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
+denials="$(docker logs "$backend" 2>&1 | count_permission_errors)"
+check "backend log entries reporting permission denied / SQLSTATE 42501" "$denials" 0
 
 echo "== AU07 request worker under the runtime role (recovery activated; synthetic SMTP host that cannot resolve)"
 # Restart the same image against the same migrated database with recovery settings. Every value
@@ -546,7 +556,8 @@ check "only the two eligible capabilities exist" "$(psql_admin <<<"SELECT count(
 check "backend log never contains a recipient address" "$(docker logs "$backend" 2>&1 | grep -ciE 'learner\.[abc]@example\.test|nobody@example\.test' || true)" 0
 
 echo "== no permission failure anywhere, and the matrix is unchanged"
-check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
+denials="$(docker logs "$backend" 2>&1 | count_permission_errors)"
+check "backend log entries reporting permission denied / SQLSTATE 42501" "$denials" 0
 verify_runtime_privileges complete >/dev/null
 echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank, AS06 quiz composition, CO06 Instructor authoring, AS09 owner assignments, the IN10 audit read, and IN07 notifications under the matrix"
 BASH
@@ -689,7 +700,8 @@ check "visit writes pointer and server time" "$STATUS/$(field resumeLessonId)" "
 check "stored pointer and visit time" "$(psql_admin <<<"SELECT (resume_lesson_id='$lesson' AND last_visited_at IS NOT NULL)::text FROM public.enrollments;")" "true"
 call PUT "/api/courses/$course/lessons/$lesson/completion" "$token" '{"completed":true}'
 check "completion on the upgraded database" "$STATUS/$(field membershipStatus)" "200/completed"
-check "backend log entries mentioning permission denied / 42501" "$(docker logs "$backend" 2>&1 | grep -ciE 'permission denied|42501' || true)" 0
+denials="$(docker logs "$backend" 2>&1 | count_permission_errors)"
+check "backend log entries reporting permission denied / SQLSTATE 42501" "$denials" 0
 echo "RUNTIME_UPGRADE_TESTS_PASS: real Flyway V008 with r3 grants -> pre-migration provisioning -> V009 -> exact r4 and CO08 writes"
 BASH
 docker rm -f "${container}-backend" >/dev/null 2>&1 || true

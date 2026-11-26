@@ -1,26 +1,51 @@
+# Use only the Apache distribution directory from the Docker Official Image.
+# The checked-in tree digest below is derived independently from Apache's archive.
+FROM docker.io/library/maven:3.9.16-eclipse-temurin-25@sha256:93b8a14ea2f412782e4e842651273b4d903e35cc496284f178fbbe2d67d00976 AS maven-distribution
+
 # Temurin 25.0.5+8 (the October 2026 OpenJDK security release), each tag pinned
 # to the index it resolved to on 3 November 2026, so a rebuild cannot silently
 # pick up different base content (docs/deployment.md, F11).
-FROM eclipse-temurin:25.0.5_8-jdk-noble@sha256:95e350ad1eb738f943e141640f7e3d797e483359a3b33c3864255bfd1ad71f8a AS build
+FROM eclipse-temurin:25.0.5_8-jdk-noble@sha256:95e350ad1eb738f943e141640f7e3d797e483359a3b33c3864255bfd1ad71f8a AS jdk
 
+FROM jdk AS maven-bootstrap
 WORKDIR /build
+COPY --from=maven-distribution --chown=0:0 /usr/share/maven/ /opt/maven/
+COPY .mvn/wrapper/maven-wrapper.properties .mvn/wrapper/
+# BEGIN MAVEN DISTRIBUTION VERIFICATION
+RUN --network=none set -eu; \
+    properties=.mvn/wrapper/maven-wrapper.properties; \
+    [ "$(tail -c 1 "$properties" | wc -l)" -eq 1 ] \
+        || { echo 'Maven wrapper properties must end with a newline' >&2; exit 1; }; \
+    expected_url='https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.16/apache-maven-3.9.16-bin.zip'; \
+    wrapper_url="$(awk 'tolower($0) ~ /^[[:space:]]*distributionurl([[:space:]]*[:=]|[[:space:]]|$)/ { \
+        count++; \
+        if (sub(/^distributionUrl=/, "")) { \
+            sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); url = $0; \
+        } \
+    } END { if (count == 1) print url }' "$properties")"; \
+    [ "$wrapper_url" = "$expected_url" ] || { echo 'Maven distribution pin and wrapper URL differ' >&2; exit 1; }; \
+    rm -rf /opt/maven/ref; \
+    tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner --format=gnu \
+        -C /opt/maven -cf /tmp/maven-tree.tar .; \
+    echo 'a05d2e6ca8d235aaeb66d8c68f2f6a84506774355b52c14ce3431073ddad513a6adf8fb4d5a0f3f52d5bf33205fbc3855d37977766dcf7a71fe83e7e226e48a9  /tmp/maven-tree.tar' \
+        | sha512sum -c -; \
+    rm /tmp/maven-tree.tar; \
+    /opt/maven/bin/mvn --version
+# END MAVEN DISTRIBUTION VERIFICATION
+
+FROM maven-bootstrap AS build
 COPY .mvn/ .mvn/
-COPY mvnw pom.xml ./
-# The JDK image has no curl or wget, so the Maven Wrapper fetches the pinned Maven
-# distribution with one unretried Java request, and Maven Central answers HTTP 429
-# when it rate-limits (a CI build failed so on 19 November 2026; docs/testing.md).
-# Maven's own dependency downloads already retry 429 and 503. Only this bootstrap
-# is retried, at most three times with growing pauses; the build below runs once.
-RUN for pause in 5 15 30; do \
-        ./mvnw --version >/dev/null && exit 0; \
-        echo "Maven Wrapper bootstrap failed; retrying in ${pause} s" >&2; sleep "${pause}"; \
-    done; \
-    ./mvnw --version >/dev/null
+COPY pom.xml ./
 COPY src/ src/
-RUN ./mvnw package -DskipTests
+# Give Resolver's existing 429/503 retries more time on cold runners.
+# Without Retry-After the three delays are 15, 30 and 45 seconds.
+# Resolver declines a retry when the requested delay exceeds 60 seconds.
+RUN /opt/maven/bin/mvn package -DskipTests \
+    -Daether.connector.http.retryHandler.interval=15000 \
+    -Daether.connector.http.retryHandler.intervalMax=60000
 
 # Build-only verifier: no compiler, helper class or verification inventory ships.
-FROM build AS truststore-verifier
+FROM jdk AS truststore-verifier
 COPY <<'JAVA' /truststore-verifier/VerifyTrustStore.java
 import java.io.File;
 import java.nio.file.Files;
