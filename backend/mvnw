@@ -108,15 +108,37 @@ trim() {
 scriptDir="$(dirname "$0")"
 scriptName="$(basename "$0")"
 
-# parse distributionUrl and optional distributionSha256Sum, requires .mvn/wrapper/maven-wrapper.properties
+# parse distributionUrl, requires .mvn/wrapper/maven-wrapper.properties
 while IFS="=" read -r key value; do
   case "${key-}" in
   distributionUrl) distributionUrl=$(trim "${value-}") ;;
-  distributionSha256Sum) distributionSha256Sum=$(trim "${value-}") ;;
-  distributionTarGzSha256Sum) distributionTarGzSha256Sum=$(trim "${value-}") ;;
   esac
 done <"$scriptDir/.mvn/wrapper/maven-wrapper.properties"
 [ -n "${distributionUrl-}" ] || die "cannot read distributionUrl property in $scriptDir/.mvn/wrapper/maven-wrapper.properties"
+
+# CodeMastery requires both archive pins. Each needs exactly one declaration of
+# the exact form name=<64 lowercase hex>, with optional space around the value.
+# Case, spacing and ':' variants of a name count as further declarations.
+# Only the file is read, never an inherited variable of the same name.
+read_archive_pin() {
+  awk -v name="$1" '
+    { line = $0; sub(/\r$/, "", line) }
+    tolower(line) ~ ("^[ \t\f\v]*" tolower(name) "([ \t\f\v]*[:=]|[ \t\f\v]|$)") {
+      count++
+      value = ""
+      if (index(line, name "=") == 1) {
+        value = substr(line, length(name) + 2)
+        sub(/^[ \t\f\v]+/, "", value)
+        sub(/[ \t\f\v]+$/, "", value)
+      }
+    }
+    END { if (count == 1 && length(value) == 64 && value !~ /[^0-9a-f]/) print value }
+  ' "$scriptDir/.mvn/wrapper/maven-wrapper.properties"
+}
+distributionSha256Sum="$(read_archive_pin distributionSha256Sum)" || distributionSha256Sum=''
+distributionTarGzSha256Sum="$(read_archive_pin distributionTarGzSha256Sum)" || distributionTarGzSha256Sum=''
+[ -n "$distributionSha256Sum" ] && [ -n "$distributionTarGzSha256Sum" ] \
+  || die "Invalid Maven Wrapper archive pins: $scriptDir/.mvn/wrapper/maven-wrapper.properties needs exactly one distributionSha256Sum and one distributionTarGzSha256Sum, each 64 lowercase hex characters"
 
 case "${distributionUrl##*/}" in
 maven-mvnd-*bin.*)
@@ -149,24 +171,18 @@ case "${distributionUrl-}" in
 esac
 
 # Choose the separately pinned archive before looking for an installation.
-archiveChecksum="${distributionSha256Sum-}"
+[ "$MVN_CMD" != mvnd.sh ] || die "Checksum validation is not supported for maven-mvnd."
+archiveChecksum="$distributionSha256Sum"
 archiveFormat=zip
 if ! command -v unzip >/dev/null; then
   archiveFormat=tar.gz
   distributionUrl="${distributionUrl%.zip}.tar.gz"
   distributionUrlName="${distributionUrl##*/}"
-  archiveChecksum="${distributionTarGzSha256Sum-}"
-fi
-if [ -n "${distributionSha256Sum-}${distributionTarGzSha256Sum-}" ]; then
-  [ "$MVN_CMD" != mvnd.sh ] || die "Checksum validation is not supported for maven-mvnd."
-  case "$archiveChecksum" in
-  '' | *[!0-9a-f]*) die "Invalid or missing Maven distribution SHA-256 for $archiveFormat" ;;
-  esac
-  [ "${#archiveChecksum}" -eq 64 ] || die "Invalid Maven distribution SHA-256 for $archiveFormat"
+  archiveChecksum="$distributionTarGzSha256Sum"
 fi
 MAVEN_USER_HOME="${MAVEN_USER_HOME:-${HOME}/.m2}"
-# The pin changes the cache identity, including for unchecked legacy installs.
-MAVEN_HOME="${MAVEN_USER_HOME}/wrapper/dists/${distributionUrlNameMain-}/$(hash_string "$distributionUrl")${archiveChecksum:+-$archiveChecksum}"
+# The pin is part of the cache identity, so an unpinned upstream install is never reused.
+MAVEN_HOME="${MAVEN_USER_HOME}/wrapper/dists/${distributionUrlNameMain-}/$(hash_string "$distributionUrl")-$archiveChecksum"
 
 exec_maven() {
   unset MVNW_VERBOSE MVNW_USERNAME MVNW_PASSWORD MVNW_REPOURL || :
@@ -236,22 +252,20 @@ elif set_java_home; then
 fi
 
 # Validate the selected archive before extraction.
-if [ -n "$archiveChecksum" ]; then
-  distributionSha256Result=false
-  if command -v sha256sum >/dev/null; then
-    if printf '%s  %s\n' "$archiveChecksum" "$TMP_DOWNLOAD_DIR/$distributionUrlName" | sha256sum -c - >/dev/null 2>&1; then
-      distributionSha256Result=true
-    fi
-  elif command -v shasum >/dev/null; then
-    if printf '%s  %s\n' "$archiveChecksum" "$TMP_DOWNLOAD_DIR/$distributionUrlName" | shasum -a 256 -c - >/dev/null 2>&1; then
-      distributionSha256Result=true
-    fi
-  else
-    die "Checksum validation requires sha256sum or shasum."
+distributionSha256Result=false
+if command -v sha256sum >/dev/null; then
+  if printf '%s  %s\n' "$archiveChecksum" "$TMP_DOWNLOAD_DIR/$distributionUrlName" | sha256sum -c - >/dev/null 2>&1; then
+    distributionSha256Result=true
   fi
-  if [ "$distributionSha256Result" = false ]; then
-    die "Failed to validate Maven distribution SHA-256 for $archiveFormat."
+elif command -v shasum >/dev/null; then
+  if printf '%s  %s\n' "$archiveChecksum" "$TMP_DOWNLOAD_DIR/$distributionUrlName" | shasum -a 256 -c - >/dev/null 2>&1; then
+    distributionSha256Result=true
   fi
+else
+  die "Checksum validation requires sha256sum or shasum."
+fi
+if [ "$distributionSha256Result" = false ]; then
+  die "Failed to validate Maven distribution SHA-256 for $archiveFormat."
 fi
 
 # unzip and move

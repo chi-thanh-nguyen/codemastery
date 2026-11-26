@@ -51,13 +51,23 @@ if ($env:MVNW_VERBOSE -eq "true") {
 }
 
 # calculate distributionUrl, requires .mvn/wrapper/maven-wrapper.properties
-$wrapperProperties = Get-Content -Raw "$scriptDir/.mvn/wrapper/maven-wrapper.properties" | ConvertFrom-StringData
-$distributionUrl = $wrapperProperties.distributionUrl
-$distributionSha256Sum = $wrapperProperties.distributionSha256Sum
-if (($distributionSha256Sum -or $wrapperProperties.distributionTarGzSha256Sum) -and
-    ($distributionSha256Sum -cnotmatch '^[0-9a-f]{64}$')) {
-  Write-Error "Invalid Maven distribution ZIP SHA-256"
+$wrapperPropertiesText = Get-Content -Raw "$scriptDir/.mvn/wrapper/maven-wrapper.properties"
+# CodeMastery requires both archive pins. Each needs exactly one declaration of
+# the exact form name=<64 lowercase hex>, with optional space around the value.
+# Case, spacing and ':' variants of a name count as further declarations.
+$wrapperPropertiesLines = "$wrapperPropertiesText" -split '\r?\n'
+$archivePins = @{}
+foreach ($pinName in 'distributionSha256Sum', 'distributionTarGzSha256Sum') {
+  $declarations = @($wrapperPropertiesLines -match "^[ \t\f\v]*$pinName(?:[ \t\f\v]*[:=]|[ \t\f\v]|$)")
+  if ($declarations.Count -eq 1 -and $declarations[0] -cmatch "^$pinName=[ \t\f\v]*([0-9a-f]{64})[ \t\f\v]*$") {
+    $archivePins[$pinName] = $Matches[1]
+  } else {
+    Write-Error "Invalid Maven Wrapper archive pins: $scriptDir/.mvn/wrapper/maven-wrapper.properties needs exactly one distributionSha256Sum and one distributionTarGzSha256Sum, each 64 lowercase hex characters"
+  }
 }
+$distributionSha256Sum = $archivePins.distributionSha256Sum
+$wrapperProperties = $wrapperPropertiesText | ConvertFrom-StringData
+$distributionUrl = $wrapperProperties.distributionUrl
 if (!$distributionUrl) {
   Write-Error "cannot read distributionUrl property in $scriptDir/.mvn/wrapper/maven-wrapper.properties"
 }
@@ -74,6 +84,9 @@ switch -wildcard -casesensitive ( $($distributionUrl -replace '^.*/','') ) {
     $MVN_CMD = $script -replace '^mvnw','mvn'
     break
   }
+}
+if ($USE_MVND) {
+  Write-Error "Checksum validation is not supported for maven-mvnd."
 }
 
 # apply MVNW_REPOURL and calculate MAVEN_HOME
@@ -97,7 +110,7 @@ if (-not (Test-Path -Path $MAVEN_M2_PATH)) {
 $MAVEN_WRAPPER_DISTS = Join-Path $MAVEN_M2_PATH "wrapper/dists"
 
 $MAVEN_HOME_PARENT = "$MAVEN_WRAPPER_DISTS/$distributionUrlNameMain"
-# Include the ZIP pin in the identity so unchecked legacy installations are not reused.
+# The ZIP pin is part of the cache identity, so an unpinned upstream install is never reused.
 $MAVEN_HOME_NAME = ([System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes("$distributionUrl#$distributionSha256Sum")) | ForEach-Object {$_.ToString("x2")}) -join ''
 $MAVEN_HOME = "$MAVEN_HOME_PARENT/$MAVEN_HOME_NAME"
 
@@ -138,15 +151,10 @@ if ($env:MVNW_USERNAME -and $env:MVNW_PASSWORD) {
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $webclient.DownloadFile($distributionUrl, "$TMP_DOWNLOAD_DIR/$distributionUrlName") | Out-Null
 
-# If specified, validate the SHA-256 sum of the Maven distribution zip file
-if ($distributionSha256Sum) {
-  if ($USE_MVND) {
-    Write-Error "Checksum validation is not supported for maven-mvnd. `nPlease disable validation by removing 'distributionSha256Sum' from your maven-wrapper.properties."
-  }
-  Import-Module $PSHOME\Modules\Microsoft.PowerShell.Utility -Function Get-FileHash
-  if ((Get-FileHash "$TMP_DOWNLOAD_DIR/$distributionUrlName" -Algorithm SHA256).Hash.ToLower() -ne $distributionSha256Sum) {
-    Write-Error "Error: Failed to validate Maven distribution SHA-256, your Maven distribution might be compromised. If you updated your Maven version, you need to update the specified distributionSha256Sum property."
-  }
+# Validate the pinned SHA-256 of the Maven distribution zip file before extraction
+Import-Module $PSHOME\Modules\Microsoft.PowerShell.Utility -Function Get-FileHash
+if ((Get-FileHash "$TMP_DOWNLOAD_DIR/$distributionUrlName" -Algorithm SHA256).Hash.ToLower() -ne $distributionSha256Sum) {
+  Write-Error "Error: Failed to validate Maven distribution SHA-256, your Maven distribution might be compromised. If you updated your Maven version, you need to update the specified distributionSha256Sum property."
 }
 
 # unzip and move
