@@ -17,12 +17,16 @@ public interface AttemptRepository {
 
     record EvidenceCandidate(UUID skillId, UUID attemptId, UUID quizId) {}
     record Outcome(long scoredLearnerQuizPairs, BigDecimal averageQuizScore) {}
+    record OwnedLearnerAttemptRow(UUID attemptId, UUID quizId, String quizTitle, String quizKind,
+                                  int attemptNumber, Instant submittedAt, BigDecimal scorePercentage) {}
 
     boolean hasSubmittedInCourse(UUID courseId);
     boolean hasBlockingDiagnosticAttempt(UUID courseId, UUID learnerId, UUID quizId);
     UUID findPlacementQuizId(UUID courseId, UUID learnerId, Instant now);
     List<EvidenceCandidate> findLatestEvidenceCandidates(UUID courseId, UUID learnerId, Set<UUID> skillIds);
     Outcome readQuizOutcome(UUID courseId, Set<UUID> learnerIds);
+    long countSubmittedForLearnerInCourse(UUID courseId, UUID learnerId);
+    List<OwnedLearnerAttemptRow> findSubmittedForLearnerInCourse(UUID courseId, UUID learnerId, int page, int size);
 
 
     /** Inserts a new attempt or updates terminal submission fields on an existing attempt. */

@@ -12,6 +12,7 @@ import com.codemastery.modules.assessment.domain.model.AttemptAnswer;
 import com.codemastery.modules.assessment.domain.model.Question;
 import com.codemastery.modules.assessment.domain.model.Quiz;
 import com.codemastery.modules.assessment.domain.repository.AttemptRepository;
+import com.codemastery.modules.assessment.domain.repository.AttemptRepository.OwnedLearnerAttemptRow;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository.Member;
 import com.codemastery.modules.assessment.domain.repository.QuizRepository;
 import com.codemastery.modules.auth.application.service.UserAccountService;
@@ -62,6 +63,7 @@ public class AttemptService {
 
     private static final BigDecimal ZERO_SCORE = BigDecimal.ZERO.setScale(2);
     private static final BigDecimal HUNDRED_SCORE = BigDecimal.valueOf(100).setScale(2);
+    private static final Set<String> VALID_QUIZ_KINDS = Set.of("diagnostic", "practice", "test");
 
     /** B3AttemptRead union: active/overdue captured view or immutable submitted result. */
     public sealed interface AttemptRead permits AttemptView, AttemptResult {}
@@ -167,6 +169,9 @@ public class AttemptService {
     public record LatestSkillEvidence(UUID courseId, UUID learnerId, Map<UUID, SkillEvidence> bySkill) {
         public LatestSkillEvidence { bySkill = Map.copyOf(bySkill); }
     }
+    /** CT33.results (ADR011 §12): submitted attempt summary for owning Instructor insights. */
+    public record LearnerAttemptSummary(UUID attemptId, UUID quizId, String quizTitle, String quizKind,
+            int attemptNumber, Instant submittedAt, BigDecimal scorePercentage) {}
     public record QuizOutcome(UUID courseId, long scoredLearnerQuizPairs, BigDecimal averageQuizScore) {}
 
     /** ADR005 §13.2: conservative owner-only settings barrier, including malformed submitted history. */
@@ -191,6 +196,70 @@ public class AttemptService {
         requireId(courseId);
         courseAccess.requireLearnerCourseAccess(courseId);
         return latestSkillEvidence(courseId, requireSelfLearnerId(), skillIds);
+    }
+
+    /**
+     * ADR011 §12 (CT33.results): owning Instructor skill-evidence projection; callers must verify
+     * joined learner membership via {@code readOwnedLearnerState} in the same snapshot.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY,
+            readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public LatestSkillEvidence readOwnedLatestSkillEvidence(UUID courseId, UUID learnerId, Set<UUID> skillIds) {
+        requireReportingSnapshot();
+        requireId(courseId);
+        requireId(learnerId);
+        Set<UUID> requested = Set.copyOf(Objects.requireNonNull(skillIds, "skillIds"));
+        courseAccess.requireCourseOwnership(courseId);
+        return latestSkillEvidence(courseId, learnerId, requested);
+    }
+
+    /**
+     * ADR011 §12 (CT33.results): submitted attempts of {@code learnerId} on Quizzes in an owning
+     * Instructor's Course (hidden Quizzes included), ordered by {@code submittedAt DESC} then
+     * canonical lowercase attempt UUID ascending; no answer keys. Callers verify membership first.
+     */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY,
+            readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public PageResponse<LearnerAttemptSummary> listLearnerAttemptsForOwner(
+            UUID courseId, UUID learnerId, int page, int size) {
+        requireReportingSnapshot();
+        requireId(courseId);
+        requireId(learnerId);
+        PageResponse.validateRequest(page, size);
+        courseAccess.requireCourseOwnership(courseId);
+
+        long total = attempts.countSubmittedForLearnerInCourse(courseId, learnerId);
+        if (total < 0) {
+            throw new IllegalStateException("Submitted attempt count cannot be negative");
+        }
+        if ((long) page * size >= total) {
+            return new PageResponse<>(List.of(), page, size, total);
+        }
+
+        List<OwnedLearnerAttemptRow> rows = attempts.findSubmittedForLearnerInCourse(courseId, learnerId, page, size);
+        if (rows == null || rows.size() > size || rows.size() > total) {
+            throw new IllegalStateException("Invalid learner attempt page result");
+        }
+
+        List<LearnerAttemptSummary> content = new ArrayList<>(rows.size());
+        for (OwnedLearnerAttemptRow row : rows) {
+            if (row == null || row.attemptId() == null || row.quizId() == null
+                    || !hasNonWhitespaceText(row.quizTitle())
+                    || !VALID_QUIZ_KINDS.contains(row.quizKind())
+                    || row.attemptNumber() < 1 || row.submittedAt() == null
+                    || !isValidStoredScore(row.scorePercentage())) {
+                throw new IllegalStateException("Stored submitted attempt summary violates V004");
+            }
+            content.add(new LearnerAttemptSummary(
+                    row.attemptId(),
+                    row.quizId(),
+                    row.quizTitle(),
+                    row.quizKind(),
+                    row.attemptNumber(),
+                    row.submittedAt(),
+                    row.scorePercentage().setScale(2, RoundingMode.UNNECESSARY)));
+        }
+        return new PageResponse<>(content, page, size, total);
     }
 
     /** ADR011 §11: only PlacementDiagnosticService; no mastery, policy or UI offer is invented. */
@@ -992,5 +1061,26 @@ public class AttemptService {
 
     private static ResourceNotFoundException unavailable() {
         return new ResourceNotFoundException("Quiz or attempt not available");
+    }
+
+    private static boolean hasNonWhitespaceText(String value) {
+        if (value == null) {
+            return false;
+        }
+        for (int index = 0; index < value.length(); ) {
+            int codePoint = value.codePointAt(index);
+            if (!Character.isWhitespace(codePoint)) {
+                return true;
+            }
+            index += Character.charCount(codePoint);
+        }
+        return false;
+    }
+
+    private static boolean isValidStoredScore(BigDecimal score) {
+        return score != null
+                && score.scale() <= 2
+                && score.compareTo(ZERO_SCORE) >= 0
+                && score.compareTo(HUNDRED_SCORE) <= 0;
     }
 }

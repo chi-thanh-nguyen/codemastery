@@ -10660,3 +10660,285 @@ PR-specific attribution via process-scoped settings. Authenticated pusher is
 `chi-thanh-nguyen`. Codex assisted source/tests/docs; metadata does not establish
 human contribution or independent approval. Refs #199; bounded Refs #193
 (shared renderer retained). No approve/merge, Issue close, Project write or deploy.
+
+## AS16 post-AS08 normalization and author qualification — 27 November 2026
+
+Authority: the Project Leader's explicit PR #301 implementation-completion task,
+including isolated integration, remediation, contributor metadata normalization and
+lease-protected push. Contract: `AS16.read` (#162),
+`CT33-RESULTS-2026-11-12-r1` (ADR011 §12), ADR005 §6.1 and CT04's authoritative
+captured evidence. This is implementation-author verification, not independent
+acceptance, CODEOWNER approval, protected integration or deployment permission.
+
+### Baseline, scope and completeness
+
+Original AS16 HEAD: `fdb7be41f13fa67a3b3d63f998e8d2cd3a3e2805`, parent
+`4fa292386144d6ab5037058b81bef3065e7891af`. Original comparison to current main:
+10 commits / 38 files; merge-base `23402754743e0d35048e74cbabebfa133e5e6da3`.
+AS08 is merged as `114aeec3c6ec5a14eeaa0cf556774e87a7136a8c`; its complete tree
+equals final PR #296 HEAD `25ba001b3cd0b2c1aa2d2cfa2b7c7017ac8e332b`.
+The sole original AS16 commit was cherry-picked onto
+`85a3fadbb3cf172d2c03f6a104f586e4875aab12` without conflicts. Main's AS09
+integration and every unrelated path are retained. No upstream AS08 commit is
+replayed or reattributed. Local backup: `backup/as16-original-fdb7be4` in the
+isolated author checkout. All 13 remote branch tips were inspected; no other
+remote branch contains the original AS16 HEAD, and no open PR targets its branch.
+
+The initial and final implementation each satisfy **12/12 functional checkpoints
+(100%)** below. This denominator measures mandatory Assessment behavior, not test
+counts, LOC, downstream delivery or acceptance. The original production code was
+already complete; its three AS16 production files are preserved byte-for-byte.
+Initial PostgreSQL evidence was absent and the original allowlist was insufficient;
+those verification defects are addressed below rather than counted as missing
+production features.
+
+| Required behavior | Contract | Initial | Final | Evidence / ownership |
+| --- | --- | --- | --- | --- |
+| Exact immutable evidence and seven-field attempt summary | ADR011 §12 | COMPLETE | COMPLETE | AS08 `SkillEvidence`/`LatestSkillEvidence`; AS16 `LearnerAttemptSummary`, immutable `PageResponse`; unit shape and defensive-copy assertions |
+| Trusted current Learner, self-only CT03 admission | CT01.identity, CT03, ADR011 §12 | COMPLETE | COMPLETE | Inherited AS08 `readMyLatestSkillEvidence`, real self/role/LEFT tests and SELECT-only role execution |
+| Owner-only evidence and Course admission | CT03, ADR011 §§12–14 | COMPLETE | COMPLETE | AS16 `readOwnedLatestSkillEvidence`; real owner/Admin/non-owner/Learner denials; Enrollment remains a caller precondition |
+| Submitted summaries, minimized fields, valid stored projections | CT33.results, CT04 | COMPLETE | COMPLETE | AS16 count/page queries, unit malformed-row checks and seven-field projection assertions |
+| Course/learner isolation and hidden Quiz inclusion | ADR011 §12 | COMPLETE | COMPLETE | AS16 real empty foreign-learner and other-Course reads; hidden Course/Quiz owner reads; unsubmitted exclusion |
+| Stable submitted-time/UUID order and paging | ADR011 §12, CT18.minimum | COMPLETE | COMPLETE | Real equal-time UUID order, partial final page, empty and `Integer.MAX_VALUE` out-of-range pages; default/bound validation |
+| Complete latest-evidence selection tuple | ADR005 §6.1 | COMPLETE | COMPLETE | Inherited AS08 DISTINCT ON query; real submitted/start/Quiz UUID/attempt-number tie breakers and diagnostic history |
+| Frozen membership and authoritative capture integrity | CT04, ADR011 §12 | COMPLETE | COMPLETE | Inherited AS08 shared validation; owner null correctness, missing answer, missing membership and mismatched correctness fail as integrity errors |
+| Equal weighting, per-skill counts, HALF_UP and absent evidence | ADR005 §6.1, ADR011 §12 | COMPLETE | COMPLETE | Shared AS08 arithmetic; real 2/3 = 66.67 and separate 0/1 = 0.00 despite overall attempt score 50.00; absent skill omitted |
+| Actual read-only REPEATABLE READ caller snapshot | ADR011 §12 | COMPLETE | COMPLETE | Runtime guards on all three reads; real incompatible isolation/read-only cases; physical SHOW assertions; concurrent commit invisible to evidence/count/pages, visible next snapshot |
+| Execution-only separation and approved production callers | ADR011 §12 / B6-V09 | COMPLETE | COMPLETE | Inherited AS08 marker/root/thread/transaction tests preserved; AST caller and method-reference checks use exact repository paths; no reporting REST exposure |
+| Existing runtime read privileges suffice | CT17 r15, ADR012 §19.2 | COMPLETE | COMPLETE | All three reads execute under a disposable NOLOGIN/NOSUPERUSER SELECT-only subset of the unchanged matrix; matrix-contract regression passes |
+
+No bounded upstream addition or new technical contract decision was needed.
+Course's `readOwnedLearnerState` and Adaptive's AD16 composition are downstream
+admission/orchestration responsibilities, not missing Assessment producer code.
+Do not implement that membership check by reading Course internals from Assessment.
+AS12 publication, AD13, AD16, frontend integration and QA04 retain separate scope
+and acceptance gates. No endpoint, migration, grant, OpenAPI or frontend change is
+necessary for these internal application reads.
+
+### Focused audit and remediation
+
+- **AS16-A01 (P2, test determinism):** the original owner PostgreSQL test used a
+  random visible Quiz UUID while assuming it sorted below `8000...`. Reproduced:
+  63 integration tests, one assertion failure at the expected selected Attempt.
+  Preserve the oracle and use explicit `1000...` / `8000...` Quiz IDs. Also assert
+  unchanged page content/evidence during a concurrent committed submission and
+  the newer evidence on the next snapshot.
+- **AS16-A02 (P2, verification boundary):** the original scanner matched literal
+  `.method(` strings and allowed filenames alone. It missed whitespace-separated
+  calls, unqualified invocations and method references, and could allow a matching
+  basename in another package. Replace it with JDK AST traversal of calls,
+  references and identifiers plus exact source paths. Four parameterized controls
+  exercise direct/spaced/unqualified/reference syntax and ignore comments,
+  strings and longer method names. This was a coverage defect; no unauthorized
+  production caller was found.
+
+Post-implementation audit covered the complete final AS16 production delta and
+shared evidence/authorization/query paths: fields/privacy, strict Course/learner
+predicates, PostgreSQL scalar/time/numeric mapping, order/paging, snapshot behavior,
+capture integrity, AS08 regression preservation, query cost, scope and docs.
+No confirmed unresolved in-scope P0–P3 defect remains. No speculative refactor or
+production rewrite was required. The AST scan enforces source-level call sites;
+it is not a claim about arbitrary reflection or downstream runtime acceptance.
+
+### Executed verification
+
+Environment: macOS arm64, Java 25.0.4.1, Docker 29.8.1, Testcontainers hardened
+PostgreSQL 17.11 from the existing `AbstractIntegrationTest` image builder;
+Flyway V001–V009, no persistent container reuse. Sandbox initially denied GitHub and
+Docker socket access; permitted local execution closed those gaps.
+
+| Command (working directory) | Observed result |
+| --- | --- |
+| `./mvnw -B test '-Dtest=AttemptServiceTest,PracticeQuizProfilesTest'` (`backend/`, initial normalized code) | 68 unit tests; 0 failures/errors/skips; production and test sources compile |
+| `./mvnw -B verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=AssessmentPersistenceIntegrationTest` (`backend/`, original AS16 fixtures) | 63 real PostgreSQL tests; 1 failure / 0 errors / 0 skips; AS16-A01 reproduced |
+| `./mvnw -B verify '-Dtest=AttemptServiceTest,PracticeQuizProfilesTest' -Dit.test=AssessmentPersistenceIntegrationTest` (`backend/`, audit test iteration) | 72 unit tests pass; 66 integration tests, 0 failures / 2 test-fixture errors / 0 skips. Fixed a missing required Course description and explicitly rolled back expected proxied transaction refusals; assertions retained |
+| `./mvnw -B verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=AssessmentPersistenceIntegrationTest` (`backend/`, final Java sources) | **67 PostgreSQL integration tests; 0 failures/errors/skips; BUILD SUCCESS**; includes SELECT-only role execution, isolation, multi-skill integrity and snapshot assertions |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` (root) | PASS: 27 relations match approved r1–r16 matrix, including unchanged r15 Assessment read privileges and malformed-matrix refusal controls |
+| `git diff --check` (root) | PASS |
+
+The final unit sources equal those that passed 72 cases; subsequent changes are
+integration-test-only and this documentation. Expected injected scheduler failures
+in the logs are assertions of existing failure paths, not failed cases. The two
+intermediate test-fixture errors are disclosed above and do not describe product
+regressions. Compilation includes all production and test sources. Unrelated
+module/full-backend, frontend/browser/E2E, VM qualification and release suites were
+omitted because the shared AS08 production code and other modules did not change.
+No hosted workflow was dispatched, rerun or awaited. Local source/tree equivalence
+preserves test applicability; it does not transfer SHA-bound hosted CI or approvals.
+
+### Attribution and remaining gates
+
+Verified original Git identity: `minhtan29042006 <tan.buikhmt0429@hcmut.edu.vn>`
+from `fdb7be4` and established repository commits. Under explicit Leader and
+contributor consent, both Author and Committer of every remaining PR-only commit
+use that identity; the authenticated pusher remains `chi-thanh-nguyen`.
+Original commit text/author date and genuine trailers are preserved; new audit/test work
+is AI-assisted by OpenAI Codex and does not claim the contributor personally
+reviewed or authored that assistance. No signing key is used. Delivery verifies
+the implementation tree before/after metadata-only rewriting and preserves all
+messages; the mapping and final remote HEAD are recorded in the delivery report.
+
+Next: independent review of the six-file effective AS16 delta, including the
+AS08-to-main normalization and these test oracles; eligible CODEOWNER approval,
+current hosted checks and protected integration. AD16 must establish
+ACTIVE/COMPLETED Enrollment through Course in the same snapshot before owner
+reporting calls. Implementation completeness and author verification do not close
+#162, qualify the whole adaptive journey, authorize exposure, or replace those gates.
+
+## AS16 main integration and independent focused full-scope review — 27 November 2026
+
+Authority: the Project Leader's explicit PR #301 conflict-resolution, independent
+review, direct findings-remediation and commit/push task. All required context was
+available: root `CLAUDE.md` and `CLAUDE_SESSION_CONTEXT_GUIDE.md` were read completely
+from the original project environment; repository instructions, CONTRIBUTING,
+CODEOWNERS, live #162/#301/#296, effective ADR005/007/011 and relevant source/tests
+were inspected. The existing local graph was a navigation aid only; its dated
+content was checked against current source. The original workspace was untouched.
+
+### Exact baseline and preservation
+
+- Original PR HEAD: `74545db53627b2ffa82d07aaeed154edfe3dbff9`, tree
+  `5150b43981ecf48d2ef7427f28274b75567d0385`.
+- Remote main: `13d9ca7e58ead77ecc66efc8408199059d57588a`; previous merge-base:
+  `85a3fadbb3cf172d2c03f6a104f586e4875aab12`. AS08 squash
+  `114aeec3c6ec5a14eeaa0cf556774e87a7136a8c` remains an ancestor.
+- Isolated clone backup: `backup/as16-before-main-20261127`. A normal merge,
+  without replay/rebase/history rewriting, produced integration and independent
+  review HEAD **`257cea5f8e55c27eb1ebd32cf918641601c9ef28`**, tree
+  `dcf2e6bca5719c47d2413a5894d0af65df3e5bdb`.
+- The actual three-way conflict was only `docs/testing.md` (base blob
+  `0b27ea6642f59b2b97bb7317819022fdc800a2ab`, AS16
+  `698265d72f44220b06ef93b810d14e9d3c24318e`, main
+  `692b9336c71082aab9b2ba7f966b82352eb8256e`). Both versions preserve the entire
+  879,418-byte common document prefix. The resolution retains main's complete
+  944,476-byte document, including all FE14 records, and appends the exact
+  10,723-byte AS16 qualification addition. No historical section is rewritten.
+- All 23 other main-changed paths match main's blobs exactly. Relative to main,
+  the integrated tree changes only the original six AS16 paths. Both original
+  AS16 commits (`945879a1b44bb001a841760ec1ae36b121b216c1` and `74545db...`) remain
+  exact ancestors, preserving original metadata, messages and trailers.
+
+The following pre-integration blobs equal their integrated and final source blobs:
+
+| AS16 path (under `backend/src/`) | Unchanged Git blob |
+| --- | --- |
+| `main/java/com/codemastery/modules/assessment/application/service/AttemptService.java` | `6eec1fbc7bd093743f9a5324001ca6cb8535df0c` |
+| `main/java/com/codemastery/modules/assessment/domain/repository/AttemptRepository.java` | `f16d5e3132bccbf68d42d0e0babf5d98aeffb0c5` |
+| `main/java/com/codemastery/modules/assessment/infrastructure/persistence/repository/AttemptRepositoryImpl.java` | `97620ede8828c3eb304cd527e22e3ab950519eff` |
+| `test/java/com/codemastery/integration/repository/AssessmentPersistenceIntegrationTest.java` | `88c58a067a34955e6c617e40bb429171375b2277` |
+| `test/java/com/codemastery/modules/assessment/AttemptServiceTest.java` | `238c4d681feb44e88f4f7274df01ab88d2cb9d4e` |
+
+### Independent completeness and finding inventory
+
+The initial inventory was recorded against the exact integrated HEAD before any
+subsequent documentation change. **No new confirmed actionable P0-P3 finding** was
+established. No production/test remediation or artificial remediation commit is
+needed. The initial and final statuses below are independently established for the
+unchanged implementation, rather than inherited from the preceding author audit.
+
+| Checkpoint | Effective requirement | Initial / final independent status | Direct evidence |
+| --- | --- | --- | --- |
+| Exact immutable DTO shapes | ADR011 §12 | VERIFIED_COMPLETE / VERIFIED_COMPLETE | Exact records; defensive `Map.copyOf` and `PageResponse` content copy; seven summary fields |
+| Trusted learner self-read | CT01.identity, CT03, ADR011 §12 | VERIFIED_COMPLETE / VERIFIED_COMPLETE | Current identity only; real non-Learner/LEFT denials; restricted-role self read |
+| Instructor ownership admission | CT03, ADR011 §§12-14 | VERIFIED_COMPLETE / VERIFIED_COMPLETE | Shared CT03 assertion; actual Admin/Learner/non-owner denials and hidden-Course concealment |
+| Submitted summaries and field minimization | ADR011 §12, CT04 | VERIFIED_COMPLETE / VERIFIED_COMPLETE | Count/page predicates agree; immutable seven-field projection, stored-row validation, no answers/keys |
+| Course/learner isolation and hidden Quiz history | ADR011 §12 | VERIFIED_COMPLETE / VERIFIED_COMPLETE | Strict SQL scope; hidden history; populated foreign-learner negative control; separate-Course reads |
+| Deterministic order and paging | ADR011 §12, CT18.minimum | VERIFIED_COMPLETE / VERIFIED_COMPLETE | Submitted time DESC / UUID C ASC; valid bounds, long offset, empty/partial/out-of-range pages |
+| Complete latest-evidence tuple | ADR005 §6.1, ADR011 §12 | VERIFIED_COMPLETE / VERIFIED_COMPLETE | Submitted/start/Quiz UUID/attempt-number tests; extra `7fff...` versus `8000...` tie control |
+| Frozen authoritative capture integrity | CT04, ADR007 §16, ADR011 §12 | VERIFIED_COMPLETE / VERIFIED_COMPLETE | Frozen mutation boundaries; whole selected capture validation; null/missing/mismatched correctness, answer and membership refusals |
+| Per-skill counts, equal weight, HALF_UP and absence | ADR005 §6.1, ADR011 §12 | VERIFIED_COMPLETE / VERIFIED_COMPLETE | 2/3 = 66.67 and separate 0/1 = 0.00; independent historical-skill 1/1 = 100.00 despite whole score 66.67; absent skill omitted |
+| Actual caller transaction and snapshot | ADR011 §12 | VERIFIED_COMPLETE / VERIFIED_COMPLETE | MANDATORY proxy, runtime guard, PostgreSQL SHOW, incompatible transactions; concurrent commit invisible until a subsequent snapshot |
+| Execution-only marker and caller separation | ADR011 §12, B6-V09 | VERIFIED_COMPLETE / VERIFIED_COMPLETE | Course guard then marker; read-write READ COMMITTED; Course/thread/physical transaction/finally cleanup; actual AST allowlist fault controls |
+| Existing runtime privileges suffice | CT17 r15, ADR012 §19.2 | VERIFIED_COMPLETE / VERIFIED_COMPLETE | All three reads under verified SELECT-only role; no superuser or write privileges; unchanged 27-relation matrix check |
+
+**12/12 Assessment producer checkpoints VERIFIED_COMPLETE.** Issue #162 and the
+effective contract add no omitted Assessment producer behavior to this denominator.
+The self-read, shared evidence engine and execution boundary are inherited AS08
+functionality whose AS16 use was independently checked. Course-owned
+`readOwnedLearnerState` ACTIVE/COMPLETED admission and downstream owner map/insights
+composition remain consumer responsibilities, required before either owner read
+in the same transaction. That owner composition is not exposed here, and no
+unauthorized production caller was found. Its future implementation, AS12/AD13,
+AD16, frontend and QA04 acceptance remain separate; producer completeness does not
+assert their delivery. Assessment must not duplicate Course membership ownership.
+
+### Independent closure of prior findings
+
+- **AS16-A01: VERIFIED_FIXED.** Explicit visible `1000...` and hidden `8000...`
+  Quiz UUIDs preserve the original selection assertion with real competing
+  attempts. The 67-case PostgreSQL run passes; the supplementary independent
+  signed-UUID-boundary fixture also selects the canonical maximum, rather than
+  relying on random IDs or changing the expected result to fit bad ordering.
+- **AS16-A02: VERIFIED_FIXED.** All 244 production Java sources are discovered
+  beneath the configured source root. Missing-root/read failures propagate;
+  compiler absence and parse diagnostics fail closed. Exact relative paths,
+  invocation and method-reference traversal and API identifier checks were read
+  directly. The actual committed allowlist assertion, rather than just its parser
+  helper, rejected disposable direct/duplicate-basename, commented-whitespace,
+  unqualified, instance-reference, type-reference, static-import-invocation and
+  Unicode-escaped-identifier callers, a fully qualified API projection and malformed
+  Java. Comments/string literals/longer names pass; the clean scan passes after
+  removing all injections. These 11 controls establish source-level enforcement,
+  not arbitrary-reflection detection or future consumer runtime acceptance.
+
+### Executed verification and limitations
+
+Environment: Java 25.0.4.1, Docker Desktop 29.8.1, macOS arm64, existing hardened
+PostgreSQL 17.11 Testcontainers builder, Flyway V001-V009, no persistent reuse.
+All results below apply to the integrated production source; final changes after
+the reviewed HEAD only append this record. The temporary probe and all injected
+sources were removed and the five original Java blobs rechecked.
+
+| Exact command / working directory | Observed result |
+| --- | --- |
+| `./mvnw -B verify '-Dtest=AttemptServiceTest,PracticeQuizProfilesTest' -Dit.test=AssessmentPersistenceIntegrationTest` (`backend/`) | BUILD SUCCESS; 72 unit and 67 real PostgreSQL cases, zero failures/errors/skips |
+| `./mvnw -B verify -Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#independentReviewSeparatesPerSkillHistoryFromForeignRowsAndSignedUuidOrdering'` (`backend/`, temporary review-only test method) | BUILD SUCCESS; 1 additional PostgreSQL probe passes: different latest historical attempts per skill, UUID sign-boundary ordering, populated foreign learner and unsubmitted exclusion, hidden Quizzes, counts, self identity and role confinement |
+| `./mvnw -o -B surefire:test '-Dtest=AttemptServiceTest$TimedAttempts#assessmentCompanionAndGuardCallersStayInsideTheirApprovedAllowlist'` (`backend/`, once per controlled injection and after cleanup) | 9 expected assertion failures at the injected boundary/parse error, 2 successful positive/clean controls; all 11 controls pass |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` (root) | MATRIX_CONTRACT_SYNC_PASS; 27 relations and malformed-policy refusal controls |
+| `git diff --check origin/main...HEAD` (root), ancestor/path/blob/document comparisons | PASS; no conflict markers or unexpected path changes |
+
+The extra PostgreSQL probe used committed production services and a disposable
+NOLOGIN/NOSUPERUSER/NOCREATEDB/NOCREATEROLE/NOINHERIT role. It checked `current_user`
+before owner reads and after self-read, role attributes and absent write grants;
+all three reads ran within that restricted transaction. Role grants were a
+SELECT-only subset of the existing policy, and DROP OWNED/DROP ROLE ran in finally.
+This is genuine restricted-role query evidence, not complete deployment/runtime
+qualification or authority to change real grants.
+
+Two scanner harness setup attempts supplied no valid negative-control evidence:
+the outer-class method selector ran zero tests, then the corrected nested selector
+inside the sandbox hit Mockito/JDK attach denial before the assertion. The
+completed controls used the correct nested selector with permitted local execution;
+test counts and the specific failing assertion were checked, so neither an empty
+run nor an environment error was counted as a refusal. No production or assertion
+change was needed to make these controls pass.
+
+At original HEAD, all 16 immediately available checks succeeded, the CodeQL open
+alerts response for `refs/pull/301/merge` was empty, and SonarCloud PR issue search
+returned total 0. Those are historical snapshots, not final-HEAD analysis or an
+independent security qualification. No hosted workflow was dispatched, rerun,
+polled to completion or awaited. Unrelated FE14/frontend/browser/E2E, full backend,
+VM and release suites were omitted: main's unrelated blobs and all reviewed Java
+sources are unchanged. Repeating the same unchanged suites after this documentation
+append would add no material assurance.
+
+### Disposition, attribution and remaining gates
+
+**APPROVE_AFTER_GATES** for the independently reviewed, unchanged Assessment
+producer implementation. Integration resolves the documentation conflict and
+preserves main; there are no new findings to remediate and no implementation delta
+requiring another technical review. This evidence-record append is author-verified
+documentation, not an independent acceptance of new code authored in this session.
+
+The two existing contributor commits retain their exact Author/Committer identity,
+dates, messages and disclosures. New merge/evidence commits use the current
+authenticated contributor's configured identity, Nguyen Chi Thanh, with explicit
+OpenAI Codex assistance disclosure; they are not reattributed to the AS16 author.
+Authenticated GitHub pusher is `chi-thanh-nguyen`. Normal non-force push is subject
+to remote-tip revalidation; the exact final delivered HEAD belongs in PR #301's
+description rather than a self-referential commit hash in this record.
+
+Eligible independent CODEOWNER approval, final-HEAD required CI/scanning and
+authorized protected squash integration remain gates. No GitHub approval, merge,
+Issue closure, Project update, grant expansion, release or deployment is performed.
+Downstream owner Enrollment admission and complete adaptive acceptance stay open.
