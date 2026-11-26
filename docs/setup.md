@@ -2484,3 +2484,18 @@ infrastructure change is included. Local evidence is recorded in `docs/testing.m
 formal CODEOWNER review, required CI, QA, protected integration and release remain
 separate gates. Codex performed the supplementary implementation, verification and
 author self-audit under the Leader's authorization; no AI runtime is introduced.
+
+### Shared CI dependency cache and real E2E storage
+
+The disposable E2E stack includes a private, digest-pinned MinIO server and the
+existing local bucket/application-identity initializer by default. Setup requires
+successful initialization before backend startup; `E2E_MATERIAL_FILES=1` is
+published after successful fixture setup. No local `.env`, fixed storage port,
+shared bucket or root application credential is needed. Recovery uses the same
+run inventory as PostgreSQL and the backend.
+
+CI optionally supplies `CODEMASTERY_MAVEN_LAYER_CACHE`, a BuildKit local-cache
+directory restored under the runner's temporary directory. It is build tooling
+only. Local Docker builds need no such input; a cold build still downloads the
+POM's dependencies from Maven Central. See the
+[cache trust boundary and availability limits](deployment.md#shared-ci-reliability-remediation--26-november-2026).

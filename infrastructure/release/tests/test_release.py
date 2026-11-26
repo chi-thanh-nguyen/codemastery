@@ -2250,6 +2250,50 @@ class VerifyReleaseProcedureTests(unittest.TestCase):
         self.assertIn("Package records are inconsistent", p.stderr)
 
 
+class MavenCacheConsumerTests(unittest.TestCase):
+    """Run the committed backend-build shell with an absent, empty or spaced cache path."""
+
+    def test_optional_cache_arguments_on_available_bash_versions(self):
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+        sources = [
+            ("release", os.path.join(root, "infrastructure/release/release.sh"),
+             '  log "Building five linux/amd64 candidates from ${revision}."\n', '  quiet_build frontend ',
+             "/synthetic source/backend"),
+            ("ingress", os.path.join(root, "infrastructure/vm/tests/test-ingress-release-image-build.sh"),
+             'build_image -t "$FRONTEND_LOCAL_IMAGE" frontend\n',
+             'bash infrastructure/vm/tests/test-java-truststore.sh "$BACKEND_IMAGE"', "backend"),
+        ]
+        shims = """set -euo pipefail
+source='/synthetic source'
+revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+BACKEND_IMAGE=synthetic-backend
+candidate_ref() { printf '%s\\n' synthetic-ref; }
+quiet_build() { "$TEST_PYTHON" -c 'import json,sys;print(json.dumps(sys.argv[1:]))' "$@"; }
+build_image() { quiet_build "$@"; }
+"""
+        shells = list(dict.fromkeys([shutil.which("bash"), "/bin/bash"]))
+        for label, path, start, end, context in sources:
+            with open(path) as handle:
+                shell = handle.read().split(start, 1)[1].split(end, 1)[0]
+            for bash in shells:
+                for cache in (None, "", "/tmp/cache path"):
+                    with self.subTest(consumer=label, bash=bash, cache=cache):
+                        env = dict(os.environ, TEST_PYTHON=sys.executable)
+                        env.pop("CODEMASTERY_MAVEN_LAYER_CACHE", None)
+                        if cache is not None:
+                            env["CODEMASTERY_MAVEN_LAYER_CACHE"] = cache
+                        result = subprocess.run([bash, "-c", shims + "probe() {\n" + shell + "\n}\nprobe\n"], env=env,
+                                                capture_output=True, text=True)
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        args = json.loads(result.stdout)
+                        self.assertEqual(args[-1], context)
+                        if cache:
+                            at = args.index("--cache-from")
+                            self.assertEqual(args[at + 1], "type=local,src=" + cache)
+                        else:
+                            self.assertNotIn("--cache-from", args)
+
+
 class DraftVersionTests(unittest.TestCase):
     """release.sh version-unused against a stub gh: a used release version is refused before admission."""
 
