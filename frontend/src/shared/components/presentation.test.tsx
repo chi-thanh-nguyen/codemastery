@@ -531,6 +531,21 @@ describe('Lit Path design-system primitives', () => {
         expect(styleColor(bell, 'background-color')).toBe('rgb(28, 30, 36)'); // chrome-raised
         expect(other.hasAttribute('aria-current')).toBe(false);
     });
+    it.each([[999, 1000], [1000, 999], [1000, 0], [1000, undefined], [0, 1000], [undefined, 1000], [1000, 1001], [1001, 99999]])(
+        'preserves the focused notification link when its count changes from %s to %s', async (before, after) => {
+            const action = vi.fn();
+            const utility = (badge: number | undefined) => <><HeaderIconButton label="Notifications" icon="bell" badge={badge} current href="/notifications"
+                onClick={(event) => { event.preventDefault(); action(); }} /><button>Next utility</button></>;
+            await render(utility(before));
+            const original = host.querySelector<HTMLAnchorElement>('a[href="/notifications"]')!;
+            original.focus();
+            await render(utility(after));
+            const updated = host.querySelector<HTMLAnchorElement>('a[href="/notifications"]')!;
+            expect(updated).toBe(original); expect(document.activeElement).toBe(original);
+            expect(updated.getAttribute('aria-label')).toBe(after ? `Notifications, ${after} unread` : 'Notifications');
+            expect(updated.getAttribute('aria-current')).toBe('page');
+            await click(updated); expect(action).toHaveBeenCalledOnce();
+        });
     it('keeps the Theme menu open on selection, exposes radio state and announces the effective choice', async () => {
         await render(<ThemeControl />);
         const trigger = host.querySelector<HTMLButtonElement>('button[aria-label="Theme: System (currently Dark)"]')!;

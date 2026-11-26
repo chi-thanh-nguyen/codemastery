@@ -127,6 +127,31 @@ jobs:
       - name: Enable the containerd image store
         shell: bash
         run: bash infrastructure/release/release.sh enable-containerd-store
+      # Source-free BuildKit layers only; PR cache writes remain scoped to the PR.
+      - name: Restore Maven dependency layers
+        id: maven-layer
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ runner.temp }}/maven-layer
+          key: maven-layer-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('backend/Dockerfile', 'backend/pom.xml', 'backend/.mvn/**') }}
+      - name: Prepare Maven dependency layers
+        timeout-minutes: 10
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f "$RUNNER_TEMP/maven-layer/index.json" ]]; then
+            # This isolated builder exports a standard local cache, independently
+            # of the runner's Docker image store. Ordinary consumers import it.
+            builder="maven-cache-${GITHUB_JOB}"
+            docker buildx create --name "$builder" --driver docker-container \
+              --driver-opt image=moby/buildkit:v0.35.1@sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c
+            trap 'docker buildx rm "$builder" >/dev/null' EXIT
+            docker buildx build --builder "$builder" --platform linux/amd64 \
+              --target maven-dependencies --output type=cacheonly \
+              --cache-to "type=local,dest=$RUNNER_TEMP/maven-layer,mode=max" backend
+          fi
+          echo "CODEMASTERY_MAVEN_LAYER_CACHE=$RUNNER_TEMP/maven-layer" >> "$GITHUB_ENV"
       - name: Build, qualify, scan and package a rehearsal candidate
         shell: bash
         run: |

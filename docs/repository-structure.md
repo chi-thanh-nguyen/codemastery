@@ -2417,3 +2417,25 @@ the two IN07 files introduced in that PR:
 The HTTP authorization and error cases extend the existing
 `AuthorizationIntegrationTest.java`. The canonical tree and CODEOWNERS stay
 unchanged. This record approves no other paths.
+
+## FE28 focused frontend test placement — 26 November 2026
+
+`CT14-FE28-PLACEMENT-2026-11-26-r1` is **DELEGATED_APPROVED** within the
+Project Leader's explicit “CodeMastery — FE28 PR Consolidation, Complete
+Implementation, Targeted Verification and Self-Audit” instruction, §§6–7E.
+This additive placement decision covers exactly these co-located Vitest suites:
+
+| Path | Responsibility |
+| --- | --- |
+| `frontend/src/features/interaction/api/notificationApi.test.ts` | CT11 runtime decoding, four authenticated bindings, request/response identity and cancellation |
+| `frontend/src/features/interaction/hooks/useNotifications.test.tsx` | Notification state, session replacement, stale reads, mutation serialization and reconciliation |
+| `frontend/src/features/interaction/pages/NotificationsPage.test.tsx` | S15 page/row/bell presentation, accessible states, explicit actions and preview fidelity |
+
+Existing `frontend/src/routes/index.test.tsx` and
+`frontend/src/shared/components/presentation.browser.cjs` receive focused route,
+shell and rendered regressions. No new production file, provider, state library,
+E2E suite or backend test placement is introduced. Co-location preserves feature
+ownership and follows existing frontend tests; a parallel test tree or omnibus
+shared suite would obscure that ownership. This grants no other CT14 expansion,
+independent acceptance, protected integration or deployment approval. Execution
+results and limitations are recorded in `docs/testing.md`.
