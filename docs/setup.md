@@ -13,7 +13,7 @@ CORS `Content-Disposition`, open-in-view=false and local UTC clocks are reused.
 Replacement is allowed only before the exclusive deadline and before grading;
 grades echo the exact `submittedAt` string, including microseconds. No key is a
 public identifier. Database runtime consumers require the dated CT17-P6 r15 matrix
-in [deployment](deployment.md#ct17-p6-privileges-2026-11-27-r15--as09-submissions-within-adr012-192-27-november-2026).
+in [deployment](deployment.md#ct17-p6-privileges-2026-11-27-r16--as09-submissions-within-adr012-192-27-november-2026).
 Applying grants on a real host, operator upload/ingress/tmpfs configuration and
 hostile-download risk acceptance remain separate gates. See the dated
 [author verification](testing.md#as09-full-scope-author-verification--27-november-2026).
@@ -274,7 +274,7 @@ The approved Option A contract uses these names:
 | Backend object storage | `STORAGE_ENDPOINT`, `STORAGE_REGION`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `STORAGE_PATH_STYLE_ACCESS` | Referenced by backend storage configuration. |
 | Backend security/CORS | `JWT_SECRET`, `JWT_EXPIRATION`, `CORS_ALLOWED_ORIGINS` | Required/validated by backend security configuration. |
 | Password recovery (optional) | `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `PASSWORD_RESET_EMAIL_FROM`, `PASSWORD_RESET_FRONTEND_ORIGIN`, `PASSWORD_RESET_TOKEN_TTL` | Read by the backend for AU07 delivery. If any value is missing, a placeholder or invalid, recovery stays inactive and the rest of the backend starts normally. SMTP uses port 587 with required STARTTLS; TTL defaults to and must equal `PT30M`. SMTP authentication is mandatory: a server that does not offer AUTH after STARTTLS receives no message. AUTH mechanisms are fixed to `LOGIN PLAIN` over verified TLS; SASL is disabled. NTLM, DIGEST-MD5, XOAUTH2 and unknown-only offers fail closed. Angus SMTP/wire/socket and authentication-helper JUL diagnostics are source-filtered JVM-wide; Session debug is disabled with a discarded output stream. Synthetic DEBUG/TRACE coverage includes actual Spring Boot startup, encoded authentication material and a test-only NTLM override; see the SMTP coverage in `docs/testing.md`. Recovery failures retain only aggregate metrics. Local Compose and the VM release do not pass these values. No real credentials are supplied. Names and validation: `CT38-PASSWORD-RESET-2026-11-13-r1` ([ADR006 §10.5.1](decisions/006-batch-02-contract-approvals.md#1051-ct38-password-reset-2026-11-13-r1--ct38featurepassword-reset)). |
-| Backend runtime/operations | `SERVER_PORT`, `MAX_UPLOAD_SIZE`, `LOG_LEVEL_ROOT`, `LOG_LEVEL_APP`, `SCHEDULING_ENABLED`, `ATTEMPT_AUTO_SUBMIT_DELAY`, `DEADLINE_REMINDER_DELAY`, `DEADLINE_REMINDER_LEAD_TIME` | Referenced by backend runtime configuration. |
+| Backend runtime/operations | `SERVER_PORT`, `MAX_UPLOAD_SIZE`, `LOG_LEVEL_ROOT`, `LOG_LEVEL_APP`, `SCHEDULING_ENABLED`, `APP_QUIZ_AUTO_SUBMIT_ENABLED`, `APP_QUIZ_AUTO_SUBMIT_DELAY_MS`, `APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE`, `DEADLINE_REMINDER_DELAY`, `DEADLINE_REMINDER_LEAD_TIME` | Referenced by backend runtime configuration. |
 | Spring profile selection | `SPRING_PROFILES_ACTIVE` | Supported through Spring profile selection, rather than a `${...}` placeholder in `application.yml`. |
 | Frontend | `VITE_API_BASE_URL` | Public build-time API address read by the shared HTTP client; Compose passes a build ARG defaulting to http://localhost:8080. Required for any API request. |
 | VM deployment only | `SPRING_FLYWAY_URL`, `SPRING_FLYWAY_USER`, `SPRING_FLYWAY_PASSWORD` | Separate Flyway migrator identity required by `deploy.sh` and the VM override. Local Compose ignores them; see [deployment.md](deployment.md#current-status-and-reproduction-summary). |
@@ -2137,16 +2137,31 @@ migration, public exposure or bypass of independent review. Provider delivery,
 load/abuse qualification and security review remain outstanding.
 
 
-## Batch 3 expiry configuration specification — not implemented
+## AS08 expiry configuration — 26 November 2026
 
 [ADR007 §3.2](decisions/007-batch-03-contract-approvals.md#32-ct38featurequiz-expiry)
-records **CT38-QUIZ-EXPIRY-2026-11-09-r1**: explicit backend
-APP_QUIZ_AUTO_SUBMIT_ENABLED, APP_QUIZ_AUTO_SUBMIT_DELAY_MS and
-APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE, their property bindings, validation, consumer
-locations and disabled-mode limits. No runtime configuration/default or .env.example
-change is made here. Future implementation must bind/validate these required inputs
-and synchronize the placeholder template. Deployment tuning and actual timely
-finalization remain unverified; existing Auth/reset/storage configuration is unchanged.
+is implemented by AppConfig, application.yml and AttemptAutoSubmitScheduler in
+PR #296. Supply all three inputs for backend host or Compose startup, even when disabled:
+
+| Input | Required value |
+|---|---|
+| `APP_QUIZ_AUTO_SUBMIT_ENABLED` | explicit `true` or `false` |
+| `APP_QUIZ_AUTO_SUBMIT_DELAY_MS` | integer 1..2147483647 milliseconds |
+| `APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE` | integer 1..2147483647 |
+
+Missing, placeholder, malformed or out-of-range values fail startup. There are no
+production defaults; `.env.example` contains placeholders only. AppConfig activates
+Spring scheduling when the feature is enabled. Fixed-delay passes do not overlap
+in one process; PostgreSQL Course-root locking serializes multiple workers.
+Discovery is keyset-paged and each candidate has its own write transaction.
+Disabled suppresses scheduling and never permits late saves or submissions.
+`SCHEDULING_ENABLED` does not replace this feature input. The obsolete
+`ATTEMPT_AUTO_SUBMIT_DELAY` / `codemastery.assessment.auto-submit.fixed-delay`
+binding is removed. Shared tests explicitly disable the feature; focused tests
+activate it with synthetic values. A deployed timed-attempt capability requires
+an enabled, qualified scheduler, operator-selected tuning and finite database
+statement/transaction budgets. No deployment values or operational acceptance
+are selected here. AS12/AD13 integrated submission remains blocked separately.
 
 ## Batch 4 runner and time-input decisions — 9 November 2026
 

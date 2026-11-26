@@ -1,5 +1,117 @@
 # Testing
 
+## AS09 safe main integration and targeted self-audit — 27 November 2026
+
+**Scope and authority.** The Project Leader's explicit AS09 safe-integration task
+permits normal main integration, conflict and directly related semantic fixes,
+focused tests, commit/push to existing PR #297 and synchronization of its body.
+This is OpenAI Codex-assisted implementation-agent verification, not independent
+acceptance. No merge, Issue/Project change, production grant or deployment occurs.
+
+**Exact parents.** AS09/P3 parent: `b36d9397a6f2f37a38b491cda49be633051e0d60`;
+verified main/AS08 parent: `114aeec3c6ec5a14eeaa0cf556774e87a7136a8c`;
+previous merge-base: `3f1831198982b712bfdaa91381e447d39978d550`.
+Remote PR was OPEN with `mergeable=false`, `mergeable_state=dirty`. A clean,
+isolated clone preserves the occupied repository/worktrees. The delivery commit
+is the normal two-parent merge whose parents are above; its exact SHA is recorded
+by Git and the PR body, avoiding a self-referential SHA in this file.
+
+**Conflict inventory and correction.** Actual textual conflicts are only
+`infrastructure/vm/deploy.sh` and
+`infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh`.
+Nine files overlap: those two, SecurityConfig, OpenAPI, deployment/setup/testing
+and the PostgreSQL containment/real-backend runtime scripts. Both privilege
+extensions are required. Keep merged AS08
+`CT17-P6-PRIVILEGES-2026-11-26-r15`; renumber the unmerged AS09 extension to
+`CT17-P6-PRIVILEGES-2026-11-27-r16`. Preserve the authorized Submission row and
+all AS08 Attempt/Answer rows. Reconcile behavioral probes, contract overlay,
+revision provenance, current OpenAPI/setup references, diagnostics and test labels.
+The contract test now also rejects duplicate revision numbers across dates; a
+scratch duplicate-r15 mutant was rejected by that exact assertion. Historical
+AS09 r15 and exact-SHA execution records below remain unchanged as history.
+
+**Static preservation/self-audit.** Full comparisons against both parents and the
+merge-base verified 658 files without overlapping edits are byte-identical to
+the appropriate parent; only the nine overlapping files need reconciliation.
+No Java production or test source was manually changed in this integration.
+SecurityConfig retains both exact parent matcher groups: AS08's owner result
+matcher precedes the Learner attempt group; AS09's authenticated bindings defer
+role/error precedence to its application admission. Material protection, lazy
+multipart handling, connection-close transport and default deny remain intact.
+The OpenAPI tree equals the semantic three-way union plus five AS09 r16 wording
+updates: seven modified operation objects from each feature, all 946 internal
+references resolved, duplicate keys rejected, normative shapes unchanged.
+Documentation additions from both parents survive; recorded historical evidence
+is not reassigned to this tree. The matrix is the exact parent-row union over
+27 relations, within ADR012 §19.2. No new identity UPDATE, DELETE, DDL, grant
+option, future-object or broader privilege is introduced; existing unrelated
+privileges and restrictions remain unchanged. AS08 scheduler settings, fail-closed
+validation, Compose bindings and explicit disabled test/harness inputs come from
+main unchanged. No additional scheduler consumer is enabled by this work.
+
+**Executed focused Maven verification**, from `backend/`, Java 25.0.4.1,
+Docker Desktop, disposable hardened PostgreSQL 17.11 and Compose-pinned MinIO:
+
+```bash
+./mvnw -q '-Dtest=SubmissionServiceTest#notificationAdmissionRejectsInvalidTransactionBeforeRepositoryAccess,AppConfigTest' '-Dit.test=FileStorageIntegrationTest#as09NotificationProducerDiscoveryAndSharedLockAdmission+as09NotificationStateRefreshesPreloadedEntityAndHoldsCallerSharedLock+as09RestrictedRuntimeConsumerUsesTheExecutableMatrix+as09RealTomcatAdmissionRawMultipartAndGradeContracts+co09RealTomcatMultipartPrecedenceAndBinaryHeaders,AuthorizationIntegrationTest$AssignmentAuthoringEndpoints,AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#realRuntimeMatrixPermitsOnlyTheImplementedAttemptOperations+httpSecurityClosedBodiesNoStoreAndResultConfidentialityUseTheRealStack+exactDeadlineAndLogicalExpiryUseOnlyTheLastCommittedSavedMasks+manualSaveAndExpiryRacesProduceOneImmutableTerminalResult' verify
+```
+
+PASS: **44 unit cases + 12 integration tests**, zero failures/errors/skips,
+from Surefire/Failsafe XML. This compiles all production/test sources and verifies
+application wiring, startup input validation, both feature security paths,
+material/submission multipart transport, both actual restricted-role consumers,
+AS08 expiry/manual-save races and exact deadline, and AS09-R01's proxy/transaction
+and PostgreSQL current-state/shared-lock regressions.
+
+**Repository-root checks:**
+
+```bash
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+bash -n infrastructure/vm/deploy.sh infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
+BUILDX_CONFIG=../buildx BUILDKIT_PROGRESS=plain docker build -t codemastery-backend:as09-as08-integration-20261127 backend
+BACKEND_IMAGE=codemastery-backend:as09-as08-integration-20261127 BACKEND_PORT=18097 bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
+git diff --check
+```
+
+Contract/shell/diff/build checks PASS. PostgreSQL containment PASS:
+**121 operation probes + 36 expected rejection checks**, including idempotence,
+excess-grant drift, PUBLIC/role/ownership/default-privilege escalation, unknown
+objects/columns, V008-to-V009 and V006-to-V009 upgrades, failed-stop reporting and
+fail-closed application containment. Packaged real-backend harness PASS: **198 assertions**, actual runtime consumer
+HTTP/SQL checks and real Flyway V008-to-V009 upgrade, with zero backend permission
+errors/SQLSTATE 42501 entries. The image is built from the integrated backend tree;
+no container image from a previous revision is reused as verification evidence.
+Built image ID: `sha256:d49fda50a96b857b2185e7649b8584492bffb2834b358b5bc86dc8bb2d245bb4`.
+
+**Finding dispositions and retained inventory.** The actual conflict, duplicate
+r15 sequence, stale AS09 references and incomplete diagnostics are resolved.
+No other confirmed actionable integration defect remains after the focused
+source audit and completed checks. AS09-R01/F08 remain FIXED_AUTHOR_VERIFIED:
+exact IllegalStateException outside an active read-write transaction, no repository
+access or implicit transaction on refusal, caller transaction identity, current
+rereads, FOR SHARE lifetime and release are retained. AssignmentService,
+repositories, SubmissionService and their regressions are byte-identical to the
+P3 parent. The prior remediation's **29/29 author inventory remains applicable**;
+this is preservation plus targeted revalidation, not a new comprehensive or
+independent 29-unit execution. The earlier 110 independent passing executions
+remain historical baseline evidence; the former failing oracle was rerun through
+the preserved corrected regression.
+
+**Deliberate omissions and remaining gates.** No comprehensive AS09/AS08 suite,
+all browsers, complete repository suite, frontend rebuild or release qualification
+is repeated: frontend/types, feature implementation and unrelated sources are
+parent-preserved, and focused real SQL/HTTP/lock checks exercise the changed
+integration boundaries. The packaged runtime harness is justified specifically
+by the merged privilege probes and new required AS08 startup inputs; its existing
+unrelated consumer checks were retained. Hosted CI is not awaited or dispatched.
+Final narrow independent review must cover P3 `21bb06cd..b36d9397` plus this main
+integration, both parent comparisons and r15/r16/security/API/operational-test
+coexistence. Independent acceptance, required exact-head CI, eligible CODEOWNER
+approval, QA, protected integration, notification consumers, operational tuning,
+privilege provisioning, hostile-file risk acceptance and deployment remain
+separate gates.
+
 ## AS09 targeted P3 remediation — 27 November 2026
 
 **Authority and baseline.** The Project Leader explicitly authorized independent
@@ -8963,6 +9075,509 @@ matrices were not repeated. The selected component regressions and production
 journey still run. No CI query/wait/dispatch, GitHub review submission, merge,
 Issue/Project change or deployment was performed. Independent QA, CODEOWNER,
 required CI at the integration revision and protected merge remain separate.
+
+## AS08 completion and remediation-author audit — 26 November 2026
+
+> Historical author audit at `031dbffffd4d7f8c60570755354ec11e7eb056b5`.
+> The subsequent full-scope independent review issued `REQUEST_CHANGES`: contract
+> synchronization was PARTIAL (IR296-02), focused test-source qualification was
+> PARTIAL (IR296-01/03), and AS18 was missing from the dependency inventory.
+> The assertions and original verification below remain dated history; the targeted
+> remediation record at the end of this section gives the current author disposition.
+
+**AS08_OWNED_CODE_COMPLETE_INTEGRATION_BLOCKED**, PR #296, branch
+`feat/as08-timed-attempts`. This is an implementation-author self-audit, not an
+independent review, CODEOWNER approval, US-06 acceptance or release qualification.
+Initial remote HEAD `329bcf45587be0d783675dca9fb2b1c7b825674f`; current-main and
+merge-base at implementation start `cc6cb54ddedf226966a51c9614fc5fc5756267bb`.
+The original two commits remain intact. Final commit identity is recorded by Git
+and the PR; no self-referential commit SHA is fabricated in this file.
+
+Authority: the Project Leader's explicit AS08 full-completion task authorizes
+AS08 implementation, eligible cohesive upstream additions below approximately
+20%, supporting files, bounded necessary technical decisions, self-audit,
+commit/push and a PR-body update. It excludes merge, Issue closure, deployment,
+operational acceptance and substantial upstream implementation. Effective sources:
+ADR005 (CT03 root, evidence tuple, settings barrier), ADR007 (CT23/CT04/CT38),
+ADR011 §§3–5/11–12 (CT22/CT08/CT25/CT33), ADR012 §13/19.2 (CT13 and privilege
+ceiling), ADR013 §19 (fixed full-Quiz capture retained), ADR014 (current trusted
+identity/session), and the CT14/CT39 placements/local Clock decisions. The
+ADR011 §17 dynamic practice-capture amendment remains unadopted.
+
+### Checkpoint inventory and completion evidence
+
+`PARTIAL` and `MISSING` below describe the initial PR HEAD, not an historical
+Issue checkbox. `COMPLETE` in the final-code column means the owning code is
+implemented and executed by the indicated focused tests; it does not make an
+unconsumed cross-module seam an integrated user capability.
+
+| Checkpoint | Authority | Initial | Final code / exact location | Executed evidence / remaining gate |
+|---|---|---|---|---|
+| AS08.attempt | ADR007 §8 | PARTIAL | COMPLETE — `AttemptService.start`, Attempt repositories | concurrent first start 201/200, committed retake number, int exhaustion and unchanged timer |
+| AS08.answers | ADR007 §9 | PARTIAL | COMPLETE — `saveAnswers`, `validateAndCanonicalizeAnswers`, `SubmitAttemptRequest` | complete replacement, duplicate/type/UUID rejection, no late masks |
+| AS08.expiry | ADR007 §10 | PARTIAL | COMPLETE — `finalizeExpired` | logical submittedAt, saved masks, hidden/LEFT/locked cleanup, repeated cleanup |
+| AS08.scheduler | ADR007 §3.2/10 | MISSING configuration/activation | COMPLETE — `AppConfig.QuizExpirySettings`, application.yml, `AttemptAutoSubmitScheduler` | eager invalid/missing-input refusal including disabled; actual scheduled invocation; multi-page poison-row isolation; production tuning remains operator-owned |
+| AS08.grade | ADR007 §9, AS04 | PARTIAL | COMPLETE — `gradeAndFinalize`, `requireCapturedAnswers` | actual AS04 grading and rounding; incorrect provider score/correctness refused; stored corruption refused |
+| AS08.results | ADR007 §11 | PARTIAL | COMPLETE — `read`, `readResult`, `readOwnedResult`, `AttemptResponses` | own/owner submitted projections, active-result 409, foreign concealment, no keys |
+| AS08.history | ADR007 §11 | PARTIAL | COMPLETE — `history`, `findPageByQuizAndLearner` | deterministic number-descending paging/count, derived overdue status, coherent RR snapshot |
+| AS08.rest | ADR007 §13, CT01/03/18 | PARTIAL | COMPLETE — `QuizAttemptController`, `SecurityConfig` | real JWT/session and PostgreSQL stack; 401/403/404/400, exact routes, no-store on errors/success, closed JSON |
+| AS08.persistence | V004, ADR007 §9/13 | PARTIAL | COMPLETE — Attempt adapters/entities | real flush/rollback, mutable-column updates, microseconds/timestamptz, role r15 allows writes and denies immutable rewrites/DELETE |
+| AS08.guard | ADR007 §3.1, ADR005 §13.3 | MISSING | COMPLETE — Course `withLearnerAssessmentWrite` / `withAssessmentExpiryWrite` | actual Course root before Quiz/Attempt/answers; post-wait LEFT denial, definition winner re-read, manual/save/expiry races, explicit test statement deadline/rollback; existing guard regressions reused unchanged |
+| AS08.evidence.execution | ADR011 §12 | MISSING | COMPLETE — `readLatestSkillEvidence`, `ExecutionScope`, `findLatestEvidenceCandidates` | correct tuple/counts, missing capture/membership fail closed; marker rejects wrong Course/thread/physical transaction/after-return and start/ordinary guard; production AD13 caller absent |
+| AS08.evidence.self | ADR011 §12 | MISSING | COMPLETE — `readMyLatestSkillEvidence` | trusted self only, LEFT/other-role denial, RR join, latest diagnostic/hidden evidence; map consumer remains separate |
+| AS08.reporting | ADR012 §13 | MISSING | COMPLETE — `readQuizOutcome`, set-based adapter aggregate | latest per learner/Quiz, diagnostics excluded, hidden practice/test included, exact pair mean/null; Admin composition remains separate |
+| AS08.settings-barrier | ADR005 §13.2 | MISSING | COMPLETE — `hasSubmittedAttempts`, `hasSubmittedInCourse` | owner-only conservative existence probe under shared root; actual AD08 threshold-edit integration absent |
+| AS08.diagnostic-gate | ADR011 §11 | MISSING (unconditional rejection) | COMPLETE — `requireDiagnosticAdmission`, `hasBlockingDiagnosticAttempt` | first start/same active resume, overdue and submitted refusal, two different diagnostic starts serialize to one winner |
+| AS08.placement-projection | ADR011 §11 | MISSING | COMPLETE — `readMyPlacementQuizId`, `findPlacementQuizId` | server title-C/UUID choice, same active resume, null after expiry/submission; only PlacementDiagnosticService may consume; AD10 caller absent |
+| AS08.contract-sync | CT04 bindings, CT38, CT17 ceiling | MISSING | COMPLETE — OpenAPI seven operations, `.env.example`, setup/deployment records, Compose, existing startup fixtures | schemas and request/response contracts retained; implementation metadata explicitly records integration blockers; no frontend runtime attempt client exists to synchronize |
+| AS08.focused-test-source | CT14/ADR007 §14 | PARTIAL (mock-only timed tests) | COMPLETE — `AttemptServiceTest`, `AppConfigTest`, `AssessmentPersistenceIntegrationTest.TimedAttemptRuntime` | unit/configuration + actual Spring/PostgreSQL/security/concurrency/role tests; independent QA04 atomic-event acceptance not claimed |
+
+There are **18 applicable AS08-owned code checkpoints, 18 implemented** (100% of
+this explicit code inventory). This is not a 100% integrated-AS08 or US-06 claim.
+The full required implementation/integration percentage is not defensible: the
+remaining Issues contain unequal orchestration, security, persistence and
+acceptance work. In particular, publication, owner-insight consumption, atomic
+Adaptive execution and client workflows cannot be counted as completed by these
+published/locally tested methods. Exact deferred capabilities are listed below.
+
+### Upstream assessment and bounded additions
+
+Remote main, PR branch and all fetched remote integration refs were inspected.
+AS12 event/listener/orchestration scaffolds remain empty; neither AS16 owner method
+is present on another fetched branch. No upstream PR or unrelated commit is imported.
+Percentages are functional/complexity estimates, not LOC ratios, and additions
+are aggregated per owning Issue.
+
+| Owner / exact contract | Full implementation denominator | Missing slice / estimate | Decision and effect |
+|---|---|---|---|
+| CO14 #177 / ADR005 guard and ADR007 §3.1 | settings read/write handoff and compare-and-set, ownership, both lock entries, actual transaction compatibility/joining/refresh/savepoint/rollback enforcement and focused tests | two Assessment admission adapters reusing the existing enforcement, approximately 10–15% | IMPLEMENTED, no new lock identity or schema; original Instructor/NOWAIT behavior unchanged |
+| AD07 #165 / CT40, ADR007 §16 companion | graph repositories, skill CRUD, DAG/prerequisite mutations, lesson mappings, ancestry, locking, REST/security and tests | assertion-only Course-skill validation plus allowlist/negative tests, approximately 3–5% | IMPLEMENTED under delegated technical authority; existing owner-only projections unchanged |
+| CT38 #21 / ADR007 §3.2 | existing configuration contract plus the AS08 feature-owned binding | the three already-approved inputs, strict validation and scheduler activation | AS08-owned support implemented; no production values selected |
+| CT17 #70 / ADR012 §19.2 | 27-relation runtime matrix, provisioning/containment/consumer verification and deployment gates | two existing relation rows and exact consumer tests, approximately 5–10% of the runtime-privilege slice (less of CT17 as a whole) | IMPLEMENTED as r15, inside the exact ceiling; no applied migration or real shared-system grant changed |
+| AS18 #164 / ADR005 §3.3, ADR011 §§4/12 | conditional tagged-question coverage lookup: `QuestionBankService.readCoverage`, nested immutable `CoverageSnapshot`, and execution-only `readCoverageForExecution` | the coverage producer and execution companion are absent; substantial AS18 work | DEFERRED external dependency, omitted from the original author inventory and added after independent review; AD08 consumes readiness coverage and AD13 consumes conditional execution coverage; not implemented by this remediation |
+| AS12 #161 / ADR007 §12, ADR011 §§4–5 | immutable validated event artifact AND complete persisted/flushed producer, transition-only publication, synchronous failure/rollback tests | both principal checkpoints absent, approximately 100% | DEFERRED, above threshold; event file stays empty, no dummy listener/publication or integrated mastery claim |
+| AS16 #162 / ADR011 §12/14 | owner insight evidence/read admission with same-snapshot joined membership, result projection, submitted attempt paging and tests | `readOwnedLatestSkillEvidence`, `listLearnerAttemptsForOwner`, membership integration and tests; approximately 70–100% of the owner slice | DEFERRED, material scope above threshold; AS08 learner/owner single-result HTTP endpoints remain delivered |
+| AD13 #169 / ADR011 §§3–5 | listener, authoritative latest-evidence/mastery update, atomic Course progress, decision/recommendation history and all-or-nothing tests | all four AD13 functional checkpoints absent, approximately 100% | DEFERRED; AS08 result persistence is only the Assessment-local unit, not the required whole atomic flow |
+| CO15 #178 / ADR011 §3 | Course execution snapshot, monotonic mastery skips, Enrollment/progress transaction participant and tests | no missing code needed here, 0% addition | REUSE current main implementation; actual AS12→AD13→CO15 integration remains blocked |
+| AD08 #166 / ADR005 settings/freeze | enablement/readiness validation, settings handoff/ETag/If-Match and threshold freeze, REST and tests | settings consumer is empty; implementing it is approximately 100% of AD08 | DEFERRED; AS08 provides the submitted-history probe and shared root, not a fabricated settings endpoint |
+| AD10 #167 / ADR011 §11 | diagnostic guidance/initialization/skip composition, approved evidence consumer and tests | its application consumer is empty; material whole-use-case work, approximately 100% | DEFERRED; Assessment diagnostic start/projection implemented without claiming guidance or initialization |
+| Frontend FE09/FE10, Adaptive maps/insights and Admin reporting | their complete owning user workflows | actual consumers, save-before-submit, current-session decoders/views and composition | OUTSIDE AS08; `quizApi.ts` is empty, preview view types are not API DTOs; no mock production client or browser acceptance claim |
+
+### Technical selections and audit disposition
+
+The only new material interface selection is **AS08-ANCESTRY-2026-11-26-r1**,
+recorded with alternatives, authority and exclusions in ADR007 §16. A real
+PostgreSQL test showed that calling the existing Instructor-only skill projection
+from a Learner/actorless path denies valid attempts. The narrow assertion returns
+no graph data and preserves that settled owner boundary. Root identity, READ
+COMMITTED write propagation, REPEATABLE READ snapshots, local UTC clocks,
+fixed full membership, exact masks and the approved evidence tuple remain unchanged.
+CT17 r15 is a bounded existing-ceiling realization, not a new privilege policy.
+Runtime deadlines use explicit synthetic test budgets; no production timeout,
+resource, credential, risk or deployment decision is invented.
+
+| Finding | Severity | Evidence / impact | Remediation and verification |
+|---|---|---|---|
+| F01 root missing | P1 | initial `AttemptService.withLearnerAssessmentWrite` / `withAssessmentExpiryWrite` used only TransactionTemplate; no shared physical root | Course-owned entries and real wait/recheck/start/definition/terminal race tests; existing guard regression suite |
+| F02 scheduler configuration/activation | P1 | scheduler properties unbound, no scheduling activation, disabled mode skipped validation | eager AppConfig settings, explicit inputs, actual @Scheduled invocation and keyset poison-row tests |
+| F03 AS12 event/publication absent | P1 integration blocker | empty `QuizSubmittedEvent.java`, no persisted/flushed publication | DEFERRED at approximately 100% AS12; no event/schema/consumer acceptance claimed |
+| F04 public result reads missing | P2 | no CT33/CT13 Assessment projections | execution/self/reporting/placement projections delivered and exercised; AS16 owner reads remain upstream-blocked |
+| F05 runtime/API boundary | P1 | Attempt routes default-denied; parser accepted duplicate/trailing JSON and noncanonical UUIDs; metadata remained unimplemented | exact security methods/roles, strict Jackson 3 byte parser, admitted body validation, no-store and real HTTP regression; OpenAPI synchronized |
+| F06 persistence verification/privileges | P1 | original timed tests bypassed transaction enforcement; runtime role could not read/write Attempt data | real Spring/PG role/rollback/concurrency tests; dynamic mutable-column updates; r15 containment contract |
+| F07 capture/provider integrity | P1 | initial service could grade an incomplete captured subset and accepted incorrect provider flags/percentage | exact full frozen membership/position/ancestry and persisted-mask/correctness/score validation; incorrect-provider and corruption tests |
+| F08 owner-only ancestry reuse | P1 | real Learner start returned 403 when an owner-only SkillGraph projection was reused | ADR007 §16 assertion companion, admitted snapshot/held-root contract, foreign/no-transaction negatives and allowlist |
+| F09 lost membership looked like absent evidence | P1 | latest candidate query based only on membership could return Unknown after membership loss | union of frozen membership and captured skill candidates, full selected-capture validation; deletion reproducer now refuses |
+| F10 effective CT25 missed | P2 | initial `rejectDiagnostic` always returned 409 despite later ADR011 §11 approval | conditional one-time gate and server-chosen placement projection, diagnostic history/expiry and concurrent cross-Quiz tests |
+
+No confirmed unresolved in-scope P0–P3 remains after remediation. F03, AS16 and the
+other named substantial dependencies remain explicit external blockers. This
+statement covers the complete effective PR diff and AS08 runtime, not just the
+follow-up delta; it is still an author audit. Test-source mistakes (proxy spy
+unwrapping, a gapped fixture used with canonical AS06 authoring, and an allowlist
+scanner confusing a private repository delegation with a cross-module call) were
+corrected; they are not reported as product findings or successful test runs.
+
+### Verification and retained gates
+
+All commands below run in `backend/` unless otherwise stated. Focused runs compile
+main and test sources; no full unrelated suite, browser/E2E journey, deployment,
+workflow dispatch or post-push CI wait is performed. PostgreSQL is the existing
+Testcontainers hardened PostgreSQL 17.11 image and real V001–V009 migrations.
+The default test profile disables expiry with explicit case inputs; the scheduler
+activation test separately proves real task registration and invocation.
+
+Final suite reports represent **254 distinct unit tests and 158 PostgreSQL integration
+tests, zero current failures/errors/skips**, obtained across focused runs rather than
+one repository-wide verify. Reuse is limited to unchanged dependencies: AS05 (88),
+AD07 (56), AS04 (12), AppConfig (42) and Course-guard integration (110). Final AS08
+runs execute AttemptServiceTest (56) and AssessmentPersistenceIntegrationTest (48,
+including 19 AS08 runtime cases). The latter also preserves its 29 existing mapping/
+repository cases. No duplicate run is counted twice.
+
+| Exact command | Actual outcome / revision scope |
+|---|---|
+| `./mvnw -B -q -DskipTests compile` | PASS; subsequent test-compile goals compile the final main/test code |
+| `./mvnw -B -q test -Dtest='AttemptServiceTest,QuizGradingServiceTest,AppConfigTest'` | PASS after sandbox access and test input corrections; later source changes verified below |
+| `./mvnw -B -q verify -Dtest='AttemptServiceTest,QuizGradingServiceTest,AppConfigTest,QuestionBankServiceTest*,SkillGraphTest*' -Dit.test='AssessmentPersistenceIntegrationTest,AdaptiveLearningFlowIntegrationTest'` | This run was RED only for the allowlist test's repository-call false positive (253 unit cases, 1 failure); its 198 unchanged AS04/AS05/AD07/config cases passed. No claim this entire command passed |
+| `./mvnw -B -q test-compile surefire:test failsafe:integration-test failsafe:verify -Dtest='AttemptServiceTest' -Dit.test='AssessmentPersistenceIntegrationTest,AdaptiveLearningFlowIntegrationTest'` | PASS after the allowlist correction; real existing Course guard regression report: 110 passing cases. Later AS08-only changes do not change that guard or its dependencies |
+| `./mvnw -B -q test-compile surefire:test failsafe:integration-test failsafe:verify -Dtest='AttemptServiceTest' -Dit.test='AssessmentPersistenceIntegrationTest'` | PASS on the final code, after the full-diff audit's membership correction and CT25 implementation: 56 unit and 48 PostgreSQL cases |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` (repository root) | PASS: all 27 relations match the retained revisions plus exactly two r15 rows; malformed matrix cases refused |
+| Per-file `bash -n <path>` over the eight modified VM scripts (repository root) | PASS; syntax only, not execution of a live deployment/VM |
+| `docker compose --env-file <temporary-synthetic-file> -f infrastructure/docker-compose.yml config --quiet` (repository root) | PASS; explicit synthetic inputs, temporary file removed, no service started |
+| Read-only Python OpenAPI audit (repository root) | PASS: JSON parses, 946 internal refs resolve, exactly seven operation metadata/descriptions change, every component/schema/response/security definition remains identical to initial PR HEAD |
+| `git diff --check` (repository root) | PASS |
+
+The final commands execute the final production/test code; later changes are English
+records and comments only. Test revision is the follow-up commit containing this
+record. The earlier real ancestry failure exposed F08 and was remediated before the
+final pass. No unexecuted event constructor, listener, seeded SD04, browser or whole
+Adaptive-flow test is reported as passed.
+
+The original sandbox could not attach Mockito's agent or reach the Docker socket;
+focused verification was rerun with authorized local access. Subsequent essential
+PostgreSQL tests executed, so those transient failures are not remaining environment
+blockers. Initial red test runs are retained as debugging evidence and never counted
+as passes. Production pool/load, enabled multi-instance timeliness and real deployment
+statement/transaction budgets are not qualified by these controlled cases.
+
+Remaining gates: AS12 producer and AD13 synchronous consumer with the approved
+Interaction phase; real whole-unit result/mastery/progress/recommendation rollback
+and independent QA04; AS16 owner reads and their joined-member Course handoff;
+AD08 settings and AD10/map/Admin/frontend consumers; SD04 seeded score acceptance;
+independent CODEOWNER/last-contribution review, required CI and protected integration;
+operator-selected scheduler/deadline/pool values and runtime provisioning; separate
+release/deployment authorization. No Issue is closed, no PR merged/approved and no
+operational risk accepted.
+
+AI disclosure and attribution: OpenAI Codex performed this follow-up implementation,
+test authoring and author self-audit under @chi-thanh-nguyen's instruction. Original
+commit objects identify `minhtan29042006 <tan.buikhmt0429@hcmut.edu.vn>`, but no
+identity-holder authorization for attributing these new contributions to that person
+was available. CONTRIBUTING.md requires attributable genuine contributions. Follow-up
+commits therefore use the performing maintainer's verified existing Git identity;
+authenticated CLI/pusher is `chi-thanh-nguyen`. No global Git config, credential,
+existing commit, signature or original contribution attribution is rewritten.
+
+### Targeted IR296-01/02/03 remediation-author qualification — 26 November 2026
+
+> Historical first-round author record at `10bcc9c`. The later independent review
+> verified IR296-01/02 but left IR296-03 PARTIALLY_FIXED (IR296-D01/D02). Current
+> second-round evidence and author dispositions are recorded below.
+
+The full-scope independent review of `031dbff` issued **REQUEST_CHANGES**, with
+three P2 defects. Those findings remain valid historical results. This follow-up
+changes qualification fixtures, release smoke generation and affected test support;
+it does not replace that review with an independent approval. Current author
+verdict: **REMEDIATED_READY_FOR_DELTA_INDEPENDENT_REVIEW**, subject to the focused
+results below, required CI and formal review of the new HEAD.
+
+| Finding | Confirmed mechanism | Correction and author evidence | Current status |
+| --- | --- | --- | --- |
+| IR296-01 | The containment fixture is unsubmitted; updating only score violates V004 `ck_attempts_submission` (`23514`). A zero-row INSERT also did not qualify real capture writes. | Update both terminal columns on the controlled existing Attempt and assert exactly one terminal row; insert an actual Attempt/Answer, update both permitted answer columns and assert the stored values; a subsequent probe proves all writes rolled back. Full containment reaches its multiversion and both failure-containment sentinels. Immutable-column and DELETE denials remain. | FIXED_AUTHOR_VERIFIED |
+| IR296-02 | The actual `smoke()` environment generator omitted all three mandatory expiry inputs, so HEAD Compose rendering and preflight reject its output even when expiry is disabled. | `smoke()` and isolated regressions share `write_smoke_env`; it writes explicit test-only `false`, `1000`, `2` in a private file. Release tests check exact inputs, duplicate keys, mode 0600 and the existing host refusal. Rendered preflight uses the generator itself, then rejects missing and invalid values for each input. The generated inputs also pass the committed VM override and actual preflight in an isolated Ubuntu container. | FIXED_AUTHOR_VERIFIED |
+| IR296-03 | Reverse resource close order waits for an executor while its worker is blocked on the still-held Course root. A Future timeout does not release that root or cancel JDBC execution. | Test-local `AttemptWorkers` owns blocker and workers, marks pending transactions for rollback, releases the blocker before bounded cancellation/termination, and preserves interruption. Worker statements/locks and blocker setup have explicit test-only deadlines. Four real PostgreSQL failure cases before blocker commit verify finite failure, rollback of an uncommitted Enrollment mutation, no partial Attempt/Answer, no remaining worker transaction/root lock, zero borrowed pool connections, and a subsequent successful root acquisition. | FIXED_AUTHOR_VERIFIED |
+
+**Checkpoint reassessment.** `AS08.contract-sync`: PARTIAL at independent review
+(IR296-02), now AUTHOR_VERIFIED for the affected release/configuration path.
+`AS08.focused-test-source`: PARTIAL at independent review (IR296-01/03), now
+AUTHOR_VERIFIED for the corrected containment and concurrency sources. All 18
+implementation groups exist; this is neither independent acceptance of 18 delivery
+checkpoints nor a complete integrated quiz/adaptive capability.
+
+**Related-path audit.** The AS08 concurrent-start, manual/save/expiry, diagnostic,
+definition-winner, explicit-statement-deadline and execution-scope negative workers
+now use bounded executor cleanup. Database-capable workers use read-write READ
+COMMITTED transactions with local 8-second statement and 6-second lock deadlines,
+a 10-second test transaction budget and a 10-second cleanup bound. Blocker setup
+uses 5-second statements/4-second lock waits. Existing 1-second cancellation
+verification is retained. Expected BusinessRuleException refusals in diagnostic/save
+races are caught outside the bounded transaction, after its rollback; the
+execution-scope wrong-thread negative deliberately remains outside a transaction.
+No production deadline is selected. Physical lock observation is scoped to the
+recorded worker PostgreSQL PIDs rather than any lock wait in the database.
+
+Other startup consumers checked: Compose, deploy validation, release paths/workflow,
+E2E local-stack generation, runtime-backend initial/upgrade fixtures, ingress and
+env-custody fixtures, `.env.example` and the backend test profile. No additional
+missing mandatory expiry inputs were confirmed. CT17's executable matrix,
+ADR012 §19.2 ceiling, applied migrations and retained r1–r15 records are unchanged.
+
+**Executed verification.** Repository-root commands unless noted:
+
+| Command / environment | Actual result |
+| --- | --- |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` — macOS host, Docker Desktop, disposable PostgreSQL 17.11 Bookworm clusters | PASS; 119 SQL probes and 36 expected rejection messages, multiversion PASS and both containment PASS sentinels reached |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | PASS; exact 27 relations and retained revisions including r15 |
+| `python3 -m unittest discover -s infrastructure/release/tests -v` | PASS; 97 tests, including 2 new generator/refusal tests |
+| `bash infrastructure/vm/tests/test-deploy-preflight-rendered-compose.sh` — existing Ubuntu 24.04 linux/amd64 harness container under emulation, checkout read-only, `--network none`, Docker socket for read-only Compose/preflight inspection | PASS; actual generator accepted, 6 new missing/invalid-input refusals, all 33 existing policy/certificate negative calls retained, final PASS sentinel reached |
+| Actual shared smoke generator → `docker compose --env-file <generated-file> -f infrastructure/docker-compose.yml -f infrastructure/vm/docker-compose.vm.yml config --format json`; then `bash infrastructure/vm/deploy.sh preflight --env-file <generated-file> --origin https://smoke.example.invalid --compose-override infrastructure/vm/docker-compose.vm.yml` — same isolated Ubuntu harness, synthetic certificate custody inside container only | PASS; exact three rendered backend values asserted and PREFLIGHT OK |
+| `./mvnw -B -q test-compile failsafe:integration-test failsafe:verify -Dit.test=AssessmentPersistenceIntegrationTest` — `backend/`, Temurin Java 25, Testcontainers hardened PostgreSQL 17.11, V001–V009 | PASS; 52 actual cases: 48 retained plus 4 new adversarial cases, zero failures/errors/skips |
+| `bash -n` on the three changed shell scripts; `git diff --check` | PASS |
+
+Baseline reproduction used the original smoke-generation block itself and failed
+HEAD Compose on missing expiry inputs. The original full containment run failed
+at `23514`; neither baseline failure is counted as a successful qualification.
+An initial new helper compilation error and a first integration run exposing
+caught-exception transaction boundaries/interruption handling were corrected before
+the final successful runs. The arm64 Ubuntu preflight attempt correctly refused
+the platform; qualification used the amd64 harness without bypassing validation.
+Full smoke/load/provision/deploy was not executed; host `/etc/codemastery`, shared
+Compose resources and real credentials were not modified. The broader 415-case
+independent baseline was not rerun and is not new-HEAD verification.
+
+**AS18 dependency correction.** AS18 #164 owns the conditional tagged-question
+coverage lookup, not AS08. ADR005 §3.3 defines `QuestionBankService.readCoverage`
+and nested deeply immutable `CoverageSnapshot` with exactly the requested skill
+counts; AD08 uses its readiness result. ADR011 §4 step 6 and §12 define
+`readCoverageForExecution`, with the same population/shape and execution-scope
+precondition, for the AD13 conditional readiness path. Source inspection confirms
+all three symbols are absent at this revision. This is substantial missing AS18
+implementation, not a small wrapper to implement here. The Issue's old publication
+status text does not supersede the effective ADR contracts.
+
+**Retained boundaries.** AS12 publication, AD13 whole-transaction mastery/progress/
+recommendation integration, AS18 coverage, AS16 owner evidence/paging, AD08 settings,
+AD10 diagnostic composition and the appropriate frontend/map/Admin consumers remain
+incomplete. QA04 whole-unit rollback, SD04 seeded acceptance, operational scheduler/
+pool/deadline qualification and reserved risk acceptance remain separate. After
+these defects are fixed and applicable protected gates pass, PR #296 may be
+considered for merge as a bounded Assessment foundation. It is not authorized for
+integrated quiz/adaptive exposure or production deployment. An absent frontend or
+a disabled scheduler does not restrict accessible REST endpoints. No risk is
+accepted and no Issue closure, merge, review approval or deployment is performed.
+
+AI assistance: OpenAI Codex authored this targeted remediation and its author-side
+qualification under the explicit Leader task. New commits use the verified
+maintainer identity Nguyen Chi Thanh / `nguyenchithanh.me@gmail.com`; authenticated
+GitHub identity is `chi-thanh-nguyen`. The original three commits are preserved.
+
+### Second-round IR296-D01/D02 author qualification — 26 November 2026
+
+**Review history.** The full-scope review of `031dbff` issued REQUEST_CHANGES
+for IR296-01/02/03. The first author remediation ended at
+`10bcc9c6b751c54c8e0e36ccfa16072bc237d30c` (six PR commits, 37 files,
++3553/-101; main/merge-base `cc6cb54ddedf226966a51c9614fc5fc5756267bb`).
+The subsequent independent narrow-delta review independently VERIFIED_FIXED
+IR296-01 and IR296-02, but assessed IR296-03 as PARTIALLY_FIXED and confirmed
+P2 findings IR296-D01 (late physical commit) and IR296-D02 (suppressed cleanup
+failure). The preceding first-round author claims are historical, not independent
+closure. This second round changes only this integration test and testing records.
+
+**D01 mechanism and correction.** With Spring 7.0.9's actual
+`JpaTransactionManager` and Hibernate 7.4.5.Final, returning from a
+`TransactionTemplate` callback precedes Spring beforeCommit/beforeCompletion,
+JPA commit, Hibernate completion/flush and physical JDBC commit. Checking a flag
+in the action callback cannot cancel that later commit. Each worker now owns a
+test-local `JpaTransactionManager` using the application's existing
+EntityManagerFactory, DataSource, JpaDialect and execution listeners. Its doCommit
+runs after Spring synchronizations, explicitly flushes outside the coordination
+lock, and then arbitrates admission under the same short lock as cleanup.
+
+The assignment to ADMITTED is the commit-admission linearization point. Cleanup
+sets stopping and marks PENDING units CANCELLED under that lock. If cancellation
+wins, the callback or doCommit throws `WorkerCancelled`; Spring executes physical
+rollback. No action result is returned as a successful cancelled transaction.
+If admission wins, cleanup cannot revoke it: JPA/Hibernate/JDBC completion runs
+outside the lock and may commit or fail. ADMITTED is permission to attempt commit,
+not proof of a successful or irreversible commit. Actual afterCompletion status
+is recorded separately. Missing/UNKNOWN completion, failed commit/rollback/resource
+cleanup, or a CANCELLED unit that did not roll back makes cleanup qualification
+fail, even when Future.cancel has hidden the worker exception. Failures after the
+callback, including afterCommit, are retained. An action exception replaced by a
+rollback exception remains attached for diagnostics.
+
+The deterministic advisory-lock regression runs actual AttemptService.start,
+checks one pending Attempt and two pending Answers inside its transaction, and
+blocks real JDBC after the old callback check. The test observes that worker's
+PostgreSQL lock wait before starting cleanup. It observes cancellation winning
+before releasing the controlled blocker. beforeCommit and beforeCompletion cases
+both end CANCELLED/ROLLED_BACK with zero committed Attempts/Answers. The admitted
+case ends ADMITTED/COMMITTED with one Attempt/two Answers despite a cancelled
+Future. Two additional faults prove that an admitted commit failure rolls back
+and fails qualification, while an afterCommit failure reports committed data and
+also fails qualification. Neither is misclassified as successful cancellation.
+
+**D02 correction and faults.** Expected-primary qualification checks the exact
+expected failure family and rejects suppressed exceptions on the original/cause
+chain, preserving the original throwable and its cleanup diagnostics. Four
+permanent real-cleanup fault cases delegate physical blocker rollback and then
+throw SQLException (SQLState IR296); assertion, timeout, SQL setup and interruption
+must each be rejected as failed qualification. A fifth case injects both rollback
+and close reporting failures after the real operations; both errors survive
+try-with-resources suppression. Cleanup always attempts blocker rollback, blocker
+close, task cancellation, executor shutdown and bounded termination, accumulating
+secondary errors rather than replacing the first. Resource release, rolled-back
+Enrollment mutation, zero partial data and subsequent root reacquisition are
+asserted on these fault paths too.
+
+**Executed verification** (backend directory, Temurin 25.0.4.1, disposable hardened
+PostgreSQL 17.11 Testcontainers, unchanged V001-V009):
+
+```bash
+./mvnw -B -q test-compile failsafe:integration-test failsafe:verify \
+  -Dit.test=AssessmentPersistenceIntegrationTest
+```
+
+| Source under test | Actual cases | Failures/errors/skips | Evidence |
+| --- | ---: | --- | --- |
+| Exact vulnerable helper plus supplied independent JDBC/cleanup harness | 54 | 2/0/0 | D01: stopping=true, cancelled=true, terminated=true, attempts=1, answers=2. D02: original qualification returns success despite cleanup SQLException. |
+| First corrected source with permanent regressions | 60 | 0/0/0 | All 52 retained cases plus eight new cases pass. |
+| Controlled mutations restoring the absent completion gate and ignored suppression | 60 | 7/0/0 | Both cancellation regressions and all five cleanup-fault regressions fail; complementary admitted commit still passes. These are deliberate red results, not qualifications. |
+| Final corrected source, including two completion-failure audit cases | 62 | 0/0/0 | All 52 retained plus ten new cases pass; actual testcase records inspected. |
+
+`git diff --check` passes. All original behavioral assertions remain: concurrent
+start/retake, manual/save/expiry, diagnostic winners, definition re-read, the
+one-second statement deadline and execution-scope wrong-thread refusal. Blocker
+release remains before cancellation/termination waiting. Existing 8-second
+statement, 6-second lock and 10-second transaction budgets, 5-second/4-second
+blocker setup limits, 10-second termination limit, interruption preservation,
+worker security-context cleanup and PID-scoped observation remain test-local.
+The new race qualification has a 15-second successful-execution budget and a
+12-second bounded join around the helper's 10-second termination deadline. It
+checks no worker transaction, Course/advisory lock or borrowed Hikari connection,
+probes advisory reacquisition and performs a subsequent valid Course-root operation.
+The admission lock is never held during JDBC, flush or commit. No sleeps are used.
+
+**Current dispositions.** IR296-01/02 remain independently VERIFIED_FIXED within
+the previously reviewed scope; AS08.contract-sync retains that bounded independent
+verification. IR296-D01/D02 and the remaining IR296-03 obligations are now
+FIXED_AUTHOR_VERIFIED. AS08.focused-test-source is AUTHOR_VERIFIED pending final
+independent narrow-delta closure. This does not claim independent 18/18 acceptance.
+No production implementation, migration, grant, containment or release-tooling
+source changes in this round; their unchanged historical tests are not rerun.
+No CI wait or gate bypass. AS12, AS16, AS18, AD13, AD08 and AD10, whole-unit QA04,
+SD04, operational qualification, integrated exposure restrictions, bounded
+Assessment-foundation merge conditions and reserved Leader decisions all remain.
+No merge, approval, Issue closure or deployment is performed.
+
+AI assistance: OpenAI Codex implemented, tested and audited this second-round
+remediation under the explicit Leader task. Commit attribution uses Nguyen Chi
+Thanh and the GitHub noreply address for the authenticated maintainer account
+`chi-thanh-nguyen` (account ID 212181152); no other contributor is impersonated.
+
+### Targeted IR296-D03 CT38 consumer synchronization — 26 November 2026
+
+**Baseline and provenance.** PR #296 was OPEN at
+`a7da23a10ff78fd1650e442ede394bd26c4642ff`, with main/merge-base
+`cc6cb54ddedf226966a51c9614fc5fc5756267bb` (seven retained commits,
+37 files, +3989/-101). The [VM MinIO failed job](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45826625255/job/139932322567)
+and [Release rehearsal failed job](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45826625121/job/139932543186)
+both identify that PR head and fail at mandatory backend CT38 Compose interpolation.
+The subsequent Python JSONDecodeError is secondary to the failed rendering.
+These failures are separate from historical GHCR TLS timeouts and Maven Central
+HTTP 429 failures. This is an author remediation, not an independent review.
+
+Commit `031dbffffd4d7f8c60570755354ec11e7eb056b5` made the three expiry
+inputs mandatory in the base Compose model. The MinIO qualification generator
+was byte-for-byte unchanged from main. Even a MinIO-only `up` renders the complete
+model, including backend configuration and the test backend placeholder. CI VM
+invokes the same suite for golithus, chainguard and minimal; release.sh `qualify()`
+invokes it for the archived candidate initializer/minimal server after Q00 reload.
+This is an AS08 configuration synchronization omission, not a MinIO implementation
+defect or a reopening of the resolved IR296-02 smoke-generator mechanism.
+
+**Correction and permanent regression.** The actual `${WORK}/compose.env`
+generator in `infrastructure/minio/test-minio-init.sh` now writes explicit
+`APP_QUIZ_AUTO_SUBMIT_ENABLED=false`, `APP_QUIZ_AUTO_SUBMIT_DELAY_MS=1000` and
+`APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE=2`. ADR007 §3.2 permits these disabled synthetic
+case values; application-test.yml and the existing release/VM/E2E fixtures use
+the same convention. These are not production defaults or operator selections.
+The suite unsets all three inherited variables before generating its fixture.
+Its permanent assertion requires exactly one definition per key in that file,
+the exact case values in the rendered backend (including the placeholder), and
+absence of those keys from the MinIO server and initializer environments. It
+checks Compose exit status before loading JSON. It exercises base, local override,
+committed VM override, VM plus generated release-image override, and every local
+credential-boundary override. Existing exact six-variable initializer assertions
+and server environment/capability/filesystem/privilege assertions remain unchanged.
+
+**Tracked-source consumer coverage ledger.** Searches covered all tracked sources
+for the three new inputs, prior backend inputs, Compose invocations/base-model
+references, environment generation and real-backend startup; indirect callers
+were traced through workflow scripts, release.sh, deploy.sh and host operations.
+The available Graphify graph was dated 5 November, so its navigation hints were
+verified against source rather than treated as current coverage evidence.
+`ALREADY_SYNCHRONIZED` denotes inspected source/configuration, not a rerun of every
+unchanged runtime suite. No other confirmed omission was found in this scope.
+
+| Consumer / source | Actual caller | Environment source | CT38 applicability | Disposition |
+| --- | --- | --- | --- | --- |
+| MinIO base/local/VM/release-image/credential models and cleanup | test-minio-init.sh; ci-vm.yml's three server steps; release.sh qualify Q01 via release.yml rehearsal/candidate | Actual generated WORK/compose.env, with existing storage credential exports | Whole base model renders backend even for MinIO-only operations and the sleeping placeholder | FIXED |
+| Base Compose backend and committed VM override | Local README/setup/sample-data commands; deploy.sh; all model consumers above | Explicit env file; VM inherits base CT38 bindings | Required interpolation; VM does not erase the three backend inputs | ALREADY_SYNCHRONIZED |
+| Release smoke generator and cleanup | release.yml rehearsal/promote -> release.sh smoke -> write_smoke_env -> deploy.sh | Private synthetic smoke env | Starts real backend through base plus VM override; all three explicit case inputs already present (IR296-02) | ALREADY_SYNCHRONIZED |
+| Rendered preflight regression | ci-vm.yml deployment-script -> test-deploy-preflight-rendered-compose.sh | Calls actual write_smoke_env; generated release override | Whole base model plus missing/invalid-input cases | ALREADY_SYNCHRONIZED |
+| Env custody and committed ingress preflight | ci-vm.yml -> test-deploy-env-file-custody.sh; test-ingress-dp01-preflight.sh | write_env / generated operator and root env files | validate_env_file and, for ingress, real base plus VM rendering | ALREADY_SYNCHRONIZED |
+| Real backend ingress | ci-vm.yml -> test-ingress-real-backend.sh | Generated backend.env passed to docker run | Real backend startup; explicit false/1000/2 | ALREADY_SYNCHRONIZED |
+| Runtime privilege fresh install and V008 upgrade | ci-vm.yml and release.sh qualify Q03 -> test-runtime-real-backend-privileges.sh | backend.env -> backend-recovery.env; upgrade.env -> upgrade-v008.env | Both generators and recovery/V008 variants start real backend; explicit false/1000/2 | ALREADY_SYNCHRONIZED |
+| E2E disposable stack | ci-e2e.yml -> npm test -> fixtures/local-stack.ts | Explicit docker run -e arguments | Starts real backend directly; explicit false/1000/2 | ALREADY_SYNCHRONIZED |
+| Backend host/container bootstrap | Maven host startup or backend/Dockerfile entrypoint -> application.yml -> AppConfig | Required environment placeholders; eager QuizExpirySettings validation | All three required even when disabled; no defaults | ALREADY_SYNCHRONIZED |
+| Backend integration/config tests | ci-backend.yml Maven verify; AbstractIntegrationTest and storage/security suites | application-test.yml via test profile; AppConfigTest explicit properties; focused overrides | Real Spring contexts use explicit test properties; negative cases deliberately omit/alter inputs | ALREADY_SYNCHRONIZED |
+| Deployment/plan/update and operational verification | deploy.yml -> cd/deploy-release.sh / vm-transport.sh -> host/ops.py -> deploy.sh preflight/all; release smoke | Operator env path forwarded unchanged, or synchronized synthetic smoke env | deploy.sh validates presence, boolean/integer bounds and effective backend binding; no synthetic operator generator | ALREADY_SYNCHRONIZED |
+| Actual operator/production runtime values | Manual local/VM startup and the same host operations | Untracked operator env file, documented by .env.example/setup | Inputs required; real choices and deployed acceptance were not accessed or executed | UNVERIFIED — outside this synthetic remediation; operator qualification remains required |
+| Recovery capture/restore and test-recovery-roundtrip.sh | ci-vm.yml recovery steps; host/ops.py -> host/recovery.py | Existing container identity/environment; test uses direct docker run and Alpine sleep writers | No base-model interpolation or real backend configuration in standalone recovery fixture; actual post-deploy verification follows deploy preflight above | NOT_APPLICABLE — no replacement backend env is generated |
+| Standalone archive/image/static guards | ci-vm.yml -> test-containerd-archive-roundtrip.sh; release.py/verify-release.sh; image-layer/truststore tests; FileStorageIntegrationTest pin checks | Image/archive metadata, scratch payloads or test-profile properties | Reads pins/source or inventories artifacts; does not render base model/start a configured backend in the archive/image-only paths | NOT_APPLICABLE — Compose file reference alone is not a consumer |
+| Isolated PostgreSQL/containment tests, ingress stub and deployment mocks/early authorization refusals | ci-vm.yml -> test-postgres-*.sh; test-ingress-stub-backend.sh; offline-compose-guards, frontend-stage-cleanup, syntax-and-authorization-gates | PostgreSQL-only fixtures (including runtime-privilege env/.env used only by pgcompose), Nginx stub, mocked COMPOSE arrays/JSON or deliberately unreadable /dev/null | No real backend startup/base interpolation; early refusal tests intentionally stop before env validation | NOT_APPLICABLE — adding feature inputs would not exercise the guarded boundary |
+
+**Executed verification.** All isolated render/mutation runs and runtime invocations
+clear the three inherited inputs. The render harness executes the actual generator
+and Compose section extracted from the qualification source, stopping before runtime
+startup; it does not substitute an independently populated environment fixture.
+
+| Check | Actual result |
+| --- | --- |
+| Original a7da23a generator and actual VM/release model | Exit 1 at mandatory CT38 interpolation, followed by secondary JSONDecodeError; all three omissions reproduced |
+| Corrected generated-env regression and security assertions | Exit 0; actual file unique/exact values, backend propagation, no MinIO propagation; existing six-variable initializer and server restrictions pass |
+| Compose render paths | Base; base plus actual local override; base plus committed VM; base plus VM/generated release-image override; actual local credential override all pass |
+| Controlled generator mutations | 10/10 rejected: each of three missing keys at Compose interpolation; each duplicate (even the same value) and invalid case value at the explicit fixture assertion; all keys absent with valid inherited values also fail |
+| Semantic boundary | Nonempty invalid values can render in Compose; exact synthetic-value assertion rejects them. AppConfig and deploy preflight own boolean/integer semantics, unchanged and not requalified by rendering |
+| Existing release smoke generator tests | 2/2 SmokeEnvironmentTests pass; full unchanged release-tooling suite not rerun |
+| golithus runtime | PASS; exit 0; 30/30 checks; final All 30 MinIO initializer checks passed sentinel reached |
+| chainguard runtime | PASS; exit 0; 29/29 checks; final All 29 MinIO initializer checks passed sentinel reached |
+| minimal runtime | PASS; exit 0; 29/29 checks; final All 29 MinIO initializer checks passed sentinel reached |
+| Exact archived-candidate release qualification | UNVERIFIED: no archive for the new source revision was built/reloaded; local minimal qualification is not Q00-Q05/exact release acceptance |
+| Modified shell syntax and whitespace | bash -n infrastructure/minio/test-minio-init.sh and git diff --check pass |
+
+Runtime commands, from the repository root (each prefixed with
+`env -u APP_QUIZ_AUTO_SUBMIT_ENABLED -u APP_QUIZ_AUTO_SUBMIT_DELAY_MS -u APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE`):
+
+```bash
+MINIO_INIT_TEST_SERVER=golithus bash infrastructure/minio/test-minio-init.sh
+MINIO_INIT_TEST_SERVER=chainguard bash infrastructure/minio/test-minio-init.sh codemastery-test/minio-init:qualification
+docker build --platform linux/amd64 -t codemastery-test/minio-server:qualification - < infrastructure/vm/Dockerfile.minio-server
+MINIO_INIT_TEST_SERVER=minimal bash infrastructure/minio/test-minio-init.sh codemastery-test/minio-init:qualification
+```
+
+The golithus invocation builds the initializer from the unchanged pinned Dockerfile
+and verifies its Corresponding Source; the two subsequent variants reuse that exact
+initializer and still verify its artifact, filesystem and binary hashes. The minimal
+server was locally rebuilt from the unchanged Chainguard pin and subjected to its
+existing exact filesystem/binary/identity checks. All are linux/amd64 on Docker
+Desktop's Linux VM (arm64 host with emulation), Docker 29.8.1 / Compose v5.5.1.
+The initializer image ID under test was `sha256:51a40f9eb15394408b6eba41223a2ac2ecc40e696c559c129c37fe0d3fd0389c`; the locally rebuilt minimal server was `sha256:17b7adbfb50540dcc617685444d469dbce4c71bd4e7655a6d3592ad57724e8e7`.
+No production provisioning, destructive release smoke or deployment was run. No
+backend, Adaptive, concurrency, containment or full release-tooling suite was rerun.
+No CI waiting, polling, manual rerun or workflow/gate change was performed.
+
+**Author verdict: REMEDIATED_WITH_VERIFICATION_LIMITATIONS.** All three local MinIO runtime variants passed; exact archived-candidate release qualification and actual operator configuration remain unverified.
+
+**Reconciliation and remaining review.** IR296-01 and IR296-02 remain independently
+VERIFIED_FIXED for their original mechanisms. IR296-03 was independently
+PARTIALLY_FIXED; its remaining obligations and D01/D02 remain FIXED_AUTHOR_VERIFIED
+at a7da23a, pending independent closure. IR296-D03 is FIXED_AUTHOR_VERIFIED with the
+exact-release limitation above. AS08.contract-sync's earlier independent closure
+was bounded: it did not cover this newly identified MinIO path. That path is now
+AUTHOR_VERIFIED, pending independent closure; no independent 18/18 delivery
+acceptance is claimed. The next independent review must examine the complete delta
+from `10bcc9c6b751c54c8e0e36ccfa16072bc237d30c` to the new final HEAD, including
+D01/D02/D03 and closure of IR296-03. All D01/D02 source and regression coverage is
+unchanged by this remediation. AS12, AS16, AS18, AD13, AD08, AD10, QA04, SD04,
+integrated-exposure restrictions, bounded foundation merge conditions, operational
+qualification and reserved Leader decisions remain unchanged. No merge, approval,
+Issue closure or deployment is authorized by author qualification.
+
+AI assistance: OpenAI Codex implemented, verified and audited this targeted
+remediation under the explicit Leader task; attribution uses the authenticated
+maintainer's GitHub noreply identity, preserving all seven existing commits.
 
 ## Shared CI reliability remediation qualification — 26 November 2026
 
