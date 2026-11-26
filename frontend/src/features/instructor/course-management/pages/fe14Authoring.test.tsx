@@ -106,6 +106,24 @@ describe('FE14 production authoring and reconciliation', () => {
         expect(api.createRelationalMaterial).toHaveBeenCalledWith(c, l, { materialType: 'text', title: 'Notes', textContent: '**Body**' }, expect.anything()); expect(field('Lesson title').value).toBe('Draft'); expect(text()).toContain('Notes'); expect(api.updateCourseLesson).not.toHaveBeenCalled();
     });
     it('validates the canonical video address with exact helper text', async () => { await mount(); await click('Add video link'); expect(text()).toContain('Use the embed address that starts with https://www.youtube-nocookie.com/embed/'); await type('Title', 'Video', modal()); await type('Video link', 'https://youtube.com/watch?v=x', modal()); await click('Add material', modal()); expect(api.createRelationalMaterial).not.toHaveBeenCalled(); expect(text()).toContain('Enter a YouTube privacy-enhanced embed address.'); });
+    it.each(['https://youtube.com/watch?v=x', 'https://www.youtube-nocookie.com:443/embed/x', 'https://user@www.youtube-nocookie.com/embed/x', 'https://www.youtube-nocookie.com/embed/x?x=1', 'https://www.youtube-nocookie.com/embed/x#x', '\thttps://www.youtube-nocookie.com/embed/x', '\u00a0https://www.youtube-nocookie.com/embed/x', 'https://www.youtube-nocookie.com/embed/x' + ' '.repeat(120_000) + '!'])('FE14-IR-05 rejects invalid video case %# without dispatch and links the field error', async value => {
+        await mount(); await click('Add video link'); await type('Title', 'Video', modal()); await type('Video link', value, modal()); await click('Add material', modal());
+        expect(api.createRelationalMaterial).not.toHaveBeenCalled(); expect(api.updateRelationalMaterial).not.toHaveBeenCalled();
+        const input = field('Video link', modal());
+        expect(input.getAttribute('aria-invalid')).toBe('true');
+        const description = input.getAttribute('aria-describedby'); expect(description).toBeTruthy();
+        expect(document.getElementById(description!)?.textContent).toBe('Enter a YouTube privacy-enhanced embed address.');
+        expect(text()).toContain('Fix the highlighted fields, then save again.');
+    });
+    it('FE14-IR-05 submits canonical video values for creation and editing with outer ASCII spaces', async () => {
+        const canonical = 'https://www.youtube-nocookie.com/embed/a_B-1';
+        vi.mocked(api.createRelationalMaterial).mockImplementation(async (_, __, payload) => { const row = { ...payload, id: m, publicationStatus: 'hidden' as const }; lesson().materials = [row]; return row; });
+        vi.mocked(api.updateRelationalMaterial).mockImplementation(async (_, __, ___, payload) => { const row = { ...payload, id: m, publicationStatus: 'hidden' as const }; lesson().materials = [row]; return row; });
+        await mount(); await click('Add video link'); await type('Title', 'Video', modal()); await type('Video link', '  ' + canonical + '  ', modal()); await click('Add material', modal());
+        expect(api.createRelationalMaterial).toHaveBeenCalledWith(c, l, { materialType: 'external_video', title: 'Video', externalVideoUrl: canonical }, expect.anything());
+        await click('Edit material'); await type('Video link', ' ' + canonical + '-edited ', modal()); await click('Save material', modal());
+        expect(api.updateRelationalMaterial).toHaveBeenCalledWith(c, l, m, { materialType: 'external_video', title: 'Video', externalVideoUrl: canonical + '-edited' }, expect.anything());
+    });
     it('retains actual File bytes and locks another upload until unknown-outcome resource reconciliation', async () => {
         let reject!: (error: unknown) => void, resolveRead!: (value: OwnedCourse) => void;
         vi.mocked(api.b5CreateFileMaterial).mockImplementation(() => new Promise((_, r) => { reject = r; }));

@@ -1,5 +1,16 @@
 import { randomUUID } from 'node:crypto';
+import type { Page } from '@playwright/test';
 import { expect, expectNoPageOverflow, signIn, target, test } from '../fixtures/auth-fixture';
+
+async function expectResponsiveHeaderMode(page: Page, width: number) {
+    const header = page.getByRole('banner');
+    await expect(header).toBeVisible();
+    const theme = header.getByRole('button', { name: /^Theme:/ });
+    // DESIGN/CT16 md=900: AppHeader mounts this control only in desktop React mode.
+    // Wait for that commit in both resize directions before sampling strict geometry.
+    if (width >= 900) await expect(theme).toBeVisible();
+    else await expect(theme).toHaveCount(0);
+}
 
 test('FE14 real Course, Lesson, mappings and three material types', async ({ page }, testInfo) => {
     test.skip(!target.fixture, 'Mutates only this run’s disposable environment.');
@@ -66,8 +77,28 @@ test('FE14 real Course, Lesson, mappings and three material types', async ({ pag
     await expect(reading.getByText('Hidden', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Add video link', exact: true }).click();
     await page.getByRole('dialog').getByRole('textbox', { name: 'Title' }).fill('Video');
-    await page.getByRole('textbox', { name: 'Video link' }).fill('https://www.youtube-nocookie.com/embed/test_video');
+    const videoInput = page.getByRole('textbox', { name: 'Video link' });
+    const malformedVideo = 'https://www.youtube-nocookie.com/embed/x' + ' '.repeat(120_000) + '!';
+    await videoInput.fill(malformedVideo);
+    const materialWrites: string[] = [];
+    const recordWrite = (request: import('@playwright/test').Request) => {
+        if (['POST', 'PUT'].includes(request.method()) && new URL(request.url()).pathname.endsWith('/materials')) materialWrites.push(request.method());
+    };
+    page.on('request', recordWrite);
+    const validation = await page.getByRole('dialog').getByRole('button', { name: 'Add material', exact: true }).evaluate((button: HTMLButtonElement) => {
+        const start = performance.now(); button.click(); return { durationMs: performance.now() - start };
+    });
+    await expect(videoInput).toHaveAttribute('aria-invalid', 'true');
+    await expect(page.getByText('Enter a YouTube privacy-enhanced embed address.', { exact: true })).toBeVisible();
+    expect(materialWrites).toEqual([]);
+    page.off('request', recordWrite);
+    await testInfo.attach('video-validation', { body: JSON.stringify({ ...validation, inputLength: malformedVideo.length, materialWrites }), contentType: 'application/json' });
+    await videoInput.fill('  https://www.youtube-nocookie.com/embed/test_video  ');
+    const createdVideo = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/materials'));
     await page.getByRole('dialog').getByRole('button', { name: 'Add material', exact: true }).click();
+    const videoResponse = await createdVideo;
+    expect(videoResponse.status()).toBe(201);
+    expect(videoResponse.request().postDataJSON().externalVideoUrl).toBe('https://www.youtube-nocookie.com/embed/test_video');
     await expect(page.getByRole('heading', { name: 'Video', exact: true })).toBeVisible();
     const video = page.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Video', exact: true }) });
     await video.getByRole('button', { name: 'Edit material', exact: true }).click();
@@ -116,10 +147,15 @@ test('FE14 real Course, Lesson, mappings and three material types', async ({ pag
     await page.getByRole('button', { name: 'Publish lesson', exact: true }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Publish lesson', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Hide lesson', exact: true })).toBeEnabled();
+    const responsive: { width: number; scroll: number; client: number; desktopThemeCount: number }[] = [];
     for (const width of [360, 768, 1024, 1280, 1440]) {
-        await page.setViewportSize({ width, height: 960 }); await expectNoPageOverflow(page);
+        await page.setViewportSize({ width, height: 960 });
+        await expectResponsiveHeaderMode(page, width);
+        await expectNoPageOverflow(page);
+        responsive.push({ width, ...await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth })), desktopThemeCount: await page.getByRole('banner').getByRole('button', { name: /^Theme:/ }).count() });
         await page.screenshot({ path: testInfo.outputPath(`fe14-${width}.png`), fullPage: true });
     }
+    await testInfo.attach('responsive-geometry', { body: JSON.stringify(responsive), contentType: 'application/json' });
     await page.getByRole('button', { name: /^Theme:/ }).click();
     await page.getByRole('menuitemradio', { name: 'Dark', exact: true }).click();
     await page.keyboard.press('Escape');

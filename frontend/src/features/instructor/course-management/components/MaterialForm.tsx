@@ -63,7 +63,11 @@ export interface MaterialEditorFormProps {
 
 /** Canonical CT37.embed address, checked with the URL parser and exact serialization. */
 export function youtubeEmbedAddress(input: string): string | null {
-    const value = input.replace(/^ +| +$/g, '');
+    // CT37 permits only outer U+0020; bounded scans avoid a backtracking suffix search.
+    let start = 0, end = input.length;
+    while (start < end && input.charCodeAt(start) === 0x20) start++;
+    while (end > start && input.charCodeAt(end - 1) === 0x20) end--;
+    const value = input.slice(start, end);
     try {
         const url = new URL(value);
         if (url.href !== value || url.origin !== 'https://www.youtube-nocookie.com' || url.username || url.password || url.port || url.search || url.hash ||

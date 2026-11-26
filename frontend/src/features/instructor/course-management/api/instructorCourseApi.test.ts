@@ -48,6 +48,25 @@ describe('FE14 approved operation consumers', () => {
 });
 
 describe('CT37 canonical YouTube admission', () => {
+    const canonical = 'https://www.youtube-nocookie.com/embed/a_B-1';
+    it.each(['', ' ', '    '])('FE14-IR-05 preserves canonical values with outer ASCII spaces %j', padding => {
+        expect(youtubeEmbedAddress(padding + canonical + padding)).toBe(canonical);
+    });
+    it.each(['\t', '\n', '\r', '\r\n', '\u00a0', '\u2003', '\u2028', '\u0000', '\u001f', '\u007f'])('FE14-IR-05 rejects non-ASCII-space whitespace/control %j', character => {
+        for (const value of [character + canonical, canonical + character, canonical + character + 'x', ' ' + character + canonical + ' ']) {
+            expect(youtubeEmbedAddress(value)).toBeNull();
+        }
+    });
+    it.each(['', '    ', 'https://www.youtube-nocookie.com/embed/a\\b', 'https://www.youtube-nocookie.com:8443/embed/a', 'http://www.youtube-nocookie.com/embed/a', 'https://www.youtube-nocookie.com/embed/a?', 'https://www.youtube-nocookie.com/embed/a#'])('FE14-IR-05 retains strict admission for %j', value => {
+        expect(youtubeEmbedAddress(value)).toBeNull();
+    });
+    it('FE14-IR-05 handles bounded large malformed and outer-space inputs without a timing oracle', () => {
+        const spaces = ' '.repeat(120_000);
+        expect(youtubeEmbedAddress(canonical + spaces + '!')).toBeNull();
+        expect(youtubeEmbedAddress(spaces + canonical + spaces)).toBe(canonical);
+        expect(youtubeEmbedAddress(spaces)).toBeNull();
+    });
+
     it('admits only the exact privacy-enhanced embed serialization with outer ASCII spaces', () => { expect(youtubeEmbedAddress(' https://www.youtube-nocookie.com/embed/a_B-1 ')).toBe('https://www.youtube-nocookie.com/embed/a_B-1'); });
     it.each(['https://youtube.com/watch?v=a', 'https://www.youtube-nocookie.com:443/embed/a', 'https://www.youtube-nocookie.com/embed/a?x=1', 'https://www.youtube-nocookie.com/embed/a#x', 'https://www.youtube-nocookie.com/embed/%61', 'https://www.youtube-nocookie.com.evil.test/embed/a', 'https://evil@www.youtube-nocookie.com/embed/a', 'https://www.youtube-nocookie.com/embed/a/b', 'HTTPS://www.youtube-nocookie.com/embed/a', '\thttps://www.youtube-nocookie.com/embed/a', 'https://www.youtube-nocookie.com/embed/'])('rejects %s', (source) => expect(youtubeEmbedAddress(source)).toBeNull());
 });
