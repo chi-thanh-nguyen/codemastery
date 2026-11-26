@@ -131,7 +131,7 @@ export function LearnerPreview({ state, setState, screen, item, go }: Props) {
 
     if (screen === 'assignment') return <AssignmentScreen key={item} id={item ?? 'as-trace'} state={state} setState={setState} back={back('Assessments', 'assessments')} />;
 
-    if (screen === 'notifications') return <NotificationsScreen state={state} setState={setState} go={go} />;
+    if (screen === 'notifications') return <NotificationsScreen state={state} setState={setState} />;
     return null;
 }
 
@@ -259,11 +259,10 @@ function AssignmentScreen({ id, state, setState, back }: { id: string; state: Le
         onSelectFile={(file) => { setUpload({ kind: 'uploading', fileName: file.name }); later(() => { setUpload({ kind: 'accepted', fileName: file.name, detail: 'Sample: not uploaded.' }); setState((current) => ({ ...current, submissions: { ...current.submissions, [assignment.id]: { fileName: file.name, submittedAtLabel: nowLabel } } })); }, 900); }} />;
 }
 
-function NotificationsScreen({ state, setState, go }: { state: LearnerState; setState: Props['setState']; go: Go }) {
+function NotificationsScreen({ state, setState }: { state: LearnerState; setState: Props['setState'] }) {
     const [filter, setFilter] = useState<'all' | 'unread'>('all');
-    const targets: Record<NotificationView['kind'], () => void> = { recommendation: () => go('lesson', { item: 'l5' }), result: () => go('quiz-result'), deadline: () => go('assignment', { item: 'as-trace' }), reply: () => go('lesson', { item: 'l7' }), content: () => go('course') };
     return <NotificationsPage notifications={state.notifications} filter={filter} onFilterChange={setFilter}
         onMarkAllRead={() => setState((current) => ({ ...current, notifications: current.notifications.map((entry) => ({ ...entry, read: true })) }))}
-        onOpen={(id) => { const entry = state.notifications.find((item) => item.id === id)!; setState((current) => ({ ...current, notifications: current.notifications.map((item) => item.id === id ? { ...item, read: true } : item) })); targets[entry.kind](); }} />;
+        onMarkRead={(id) => setState((current) => ({ ...current, notifications: current.notifications.map((item) => item.id === id ? { ...item, read: true } : item) }))} />;
 }
 

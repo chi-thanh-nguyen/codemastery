@@ -2427,3 +2427,75 @@ This changes test synchronization only, with no production implementation change
 no rule suppression, tolerance change or removed assertion. Focused browser verification passes 6 cases in each of Firefox 155 and WebKit 26.6,
 and the 8 harness lifecycle tests pass for this follow-up; the earlier full
 matrix and runtime-source evidence remain applicable to the identical application.
+
+## FE28 notification production handoff — 26 November 2026
+
+Authority: the Project Leader's explicit “CodeMastery — FE28 PR Consolidation,
+Complete Implementation, Targeted Verification and Self-Audit” instruction.
+This branch implements FE28 (#210) by retaining PR #280 and the original API/hook
+commit already shared with #279, integrating remote `main` `cc6cb54`, and completing
+the following bounded consumer. Earlier preview-only and pending-contract status
+lines are dated history; this record describes the proposed PR implementation,
+not protected integration or independent acceptance.
+
+- `/notifications` is registered once in `WORKSPACE_ROUTES` and bound to
+  `LiveNotificationsPage`. CT16.routes admits Learner and Instructor; Administrator
+  remains excluded even though CT11 backend reads admit every active role.
+- `Workspace` composes one `useNotifications` instance, passes its count to the
+  existing header utility and its page state through the existing router `Outlet`.
+  This is CT16.final-state F1's closest React owner: no provider, global store,
+  duplicate registry, authentication-store change or cross-feature cache is added.
+- Only the count is fetched when the bell mounts. Navigation re-reads it; an open
+  notification page reads the selected server filter/page. All four existing CT11
+  operations use shared authenticated HTTP and strict runtime decoding. Mutations
+  are explicit, serialized and never automatically replayed. Completion re-reads
+  list/count, including after an uncertain response; mark-all never assumes zero.
+- Page/operation/session identities and abort signals exclude stale rows, counts,
+  errors and feedback, including same-account session replacement. Empty pages
+  after Unread mutations re-read the last extant page or page zero. Count failure
+  silently hides the badge and leaves the bell available; unknown count is not zero.
+- The bell retains native modified-link clicks; plain clicks use the existing
+  unsaved-editor interceptor. It is current on the notification page and uses
+  DESIGN r13 ordering: bell, Theme, account. S15/F10 rows are plain-text messages
+  with preserved line breaks, neutral glyph, timestamp, explicit Mark as read,
+  day groups in one surface, server pagination and semantic theme roles.
+- Preview uses the same message-only row presentation with preview-owned state;
+  explicit sample mark-read replaces its obsolete type-based destination navigation.
+  No sample data or preview state enters production.
+
+Delegated choices: reusing the existing composing owner/Outlet avoids separate
+hook instances and a new provider; authoritative GET reconciliation is chosen over
+optimistic subtraction/zeroing; co-located tests are recorded as
+`CT14-FE28-PLACEMENT-2026-11-26-r1` in `docs/repository-structure.md`. These choices
+preserve CT11, CT16, CT18, ADR014 and DESIGN; no public contract is amended.
+
+Upstream accounting: IN07 #182 already supplies the four secured REST operations,
+owner-scoped persistence and CT17-P6 r13 notification privileges; FE32 #224 supplies
+the production route/utility/guard/interception mechanism; FE34 #255 supplies the
+shared Light/Dark/System foundation; FE03 #56 supplies authenticated transport and
+session lifecycle. Additional upstream functional implementation is **0% for each**:
+no missing upstream slice was required, so no under-20% exception was exercised.
+Registering/delivering this screen and wiring its utility are FE28-owned handoffs.
+IN08 reminders, IN15 subscriptions and producing workflows remain outside this
+notification-consumption task and do not block consuming existing rows.
+
+No configuration, dependency, backend, database, deployment or production
+infrastructure change is included. Local evidence is recorded in `docs/testing.md`;
+formal CODEOWNER review, required CI, QA, protected integration and release remain
+separate gates. Codex performed the supplementary implementation, verification and
+author self-audit under the Leader's authorization; no AI runtime is introduced.
+
+### Shared CI dependency cache and real E2E storage
+
+The disposable E2E stack includes a private, digest-pinned MinIO server and the
+existing local bucket/application-identity initializer by default. Setup requires
+successful initialization before backend startup; `E2E_MATERIAL_FILES=1` is
+published after successful fixture setup. No local `.env`, fixed storage port,
+shared bucket or root application credential is needed. Recovery uses the same
+run inventory as PostgreSQL and the backend.
+
+CI optionally supplies `CODEMASTERY_MAVEN_LAYER_CACHE`, a BuildKit local-cache
+directory restored under the runner's temporary directory. It is build tooling
+only. Local Docker builds need no such input; a cold build still downloads the
+POM's dependencies from Maven Central. See the
+[cache trust boundary and availability limits](deployment.md#shared-ci-reliability-remediation--26-november-2026).

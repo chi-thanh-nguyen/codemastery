@@ -11,6 +11,7 @@
 //
 // Usage (from frontend/):
 //   npm run test:browser -- --fe32 --fixture-url <isolated-fixture-url> --url <owned-production-url> --engine firefox
+//   npm run test:browser -- --fe28-remediation [--reproduce] [--case <substring>]
 //   npm run test:browser                          # builds, serves on a free 127.0.0.1 port, Chromium
 //   npm run test:browser -- --engine all          # chromium, webkit and firefox in turn
 //   npm run test:browser -- --url http://127.0.0.1:4173/ --out /tmp/evidence --engine webkit
@@ -94,12 +95,30 @@ const problem = (status, detail, instance) => ({ status, contentType: 'applicati
 const ok = (value) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(value) });
 
 function createApi() {
-    const state = { role: 'Learner', displayName: 'Harness Learner', sessionId: instructorId, restore: false, requests: [], hold: null, fail: new Map(), memberships: new Map([[primaryId, 'active'], [courses[3].id, 'left']]) };
+    const state = { notifications: [], newAfterMarkAll: null, role: 'Learner', displayName: 'Harness Learner', sessionId: instructorId, restore: false, requests: [], hold: null, fail: new Map(), memberships: new Map([[primaryId, 'active'], [courses[3].id, 'left']]) };
     async function handle(route) {
         const request = route.request(), url = new URL(request.url()), p = url.pathname.replace(/^\/api/, '');
         state.requests.push(`${request.method()} ${url.pathname}${url.search}`);
         if (state.hold && state.hold.test(p)) { const release = await new Promise((resolve) => { state.release = resolve; }); if (release === 'abort') return route.abort(); }
         if (state.fail.has(p)) return route.fulfill(problem(state.fail.get(p), 'The request could not be completed.', url.pathname));
+        if (p === '/me/notifications/unread-count') return route.fulfill(ok({ unreadCount: state.notifications.filter((item) => !item.read).length }));
+        if (p === '/me/notifications' && request.method() === 'GET') {
+            const page = Number(url.searchParams.get('page')), size = Number(url.searchParams.get('size'));
+            const rows = state.notifications.filter((item) => url.searchParams.get('unreadOnly') !== 'true' || !item.read);
+            return route.fulfill(ok({ content: rows.slice(page * size, (page + 1) * size), page, size, totalElements: rows.length, totalPages: Math.ceil(rows.length / size) }));
+        }
+        if (p === '/me/notifications/read-all' && request.method() === 'PUT') {
+            const markedCount = state.notifications.filter((item) => !item.read).length;
+            state.notifications.forEach((item) => { item.read = true; });
+            if (state.newAfterMarkAll) { state.notifications.unshift(state.newAfterMarkAll); state.newAfterMarkAll = null; }
+            return route.fulfill(ok({ markedCount }));
+        }
+        const notice = /^\/me\/notifications\/([^/]+)\/read$/.exec(p);
+        if (notice && request.method() === 'PUT') {
+            const item = state.notifications.find((item) => item.id === notice[1]);
+            if (!item) return route.fulfill(problem(404, 'Not found.', url.pathname));
+            item.read = true; return route.fulfill(ok(item));
+        }
         if (p === '/auth/login' && request.method() === 'POST') {
             const body = request.postDataJSON();
             return body.password === 'wrong-password-123' ? route.fulfill(problem(401, 'Invalid email or password.', url.pathname)) : route.fulfill(ok(loginBody(state.role, state.displayName, state.sessionId)));
@@ -199,7 +218,7 @@ async function main() {
         for (const engine of engines) {
             const fixtureUrl = flag('fixture-url');
             if (args.includes('--fe32') && !fixtureUrl) throw new Error('--fe32 requires --fixture-url serving createFE32Fixture output; never activate production routes.');
-            const result = args.includes('--fe32') ? await runFE32Engine(playwright, engine, baseUrl, fixtureUrl) : await runEngine(playwright, engine, baseUrl);
+            const result = args.includes('--fe28-remediation') ? await runFE28RemediationEngine(playwright, engine, baseUrl) : args.includes('--fe28') ? await runFE28Engine(playwright, engine, baseUrl) : args.includes('--fe32') ? await runFE32Engine(playwright, engine, baseUrl, fixtureUrl) : await runEngine(playwright, engine, baseUrl);
             report.engines.push(result); failed += result.failed.length;
         }
     } finally {
@@ -1606,7 +1625,7 @@ async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl, selection 
     result.version = browser.version();
     const check = async (name, run) => {
         try { await run(); result.passed.push(name); console.log(`PASS [${engine}] ${name}`); }
-        catch (error) { result.failed.push({ name, error: String(error) }); console.log(`FAIL [${engine}] ${name}: ${String(error).split('\n')[0]}`); }
+        catch (error) { result.failed.push({ name, error: String(error) }); console.log(`FAIL [${engine}] ${name}: ${String(error)}`); }
     };
     const ready = async (page) => { await page.locator('header').first().waitFor(); await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(300); };
     const longName = 'Alexandria Nguyễn Montgomery';
@@ -1729,6 +1748,428 @@ async function runFE32Engine(playwright, engine, baseUrl, fixtureUrl, selection 
                 } finally { release(); await context.close(); }
             });
         }
+    } finally { await browser.close(); }
+    return result;
+}
+
+/** FE28: production notifications only, controlled REST doubles; backend evidence is separate. */
+async function runFE28Engine(playwright, engine, baseUrl) {
+    const result = { engine, version: null, passed: [], failed: [], measurements: [], notExercised: ['Real browser-to-backend delivery', 'VoiceOver/NVDA and physical devices'] };
+    const dir = path.join(out, engine); fs.mkdirSync(dir, { recursive: true });
+    let browser;
+    try { browser = await playwright[engine].launch({ headless: true }); }
+    catch (error) { result.launchError = String(error); return result; }
+    result.version = browser.version();
+    const check = async (name, run) => {
+        try { await run(); result.passed.push(name); console.log(`PASS [${engine}] ${name}`); }
+        catch (error) { result.failed.push({ name, error: String(error) }); console.log(`FAIL [${engine}] ${name}: ${String(error)}`); }
+    };
+    const fixtures = () => Array.from({ length: 23 }, (_, index) => {
+        const date = new Date(); date.setDate(date.getDate() - (index < 2 ? 0 : index < 4 ? 1 : 7));
+        return { id: `00000000-0000-3000-8000-${String(index + 1).padStart(12, '0')}`, read: false, createdAt: date.toISOString(),
+            message: index === 0 ? `<b>Plain text</b>\n${'W'.repeat(180)} in "Course".` : `Notification ${index + 1} in "Programming".` };
+    });
+    const open = async (preference = 'light', width = 1280, role = 'Learner') => {
+        const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: 'dark' });
+        await context.addInitScript((value) => localStorage.setItem('codemastery.theme', value), preference);
+        const page = await context.newPage(), api = createApi(); api.state.role = role; api.state.notifications = fixtures();
+        await page.route('**/api/**', api.handle);
+        await page.goto(new URL('/login', baseUrl).href);
+        await page.locator('input[name="email"]').fill('synthetic@example.com'); await page.locator('input[name="password"]').fill('synthetic-password');
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+        await page.waitForURL((url) => url.pathname !== '/login');
+        return { context, page, api };
+    };
+    const ready = async (page) => { await page.locator('#notification-results').waitFor(); await page.waitForFunction(() => document.querySelector('#notification-results')?.getAttribute('aria-busy') === 'false'); await page.evaluate(() => document.fonts.ready); };
+    try {
+        await check('production journey: count-only shell, explicit reads, pagination, Unread and concurrent mark-all', async () => {
+            const { context, page, api } = await open();
+            try {
+                await page.getByRole('link', { name: 'Notifications, 23 unread', exact: true }).waitFor();
+                assert(!api.state.requests.some((value) => /GET \/api\/me\/notifications\?/.test(value)), 'Bell mounted without fetching a list');
+                await page.getByRole('link', { name: 'Notifications, 23 unread', exact: true }).click(); await ready(page);
+                assert.equal(await page.locator('h1').textContent(), 'Notifications');
+                assert.equal(await page.locator('header [aria-current="page"]').getAttribute('href'), '/notifications');
+                assert.equal(api.state.requests.filter((value) => value.startsWith('PUT ')).length, 0);
+                assert.equal(await page.locator('#notification-results li').count(), 20);
+                assert.equal(await page.locator('#notification-results a, #notification-results b').count(), 0);
+                assert.equal(await page.locator('#notification-results li p').first().evaluate((node) => getComputedStyle(node).fontSize), '18px');
+                await page.getByRole('button', { name: 'Go to page 2', exact: true }).click(); await ready(page);
+                assert.equal(await page.locator('#notification-results li').count(), 3);
+                await page.getByRole('button', { name: 'Unread', exact: true }).click(); await ready(page);
+                assert(api.state.requests.some((value) => value.includes('unreadOnly=true&page=0&size=20')));
+                await page.getByRole('button', { name: 'Mark as read', exact: true }).first().click();
+                await page.getByRole('link', { name: 'Notifications, 22 unread', exact: true }).waitFor(); await ready(page);
+                api.state.newAfterMarkAll = { id: '00000000-0000-3000-8000-999999999999', read: false, message: 'Concurrent new notification', createdAt: new Date().toISOString() };
+                await page.getByRole('button', { name: 'Mark all as read', exact: true }).click();
+                await page.getByText('Marked 22 notifications as read.', { exact: true }).waitFor();
+                await page.getByRole('link', { name: 'Notifications, 1 unread', exact: true }).waitFor(); await ready(page);
+                assert.equal(await page.locator('#notification-results li').count(), 1);
+                await page.getByRole('button', { name: 'All', exact: true }).click(); await ready(page);
+                assert.equal(await page.locator('#notification-results li p').nth(1).evaluate((node) => getComputedStyle(node).fontSize), '16px');
+                api.state.fail.set('/me/notifications/unread-count', 500);
+                await page.locator('header a[href="/courses"]').click();
+                await page.getByRole('link', { name: 'Notifications', exact: true }).waitFor();
+                assert.equal(await page.locator('header [aria-label*="unread"]').count(), 0);
+                assert.equal(await page.locator('[role="alert"]').count(), 0);
+            } finally { await context.close(); }
+        });
+        for (const preference of ['light', 'dark', 'system']) for (const width of [360, 768, 1024, 1280, 1440]) {
+            await check(`${preference} ${width}px: reflow, grouping, roles, keyboard and visible focus`, async () => {
+                const { context, page } = await open(preference, width);
+                try {
+                    await page.locator('header a[href="/notifications"]').click(); await ready(page);
+                    const overflow = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, width: innerWidth, scheme: document.documentElement.dataset.colorScheme }));
+                    assert(overflow.scroll <= width + 1, JSON.stringify(overflow));
+                    assert.equal(overflow.scheme, preference === 'system' ? 'dark' : preference);
+                    assert.deepEqual(await page.locator('#notification-results h2').allTextContents(), ['Today', 'Yesterday', new Date(Date.now() - 7 * 86400000).toLocaleDateString('en-US', { dateStyle: 'medium' })]);
+                    const button = page.getByRole('button', { name: 'Unread', exact: true });
+                    await page.getByRole('button', { name: 'All', exact: true }).focus(); await page.keyboard.press('ArrowRight');
+                    await ready(page); assert.equal(await button.getAttribute('aria-pressed'), 'true');
+                    assert.equal(await page.evaluate(() => document.activeElement.textContent), 'Unread');
+                    const focus = await button.evaluate((node) => ({ outline: getComputedStyle(node).outlineStyle, width: getComputedStyle(node).outlineWidth, focus: node.matches(':focus-visible') }));
+                    assert(focus.focus && focus.outline !== 'none' && parseFloat(focus.width) >= 2, JSON.stringify(focus));
+                    const targets = await page.locator('#notification-results button').first().boundingBox(); assert(targets && targets.width >= 44 && targets.height >= 44);
+                    const colors = await page.evaluate(sampleText); const low = colors.filter((item) => contrast(item.color, item.bg) < (item.large ? 3 : 4.5)); assert.equal(low.length, 0, JSON.stringify(low));
+                    if (width >= 1024) {
+                        const order = await page.locator('header :is(a,button)[aria-label]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')).filter((value) => /^(Notifications|Theme|Account menu)/.test(value)));
+                        assert(/^Notifications/.test(order[0]) && /^Theme/.test(order[1]) && /^Account menu/.test(order[2]), JSON.stringify(order));
+                    }
+                    await page.screenshot({ path: path.join(dir, `notifications-${preference}-${width}.png`), fullPage: true });
+                    result.measurements.push({ preference, width, overflow, focus });
+                } finally { await context.close(); }
+            });
+        }
+        await check('320px, System OS change, error/retry, zero-count disabling and preview isolation', async () => {
+            const { context, page, api } = await open('system', 320);
+            try {
+                await page.locator('header a[href="/notifications"]').click(); await ready(page);
+                await page.emulateMedia({ colorScheme: 'light' }); await page.waitForFunction(() => document.documentElement.dataset.colorScheme === 'light');
+                assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+                api.state.fail.set('/me/notifications', 500); await page.getByRole('button', { name: 'Unread', exact: true }).click();
+                await page.getByRole('heading', { name: "Couldn't load notifications" }).waitFor(); api.state.fail.delete('/me/notifications');
+                await page.getByRole('button', { name: 'Try again', exact: true }).click(); await ready(page);
+                await page.getByRole('button', { name: 'Mark all as read', exact: true }).click(); await page.getByText('Marked 23 notifications as read.', { exact: true }).waitFor();
+                assert(await page.getByRole('button', { name: 'Mark all as read', exact: true }).isDisabled());
+                api.state.requests.length = 0;
+                await page.goto(new URL('/preview?screen=notifications', baseUrl).href); await page.locator('h1').filter({ hasText: 'Notifications' }).waitFor();
+                assert.equal(api.state.requests.length, 0); assert.equal(await page.locator('#notification-results a').count(), 0);
+            } finally { await context.close(); }
+        });
+        for (const role of ['Instructor', 'Administrator']) await check(`${role} production role boundary`, async () => {
+            const { context, page, api } = await open('light', 1280, role);
+            try {
+                if (role === 'Instructor') { await page.locator('header a[href="/notifications"]').click(); await ready(page); assert.equal(await page.locator('h1').textContent(), 'Notifications'); }
+                else { assert.equal(await page.locator('header a[href="/notifications"]').count(), 0); api.state.restore = true; api.state.requests.length = 0; await page.goto(new URL('/notifications', baseUrl).href); await page.getByRole('heading', { name: "You don't have access to this page" }).waitFor(); assert(!api.state.requests.some((value) => value.includes('/me/notifications'))); }
+            } finally { await context.close(); }
+        });
+    } finally { await browser.close(); }
+    return result;
+}
+
+/** Targeted FE28 independent-finding regressions, production build and controlled REST doubles. */
+async function runFE28RemediationEngine(playwright, engine, baseUrl) {
+    const result = { engine, version: null, passed: [], failed: [], measurements: [], focus: [], console: [], pageErrors: [], notExercised: ['Real backend (unchanged transport)', 'Screen readers, native zoom and physical devices'] };
+    const dir = path.join(out, engine); fs.mkdirSync(dir, { recursive: true });
+    let browser;
+    try { browser = await playwright[engine].launch({ headless: true }); }
+    catch (error) { result.launchError = String(error); return result; }
+    result.version = browser.version();
+    const baseline = args.includes('--reproduce');
+    const notice = (n) => ({ id: `00000000-0000-3000-8000-${String(n).padStart(12, '0')}`, message: `Remediation notification ${n}`, read: false, createdAt: new Date().toISOString() });
+    let serial = 0;
+    const check = async (name, run) => {
+        if (flag('case', '') && !name.includes(flag('case', ''))) { (result.skipped ??= []).push(name); return; }
+        try { await run(); result.passed.push(name); console.log(`PASS [${engine}] ${name}`); }
+        catch (error) { result.failed.push({ name, error: String(error), stack: error.stack }); console.log(`FAIL [${engine}] ${name}: ${error}`); }
+    };
+    const fresh = async ({ width = 1280, preference = 'light', role = 'Learner', count = undefined, size = 23 } = {}) => {
+        const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: 'dark' });
+        // A native modified click first opens an opaque about:blank document.
+        await context.addInitScript((value) => { if (location.protocol === 'http:' || location.protocol === 'https:') localStorage.setItem('codemastery.theme', value); }, preference);
+        await context.tracing.start({ screenshots: true, snapshots: true });
+        const api = createApi(); api.state.role = role; api.state.notifications = Array.from({ length: size }, (_, i) => notice(i + 1));
+        const page = await context.newPage(); page.setDefaultTimeout(7000);
+        const diagnostics = (tab) => {
+            tab.on('pageerror', (error) => result.pageErrors.push(String(error)));
+            tab.on('console', (message) => { if (message.type() === 'error') result.console.push(message.text()); });
+            tab.on('response', (response) => { if (response.status() >= 400) (result.httpErrors ??= []).push({ status: response.status(), path: new URL(response.url()).pathname }); });
+        };
+        diagnostics(page); context.on('page', diagnostics);
+        await context.route('**/api/**', api.handle);
+        const countState = { value: count };
+        await page.route('**/api/me/notifications/unread-count', (route) => countState.value === undefined ? route.fallback()
+            : countState.value === null ? route.fulfill(problem(500, 'Synthetic count failure', '/api/me/notifications/unread-count')) : route.fulfill(ok({ unreadCount: countState.value })));
+        await page.route(/\/api\/instructor\/courses(?:\?.*)?$/, (route) => route.fulfill(ok({ content: [], page: 0, size: 20, totalElements: 0, totalPages: 0 })));
+        await page.goto(new URL('/login', baseUrl).href);
+        await page.locator('input[name="email"]').fill('synthetic@example.com'); await page.locator('input[name="password"]').fill('synthetic-password');
+        await page.getByRole('button', { name: 'Sign in', exact: true }).click(); await page.waitForURL((url) => url.pathname !== '/login');
+        // Successful ADR014 sign-in also installs a refresh-cookie session in a real browser.
+        api.state.restore = true;
+        await page.evaluate(() => document.fonts.ready);
+        return { context, page, api, countState, close: async (label) => { await context.tracing.stop({ path: path.join(dir, `${++serial}-${label}.zip`) }); await context.close(); } };
+    };
+    const ready = async (page) => { await page.locator('#notification-results').waitFor(); await page.waitForFunction(() => document.querySelector('#notification-results')?.getAttribute('aria-busy') === 'false'); };
+    const open = async (page) => { await page.locator('header a[href="/notifications"]').click(); await ready(page); };
+    const shot = (page, label) => page.screenshot({ path: path.join(dir, `${label}.png`), fullPage: true });
+    const focused = (page) => page.evaluate(() => { const el = document.activeElement, style = getComputedStyle(el); return { tag: el.tagName, id: el.id, label: el.getAttribute('aria-label'), text: el.textContent.slice(0, 100), visible: el.matches(':focus-visible'), outline: style.outlineStyle, outlineWidth: style.outlineWidth }; });
+    // Holds the next authoritative list read; release before closing the context even on assertion failure.
+    const holdList = async (page) => {
+        let release, started; const wait = new Promise((resolve) => { release = resolve; }), hit = new Promise((resolve) => { started = resolve; });
+        const handler = async (route) => { started(); await wait; await route.fallback().catch(() => undefined); };
+        await page.route('**/api/me/notifications?*', handler, { times: 1 });
+        return { release, hit };
+    };
+    const holdCount = async (page) => {
+        let release;
+        const wait = new Promise((resolve) => { release = resolve; });
+        const hit = page.waitForRequest('**/api/me/notifications/unread-count');
+        await page.route('**/api/me/notifications/unread-count', async (route) => { await wait; await route.fallback().catch(() => undefined); }, { times: 1 });
+        return { release, hit };
+    };
+    const keyboardFocus = async (page, target) => {
+        await target.focus(); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab');
+        assert(await target.evaluate((node) => node === document.activeElement), 'keyboard traversal reaches the intended control');
+    };
+    try {
+        if (!baseline) await check('IR-FE28-D01 focused bell survives delayed count transitions and reconciliation', async () => {
+            const x = await fresh({ width: 360, size: 999 }); const { page, api } = x; let hold;
+            const verify = async (original, count, flow) => {
+                await page.getByRole('link', { name: count ? `Notifications, ${count} unread` : 'Notifications', exact: true }).waitFor();
+                const bell = page.locator('header a[href="/notifications"]');
+                const same = await bell.evaluate((node, old) => node === old && old.isConnected, original), focus = await focused(page);
+                result.focus.push({ scenario: 'IR-FE28-D01', flow, count, same, ...focus });
+                assert(same && focus.tag === 'A' && focus.label === (count ? `Notifications, ${count} unread` : 'Notifications'), JSON.stringify(focus));
+                assert(focus.visible && focus.outline !== 'none', 'asynchronous count updates preserve the visible bell focus');
+                assert.equal(await bell.getAttribute('aria-current'), new URL(page.url()).pathname === '/notifications' ? 'page' : null);
+                await page.keyboard.press('Tab'); assert.match((await focused(page)).label, /^Account menu,/, 'Tab continues to the next utility, without repeating the bell');
+                await original.dispose();
+            };
+            try {
+                // Settle bootstrap before installing a one-shot hold for the next supported refresh.
+                await page.getByRole('link', { name: 'Notifications, 999 unread', exact: true }).waitFor();
+                for (const count of [1000, 999, 1000, 0, 1000, null, 1000, 1001, 1100]) {
+                    if (count === null) api.state.fail.set('/me/notifications/unread-count', 500);
+                    else api.state.notifications = Array.from({ length: count }, (_, i) => notice(i + 1));
+                    hold = await holdCount(page);
+                    await page.locator(new URL(page.url()).pathname === '/notifications' ? 'header a[aria-label="CodeMastery home"]' : 'header a[href="/notifications"]').click();
+                    await hold.hit; await page.waitForFunction(() => document.activeElement?.tagName === 'H1');
+                    const bell = page.locator('header a[href="/notifications"]'); await keyboardFocus(page, bell);
+                    const original = await bell.elementHandle(); hold.release(); await verify(original, count, 'route refresh');
+                    api.state.fail.delete('/me/notifications/unread-count');
+                }
+                await ready(page); hold = await holdCount(page);
+                await keyboardFocus(page, page.getByRole('button', { name: 'Mark all as read', exact: true })); await page.keyboard.press('Space');
+                await hold.hit; await ready(page);
+                const bell = page.locator('header a[href="/notifications"]'); await keyboardFocus(page, bell);
+                const original = await bell.elementHandle(); hold.release(); await verify(original, 0, 'mark-all reconciliation');
+                assert.equal(api.state.requests.filter((request) => request.startsWith('PUT ')).length, 1, 'one explicit mutation, no replay');
+                await shot(page, 'D01-after-count-reconciliation');
+            } finally { hold?.release(); await x.close('D01-count-focus'); }
+        });
+        if (!baseline) await check('IR-FE28-D02 compact Home has a 44px target and operable edges', async () => {
+            for (const role of ['Learner', 'Instructor']) for (const preference of ['light', 'dark']) {
+                const x = await fresh({ width: 360, role, preference, count: 1000 });
+                try {
+                    await x.page.getByRole('link', { name: 'Notifications, 1000 unread', exact: true }).waitFor();
+                    for (const width of [320, 360, 389, 390, 400]) {
+                        await x.page.setViewportSize({ width, height: 900 }); await open(x.page);
+                        const geometry = await x.page.getByRole('link', { name: 'CodeMastery home', exact: true }).evaluate((home) => {
+                            const r = home.getBoundingClientRect(), point = { x: r.x + r.width / 2, y: r.y + 1 };
+                            return { x: r.x, y: r.y, width: r.width, height: r.height, point, hit: document.elementFromPoint(point.x, point.y)?.closest('a') === home };
+                        });
+                        result.measurements.push({ track: 'home-target', role, preference, width, count: 1000, home: geometry });
+                        assert(geometry.width >= 44 && geometry.height >= 44 && geometry.hit, JSON.stringify(geometry));
+                        await x.page.mouse.click(geometry.point.x, geometry.point.y);
+                        await x.page.waitForURL((url) => url.pathname === (role === 'Learner' ? '/home' : '/teach'));
+                        if (width === 360) await x.page.locator('header').first().screenshot({ path: path.join(dir, `D02-${role}-${preference}-360.png`) });
+                    }
+                } finally { await x.close(`D02-home-${role}-${preference}`); }
+            }
+        });
+        const themes = baseline ? ['light'] : ['light', 'dark', 'system'];
+        for (const role of baseline ? ['Learner'] : ['Learner', 'Instructor']) for (const preference of themes) {
+            await check(`IR-FE28-01 ${role} ${preference}: count geometry, hit testing and native navigation`, async () => {
+                const x = await fresh({ width: 360, preference, role, count: 100000 }); const { page, countState } = x;
+                const problems = [];
+                try {
+                    const counts = baseline ? [100000] : [0, 1, 9, 99, 999, 99999, 100000, 123456789, 2147483647, Number.MAX_SAFE_INTEGER, null];
+                    for (const width of baseline ? [360] : [320, 360, 390, 400, 599, 600, 768, 899, 900, 901, 1024, 1199, 1200, 1201, 1280, 1440]) {
+                        await page.setViewportSize({ width, height: 900 });
+                        // Full count matrix on narrow screens; breakpoint and desktop stress/zero/unknown fixtures.
+                        for (const count of counts.filter((n) => width <= 400 || [0, 100000, Number.MAX_SAFE_INTEGER, null].includes(n))) {
+                            countState.value = count;
+                            await page.getByRole('link', { name: 'CodeMastery home', exact: true }).click();
+                            const bell = page.locator('header a[href="/notifications"]');
+                            await page.getByRole('link', { name: count ? `Notifications, ${count} unread` : 'Notifications', exact: true }).waitFor();
+                            await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+                            const measurement = await bell.evaluate((el) => {
+                                const rect = (node) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom }; };
+                                const b = el.querySelector('span[aria-hidden]') || el.closest('[data-wide-header-badge]')?.querySelector(':scope > span[aria-hidden]'), badge = b && rect(b), target = rect(el), home = document.querySelector('header a[aria-label="CodeMastery home"]');
+                                const neighbors = [...el.closest('header').querySelectorAll('a,button')].filter((n) => n !== el && n.getBoundingClientRect().width > 0).map((n) => ({ name: n.getAttribute('aria-label') || n.textContent, rect: rect(n) }));
+                                const collisions = badge ? neighbors.filter(({ rect: r }) => Math.min(r.right, badge.right) - Math.max(r.x, badge.x) > .5 && Math.min(r.bottom, badge.bottom) - Math.max(r.y, badge.y) > .5) : [];
+                                const collision = collisions[0], point = collision && { x: (Math.max(collision.rect.x, badge.x) + Math.min(collision.rect.right, badge.right)) / 2, y: (Math.max(collision.rect.y, badge.y) + Math.min(collision.rect.bottom, badge.bottom)) / 2 };
+                                const text = b && document.createRange(); if (text) text.selectNodeContents(b);
+                                return { target, badge, badgeText: b?.textContent, textWidth: text?.getBoundingClientRect().width, home: rect(home), collisions, point, hit: point && document.elementFromPoint(point.x, point.y)?.closest('a')?.getAttribute('href'), scroll: document.documentElement.scrollWidth, width: innerWidth, scheme: document.documentElement.dataset.colorScheme,
+                                    order: [...el.closest('header').querySelectorAll(':is(a,button)[aria-label]')].map((n) => n.getAttribute('aria-label')).filter((name) => /^(Notifications|Theme|Account menu)/.test(name)) };
+                            });
+                            const receipt = { role, preference, count, width, ...measurement }; result.measurements.push(receipt);
+                            assert(measurement.target.width >= 44 && measurement.target.height >= 44, '44px bell target');
+                            assert(/^Notifications/.test(measurement.order[0]) && /^Account menu/.test(measurement.order.at(-1)), 'utility order');
+                            if (width >= 900) assert(/^Theme/.test(measurement.order[1]), 'Theme stays between bell and account');
+                            assert.equal(measurement.scheme, preference === 'system' ? 'dark' : preference);
+                            assert.equal(measurement.badgeText ?? null, count ? String(count) : null, 'exact visible count; zero/unknown hidden');
+                            if (measurement.badge) {
+                                assert(measurement.badge.x >= 0 && measurement.badge.right <= width + .5, 'badge inside viewport');
+                                assert(measurement.textWidth <= measurement.badge.width, 'digits not clipped');
+                            }
+                            assert(measurement.scroll <= width + 1, 'no horizontal overflow');
+                            if (measurement.collisions.length) {
+                                await shot(page, `before-collision-${width}-${count}`);
+                                await page.mouse.click(measurement.point.x, measurement.point.y);
+                                await page.waitForURL('**/notifications'); receipt.collisionClickPath = new URL(page.url()).pathname;
+                                problems.push(receipt); continue;
+                            }
+                            // Click the historical collision side of Home, not just its centre.
+                            const home = measurement.home;
+                            await page.mouse.click(home.right - 3, home.y + Math.min(11, home.height / 2));
+                            await page.waitForURL((url) => url.pathname === (role === 'Learner' ? '/home' : '/teach'));
+                            receipt.homeClickPath = new URL(page.url()).pathname;
+                            await bell.click(); await ready(page); receipt.bellClickPath = new URL(page.url()).pathname;
+                            assert.equal(await bell.getAttribute('aria-current'), 'page');
+                            if ([320, 360, 1280].includes(width) && count === 100000) await shot(page, `header-${role}-${preference}-${width}`);
+                        }
+                    }
+                    assert.equal(problems.length, 0, JSON.stringify(problems));
+                    if (preference === 'system' && !baseline) { await page.emulateMedia({ colorScheme: 'light' }); await page.waitForFunction(() => document.documentElement.dataset.colorScheme === 'light'); }
+                } finally { await x.close(`header-${role}-${preference}`); }
+            });
+        }
+        if (!baseline) await check('supplemental header containment and glyph at breakpoint boundaries', async () => {
+            for (const role of ['Learner', 'Instructor']) for (const preference of ['light', 'dark']) {
+                const x = await fresh({ role, preference, width: 320, count: Number.MAX_SAFE_INTEGER });
+                try {
+                    await x.page.getByRole('link', { name: `Notifications, ${Number.MAX_SAFE_INTEGER} unread`, exact: true }).waitFor();
+                    for (const width of [320, 360, 390, 400, 599, 600, 899, 900, 901, 1199, 1200, 1201, 1280, 1440]) {
+                        await x.page.setViewportSize({ width, height: 900 });
+                        await x.page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+                        const geometry = await x.page.locator('header a[href="/notifications"]').evaluate((button) => {
+                            const rect = (el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; };
+                            const intersects = (a,b) => Math.min(a.right,b.right)-Math.max(a.x,b.x) > .5 && Math.min(a.bottom,b.bottom)-Math.max(a.y,b.y) > .5;
+                            const wrapper = button.closest('[data-wide-header-badge]'), badge = wrapper.querySelector(':scope > span[aria-hidden]'), b = rect(badge), target = rect(button), glyph = rect(button.querySelector('svg'));
+                            const neighbors = [...button.closest('header').querySelectorAll('a,button')].filter((n) => n !== button && n.getBoundingClientRect().width > 0).map((n) => ({ name: n.getAttribute('aria-label') || n.textContent, rect: rect(n) }));
+                            const points = [b.x+1,b.right-1].map((x) => ({ x, y: (b.y+b.bottom)/2 }));
+                            return { badge: b, target, glyph, wrapper: rect(wrapper), neighbors, collisions: neighbors.filter((n) => intersects(n.rect,b) || intersects(n.rect,target)), glyphCollision: intersects(b,glyph), hitEdges: points.map((p) => document.elementFromPoint(p.x,p.y)?.closest('a,button')?.getAttribute('aria-label') ?? null), scroll: document.documentElement.scrollWidth, width: innerWidth, glyphVisibility: getComputedStyle(button.querySelector('svg')).visibility };
+                        });
+                        result.measurements.push({ track: 'containment', role, preference, width, count: Number.MAX_SAFE_INTEGER, ...geometry });
+                        assert.equal(geometry.collisions.length, 0, JSON.stringify(geometry));
+                        assert(!geometry.glyphCollision && geometry.glyphVisibility === 'visible', 'full count cannot cover the bell glyph');
+                        assert(geometry.badge.x >= geometry.wrapper.x && geometry.badge.right <= geometry.wrapper.right+.5 && geometry.badge.y >= 0, 'badge contained in reserved space and header');
+                        assert(geometry.wrapper.right <= width+.5 && geometry.scroll <= width+1, 'reserved utility fits the viewport');
+                        assert(geometry.hitEdges.every((name) => name === null || name.startsWith('Notifications')), 'badge edges do not hit a neighbour');
+                        for (const neighbor of geometry.neighbors) assert(neighbor.rect.x >= -.5 && neighbor.rect.right <= width+.5, JSON.stringify(neighbor));
+                        if ([320,360,1280].includes(width)) await x.page.locator('header').first().screenshot({ path: path.join(dir, `header-stress-${role}-${preference}-${width}.png`) });
+                    }
+                } finally { await x.close(`containment-${role}-${preference}`); }
+            }
+        });
+        if (!baseline) await check('supplemental Instructor native modified click and dirty-editor interception', async () => {
+            const x = await fresh({ role: 'Instructor', width: 360, count: 100000 });
+            try {
+                await x.page.locator('main header').getByRole('link', { name: 'Create course', exact: true }).click();
+                await x.page.getByRole('textbox', { name: /Course title/ }).fill('Synthetic unsaved notification regression');
+                x.api.state.restore = true;
+                const bell = x.page.locator('header a[href="/notifications"]'), popup = x.context.waitForEvent('page');
+                await bell.click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] });
+                const other = await popup; await other.waitForURL('**/notifications'); await ready(other);
+                assert.equal(new URL(x.page.url()).pathname, '/teach/courses/new');
+                assert.equal(await x.page.getByRole('textbox', { name: /Course title/ }).inputValue(), 'Synthetic unsaved notification regression');
+                await other.close();
+                await bell.click(); await x.page.getByRole('dialog', { name: 'Leave without saving?', exact: true }).waitFor();
+                await x.page.getByRole('button', { name: 'Stay', exact: true }).click();
+                assert.equal(new URL(x.page.url()).pathname, '/teach/courses/new');
+                await bell.click(); await x.page.getByRole('button', { name: 'Leave', exact: true }).click(); await ready(x.page);
+                assert.equal(new URL(x.page.url()).pathname, '/notifications');
+            } finally { await x.close('native-and-guarded-navigation'); }
+        });
+        const scenarios = baseline ? ['single-all', 'mark-all-zero', 'pagination'] : ['single-all', 'single-unread', 'last-unread', 'mark-all-zero', 'mark-all-concurrent', 'pagination', 'shrink-page', 'mutation-failure', 'list-failure', 'move-focus', 'pointer-focus', 'navigate-away', 'logout', 'session-replacement', 'account-replacement', 'role-loss'];
+        for (const scenario of scenarios) await check(`FE28-R01 keyboard ${scenario}`, async () => {
+            const x = await fresh({ size: scenario === 'last-unread' ? 1 : ['pagination', 'shrink-page', 'mark-all-concurrent'].includes(scenario) ? 23 : 3, preference: scenario === 'pagination' ? 'dark' : 'light' });
+            const { page, api } = x; let hold, mutationRelease;
+            try {
+                await open(page);
+                if (['single-unread', 'last-unread', 'shrink-page'].includes(scenario)) { await page.getByRole('button', { name: 'All', exact: true }).focus(); await page.keyboard.press('ArrowRight'); await ready(page); }
+                if (scenario === 'shrink-page') { await page.getByRole('button', { name: 'Go to page 2', exact: true }).click(); await ready(page); api.state.notifications.slice(0, 3).forEach((n) => { n.read = true; }); }
+                if (scenario === 'mark-all-concurrent') api.state.newAfterMarkAll = notice(999);
+                if (scenario === 'mutation-failure') api.state.fail.set(`/me/notifications/${notice(1).id}/read`, 500);
+                const pagination = scenario === 'pagination', all = scenario.startsWith('mark-all');
+                const button = pagination ? page.getByRole('button', { name: 'Go to page 2', exact: true }) : all ? page.getByRole('button', { name: 'Mark all as read', exact: true }) : page.getByRole('button', { name: 'Mark as read', exact: true }).first();
+                await button.focus(); await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab'); assert(await button.evaluate((n) => n === document.activeElement), 'keyboard order returns to action');
+                hold = await holdList(page);
+                if (scenario === 'list-failure') api.state.fail.set('/me/notifications', 500);
+                if (['single-all', 'mark-all-zero'].includes(scenario) && !baseline) {
+                    let begin; const hit = new Promise((resolve) => { begin = resolve; }), wait = new Promise((resolve) => { mutationRelease = resolve; });
+                    await page.route(all ? '**/api/me/notifications/read-all' : '**/api/me/notifications/*/read', async (route) => { begin(); await wait; await route.fallback().catch(() => undefined); }, { times: 1 });
+                    await page.keyboard.press(all ? 'Space' : 'Enter'); await Promise.race([hit, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('mutation hold did not start')), 7000); timer.unref(); })]);
+                    assert.equal((await focused(page)).id, 'notification-updates', 'focus survives mutation pending before reconciliation');
+                    assert.equal(await page.locator('#notification-results').getAttribute('aria-busy'), 'true');
+                    await shot(page, `after-focus-${scenario}-pending`); mutationRelease();
+                } else await page.keyboard.press(all ? 'Space' : 'Enter'); await Promise.race([hold.hit, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('list hold did not start')), 7000); timer.unref(); })]);
+                result.focus.push({ scenario, phase: 'loading', ...(await focused(page)) });
+                await shot(page, `${baseline ? 'before' : 'after'}-focus-${scenario}-loading`);
+                if (scenario === 'move-focus' || scenario === 'pointer-focus') {
+                    const other = page.getByRole('button', { name: 'Unread', exact: true });
+                    // Deliberate input elsewhere while the response is still pending.
+                    if (scenario === 'pointer-focus') await other.click();
+                    else { await page.keyboard.press('Shift+Tab'); assert.equal((await focused(page)).text, 'All'); }
+                } else if (scenario === 'navigate-away') { await page.getByRole('link', { name: 'CodeMastery home', exact: true }).click(); await page.waitForURL('**/home'); }
+                else if (['logout', 'session-replacement', 'account-replacement', 'role-loss'].includes(scenario)) {
+                    api.state.sessionId = notice(700).id;
+                    api.state.restore = scenario !== 'logout'; api.state.role = scenario === 'role-loss' ? 'Administrator' : 'Learner';
+                    if (scenario === 'account-replacement') await page.route('**/api/auth/refresh', (route) => {
+                        const response = loginBody('Learner', 'Replacement learner', api.state.sessionId), id = notice(901).id;
+                        const parts = response.accessToken.split('.'), payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+                        response.accessToken = `${parts[0]}.${encode({ ...payload, sub: id })}.${parts[2]}`; response.user.id = id;
+                        return route.fulfill(ok(response));
+                    });
+                    api.state.notifications = [notice(800)];
+                    await page.evaluate((type) => { const c = new BroadcastChannel('codemastery-auth'); c.postMessage({ type }); c.close(); }, scenario === 'logout' ? 'signed-out' : 'signed-in');
+                    if (scenario === 'logout') await page.waitForURL((url) => url.pathname !== '/notifications');
+                    else if (scenario === 'role-loss') { await page.getByRole('heading', { name: "You don't have access to this page" }).waitFor(); await page.getByRole('link', { name: 'Go to catalogue', exact: true }).focus(); }
+                    else { await page.getByText('Remediation notification 800', { exact: true }).waitFor(); await page.getByRole('button', { name: 'All', exact: true }).focus(); }
+                } else if (!baseline) {
+                    const focus = await focused(page); assert.equal(focus.id, 'notification-updates', 'stable named results region owns keyboard focus while loading');
+                    assert(focus.visible && focus.outline !== 'none' && parseFloat(focus.outlineWidth) >= 2, 'visible focus ring');
+                }
+                const beforeRelease = await focused(page); hold.release(); if (!['navigate-away', 'logout', 'role-loss'].includes(scenario)) await ready(page);
+                if (['navigate-away', 'logout', 'role-loss'].includes(scenario)) {
+                    if (scenario !== 'role-loss') assert.notEqual(new URL(page.url()).pathname, '/notifications'); assert.notEqual((await focused(page)).id, 'notification-updates');
+                    assert.equal(await page.locator('#notification-results').count(), 0, 'old page owner unmounted');
+                } else if (['session-replacement', 'account-replacement'].includes(scenario)) {
+                    assert.equal((await focused(page)).text, 'All', 'old operation cannot move focus in replacement session');
+                    assert.equal(await page.locator('#notification-results li').count(), 1);
+                    assert.equal(await page.getByText('Marked notification as read.', { exact: true }).count(), 0);
+                } else if (scenario === 'move-focus') { assert.equal((await focused(page)).text, 'All', 'late response must not steal focus'); }
+                else if (scenario === 'pointer-focus') { assert.equal((await focused(page)).text, 'Unread', 'late response respects pointer intent'); }
+                else {
+                    const focus = await focused(page); result.focus.push({ scenario, phase: 'settled', ...focus }); await shot(page, `${baseline ? 'before' : 'after'}-focus-${scenario}-settled`);
+                    assert.equal(focus.id, 'notification-updates', JSON.stringify(focus));
+                    assert.equal(await page.getByRole('region', { name: 'Notifications', exact: true }).count(), 1);
+                    if (scenario === 'last-unread' || scenario === 'mark-all-zero') { assert(await page.getByRole('button', { name: 'Mark all as read', exact: true }).isDisabled()); }
+                    if (scenario === 'mark-all-concurrent') { assert.equal(await page.locator('#notification-results li').count(), 20); await page.getByRole('link', { name: 'Notifications, 1 unread', exact: true }).waitFor(); }
+                    if (scenario === 'shrink-page') assert(api.state.requests.at(-1).includes('unreadOnly=true&page=0&size=20'), 'shrunk last page recovers to current page zero');
+                    if (scenario === 'pagination') assert.equal(await page.locator('#notification-results li').count(), 3);
+                    if (scenario === 'list-failure') { api.state.fail.delete('/me/notifications'); await page.keyboard.press('Tab'); assert.equal((await focused(page)).text, 'Try again'); await page.keyboard.press('Enter'); await ready(page); assert.equal((await focused(page)).id, 'notification-updates'); }
+                    await page.keyboard.press('Tab');
+                    const next = await focused(page); assert(['BUTTON', 'A'].includes(next.tag), JSON.stringify(next));
+                    if (scenario === 'single-all' || scenario === 'single-unread') assert.equal(next.text, 'Mark as read');
+                    if (scenario === 'mutation-failure') { api.state.fail.clear(); assert.equal(next.text, 'Mark as read'); await page.keyboard.press('Space'); await ready(page); await page.getByText('Marked notification as read.', { exact: true }).waitFor(); assert.equal((await focused(page)).id, 'notification-updates'); }
+                    assert.equal(api.state.requests.filter((r) => r.startsWith('PUT ')).length, pagination ? 0 : scenario === 'mutation-failure' ? 2 : 1, 'no mutation replay');
+                }
+                result.focus.push({ scenario, phase: 'release-owner', ...beforeRelease });
+            } finally { mutationRelease?.(); hold?.release(); await x.close(`focus-${scenario}`); }
+        });
+        await check('supplemental no uncaught page errors', async () => { assert.equal(result.pageErrors.length, 0, JSON.stringify(result.pageErrors)); assert(!result.console.some((message) => /Uncaught|TypeError|ReferenceError|SyntaxError/.test(message)), JSON.stringify(result.console)); });
     } finally { await browser.close(); }
     return result;
 }
