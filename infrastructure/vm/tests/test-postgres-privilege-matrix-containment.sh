@@ -289,10 +289,12 @@ probe "attempts: delete"                                    42501 "DELETE FROM p
 probe "attempts: immutable identity and timer"                42501 "UPDATE public.attempts SET user_id=user_id, quiz_id=quiz_id, attempt_number=attempt_number, started_at=started_at, expires_at=expires_at;"
 probe "attempt_answers: immutable capture"                   42501 "UPDATE public.attempt_answers SET attempt_id=attempt_id, question_id=question_id, position=position;"
 probe "attempt_answers: delete"                              42501 "DELETE FROM public.attempt_answers;"
-probe "submissions: self-grade"                              42501 "UPDATE public.submissions SET grade_percentage=100;"
-probe "submissions: read files, learners or feedback"         42501 "SELECT object_key, user_id, feedback FROM public.submissions;"
-probe "submissions: create (learner submission not implemented)" 42501 "INSERT INTO public.submissions SELECT * FROM public.submissions WHERE false;"
+probe "submissions: grade (r16)"                             ok "UPDATE public.submissions SET grade_percentage=100, feedback='ok', graded_at=clock_timestamp();"
+probe "submissions: read files, learners or feedback (r16)"   ok "SELECT object_key, user_id, feedback FROM public.submissions;"
+probe "submissions: create (r16)"                            ok "INSERT INTO public.submissions SELECT * FROM public.submissions WHERE false;"
 probe "assignments: move to another Course or re-key"         42501 "UPDATE public.assignments SET course_id=course_id, id=id;"
+probe "submissions: immutable IDs"                           42501 "UPDATE public.submissions SET id=id, assignment_id=assignment_id, user_id=user_id;"
+probe "submissions: delete denied"                           42501 "DELETE FROM public.submissions;"
 probe "assignments/submissions: delete"                       42501 "DELETE FROM public.assignments;"
 probe "assignments/submissions: TRUNCATE"                     42501 "TRUNCATE public.submissions, public.assignments;"
 probe "learner_skill_masteries: re-key or re-target a row"     42501 "UPDATE public.learner_skill_masteries SET id=id, user_id=user_id, skill_id=skill_id;"
@@ -329,11 +331,11 @@ drift="$(harden_after_migration)"
   || { echo "drift was not reported: $drift" >&2; exit 1; }
 verify_runtime_privileges complete >/dev/null
 echo "  owner-granted excess (table and column level) reported, revoked and re-verified"
-# r6 grants SELECT on questions (CT23 owner reads include keys); submissions stay unreadable.
-admin <<<"GRANT SELECT ON public.submissions TO PUBLIC;"
+# PUBLIC must not inherit any write permission, including r15/r16 columns.
+admin <<<"GRANT DELETE ON public.submissions TO PUBLIC;"
 harden_after_migration >/dev/null
-expect_failure "SELECT on submissions through PUBLIC" "table privilege SELECT on public.submissions: expected false" verify_runtime_privileges complete
-admin <<<"REVOKE SELECT ON public.submissions FROM PUBLIC;"
+expect_failure "DELETE on submissions through PUBLIC" "table privilege DELETE on public.submissions: expected false" verify_runtime_privileges complete
+admin <<<"REVOKE DELETE ON public.submissions FROM PUBLIC;"
 admin <<<"CREATE ROLE cm_grantor NOLOGIN; GRANT UPDATE ON public.users TO cm_grantor WITH GRANT OPTION; SET ROLE cm_grantor; GRANT UPDATE ON public.users TO $APP; RESET ROLE;"
 harden_after_migration >/dev/null
 expect_failure "UPDATE users from another grantor survives reset" "table privilege UPDATE on public.users: expected false" verify_runtime_privileges complete
@@ -520,9 +522,9 @@ admin <<<"ALTER TABLE public.flyway_history_moved RENAME TO flyway_schema_histor
 as_mig <<<"ALTER TABLE public.enrollments ADD COLUMN unexpected_column integer;"
 expect_failure "unreviewed column on the predecessor" "columns differ from the reviewed matrix on public.enrollments" provision_db_roles
 as_mig <<<"ALTER TABLE public.enrollments DROP COLUMN unexpected_column;"
-admin <<<"GRANT SELECT ON public.submissions TO PUBLIC;"
-expect_failure "excess privilege through PUBLIC on the predecessor" "table privilege SELECT on public.submissions: expected false" provision_db_roles
-admin <<<"REVOKE SELECT ON public.submissions FROM PUBLIC;"
+admin <<<"GRANT DELETE ON public.submissions TO PUBLIC;"
+expect_failure "excess privilege through PUBLIC on the predecessor" "table privilege DELETE on public.submissions: expected false" provision_db_roles
+admin <<<"REVOKE DELETE ON public.submissions FROM PUBLIC;"
 admin <<<"GRANT UPDATE (last_visited_at) ON public.enrollments TO \"$APP\";" 2>/dev/null \
   && { echo "Granted a privilege on a column that does not exist" >&2; exit 1; }
 provision_db_roles >/dev/null

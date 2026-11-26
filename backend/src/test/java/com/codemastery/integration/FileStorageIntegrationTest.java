@@ -1097,10 +1097,16 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
     }
 
     // CO09 consumer qualification. Faults below decorate test beans only; real storage is retained.
+    static final ThreadLocal<String> RUNTIME_ROLE = new ThreadLocal<>();
+    static final java.util.Queue<com.codemastery.modules.assessment.application.event.AssignmentGradedEvent> COMMITTED_GRADES = new java.util.concurrent.ConcurrentLinkedQueue<>();
     static final ThreadLocal<String> COMMIT_FAULT = new ThreadLocal<>();
     static final AtomicInteger BORROWED = new AtomicInteger();
     @org.springframework.boot.test.context.TestConfiguration(proxyBeanMethods = false)
     static class CommitFaultConfiguration {
+        @org.springframework.transaction.event.TransactionalEventListener(phase = org.springframework.transaction.event.TransactionPhase.AFTER_COMMIT)
+        public void committedGrade(com.codemastery.modules.assessment.application.event.AssignmentGradedEvent event) {
+            COMMITTED_GRADES.add(event);
+        }
         @org.springframework.context.annotation.Bean
         static org.springframework.beans.factory.config.BeanPostProcessor commitFaultDataSource() {
             return new org.springframework.beans.factory.config.BeanPostProcessor() {
@@ -1109,7 +1115,11 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                     return new org.springframework.jdbc.datasource.DelegatingDataSource(source) {
                         @Override public java.sql.Connection getConnection() throws java.sql.SQLException { return wrap(super.getConnection()); }
                         @Override public java.sql.Connection getConnection(String u,String p) throws java.sql.SQLException { return wrap(super.getConnection(u,p)); }
-                        java.sql.Connection wrap(java.sql.Connection connection) {
+                        java.sql.Connection wrap(java.sql.Connection connection) throws java.sql.SQLException {
+                            String role = RUNTIME_ROLE.get();
+                            if (role != null) {
+                                try (var statement = connection.createStatement()) { statement.execute("SET ROLE " + role); }
+                            }
                             BORROWED.incrementAndGet(); var closed = new java.util.concurrent.atomic.AtomicBoolean();
                             return (java.sql.Connection)java.lang.reflect.Proxy.newProxyInstance(getClass().getClassLoader(),
                                 new Class<?>[]{java.sql.Connection.class}, (proxy,method,args)->{
@@ -1121,7 +1131,11 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
                                             if ("after".equals(fault)) throw new java.sql.SQLException("Synthetic lost acknowledgement","08006");
                                             return result;
                                         }
-                                        if (method.getName().equals("close") && closed.compareAndSet(false,true)) BORROWED.decrementAndGet();
+                                        if (method.getName().equals("close") && closed.compareAndSet(false,true)) {
+                                            try {
+                                                if (role != null) try (var statement = connection.createStatement()) { statement.execute("RESET ROLE"); }
+                                            } finally { BORROWED.decrementAndGet(); }
+                                        }
                                         return method.invoke(connection,args);
                                     } catch(java.lang.reflect.InvocationTargetException failure) { throw failure.getCause(); }
                                 });
@@ -1185,8 +1199,8 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
     com.codemastery.modules.course.api.dto.CourseStructureResponses.Material createPdf(MaterialFixture f) {
         return materials.createFileMaterial(f.course,f.lesson,()->new com.codemastery.modules.course.application.service.LearningMaterialService.FileMaterialUpload(" Slides ",pdf("Bài học.PDF",PDF_A)));
     }
-    final class ObservedStorage implements FileStorage {
-        final List<String> stored=new ArrayList<>(),deleted=new ArrayList<>(); int opens;
+    class ObservedStorage implements FileStorage {
+        final List<String> stored=Collections.synchronizedList(new ArrayList<>()),deleted=Collections.synchronizedList(new ArrayList<>()); int opens;
         String commitFault; Runnable beforeOpen; boolean failStore,failDelete,providerFailure;
         public void store(String key,InputStream in,long size,String media) {
             assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());assertEquals(0,BORROWED.get());
@@ -1622,4 +1636,520 @@ class FileStorageIntegrationTest extends AbstractIntegrationTest {
             }finally{release.countDown();pool.setMaximumPoolSize(maximum);pool.setConnectionTimeout(timeout);}
         }
     }
+
+    // AS09 producer/consumer qualification under the same approved PostgreSQL/MinIO foundation.
+    @Autowired com.codemastery.modules.assessment.application.service.AssignmentService assignmentService;
+    @Autowired com.codemastery.modules.assessment.application.service.SubmissionService submissionService;
+    @Autowired com.codemastery.modules.assessment.domain.repository.AssignmentRepository assignmentRows;
+    @Autowired com.codemastery.modules.auth.application.service.UserAccountService assignmentIdentities;
+    @Autowired com.codemastery.modules.course.application.service.EnrollmentService assignmentEnrollments;
+
+    final class AssignmentFixture implements AutoCloseable {
+        final MaterialFixture base = new MaterialFixture();
+        final java.time.Instant now = java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        final UUID assignment;
+        AssignmentFixture() {
+            assignment = assignmentService.create(base.course, new com.codemastery.modules.assessment.application.service.AssignmentService.AssignmentInput(
+                    "AS09", " Verbatim instructions\n", now.plusSeconds(3600), base.lesson)).id();
+            assignmentService.setPublication(base.course, assignment, "published");
+        }
+        String path() { return "/api/courses/" + base.course + "/assignments/" + assignment; }
+        String owned() { return "/api/courses/" + base.course + "/owned-assignments/" + assignment; }
+        void learner() { signIn(base.learner, com.codemastery.modules.auth.domain.model.Role.LEARNER); }
+        void owner() { signIn(base.owner, com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR); }
+        String key() { return materialJdbc.queryForObject("SELECT object_key FROM submissions WHERE assignment_id=?", String.class, assignment); }
+        UUID submission() { return materialJdbc.queryForObject("SELECT id FROM submissions WHERE assignment_id=?", UUID.class, assignment); }
+        java.time.Instant submittedAt() { return materialJdbc.queryForObject("SELECT submitted_at FROM submissions WHERE assignment_id=?", (rs, n) -> rs.getObject(1, java.time.OffsetDateTime.class).toInstant(), assignment); }
+        public void close() {
+            RUNTIME_ROLE.remove(); COMMIT_FAULT.remove(); COMMITTED_GRADES.clear();
+            for (String key : materialJdbc.queryForList("SELECT object_key FROM submissions WHERE assignment_id=?", String.class, assignment)) storage.delete(key);
+            materialJdbc.update("DELETE FROM submissions WHERE assignment_id=?", assignment);
+            materialJdbc.update("DELETE FROM assignments WHERE course_id=?", base.course);
+            base.close();
+        }
+    }
+    static com.codemastery.modules.assessment.application.service.SubmissionService.FilePart assignmentPdf(String name, byte[] bytes) {
+        return new com.codemastery.modules.assessment.application.service.SubmissionService.FilePart(name, bytes.length, new ByteArrayInputStream(bytes));
+    }
+    com.codemastery.modules.assessment.application.service.SubmissionService assignmentConsumer(FileStorage adapter, java.time.Clock clock) {
+        return new com.codemastery.modules.assessment.application.service.SubmissionService(assignmentRows, materialAccess,
+                assignmentIdentities, assignmentEnrollments, adapter, materialPersistence, applicationPublisher,
+                materialTransactions, 1024, clock);
+    }
+    @Autowired org.springframework.context.ApplicationEventPublisher applicationPublisher;
+    com.codemastery.modules.assessment.application.service.SubmissionService.GradeInput grade(java.time.Instant submittedAt) {
+        return new com.codemastery.modules.assessment.application.service.SubmissionService.GradeInput(new java.math.BigDecimal("99.99"), " Verbatim feedback\n", submittedAt);
+    }
+    java.time.Clock tickingClock(java.time.Instant start) {
+        var micros = new java.util.concurrent.atomic.AtomicLong();
+        return new java.time.Clock() {
+            public java.time.ZoneId getZone() { return java.time.ZoneOffset.UTC; }
+            public java.time.Clock withZone(java.time.ZoneId zone) { return this; }
+            public java.time.Instant instant() { return start.plusNanos(micros.getAndIncrement() * 1000); }
+        };
+    }
+
+    @Test void as09RealPersistenceNamesGradingAndProducerEvents() throws Exception {
+        try (var f = new AssignmentFixture()) {
+            var observed = new ObservedStorage(); var service = assignmentConsumer(observed, tickingClock(f.now));
+            long mastery = materialJdbc.queryForObject("SELECT count(*) FROM learner_skill_masteries", Long.class);
+            long progress = materialJdbc.queryForObject("SELECT count(*) FROM lesson_progress", Long.class);
+            f.learner();
+            var first = service.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("Bài.PDF", PDF_A));
+            assertTrue(first.created()); assertNull(first.submission().gradePercentage());
+            assertEquals(f.now.plusNanos(1000), first.submission().submittedAt());
+            UUID id = f.submission(); String old = f.key();
+            assertEquals("Bài.PDF", assignmentService.readForLearner(f.base.course, f.assignment).submission().originalFilename());
+            try (var file = service.downloadOwnSubmission(f.base.course, f.assignment)) {
+                assertArrayEquals(PDF_A, file.content().readAllBytes());
+            }
+            var second = service.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("new.pdf", PDF_B));
+            assertFalse(second.created()); assertEquals(id, f.submission());
+            assertTrue(second.submission().submittedAt().isAfter(first.submission().submittedAt()));
+            assertThrows(ObjectNotFoundException.class, () -> storage.open(old));
+            f.owner();
+            assertEquals("Learner", service.listSubmissionsForOwner(f.base.course, f.assignment, 0, 20).content().getFirst().learnerDisplayName());
+            // Stored public names survive LEFT, locked accounts and later role changes.
+            materialJdbc.update("UPDATE enrollments SET status='left' WHERE course_id=?", f.base.course);
+            materialJdbc.update("UPDATE users SET role='instructor',account_status='locked',display_name='Historical name' WHERE id=?", f.base.learner);
+            assertEquals("Historical name", service.listSubmissionsForOwner(f.base.course, f.assignment, 0, 1).content().getFirst().learnerDisplayName());
+            assertEquals(java.util.Map.of(), assignmentEnrollments.learnerDisplayNames(f.base.course, java.util.Set.of(f.base.owner)));
+            materialJdbc.update("UPDATE enrollments SET status='active' WHERE course_id=?", f.base.course);
+            materialJdbc.update("UPDATE users SET role='learner',account_status='active' WHERE id=?", f.base.learner);
+            var graded = service.gradeSubmission(f.base.course, f.assignment, id, grade(second.submission().submittedAt()));
+            assertEquals(new java.math.BigDecimal("99.99"), graded.gradePercentage());
+            assertEquals(" Verbatim feedback\n", graded.feedback());
+            service.gradeSubmission(f.base.course, f.assignment, id, grade(second.submission().submittedAt()));
+            var events = COMMITTED_GRADES.stream().filter(e -> e.assignmentId().equals(f.assignment)).toList();
+            assertEquals(2, events.size()); assertFalse(events.get(0).regrade()); assertTrue(events.get(1).regrade());
+            assertEquals(f.base.lesson, events.getFirst().lessonId()); assertTrue(events.getFirst().assignmentPublished());
+            assertEquals(f.base.learner, events.getFirst().learnerId());
+            int committed = COMMITTED_GRADES.size();
+            assertThrows(IllegalStateException.class, () -> new org.springframework.transaction.support.TransactionTemplate(materialTransactions).executeWithoutResult(tx -> {
+                service.gradeSubmission(f.base.course, f.assignment, id, grade(second.submission().submittedAt()));
+                throw new IllegalStateException("Synthetic rollback");
+            }));
+            assertEquals(committed, COMMITTED_GRADES.size());
+            f.learner(); assertTrue(assignmentService.readForLearner(f.base.course, f.assignment).submission().graded());
+            assertThrows(com.codemastery.common.exception.BusinessRuleException.class, () -> service.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("new.pdf", PDF_A)));
+            assertEquals(mastery, materialJdbc.queryForObject("SELECT count(*) FROM learner_skill_masteries", Long.class));
+            assertEquals(progress, materialJdbc.queryForObject("SELECT count(*) FROM lesson_progress", Long.class));
+            assertTrue(recordedMaterialEvents.stream().noneMatch(e -> e.getClass().getSimpleName().equals("QuizSubmittedEvent")));
+        }
+    }
+
+    @Test void as09RealCommitFaultsCompensationAndOuterTransaction() throws Exception {
+        try (var f = new AssignmentFixture()) {
+            f.learner(); var observed = new ObservedStorage(); var service = assignmentConsumer(observed, tickingClock(f.now));
+            service.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("old.pdf", PDF_A));
+            String old = f.key();
+            // Confirmed not committed: a clock that did not advance, and a deadline crossed during upload.
+            var fixed = assignmentConsumer(observed, java.time.Clock.fixed(f.submittedAt(), java.time.ZoneOffset.UTC));
+            assertThrows(IllegalStateException.class, () -> fixed.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("same.pdf", PDF_B)));
+            String rolledBack = observed.stored.getLast(); assertTrue(observed.deleted.contains(rolledBack)); assertEquals(old, f.key());
+            assertThrows(ObjectNotFoundException.class, () -> storage.open(rolledBack));
+            for (String fault : List.of("before", "after")) {
+                observed.commitFault = fault; int deleted = observed.deleted.size(); String previous = f.key();
+                assertThrows(RuntimeException.class, () -> service.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("unknown.pdf", PDF_B)));
+                String fresh = observed.stored.getLast(); assertEquals(deleted, observed.deleted.size());
+                assertEquals(fault.equals("before") ? previous : fresh, f.key());
+                try (var a = storage.open(previous); var b = storage.open(fresh)) { assertTrue(a.contentLength() > 0 && b.contentLength() > 0); }
+                observed.commitFault = null;
+            }
+            int stored = observed.stored.size();
+            new org.springframework.transaction.support.TransactionTemplate(materialTransactions).executeWithoutResult(tx ->
+                assertThrows(IllegalStateException.class, () -> service.submitOrReplace(f.base.course, f.assignment, () -> { throw new AssertionError("No parts"); })));
+            assertEquals(stored, observed.stored.size());
+            observed.failStore = true;
+            assertThrows(FileStorageException.class, () -> service.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("failed.pdf", PDF_A)));
+            assertTrue(observed.deleted.contains(observed.stored.getLast()));
+            for (String key : observed.stored) if (!key.equals(f.key())) storage.delete(key);
+        }
+    }
+
+    @Test void as09ConcurrentFirstSubmissionsAndStaleGradeAfterReplacement() throws Exception {
+        try (var f = new AssignmentFixture(); var workers = Executors.newFixedThreadPool(2)) {
+            CountDownLatch bothStored = new CountDownLatch(2);
+            var observed = new ObservedStorage() {
+                @Override public void store(String key, InputStream in, long size, String media) {
+                    assertFalse(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive());
+                    this.stored.add(key); storage.store(key, in, size, media); bothStored.countDown();
+                    try { assertTrue(bothStored.await(8, TimeUnit.SECONDS)); } catch (InterruptedException e) { throw new IllegalStateException(e); }
+                }
+            };
+            var service = assignmentConsumer(observed, tickingClock(f.now));
+            java.util.concurrent.Callable<com.codemastery.modules.assessment.application.service.SubmissionService.SubmissionOutcome> submit = () -> {
+                f.learner(); try { return service.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("concurrent.pdf", PDF_A)); }
+                finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+            };
+            var a = workers.submit(submit); var b = workers.submit(submit);
+            var one = a.get(12, TimeUnit.SECONDS); var two = b.get(12, TimeUnit.SECONDS);
+            assertNotEquals(one.created(), two.created());
+            assertEquals(1, materialJdbc.queryForObject("SELECT count(*) FROM submissions WHERE assignment_id=?", Integer.class, f.assignment));
+            java.time.Instant stale = f.submittedAt();
+            f.learner(); service.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("replacement.pdf", PDF_B));
+            f.owner();
+            var conflict = assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                    () -> service.gradeSubmission(f.base.course, f.assignment, f.submission(), grade(stale)));
+            assertEquals(org.springframework.http.HttpStatus.CONFLICT, conflict.getStatus());
+            assertTrue(COMMITTED_GRADES.stream().noneMatch(e -> e.assignmentId().equals(f.assignment)));
+        }
+    }
+
+    @Test void as09DownloadReplacementRetryAndConnectionRelease() throws Exception {
+        try (var f = new AssignmentFixture()) {
+            var observed = new ObservedStorage(); var service = assignmentConsumer(observed, tickingClock(f.now));
+            f.learner(); service.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("old.pdf", PDF_A));
+            UUID id = f.submission(); f.owner();
+            observed.beforeOpen = () -> {
+                f.learner(); service.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("new.pdf", PDF_B)); f.owner();
+            };
+            try (var file = service.downloadSubmissionForOwner(f.base.course, f.assignment, id)) {
+                assertEquals("new.pdf", file.originalFilename()); assertArrayEquals(PDF_B, file.content().readAllBytes());
+                assertEquals(0, BORROWED.get()); assertEquals(1, materialJdbc.queryForObject("SELECT 1", Integer.class));
+            }
+            assertEquals(2, observed.opens);
+            observed.providerFailure = true;
+            assertThrows(FileStorageException.class, () -> service.downloadSubmissionForOwner(f.base.course, f.assignment, id));
+            assertEquals(3, observed.opens); observed.providerFailure = false;
+            storage.delete(f.key());
+            assertThrows(IllegalStateException.class, () -> service.downloadSubmissionForOwner(f.base.course, f.assignment, id));
+            assertEquals(4, observed.opens);
+        }
+    }
+
+    @Test void as09RealTomcatAdmissionRawMultipartAndGradeContracts() throws Exception {
+        try (var f = new AssignmentFixture(); var foreign = new AssignmentFixture()) {
+            String owner = f.base.token(f.base.owner), learner = f.base.token(f.base.learner), other = foreign.base.token(foreign.base.owner);
+            String upload = f.path() + "/submission";
+            byte[] body = materialMultipart(false), malformed = "x=%ZZ".getBytes(StandardCharsets.US_ASCII);
+            assertEquals(401, materialHttp("PUT", upload, null, "application/x-www-form-urlencoded", malformed).statusCode());
+            assertEquals(415, materialHttp("PUT", upload, owner, "application/x-www-form-urlencoded", malformed).statusCode());
+            assertEquals(403, materialHttp("PUT", upload, owner, "multipart/form-data; boundary=x", malformed).statusCode());
+            assertEquals(400, materialHttp("PUT", upload, learner, "multipart/form-data; boundary=x", malformed).statusCode());
+            assertEquals(413, materialHttp("PUT", upload, learner, "multipart/form-data; boundary=x", new byte[2048]).statusCode());
+            assertEquals(403, materialHttp("PUT", upload, owner, "multipart/form-data; boundary=x", new byte[2048]).statusCode());
+            var created = materialHttp("PUT", upload, learner, "multipart/form-data; boundary=x", body);
+            assertEquals(201, created.statusCode(), new String(created.body(), StandardCharsets.UTF_8));
+            var json = new tools.jackson.databind.json.JsonMapper();
+            String version = json.readTree(created.body()).get("submittedAt").asString();
+            assertEquals(200, materialHttp("GET", f.path(), learner, null, new byte[0]).statusCode());
+            assertEquals(200, materialHttp("GET", "/api/courses/" + f.base.course + "/assignments", learner, null, new byte[0]).statusCode());
+            assertEquals(403, materialHttp("GET", f.path(), owner, null, new byte[0]).statusCode());
+            assertEquals(403, materialHttp("GET", f.owned() + "/submissions", other, null, new byte[0]).statusCode());
+            UUID id = f.submission();
+            assertEquals(200, materialHttp("GET", f.owned() + "/submissions", owner, null, new byte[0]).statusCode());
+            assertEquals(404, materialHttp("PUT", f.owned() + "/submissions/" + UUID.randomUUID() + "/grade", owner, "application/json", "{}".getBytes(StandardCharsets.UTF_8)).statusCode());
+            byte[] grade = ("{\"gradePercentage\":99.99,\"feedback\":\"Good\\nWork\",\"submittedAt\":\"" + version + "\"}").getBytes(StandardCharsets.UTF_8);
+            String grading = f.owned() + "/submissions/" + id + "/grade";
+            assertEquals(200, materialHttp("PUT", grading, owner, "application/json", grade).statusCode());
+            assertEquals(409, materialHttp("PUT", upload, learner, "multipart/form-data; boundary=x", body).statusCode());
+            assertEquals(400, materialHttp("PUT", upload, learner, "multipart/form-data; boundary=x", malformed).statusCode());
+            for (String download : List.of(f.path() + "/submission/file", f.owned() + "/submissions/" + id + "/file")) {
+                var response = materialHttp("GET", download, download.contains("owned-") ? owner : learner, null, new byte[0]);
+                assertEquals(200, response.statusCode()); assertArrayEquals(PDF_A, response.body());
+                assertEquals("nosniff", response.headers().firstValue("X-Content-Type-Options").orElse(""));
+                assertEquals("no-store", response.headers().firstValue("Cache-Control").orElse(""));
+                assertTrue(response.headers().firstValue("Content-Disposition").orElse("").contains("filename*=UTF-8''B%C3%A0i.pdf"));
+                assertEquals(Integer.toString(PDF_A.length), response.headers().firstValue("Content-Length").orElse(""));
+            }
+            // Parameter binding on a GET must not parse hostile multipart before role admission.
+            assertEquals(403, materialHttp("GET", f.owned() + "/submissions", learner, "multipart/form-data; boundary=x", malformed).statusCode());
+            assertEquals(403, materialHttp("DELETE", upload, learner, null, new byte[0]).statusCode());
+        }
+    }
+
+
+    @Test void as09RestrictedRuntimeConsumerUsesTheExecutableMatrix() throws Exception {
+        try (var f = new AssignmentFixture()) {
+            String role = "as09_" + UUID.randomUUID().toString().replace("-", "");
+            materialJdbc.execute("CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT");
+            try {
+                materialJdbc.execute("GRANT USAGE ON SCHEMA public TO " + role);
+                String deployment = Files.readString(Path.of("..", "infrastructure", "vm", "deploy.sh"));
+                String matrix = deployment.split("RUNTIME_PRIVILEGE_MATRIX='\\n", 2)[1].split("\\n'", 2)[0];
+                for (String line : matrix.split("\\n")) {
+                    String[] fields = line.trim().split("\\s+");
+                    if (!fields[1].equals("-")) materialJdbc.execute("GRANT " + fields[1] + " ON public." + fields[0] + " TO " + role);
+                    if (!fields[2].equals("-")) for (String columns : fields[2].split("\\+"))
+                        materialJdbc.execute("GRANT " + columns + " ON public." + fields[0] + " TO " + role);
+                }
+                var observed = new ObservedStorage(); var service = assignmentConsumer(observed, tickingClock(f.now));
+                RUNTIME_ROLE.set(role);
+                assertEquals(role, materialJdbc.queryForObject("SELECT current_user", String.class));
+                assertFalse(materialJdbc.queryForObject("SELECT has_table_privilege(current_user,'submissions','UPDATE')", Boolean.class));
+                f.learner();
+                service.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("runtime.pdf", PDF_A));
+                UUID id = f.submission();
+                service.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("runtime-new.pdf", PDF_B));
+                assertEquals(1, assignmentService.listForLearner(f.base.course, 0, 20).totalElements());
+                try (var download = service.downloadOwnSubmission(f.base.course, f.assignment)) { assertArrayEquals(PDF_B, download.content().readAllBytes()); }
+                f.owner();
+                assertEquals("Learner", service.listSubmissionsForOwner(f.base.course, f.assignment, 0, 20).content().getFirst().learnerDisplayName());
+                service.gradeSubmission(f.base.course, f.assignment, id, grade(f.submittedAt()));
+                try (var download = service.downloadSubmissionForOwner(f.base.course, f.assignment, id)) { assertArrayEquals(PDF_B, download.content().readAllBytes()); }
+                var tx = new org.springframework.transaction.support.TransactionTemplate(materialTransactions);
+                assertTrue(tx.execute(status -> assignmentService.lockNotificationState(f.assignment)).isPresent());
+                assertEquals(1, assignmentService.findReminderCandidates(f.now, f.now.plusSeconds(7200), null, 20).stream()
+                        .filter(row -> row.assignmentId().equals(f.assignment)).count());
+                assertThrows(org.springframework.dao.DataAccessException.class, () -> materialJdbc.update("UPDATE submissions SET user_id=user_id WHERE false"));
+                assertThrows(org.springframework.dao.DataAccessException.class, () -> materialJdbc.update("DELETE FROM submissions WHERE false"));
+            } finally {
+                RUNTIME_ROLE.remove();
+                materialJdbc.execute("DROP OWNED BY " + role); materialJdbc.execute("DROP ROLE " + role);
+            }
+        }
+    }
+
+    @Test void as09NotificationProducerDiscoveryAndSharedLockAdmission() throws Exception {
+        try (var f = new AssignmentFixture(); var workers = Executors.newFixedThreadPool(2)) {
+            var deadline = f.now.plusSeconds(3600);
+            // Discovery has an exclusive lower bound, inclusive upper bound and strict keyset cursor.
+            assertTrue(assignmentService.findReminderCandidates(deadline, deadline.plusSeconds(1), null, 20).stream().noneMatch(c -> c.assignmentId().equals(f.assignment)));
+            var discovered = assignmentService.findReminderCandidates(f.now, deadline, null, 20).stream().filter(c -> c.assignmentId().equals(f.assignment)).findFirst().orElseThrow();
+            assertEquals(f.base.lesson, discovered.lessonId()); assertTrue(discovered.submittedLearnerIds().isEmpty());
+            var cursor = new com.codemastery.modules.assessment.application.service.AssignmentService.ReminderCursor(deadline, f.assignment);
+            assertTrue(assignmentService.findReminderCandidates(f.now, deadline, cursor, 20).stream().noneMatch(c -> c.assignmentId().equals(f.assignment)));
+            assertThrowsExactly(IllegalStateException.class, () -> assignmentService.lockNotificationState(f.assignment));
+            var readOnly = new org.springframework.transaction.support.TransactionTemplate(materialTransactions); readOnly.setReadOnly(true);
+            assertThrowsExactly(IllegalStateException.class, () -> readOnly.execute(tx -> assignmentService.lockNotificationState(f.assignment)));
+            CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1), attempting = new CountDownLatch(1);
+            var admitted = workers.submit(() -> new org.springframework.transaction.support.TransactionTemplate(materialTransactions).execute(tx -> {
+                var state = assignmentService.lockNotificationState(f.assignment).orElseThrow(); locked.countDown();
+                try { assertTrue(release.await(8, TimeUnit.SECONDS)); } catch (InterruptedException e) { throw new IllegalStateException(e); }
+                return state;
+            }));
+            assertTrue(locked.await(5, TimeUnit.SECONDS));
+            var edit = workers.submit(() -> {
+                f.owner(); attempting.countDown();
+                try { return assignmentService.setPublication(f.base.course, f.assignment, "hidden"); }
+                finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+            });
+            try { assertTrue(attempting.await(5, TimeUnit.SECONDS)); assertFalse(edit.isDone()); }
+            finally { release.countDown(); }
+            assertEquals("AS09", admitted.get(5, TimeUnit.SECONDS).assignmentTitle()); edit.get(5, TimeUnit.SECONDS);
+            assertTrue(new org.springframework.transaction.support.TransactionTemplate(materialTransactions).execute(tx -> assignmentService.lockNotificationState(f.assignment)).isEmpty());
+        }
+    }
+
+
+    @Test void as09DeadlineBoundaryCleanupAndGradingRace() throws Exception {
+        try (var f = new AssignmentFixture(); var workers = Executors.newFixedThreadPool(2)) {
+            var deadline = f.now.plusSeconds(3600);
+            // now = deadline - 1 microsecond succeeds; equality fails before storage.
+            var observed = new ObservedStorage();
+            var edge = assignmentConsumer(observed, java.time.Clock.fixed(deadline.minusNanos(1000), java.time.ZoneOffset.UTC));
+            f.learner(); edge.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("edge.pdf", PDF_A));
+            java.time.Instant reviewed = f.submittedAt(); int stored = observed.stored.size();
+            var late = assignmentConsumer(observed, java.time.Clock.fixed(deadline, java.time.ZoneOffset.UTC));
+            assertEquals(org.springframework.http.HttpStatus.CONFLICT, assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                    () -> late.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("late.pdf", PDF_A))).getStatus());
+            assertEquals(stored, observed.stored.size());
+            // Widen the deadline, then hold a real replacement's Assignment lock while grading starts.
+            f.owner(); assignmentService.replace(f.base.course, f.assignment,
+                    new com.codemastery.modules.assessment.application.service.AssignmentService.AssignmentInput("AS09", "Instructions", deadline.plusSeconds(3600), f.base.lesson));
+            CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1), grading = new CountDownLatch(1);
+            var pausedRows = org.mockito.Mockito.mock(com.codemastery.modules.assessment.domain.repository.AssignmentRepository.class,
+                    org.mockito.AdditionalAnswers.delegatesTo(assignmentRows));
+            org.mockito.Mockito.doAnswer(call -> {
+                var row = assignmentRows.findInCourseForUpdate(f.assignment, f.base.course); locked.countDown();
+                assertTrue(release.await(8, TimeUnit.SECONDS)); return row;
+            }).when(pausedRows).findInCourseForUpdate(f.assignment, f.base.course);
+            var replacementService = new com.codemastery.modules.assessment.application.service.SubmissionService(pausedRows, materialAccess,
+                    assignmentIdentities, assignmentEnrollments, observed, materialPersistence, applicationPublisher, materialTransactions,
+                    1024, java.time.Clock.fixed(deadline, java.time.ZoneOffset.UTC));
+            var replacement = workers.submit(() -> {
+                f.learner(); try { return replacementService.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("replacement.pdf", PDF_B)); }
+                finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+            });
+            assertTrue(locked.await(5, TimeUnit.SECONDS)); UUID id = f.submission();
+            var save = workers.submit(() -> {
+                f.owner(); grading.countDown();
+                try { return edge.gradeSubmission(f.base.course, f.assignment, id, grade(reviewed)); }
+                finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+            });
+            try {
+                assertTrue(grading.await(5, TimeUnit.SECONDS));
+                boolean waiting = false;
+                for (int i = 0; i < 100 && !waiting; i++) {
+                    try (var connection = java.sql.DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+                         var query = connection.createStatement();
+                         var result = query.executeQuery("SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type='Lock' AND query ILIKE '%assignments%')")) {
+                        result.next(); waiting = result.getBoolean(1);
+                    }
+                    if (!waiting) Thread.sleep(10);
+                }
+                assertTrue(waiting, "Grade must wait for the replacement's Assignment lock"); assertFalse(save.isDone());
+            } finally { release.countDown(); }
+            assertFalse(replacement.get(5, TimeUnit.SECONDS).created());
+            var failure = assertThrows(java.util.concurrent.ExecutionException.class, () -> save.get(5, TimeUnit.SECONDS));
+            assertEquals(org.springframework.http.HttpStatus.CONFLICT, ((com.codemastery.common.exception.BusinessRuleException)failure.getCause()).getStatus());
+            assertNull(materialJdbc.queryForObject("SELECT graded_at FROM submissions WHERE id=?", java.sql.Timestamp.class, id));
+        }
+    }
+
+    @Test void as09DeadlineChangedDuringUploadAndDeleteFailureRemainSafe() throws Exception {
+        try (var f = new AssignmentFixture()) {
+            var observed = new ObservedStorage() {
+                @Override public void store(String key, InputStream in, long size, String media) {
+                    super.store(key, in, size, media);
+                    f.owner(); assignmentService.replace(f.base.course, f.assignment,
+                            new com.codemastery.modules.assessment.application.service.AssignmentService.AssignmentInput("AS09", "Instructions", f.now, f.base.lesson));
+                    f.learner();
+                }
+            };
+            var service = assignmentConsumer(observed, tickingClock(f.now)); f.learner();
+            assertEquals(org.springframework.http.HttpStatus.CONFLICT, assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                    () -> service.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("crossed.pdf", PDF_A))).getStatus());
+            assertThrows(ObjectNotFoundException.class, () -> storage.open(observed.stored.getFirst()));
+            assertEquals(0, materialJdbc.queryForObject("SELECT count(*) FROM submissions WHERE assignment_id=?", Integer.class, f.assignment));
+            f.owner(); assignmentService.replace(f.base.course, f.assignment,
+                    new com.codemastery.modules.assessment.application.service.AssignmentService.AssignmentInput("AS09", "Instructions", f.now.plusSeconds(3600), f.base.lesson));
+            var failedDelete = new ObservedStorage(); failedDelete.failDelete = true;
+            var replace = assignmentConsumer(failedDelete, tickingClock(f.now)); f.learner();
+            replace.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("a.pdf", PDF_A));
+            String orphan = f.key(); replace.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("b.pdf", PDF_B));
+            assertTrue(failedDelete.deleted.contains(orphan));
+            try (var kept = storage.open(orphan); var current = replace.downloadOwnSubmission(f.base.course, f.assignment)) {
+                assertArrayEquals(PDF_A, kept.content().readAllBytes()); assertArrayEquals(PDF_B, current.content().readAllBytes());
+            }
+            storage.delete(orphan);
+        }
+    }
+
+
+    @Test void as09HttpVisibilityAndResourceConcealmentMatrix() throws Exception {
+        try (var f = new AssignmentFixture(); var other = new AssignmentFixture()) {
+            String learner = f.base.token(f.base.learner), owner = f.base.token(f.base.owner), stranger = other.base.token(other.base.learner);
+            String upload = f.path() + "/submission";
+            byte[] multipart = materialMultipart(false), broken = "broken".getBytes(StandardCharsets.US_ASCII);
+            assertEquals(201, materialHttp("PUT", upload, learner, "multipart/form-data; boundary=x", multipart).statusCode());
+            UUID id = f.submission(); String grading = f.owned() + "/submissions/" + id + "/grade";
+            for (String path : List.of(f.path(), f.path() + "/submission/file", f.owned() + "/submissions", f.owned() + "/submissions/" + id + "/file")) {
+                assertEquals(401, materialHttp("GET", path, null, null, new byte[0]).statusCode(), path);
+                assertEquals(403, materialHttp("GET", path, path.contains("owned-") ? learner : owner, null, new byte[0]).statusCode(), path);
+            }
+            assertEquals(401, materialHttp("PUT", grading, null, "application/json", broken).statusCode());
+            assertEquals(403, materialHttp("PUT", grading, learner, "application/json", broken).statusCode());
+            assertEquals(415, materialHttp("PUT", grading, learner, "multipart/form-data; boundary=x", broken).statusCode());
+            assertEquals(400, materialHttp("GET", f.owned() + "/submissions?size=0", learner, null, new byte[0]).statusCode());
+            assertEquals(403, materialHttp("PUT", upload, stranger, "multipart/form-data; boundary=x", broken).statusCode());
+            materialJdbc.update("UPDATE enrollments SET status='left' WHERE course_id=?", f.base.course);
+            assertEquals(403, materialHttp("PUT", upload, learner, "multipart/form-data; boundary=x", broken).statusCode());
+            assertEquals(403, materialHttp("GET", f.path() + "/submission/file", learner, null, new byte[0]).statusCode());
+            materialJdbc.update("UPDATE enrollments SET status='completed' WHERE course_id=?", f.base.course);
+            assertEquals(200, materialHttp("GET", f.path(), learner, null, new byte[0]).statusCode());
+            for (String table : List.of("assignments", "lessons", "courses")) {
+                UUID target = table.equals("assignments") ? f.assignment : table.equals("lessons") ? f.base.lesson : f.base.course;
+                materialJdbc.update("UPDATE " + table + " SET publication_status='hidden' WHERE id=?", target);
+                assertEquals(404, materialHttp("PUT", upload, learner, "multipart/form-data; boundary=x", broken).statusCode(), table);
+                assertEquals(404, materialHttp("GET", f.path() + "/submission/file", learner, null, new byte[0]).statusCode(), table);
+                assertEquals(200, materialHttp("GET", f.owned() + "/submissions/" + id + "/file", owner, null, new byte[0]).statusCode(), table);
+                materialJdbc.update("UPDATE " + table + " SET publication_status='published' WHERE id=?", target);
+            }
+            assertEquals(404, materialHttp("PUT", upload.replace(f.assignment.toString(), other.assignment.toString()), learner, "multipart/form-data; boundary=x", broken).statusCode());
+            assertEquals(404, materialHttp("GET", f.owned() + "/submissions/" + UUID.randomUUID() + "/file", owner, null, new byte[0]).statusCode());
+            materialJdbc.update("UPDATE users SET role='admin' WHERE id=?", other.base.learner);
+            String admin = other.base.token(other.base.learner);
+            assertEquals(403, materialHttp("GET", f.path(), admin, null, new byte[0]).statusCode());
+            assertEquals(403, materialHttp("GET", f.owned() + "/submissions", admin, null, new byte[0]).statusCode());
+            // No bytes follow the headers: parsing a part before admission would block this request.
+            String encoded = upload.replace("/api/courses/", "/%61pi/%63ourses/").replace("/assignments/", "/%61ssignments/").replace("/submission", "/%73ubmission");
+            try (var socket = new java.net.Socket("127.0.0.1", materialPort)) {
+                socket.setSoTimeout(5000);
+                String request = "PUT " + encoded + " HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer " + owner
+                        + "\r\nContent-Type: multipart/form-data; boundary=x\r\nContent-Length: 100000\r\n\r\n";
+                socket.getOutputStream().write(request.getBytes(StandardCharsets.US_ASCII)); socket.getOutputStream().flush();
+                var reader = new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+                assertTrue(reader.readLine().startsWith("HTTP/1.1 403"));
+                var headers = new ArrayList<String>(); String line;
+                while ((line = reader.readLine()) != null && !line.isEmpty()) headers.add(line.toLowerCase(java.util.Locale.ROOT));
+                assertTrue(headers.contains("connection: close"));
+            }
+        }
+    }
+
+    @Test void as09PausedDownloadReleasesTheOnlyPoolConnection() throws Exception {
+        try (var f = new AssignmentFixture(); var workers = Executors.newFixedThreadPool(2)) {
+            f.learner(); submissionService.submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("a.pdf", PDF_A));
+            var source = ((org.springframework.jdbc.datasource.DelegatingDataSource)materialJdbc.getDataSource()).getTargetDataSource();
+            var pool = source.unwrap(com.zaxxer.hikari.HikariDataSource.class);
+            int maximum = pool.getMaximumPoolSize(); long timeout = pool.getConnectionTimeout();
+            CountDownLatch copying = new CountDownLatch(1), release = new CountDownLatch(1);
+            pool.setMaximumPoolSize(1); pool.setConnectionTimeout(1000); pool.getHikariPoolMXBean().softEvictConnections();
+            FileStorage paused = new FileStorage() {
+                public void store(String key, InputStream in, long size, String media) { throw new AssertionError(); }
+                public void delete(String key) { throw new AssertionError(); }
+                public StoredObject open(String key) {
+                    assertEquals(0, BORROWED.get()); var object = storage.open(key);
+                    return new StoredObject(object.contentLength(), object.mediaType(), new java.io.FilterInputStream(object.content()) {
+                        @Override public int read(byte[] bytes, int offset, int length) throws IOException {
+                            copying.countDown();
+                            try { assertTrue(release.await(5, TimeUnit.SECONDS)); } catch (InterruptedException e) { throw new IOException(e); }
+                            return super.read(bytes, offset, length);
+                        }
+                    });
+                }
+            };
+            try {
+                var streaming = workers.submit(() -> {
+                    f.learner();
+                    try (var file = assignmentConsumer(paused, java.time.Clock.systemUTC()).downloadOwnSubmission(f.base.course, f.assignment)) {
+                        var response = new ByteArrayOutputStream(); file.content().transferTo(response); return response.toByteArray();
+                    } finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+                });
+                assertTrue(copying.await(5, TimeUnit.SECONDS));
+                var another = workers.submit(() -> materialJdbc.queryForObject("SELECT 1", Integer.class));
+                assertEquals(1, another.get(3, TimeUnit.SECONDS)); release.countDown();
+                assertArrayEquals(PDF_A, streaming.get(5, TimeUnit.SECONDS));
+            } finally { release.countDown(); pool.setMaximumPoolSize(maximum); pool.setConnectionTimeout(timeout); }
+        }
+    }
+
+    @Test void as09NotificationStateRefreshesPreloadedEntityAndHoldsCallerSharedLock() throws Exception {
+        try (var f = new AssignmentFixture(); var workers = Executors.newSingleThreadExecutor()) {
+            var tx = new org.springframework.transaction.support.TransactionTemplate(materialTransactions);
+            tx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+            tx.executeWithoutResult(status -> {
+                String callerTransaction = materialJdbc.queryForObject("SELECT pg_current_xact_id()::text", String.class);
+                assertEquals("AS09", assignmentRows.findInCourse(f.assignment, f.base.course).orElseThrow().title());
+                try {
+                    workers.submit(() -> {
+                        f.owner();
+                        assignmentService.replace(f.base.course, f.assignment, new com.codemastery.modules.assessment.application.service.AssignmentService.AssignmentInput("Current", "Instructions", f.now.plusSeconds(7200), null));
+                        f.learner();
+                        assignmentConsumer(storage, tickingClock(f.now)).submitOrReplace(f.base.course, f.assignment, () -> assignmentPdf("current.pdf", PDF_A));
+                        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+                    }).get(8, TimeUnit.SECONDS);
+                } catch (Exception e) { throw new IllegalStateException(e); }
+                var current = assignmentService.lockNotificationState(f.assignment).orElseThrow();
+                assertEquals(callerTransaction, materialJdbc.queryForObject("SELECT pg_current_xact_id()::text", String.class));
+                assertEquals("Current", current.assignmentTitle()); assertNull(current.lessonId());
+                assertEquals(f.now.plusSeconds(7200), current.deadlineAt());
+                assertEquals(java.util.Set.of(f.base.learner), current.submittedLearnerIds());
+                assertThrows(UnsupportedOperationException.class, () -> current.submittedLearnerIds().clear());
+                try {
+                    String sqlState = workers.submit(() -> {
+                        try (var c = java.sql.DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword())) {
+                            c.setAutoCommit(false);
+                            try (var statement = c.createStatement()) {
+                                statement.execute("SET LOCAL lock_timeout='300ms'");
+                                statement.execute("SELECT id FROM assignments WHERE id='" + f.assignment + "' FOR UPDATE");
+                                return "UNEXPECTED_LOCK_ACQUIRED";
+                            } catch (java.sql.SQLException blocked) { return blocked.getSQLState(); }
+                            finally { c.rollback(); }
+                        }
+                    }).get(5, TimeUnit.SECONDS);
+                    assertEquals("55P03", sqlState);
+                } catch (Exception e) { throw new IllegalStateException(e); }
+            });
+            // The caller completed: the former shared lock must no longer block a writer.
+            tx.executeWithoutResult(status -> {
+                materialJdbc.execute("SET LOCAL lock_timeout='300ms'");
+                assertEquals(f.assignment, materialJdbc.queryForObject(
+                        "SELECT id FROM assignments WHERE id=? FOR UPDATE", UUID.class, f.assignment));
+            });
+        }
+    }
+
 }

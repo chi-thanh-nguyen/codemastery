@@ -399,7 +399,7 @@ check "CO09 publication" "$STATUS/$(field publicationStatus)" "200/published"
 call POST "$material_path" "$token_i" '{"title":"Video","materialType":"external_video","externalVideoUrl":"https://www.youtube-nocookie.com/embed/test_01"}'
 check "CO09 canonical video creation" "$STATUS/$(field materialType)" "201/external_video"
 
-echo "== AS09 owner assignments (r12: assignments SELECT, INSERT, UPDATE(definition, publication); submissions SELECT(id, assignment_id, graded_at))"
+echo "== AS09 assignments and submissions (r12/r16)"
 assigned=/api/courses/$authored
 call POST "$assigned/assignments" "$token_i" "{\"title\":\"Project\",\"instructions\":\"Submit a ZIP\",\"deadlineAt\":\"9999-12-31T23:59:59.999999Z\",\"lessonId\":\"$lesson_a\"}"
 check "create an Assignment at the latest representable deadline (INSERT)" "$STATUS/$(field publicationStatus)/$(field deadlineAt)" "201/hidden/9999-12-31T23:59:59.999999Z"
@@ -432,9 +432,24 @@ call GET "$assigned/owned-assignments" "$token_i"
 check "owner list with submission and graded counts (column SELECT)" "$STATUS/$(field totalElements)/$(field content.0.submissionCount)/$(field content.0.gradedCount)" "200/1/2/1"
 call GET "$assigned/owned-assignments/$assignment" "$token_i"; check "owner read" "$STATUS/$(field title)" "200/Project 2"
 call GET "$assigned/owned-assignments" "$token_a"; check "a Learner cannot read owner assignments" "$STATUS" 403
+# AS09 r16: backend queries execute as the configured non-owner runtime login.
+call PUT "$assigned/membership" "$token_a"
+check "learner joins the authored Course" "$STATUS" 200
+call GET "$assigned/assignments" "$token_a"
+check "learner assignment page (real schema joins)" "$STATUS/$(field totalElements)" "200/1"
+call GET "$assigned/assignments/$assignment" "$token_a"
+check "own ungraded submission has nullable grade" "$STATUS/$(field submission.graded)/$(field submission.gradePercentage)" "200/False/None"
+call GET "$assigned/owned-assignments/$assignment/submissions" "$token_i"
+check "owner receives page-bounded historical names" "$STATUS/$(field totalElements)" "200/2"
+submission="$(field content.0.id)"; submitted_at="$(field content.0.submittedAt)"
+call PUT "$assigned/owned-assignments/$assignment/submissions/$submission/grade" "$token_i" "{\"gradePercentage\":99.99,\"feedback\":\"Reviewed\",\"submittedAt\":\"$submitted_at\"}"
+check "locked grade writes only approved runtime columns" "$STATUS/$(field gradePercentage)/$(field feedback)" "200/99.99/Reviewed"
+call PUT "$assigned/owned-assignments/$assignment/submissions/$submission/grade" "$token_i" "{\"gradePercentage\":80,\"feedback\":\"Updated\",\"submittedAt\":\"$submitted_at\"}"
+check "regrade remains supported" "$STATUS/$(field feedback)" "200/Updated"
 psql_admin >/dev/null <<SQL
 DELETE FROM public.submissions WHERE assignment_id='$assignment';
 DELETE FROM public.assignments WHERE id='$assignment';
+DELETE FROM public.enrollments WHERE course_id='$authored';
 DELETE FROM public.learning_materials WHERE lesson_id IN (SELECT id FROM public.lessons WHERE chapter_id IN ('$chapter_a','$chapter_b'));
 DELETE FROM public.lessons WHERE chapter_id IN ('$chapter_a','$chapter_b');
 DELETE FROM public.chapters WHERE course_id='$authored';
