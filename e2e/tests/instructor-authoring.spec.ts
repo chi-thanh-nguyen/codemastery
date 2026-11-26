@@ -38,6 +38,13 @@ test('FE16 complete authoring, safe Preview, exact deadlines and grading handoff
     const external: string[] = [];
     page.on('request', r => { if (new URL(r.url()).hostname === 'example.test') external.push(r.url()); });
     await page.getByRole('button', { name: 'Preview', exact: true }).focus(); await page.keyboard.press('Space');
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.getByRole('button', { name: 'Instructions', exact: true })).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(page.getByRole('textbox', { name: 'Instructions', exact: true })).toHaveValue(markdown);
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByRole('button', { name: 'Preview', exact: true })).toBeFocused();
+    await page.keyboard.press('Space');
     const preview = page.getByRole('region', { name: 'Instructions preview' });
     await expect(preview.getByRole('heading', { name: 'Assignment preview' })).toBeVisible();
     await expect(preview.getByRole('table')).toBeVisible();

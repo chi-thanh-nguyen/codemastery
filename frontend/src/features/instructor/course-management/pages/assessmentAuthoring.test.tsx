@@ -159,6 +159,23 @@ async function choose(label: string, option: string, scope: ParentNode = documen
 const text = () => document.body.textContent ?? '';
 
 describe('FE16 complete Assignment authoring', () => {
+    it('uses arrow focus and explicit activation for Instructions/Preview without changing the draft', async () => {
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment());
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Instructions', '# Keyboard draft');
+        await act(async () => {
+            find('Instructions').focus();
+            find('Instructions').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+        });
+        expect(document.activeElement).toBe(find('Preview'));
+        expect(find('Instructions').getAttribute('aria-pressed')).toBe('true');
+        await click('Preview');
+        expect(find('Preview').getAttribute('aria-pressed')).toBe('true');
+        await act(async () => find('Preview').dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true })));
+        expect(document.activeElement).toBe(find('Instructions'));
+        await click('Instructions');
+        expect(field('Instructions').value).toBe('# Keyboard draft');
+    });
     it('keeps the related lesson unchanged when the course context failed', async () => {
         vi.mocked(readOwnedAssignment).mockResolvedValue(assignment());
         vi.mocked(replaceAssignment).mockImplementation(async (_c, _a, write) => assignment(write));

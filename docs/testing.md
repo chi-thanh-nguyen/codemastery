@@ -104,6 +104,13 @@ after the regression checks. This statement is author verification only.
 | FE16-A05 | P3: long form on a short viewport | Save action only after long content; reuse Lesson editor semantic sticky save pattern | Real responsive screenshots and keyboard controls |
 | FE16-A06 | P3: four-digit early year or normalized invalid native date | Local helper omitted year padding and accepted Date normalization; pad year, reject normalized calendar/UTC-range overflow, retain untouched exact server instant | Helper regression and real past/microsecond journey |
 
+A final keyboard probe initially assumed arrow navigation automatically selected
+the new mode. Inspection and browser evidence showed MUI already implements
+roving focus with explicit Space activation; that assumption was a test defect,
+not a confirmed production finding. A trial extra handler conflicted with MUI
+and was removed before publication. Final component and real-browser checks
+exercise Arrow focus followed by explicit activation and retained draft bytes.
+
 N7 is a **resolved FE16 contract/presentation mismatch**, not an unimplemented
 server-error API. Actual backend 400 evidence has safe detail and no field errors;
 the transport intentionally replaces diagnostics. `FE16-N7-2026-11-27-r1`
@@ -138,9 +145,11 @@ git bundle verify <external-evidence>/original-heads.bundle
   landing illustration timing exposed missing `ResizeObserver` in root route
   fixtures. Supply the same browser API doubles already used by the landing
   test at suite setup; no route or product behavior/assertion is weakened.
-  Final affected-suite rerun: **303/303, 2 files** (201 route + 102 authoring).
+  Before the additional keyboard regression, the affected-suite rerun passed
+  **303/303, 2 files** (201 route + 102 authoring). The final rerun passed
+  **304/304** (201 route + 103 authoring).
   The other **413** unchanged consumer tests passed in the preceding selection.
-  Thus all **716 distinct selected tests** have passing final applicable
+  Thus all **717 distinct selected tests** have passing final applicable
   evidence; the rerun is not falsely described as a new 10-suite execution.
 - Controlled browser harness: **24/24 Chromium 153.0.8010.12 and 24/24 WebKit
   26.6**, no failed scenario. `page.route` doubles cover Grade/Open grading
