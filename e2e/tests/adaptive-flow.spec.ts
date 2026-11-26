@@ -4,7 +4,7 @@
  * skipped placement (A-3), and mastery-based practice difficulty selection & fallback (A-4).
  */
 import { randomUUID } from 'node:crypto';
-import type { APIRequestContext, Page } from '@playwright/test';
+import type { APIRequestContext, Browser, BrowserContext, Page } from '@playwright/test';
 import {
     expect,
     expectNoPageOverflow,
@@ -37,7 +37,6 @@ async function apiHeaders(request: APIRequestContext, account: Account) {
 /**
  * Creates an isolated published Course mirroring the SD03 loops sub-graph (ADR013 §8.2):
  * K1 Conditionals; K2 While Loops -> K1; K3 For Loops -> K1; K4 Loop Control -> K2, K3; K5 Lists -> K3.
- * Course title starts with `~E2E Journey ` and omits "foundations" / prerequisites per CT19 isolation rules.
  */
 async function createAdaptiveCourseFixture(
     request: APIRequestContext,
@@ -171,7 +170,7 @@ async function createAdaptiveCourseFixture(
     );
     expect(pPubRes.status()).toBe(200);
 
-    // 7. Create & publish easy and hard Practice Quizzes per Skill (no medium quiz for A-4 fallback)
+    // 7. Create & publish easy and hard Practice Quizzes per Skill
     for (let i = 0; i < 5; i += 1) {
         for (const difficulty of ['easy', 'hard'] as const) {
             const qIds = questions
@@ -196,7 +195,7 @@ async function createAdaptiveCourseFixture(
         }
     }
 
-    // 8. Enable Adaptive Mode with explicit CT35 test policy (weak 1/2, mastered 4/5, min 2)
+    // 8. Enable Adaptive Mode with explicit CT35 test policy
     const getSettings = await request.get(api(`/api/courses/${courseId}/adaptive-settings`), {
         headers,
     });
@@ -258,6 +257,24 @@ async function completePlacementThroughUi(
     await expect(page).toHaveURL(new RegExp(`/courses/${courseId}/attempts/`));
 }
 
+// Reusable helper to eliminate SonarCloud code duplication
+async function setupLearnerSessionWithPlacement(
+    browser: Browser,
+    request: APIRequestContext,
+    courseId: string,
+    profileLabel: string,
+    evaluator: (prompt: string) => boolean
+): Promise<{ page: Page; context: BrowserContext }> {
+    const account = newAccount(profileLabel);
+    await registerThroughApi(request, account);
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await signIn(page, account);
+    await enrollLearnerInCourse(page, courseId);
+    await completePlacementThroughUi(page, courseId, evaluator);
+    return { page, context };
+}
+
 test.describe('adaptive learning end-to-end journey (CT35)', () => {
     test('A-1 & A-2: contrasting learner profiles produce divergent Mastery Maps, test-outs, remedial reasons and non-blocking warnings', async ({
         browser,
@@ -267,21 +284,19 @@ test.describe('adaptive learning end-to-end journey (CT35)', () => {
         test.skip(!instructor, 'Needs an Instructor account to author the adaptive E2E course.');
         const fx = await createAdaptiveCourseFixture(request, instructor!);
 
-        // --- Profile A: Strong foundation (K1..K4 all correct) ---
-        const learnerA = newAccount('StrongA');
-        await registerThroughApi(request, learnerA);
-        const ctxA = await browser.newContext();
-        const pageA = await ctxA.newPage();
-
-        await signIn(pageA, learnerA);
-        await enrollLearnerInCourse(pageA, fx.courseId);
-        await completePlacementThroughUi(pageA, fx.courseId, () => true);
+        // Profile A: Strong foundation
+        const { page: pageA, context: ctxA } = await setupLearnerSessionWithPlacement(
+            browser,
+            request,
+            fx.courseId,
+            'StrongA',
+            () => true
+        );
 
         await pageA.getByRole('link', { name: /Open Mastery Map|See your Mastery Map/i }).click();
         await expect(pageA).toHaveURL(new RegExp(`/courses/${fx.courseId}/mastery`));
         await expect(pageA.getByText('Mastery states reflect the latest submitted quiz evidence for each skill.')).toBeVisible();
 
-        // Return to Path: E1..E4 tested out as Mastered, recommendation points to E5
         await pageA.getByRole('link', { name: 'Path', exact: true }).click();
         await expect(pageA.getByText('Mastered · Counted as complete')).toHaveCount(4);
         await expect(pageA.getByText('Continue with the next lesson in the course order.')).toBeVisible();
@@ -289,15 +304,14 @@ test.describe('adaptive learning end-to-end journey (CT35)', () => {
         await expectNoPageOverflow(pageA);
         await ctxA.close();
 
-        // --- Profile B: Loops prerequisite gap (K1 correct, K2..K4 incorrect) ---
-        const learnerB = newAccount('GapB');
-        await registerThroughApi(request, learnerB);
-        const ctxB = await browser.newContext();
-        const pageB = await ctxB.newPage();
-
-        await signIn(pageB, learnerB);
-        await enrollLearnerInCourse(pageB, fx.courseId);
-        await completePlacementThroughUi(pageB, fx.courseId, (prompt) => prompt.includes('K1 '));
+        // Profile B: Loops prerequisite gap
+        const { page: pageB, context: ctxB } = await setupLearnerSessionWithPlacement(
+            browser,
+            request,
+            fx.courseId,
+            'GapB',
+            (prompt) => prompt.includes('K1 ')
+        );
 
         await pageB.getByRole('link', { name: 'Path', exact: true }).click();
         await expect(
@@ -328,11 +342,9 @@ test.describe('adaptive learning end-to-end journey (CT35)', () => {
         await signIn(page, learnerC);
         await enrollLearnerInCourse(page, fx.courseId);
 
-        // Skip placement offer
         await page.getByRole('button', { name: 'Skip and start from the beginning' }).click();
         await expect(page.getByRole('link', { name: 'E1 Conditionals' }).first()).toBeVisible();
 
-        // Check Mastery Map: all skills stay Unknown
         await page.getByRole('link', { name: 'Mastery Map' }).click();
         await expect(page).toHaveURL(new RegExp(`/courses/${fx.courseId}/mastery`));
         await expect(page.getByText('Unknown')).toHaveCount(5);
@@ -347,14 +359,13 @@ test.describe('adaptive learning end-to-end journey (CT35)', () => {
         const fx = await createAdaptiveCourseFixture(request, instructor!);
 
         // 1. Learner A (K2 Mastered -> Hard practice on E2)
-        const learnerA = newAccount('PracticeA');
-        await registerThroughApi(request, learnerA);
-        const ctxA = await browser.newContext();
-        const pageA = await ctxA.newPage();
-        await signIn(pageA, learnerA);
-        await enrollLearnerInCourse(pageA, fx.courseId);
-        await completePlacementThroughUi(pageA, fx.courseId, () => true);
-
+        const { page: pageA, context: ctxA } = await setupLearnerSessionWithPlacement(
+            browser,
+            request,
+            fx.courseId,
+            'PracticeA',
+            () => true
+        );
         await pageA.goto(`/courses/${encodeURIComponent(fx.courseId)}/lessons/${encodeURIComponent(fx.lessons[1].id)}`);
         await expect(pageA.getByText('E2E practice K2 hard')).toBeVisible();
         await expect(
@@ -363,14 +374,13 @@ test.describe('adaptive learning end-to-end journey (CT35)', () => {
         await ctxA.close();
 
         // 2. Learner B (K2 Weak -> Easy practice on E2; K5 Unknown -> Easy practice on E5)
-        const learnerB = newAccount('PracticeB');
-        await registerThroughApi(request, learnerB);
-        const ctxB = await browser.newContext();
-        const pageB = await ctxB.newPage();
-        await signIn(pageB, learnerB);
-        await enrollLearnerInCourse(pageB, fx.courseId);
-        await completePlacementThroughUi(pageB, fx.courseId, (prompt) => prompt.includes('K1 '));
-
+        const { page: pageB, context: ctxB } = await setupLearnerSessionWithPlacement(
+            browser,
+            request,
+            fx.courseId,
+            'PracticeB',
+            (prompt) => prompt.includes('K1 ')
+        );
         await pageB.goto(`/courses/${encodeURIComponent(fx.courseId)}/lessons/${encodeURIComponent(fx.lessons[1].id)}`);
         await expect(pageB.getByText('E2E practice K2 easy')).toBeVisible();
         await expect(
@@ -385,16 +395,13 @@ test.describe('adaptive learning end-to-end journey (CT35)', () => {
         await ctxB.close();
 
         // 3. Learner D (1/2 on K1 -> Learning -> Medium target, falls back to Easy)
-        const learnerD = newAccount('FallbackD');
-        await registerThroughApi(request, learnerD);
-        const ctxD = await browser.newContext();
-        const pageD = await ctxD.newPage();
-        await signIn(pageD, learnerD);
-        await enrollLearnerInCourse(pageD, fx.courseId);
-        await completePlacementThroughUi(pageD, fx.courseId, (prompt) =>
-            prompt.includes('K1 ') && prompt.includes('(easy)')
+        const { page: pageD, context: ctxD } = await setupLearnerSessionWithPlacement(
+            browser,
+            request,
+            fx.courseId,
+            'FallbackD',
+            (prompt) => prompt.includes('K1 ') && prompt.includes('(easy)')
         );
-
         await pageD.goto(`/courses/${encodeURIComponent(fx.courseId)}/lessons/${encodeURIComponent(fx.lessons[0].id)}`);
         await expect(pageD.getByText('E2E practice K1 easy')).toBeVisible();
         await expect(
