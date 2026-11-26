@@ -8344,6 +8344,13 @@ the harness, and prepared the issue-level analysis under the Leader's instructio
 
 ## AS08 completion and remediation-author audit — 26 November 2026
 
+> Historical author audit at `031dbffffd4d7f8c60570755354ec11e7eb056b5`.
+> The subsequent full-scope independent review issued `REQUEST_CHANGES`: contract
+> synchronization was PARTIAL (IR296-02), focused test-source qualification was
+> PARTIAL (IR296-01/03), and AS18 was missing from the dependency inventory.
+> The assertions and original verification below remain dated history; the targeted
+> remediation record at the end of this section gives the current author disposition.
+
 **AS08_OWNED_CODE_COMPLETE_INTEGRATION_BLOCKED**, PR #296, branch
 `feat/as08-timed-attempts`. This is an implementation-author self-audit, not an
 independent review, CODEOWNER approval, US-06 acceptance or release qualification.
@@ -8413,6 +8420,7 @@ are aggregated per owning Issue.
 | AD07 #165 / CT40, ADR007 §16 companion | graph repositories, skill CRUD, DAG/prerequisite mutations, lesson mappings, ancestry, locking, REST/security and tests | assertion-only Course-skill validation plus allowlist/negative tests, approximately 3–5% | IMPLEMENTED under delegated technical authority; existing owner-only projections unchanged |
 | CT38 #21 / ADR007 §3.2 | existing configuration contract plus the AS08 feature-owned binding | the three already-approved inputs, strict validation and scheduler activation | AS08-owned support implemented; no production values selected |
 | CT17 #70 / ADR012 §19.2 | 27-relation runtime matrix, provisioning/containment/consumer verification and deployment gates | two existing relation rows and exact consumer tests, approximately 5–10% of the runtime-privilege slice (less of CT17 as a whole) | IMPLEMENTED as r15, inside the exact ceiling; no applied migration or real shared-system grant changed |
+| AS18 #164 / ADR005 §3.3, ADR011 §§4/12 | conditional tagged-question coverage lookup: `QuestionBankService.readCoverage`, nested immutable `CoverageSnapshot`, and execution-only `readCoverageForExecution` | the coverage producer and execution companion are absent; substantial AS18 work | DEFERRED external dependency, omitted from the original author inventory and added after independent review; AD08 consumes readiness coverage and AD13 consumes conditional execution coverage; not implemented by this remediation |
 | AS12 #161 / ADR007 §12, ADR011 §§4–5 | immutable validated event artifact AND complete persisted/flushed producer, transition-only publication, synchronous failure/rollback tests | both principal checkpoints absent, approximately 100% | DEFERRED, above threshold; event file stays empty, no dummy listener/publication or integrated mastery claim |
 | AS16 #162 / ADR011 §12/14 | owner insight evidence/read admission with same-snapshot joined membership, result projection, submitted attempt paging and tests | `readOwnedLatestSkillEvidence`, `listLearnerAttemptsForOwner`, membership integration and tests; approximately 70–100% of the owner slice | DEFERRED, material scope above threshold; AS08 learner/owner single-result HTTP endpoints remain delivered |
 | AD13 #169 / ADR011 §§3–5 | listener, authoritative latest-evidence/mastery update, atomic Course progress, decision/recommendation history and all-or-nothing tests | all four AD13 functional checkpoints absent, approximately 100% | DEFERRED; AS08 result persistence is only the Assessment-local unit, not the required whole atomic flow |
@@ -8515,3 +8523,92 @@ was available. CONTRIBUTING.md requires attributable genuine contributions. Foll
 commits therefore use the performing maintainer's verified existing Git identity;
 authenticated CLI/pusher is `chi-thanh-nguyen`. No global Git config, credential,
 existing commit, signature or original contribution attribution is rewritten.
+
+### Targeted IR296-01/02/03 remediation-author qualification — 26 November 2026
+
+The full-scope independent review of `031dbff` issued **REQUEST_CHANGES**, with
+three P2 defects. Those findings remain valid historical results. This follow-up
+changes qualification fixtures, release smoke generation and affected test support;
+it does not replace that review with an independent approval. Current author
+verdict: **REMEDIATED_READY_FOR_DELTA_INDEPENDENT_REVIEW**, subject to the focused
+results below, required CI and formal review of the new HEAD.
+
+| Finding | Confirmed mechanism | Correction and author evidence | Current status |
+| --- | --- | --- | --- |
+| IR296-01 | The containment fixture is unsubmitted; updating only score violates V004 `ck_attempts_submission` (`23514`). A zero-row INSERT also did not qualify real capture writes. | Update both terminal columns on the controlled existing Attempt and assert exactly one terminal row; insert an actual Attempt/Answer, update both permitted answer columns and assert the stored values; a subsequent probe proves all writes rolled back. Full containment reaches its multiversion and both failure-containment sentinels. Immutable-column and DELETE denials remain. | FIXED_AUTHOR_VERIFIED |
+| IR296-02 | The actual `smoke()` environment generator omitted all three mandatory expiry inputs, so HEAD Compose rendering and preflight reject its output even when expiry is disabled. | `smoke()` and isolated regressions share `write_smoke_env`; it writes explicit test-only `false`, `1000`, `2` in a private file. Release tests check exact inputs, duplicate keys, mode 0600 and the existing host refusal. Rendered preflight uses the generator itself, then rejects missing and invalid values for each input. The generated inputs also pass the committed VM override and actual preflight in an isolated Ubuntu container. | FIXED_AUTHOR_VERIFIED |
+| IR296-03 | Reverse resource close order waits for an executor while its worker is blocked on the still-held Course root. A Future timeout does not release that root or cancel JDBC execution. | Test-local `AttemptWorkers` owns blocker and workers, marks pending transactions for rollback, releases the blocker before bounded cancellation/termination, and preserves interruption. Worker statements/locks and blocker setup have explicit test-only deadlines. Four real PostgreSQL failure cases before blocker commit verify finite failure, rollback of an uncommitted Enrollment mutation, no partial Attempt/Answer, no remaining worker transaction/root lock, zero borrowed pool connections, and a subsequent successful root acquisition. | FIXED_AUTHOR_VERIFIED |
+
+**Checkpoint reassessment.** `AS08.contract-sync`: PARTIAL at independent review
+(IR296-02), now AUTHOR_VERIFIED for the affected release/configuration path.
+`AS08.focused-test-source`: PARTIAL at independent review (IR296-01/03), now
+AUTHOR_VERIFIED for the corrected containment and concurrency sources. All 18
+implementation groups exist; this is neither independent acceptance of 18 delivery
+checkpoints nor a complete integrated quiz/adaptive capability.
+
+**Related-path audit.** The AS08 concurrent-start, manual/save/expiry, diagnostic,
+definition-winner, explicit-statement-deadline and execution-scope negative workers
+now use bounded executor cleanup. Database-capable workers use read-write READ
+COMMITTED transactions with local 8-second statement and 6-second lock deadlines,
+a 10-second test transaction budget and a 10-second cleanup bound. Blocker setup
+uses 5-second statements/4-second lock waits. Existing 1-second cancellation
+verification is retained. Expected BusinessRuleException refusals in diagnostic/save
+races are caught outside the bounded transaction, after its rollback; the
+execution-scope wrong-thread negative deliberately remains outside a transaction.
+No production deadline is selected. Physical lock observation is scoped to the
+recorded worker PostgreSQL PIDs rather than any lock wait in the database.
+
+Other startup consumers checked: Compose, deploy validation, release paths/workflow,
+E2E local-stack generation, runtime-backend initial/upgrade fixtures, ingress and
+env-custody fixtures, `.env.example` and the backend test profile. No additional
+missing mandatory expiry inputs were confirmed. CT17's executable matrix,
+ADR012 §19.2 ceiling, applied migrations and retained r1–r15 records are unchanged.
+
+**Executed verification.** Repository-root commands unless noted:
+
+| Command / environment | Actual result |
+| --- | --- |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` — macOS host, Docker Desktop, disposable PostgreSQL 17.11 Bookworm clusters | PASS; 119 SQL probes and 36 expected rejection messages, multiversion PASS and both containment PASS sentinels reached |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | PASS; exact 27 relations and retained revisions including r15 |
+| `python3 -m unittest discover -s infrastructure/release/tests -v` | PASS; 97 tests, including 2 new generator/refusal tests |
+| `bash infrastructure/vm/tests/test-deploy-preflight-rendered-compose.sh` — existing Ubuntu 24.04 linux/amd64 harness container under emulation, checkout read-only, `--network none`, Docker socket for read-only Compose/preflight inspection | PASS; actual generator accepted, 6 new missing/invalid-input refusals, all 33 existing policy/certificate negative calls retained, final PASS sentinel reached |
+| Actual shared smoke generator → `docker compose --env-file <generated-file> -f infrastructure/docker-compose.yml -f infrastructure/vm/docker-compose.vm.yml config --format json`; then `bash infrastructure/vm/deploy.sh preflight --env-file <generated-file> --origin https://smoke.example.invalid --compose-override infrastructure/vm/docker-compose.vm.yml` — same isolated Ubuntu harness, synthetic certificate custody inside container only | PASS; exact three rendered backend values asserted and PREFLIGHT OK |
+| `./mvnw -B -q test-compile failsafe:integration-test failsafe:verify -Dit.test=AssessmentPersistenceIntegrationTest` — `backend/`, Temurin Java 25, Testcontainers hardened PostgreSQL 17.11, V001–V009 | PASS; 52 actual cases: 48 retained plus 4 new adversarial cases, zero failures/errors/skips |
+| `bash -n` on the three changed shell scripts; `git diff --check` | PASS |
+
+Baseline reproduction used the original smoke-generation block itself and failed
+HEAD Compose on missing expiry inputs. The original full containment run failed
+at `23514`; neither baseline failure is counted as a successful qualification.
+An initial new helper compilation error and a first integration run exposing
+caught-exception transaction boundaries/interruption handling were corrected before
+the final successful runs. The arm64 Ubuntu preflight attempt correctly refused
+the platform; qualification used the amd64 harness without bypassing validation.
+Full smoke/load/provision/deploy was not executed; host `/etc/codemastery`, shared
+Compose resources and real credentials were not modified. The broader 415-case
+independent baseline was not rerun and is not new-HEAD verification.
+
+**AS18 dependency correction.** AS18 #164 owns the conditional tagged-question
+coverage lookup, not AS08. ADR005 §3.3 defines `QuestionBankService.readCoverage`
+and nested deeply immutable `CoverageSnapshot` with exactly the requested skill
+counts; AD08 uses its readiness result. ADR011 §4 step 6 and §12 define
+`readCoverageForExecution`, with the same population/shape and execution-scope
+precondition, for the AD13 conditional readiness path. Source inspection confirms
+all three symbols are absent at this revision. This is substantial missing AS18
+implementation, not a small wrapper to implement here. The Issue's old publication
+status text does not supersede the effective ADR contracts.
+
+**Retained boundaries.** AS12 publication, AD13 whole-transaction mastery/progress/
+recommendation integration, AS18 coverage, AS16 owner evidence/paging, AD08 settings,
+AD10 diagnostic composition and the appropriate frontend/map/Admin consumers remain
+incomplete. QA04 whole-unit rollback, SD04 seeded acceptance, operational scheduler/
+pool/deadline qualification and reserved risk acceptance remain separate. After
+these defects are fixed and applicable protected gates pass, PR #296 may be
+considered for merge as a bounded Assessment foundation. It is not authorized for
+integrated quiz/adaptive exposure or production deployment. An absent frontend or
+a disabled scheduler does not restrict accessible REST endpoints. No risk is
+accepted and no Issue closure, merge, review approval or deployment is performed.
+
+AI assistance: OpenAI Codex authored this targeted remediation and its author-side
+qualification under the explicit Leader task. New commits use the verified
+maintainer identity Nguyen Chi Thanh / `nguyenchithanh.me@gmail.com`; authenticated
+GitHub identity is `chi-thanh-nguyen`. The original three commits are preserved.

@@ -1105,15 +1105,188 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
             return tokens.createToken(user,session);
         }
 
+        <T> T awaitWorker(java.util.concurrent.Future<T> task, long timeout, TimeUnit unit)
+                throws java.util.concurrent.ExecutionException, java.util.concurrent.TimeoutException, InterruptedException {
+            try { return task.get(timeout, unit); }
+            catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                throw failure;
+            }
+        }
+
+        /** Test-only budgets and ownership. No ExecutorService.close(): it can wait forever. */
+        final class AttemptWorkers implements AutoCloseable {
+            final ExecutorService executor;
+            final List<java.util.concurrent.Future<?>> tasks = new java.util.concurrent.CopyOnWriteArrayList<>();
+            final Set<Integer> backendPids = new java.util.concurrent.CopyOnWriteArraySet<>();
+            final java.util.concurrent.atomic.AtomicBoolean stopping = new java.util.concurrent.atomic.AtomicBoolean();
+            java.sql.Connection blocker;
+
+            AttemptWorkers(int size) { executor = Executors.newFixedThreadPool(size); }
+
+            java.sql.Connection blockCourseRoot() throws java.sql.SQLException {
+                blocker = dataSource.getConnection(); // Owned even if any subsequent setup step throws.
+                blocker.setAutoCommit(false);
+                try (var statement = blocker.createStatement()) {
+                    statement.setQueryTimeout(5);
+                    statement.execute("SET LOCAL statement_timeout='5000ms'");
+                    statement.execute("SET LOCAL lock_timeout='4000ms'");
+                }
+                try (var statement = blocker.prepareStatement("SELECT id FROM courses WHERE id=? FOR UPDATE")) {
+                    statement.setQueryTimeout(5);
+                    statement.setObject(1, courseId);
+                    statement.executeQuery().close();
+                }
+                return blocker;
+            }
+
+            <T> java.util.concurrent.Future<T> submit(java.util.concurrent.Callable<T> action) {
+                return submitWithoutTransaction(() -> inTransaction(action));
+            }
+
+            <T> T inTransaction(java.util.concurrent.Callable<T> action) {
+                TransactionTemplate tx = new TransactionTemplate(transactionManager);
+                tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+                tx.setTimeout(10);
+                return tx.execute(status -> {
+                    jdbc.execute("SET LOCAL statement_timeout='8000ms'");
+                    jdbc.execute("SET LOCAL lock_timeout='6000ms'");
+                    backendPids.add(jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                    try {
+                        T value = action.call();
+                        // JDBC cancellation need not honor Thread.interrupt(). Refuse a late commit
+                        // after cleanup starts, including a worker woken by the blocker rollback.
+                        if (stopping.get() || Thread.currentThread().isInterrupted()) status.setRollbackOnly();
+                        return value;
+                    } catch (RuntimeException | Error failure) {
+                        throw failure;
+                    } catch (InterruptedException failure) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException(failure);
+                    } catch (Exception failure) {
+                        throw new RuntimeException(failure);
+                    }
+                });
+            }
+
+            <T> java.util.concurrent.Future<T> submitWithoutTransaction(java.util.concurrent.Callable<T> action) {
+                var task = executor.submit(() -> {
+                    try { return action.call(); }
+                    finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+                });
+                tasks.add(task);
+                return task;
+            }
+
+            void awaitRootWait() {
+                org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5)).until(() ->
+                        backendPids.stream().anyMatch(pid -> jdbc.queryForObject(
+                                "SELECT count(*) FROM pg_stat_activity WHERE pid=? AND wait_event_type='Lock' "
+                                        + "AND cardinality(pg_blocking_pids(pid))>0", Integer.class, pid) == 1));
+            }
+
+            @Override public void close() {
+                boolean interrupted = Thread.interrupted();
+                stopping.set(true);
+                try {
+                    if (blocker != null) {
+                        try { blocker.rollback(); }
+                        finally { blocker.close(); }
+                    }
+                } catch (java.sql.SQLException failure) {
+                    throw new IllegalStateException("Failed to release AS08 blocker", failure);
+                } finally {
+                    // Release the physical root before cancelling/waiting for any worker.
+                    tasks.forEach(task -> task.cancel(true));
+                    executor.shutdownNow();
+                    interrupted |= Thread.interrupted();
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                    try {
+                        while (!executor.isTerminated() && System.nanoTime() < deadline) {
+                            try { executor.awaitTermination(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS); }
+                            catch (InterruptedException failure) { interrupted = true; }
+                        }
+                        assertTrue(executor.isTerminated(), "AS08 workers exceeded the cleanup deadline");
+                    } finally {
+                        if (interrupted) Thread.currentThread().interrupt();
+                    }
+                }
+            }
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(strings={"assertion", "timeout", "setup", "interruption"})
+        void failureBeforeBlockerCommitHasBoundedCleanupAndNoPartialAttempt(String path) throws Exception {
+            var workers = new AttemptWorkers(1);
+            long started = System.nanoTime();
+            try {
+                var failure = assertThrows(Throwable.class, () -> {
+                    try (workers) {
+                        workers.blockCourseRoot();
+                        var waiting = workers.submit(() -> { asLearner(); return at(now).start(courseId, quizId); });
+                        workers.awaitRootWait();
+                        // Leave an uncommitted mutation behind as well as the physical row lock.
+                        try (var statement = workers.blocker.prepareStatement("UPDATE enrollments SET status='left' WHERE user_id=?")) {
+                            statement.setObject(1, learner); statement.executeUpdate();
+                        }
+                        switch (path) {
+                            case "timeout" -> {
+                                awaitWorker(waiting,25,TimeUnit.MILLISECONDS);
+                                throw new AssertionError("Worker did not wait for the root");
+                            }
+                            case "interruption" -> {
+                                Thread.currentThread().interrupt();
+                                awaitWorker(waiting,1,TimeUnit.SECONDS);
+                                throw new AssertionError("Future ignored caller interruption");
+                            }
+                            case "setup" -> {
+                                try (var statement = workers.blocker.createStatement()) {
+                                    statement.execute("SELECT as08_injected_missing_column FROM courses");
+                                }
+                            }
+                            default -> org.junit.jupiter.api.Assertions.fail("Injected before blocker commit");
+                        }
+                    }
+                });
+                Class<? extends Throwable> expected = switch (path) {
+                    case "timeout" -> java.util.concurrent.TimeoutException.class;
+                    case "interruption" -> InterruptedException.class;
+                    case "setup" -> java.sql.SQLException.class;
+                    default -> org.opentest4j.AssertionFailedError.class;
+                };
+                assertTrue(expected.isInstance(failure), () -> "Unexpected failure: " + failure);
+                assertEquals(path.equals("interruption"), Thread.currentThread().isInterrupted());
+            } finally {
+                // The test runner must not inherit the deliberately injected interruption.
+                Thread.interrupted();
+            }
+            assertTrue(System.nanoTime() - started < TimeUnit.SECONDS.toNanos(15));
+            assertTrue(workers.executor.isTerminated());
+            assertTrue(workers.blocker.isClosed());
+            assertFalse(workers.backendPids.isEmpty());
+            for (int pid : workers.backendPids) {
+                assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE pid=? "
+                        + "AND (xact_start IS NOT NULL OR wait_event_type='Lock')", Integer.class, pid));
+                assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM pg_locks WHERE pid=? AND relation='courses'::regclass", Integer.class, pid));
+            }
+            assertEquals("active", jdbc.queryForObject("SELECT status FROM enrollments WHERE user_id=? AND course_id=?", String.class, learner, courseId));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM attempts WHERE quiz_id=?", Integer.class, quizId));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM attempt_answers WHERE question_id IN (?,?)", Integer.class, q1, q2));
+            assertEquals(0, dataSource.unwrap(com.zaxxer.hikari.HikariDataSource.class)
+                    .getHikariPoolMXBean().getActiveConnections());
+            asLearner();
+            assertTrue(at(now).start(courseId, quizId).created()); // Reacquires the same root.
+        }
+
         @Test void concurrentStartsAreIdempotentAndOnlyCommittedRetakesAdvanceTheNumber() throws Exception {
-            try (ExecutorService workers=Executors.newFixedThreadPool(2)) {
+            try (var workers=new AttemptWorkers(2)) {
                 var barrier=new java.util.concurrent.CyclicBarrier(2);
                 java.util.concurrent.Callable<com.codemastery.modules.assessment.application.service.AttemptService.StartOutcome> call=()->{
                     asLearner(); try {barrier.await(5,TimeUnit.SECONDS);return at(now).start(courseId,quizId);}
                     finally {org.springframework.security.core.context.SecurityContextHolder.clearContext();}
                 };
                 var a=workers.submit(call);var b=workers.submit(call);
-                var first=a.get(10,TimeUnit.SECONDS);var second=b.get(10,TimeUnit.SECONDS);
+                var first=awaitWorker(a,10,TimeUnit.SECONDS);var second=awaitWorker(b,10,TimeUnit.SECONDS);
                 assertEquals(first.attempt().attemptId(),second.attempt().attemptId());
                 assertTrue(first.created()!=second.created());
                 assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM attempts WHERE quiz_id=?",Integer.class,quizId));
@@ -1191,17 +1364,15 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
         }
 
         @Test void learnerAdmissionIsRecheckedAfterWaitingForThePhysicalCourseRoot() throws Exception {
-            try (var blocker=dataSource.getConnection();ExecutorService worker=Executors.newSingleThreadExecutor()) {
-                blocker.setAutoCommit(false);
-                try(var statement=blocker.prepareStatement("SELECT id FROM courses WHERE id=? FOR UPDATE")) {statement.setObject(1,courseId);statement.executeQuery().close();}
+            try (var worker=new AttemptWorkers(1)) {
+                var blocker=worker.blockCourseRoot();
                 var waiting=worker.submit(()->{asLearner();try {return at(now).start(courseId,quizId);}
                     finally {org.springframework.security.core.context.SecurityContextHolder.clearContext();}});
                 // Observe the real lock wait rather than timing a sleep.
-                org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5)).until(()->
-                        jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'",Integer.class)>0);
+                worker.awaitRootWait();
                 try(var statement=blocker.prepareStatement("UPDATE enrollments SET status='left' WHERE user_id=?")) {statement.setObject(1,learner);statement.executeUpdate();}
                 blocker.commit();
-                var failure=assertThrows(java.util.concurrent.ExecutionException.class,()->waiting.get(10,TimeUnit.SECONDS));
+                var failure=assertThrows(java.util.concurrent.ExecutionException.class,()->awaitWorker(waiting,10,TimeUnit.SECONDS));
                 assertTrue(failure.getCause() instanceof org.springframework.security.access.AccessDeniedException);
                 assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM attempts WHERE quiz_id=?",Integer.class,quizId));
             }
@@ -1209,18 +1380,18 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
 
         @Test void manualSaveAndExpiryRacesProduceOneImmutableTerminalResult() throws Exception {
             asLearner();var attempt=at(now).start(courseId,quizId).attempt();
-            try(ExecutorService workers=Executors.newFixedThreadPool(3)) {
+            try(var workers=new AttemptWorkers(3)) {
                 var barrier=new java.util.concurrent.CyclicBarrier(3);
                 var manual=workers.submit(()->{asLearner();try {barrier.await(5,TimeUnit.SECONDS);
                     return at(now.plusSeconds(59)).submit(courseId,quizId,attempt.attemptId(),answers(true));
                     }finally {org.springframework.security.core.context.SecurityContextHolder.clearContext();}});
-                var save=workers.submit(()->{asLearner();try {barrier.await(5,TimeUnit.SECONDS);
-                    try {at(now.plusSeconds(59)).saveAnswers(courseId,quizId,attempt.attemptId(),answers(false));}
+                var save=workers.submitWithoutTransaction(()->{asLearner();try {barrier.await(5,TimeUnit.SECONDS);
+                    try {workers.inTransaction(()->{at(now.plusSeconds(59)).saveAnswers(courseId,quizId,attempt.attemptId(),answers(false));return null;});}
                     catch(com.codemastery.common.exception.BusinessRuleException terminal) {assertEquals(org.springframework.http.HttpStatus.CONFLICT,terminal.getStatus());}
                     return null;
                     }finally {org.springframework.security.core.context.SecurityContextHolder.clearContext();}});
                 var expiry=workers.submit(()->{barrier.await(5,TimeUnit.SECONDS);at(attempt.expiresAt()).finalizeExpired(attempt.attemptId());return null;});
-                var manualResult=manual.get(10,TimeUnit.SECONDS);save.get(10,TimeUnit.SECONDS);expiry.get(10,TimeUnit.SECONDS);
+                var manualResult=awaitWorker(manual,10,TimeUnit.SECONDS);awaitWorker(save,10,TimeUnit.SECONDS);awaitWorker(expiry,10,TimeUnit.SECONDS);
                 asLearner();var repeated=at(now.plusSeconds(61)).submit(courseId,quizId,attempt.attemptId(),answers(false));
                 assertEquals(manualResult,repeated);
                 assertTrue(Set.of(now.plusSeconds(59),attempt.expiresAt()).contains(repeated.submittedAt()));
@@ -1231,35 +1402,33 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
         @Test void firstAttemptRereadsDefinitionsCommittedByTheRootHolder() throws Exception {
             // AS06's authoring fixture is canonical 1..N; separate AS08 cases retain legacy gaps.
             jdbc.update("UPDATE quiz_questions SET position=2 WHERE quiz_id=? AND question_id=?",quizId,q2);
-            try(ExecutorService worker=Executors.newSingleThreadExecutor()) {
+            try(var worker=new AttemptWorkers(1)) {
                 asOwner();
                 java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<com.codemastery.modules.assessment.application.service.AttemptService.StartOutcome>> waiting=
                         new java.util.concurrent.atomic.AtomicReference<>();
                 guard.withCourseConfigurationWrite(courseId,()->{
                     waiting.set(worker.submit(()->{asLearner();try{return at(now).start(courseId,quizId);}
                         finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}}));
-                    org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(5)).until(()->
-                            jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'",Integer.class)>0);
+                    worker.awaitRootWait();
                     quizService.publish(courseId,quizId,false);
                     quizService.update(courseId,quizId,new QuizService.QuizInput("Replacement","test",120,List.of(q2)));
                     quizService.publish(courseId,quizId,true);
                     return null;
                 });
-                var captured=waiting.get().get(10,TimeUnit.SECONDS).attempt();
+                var captured=awaitWorker(waiting.get(),10,TimeUnit.SECONDS).attempt();
                 assertEquals(List.of(q2),captured.questions().stream().map(com.codemastery.modules.assessment.application.service.AttemptService.AttemptQuestionView::questionId).toList());
                 assertEquals(now.plusSeconds(120),captured.expiresAt());
             }
         }
 
         @Test void explicitStatementDeadlineRollsBackAWaitingAttemptAndReleasesItsConnection() throws Exception {
-            try(var blocker=dataSource.getConnection();ExecutorService worker=Executors.newSingleThreadExecutor()) {
-                blocker.setAutoCommit(false);
-                try(var statement=blocker.prepareStatement("SELECT id FROM courses WHERE id=? FOR UPDATE")){statement.setObject(1,courseId);statement.executeQuery().close();}
+            try(var worker=new AttemptWorkers(1)) {
+                var blocker=worker.blockCourseRoot();
                 var waiting=worker.submit(()->{asLearner();try{
                     TransactionTemplate tx=new TransactionTemplate(transactionManager);tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
                     return tx.execute(status->{jdbc.execute("SET LOCAL statement_timeout='1000ms'");return at(now).start(courseId,quizId);});
                     }finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}});
-                var failure=assertThrows(java.util.concurrent.ExecutionException.class,()->waiting.get(5,TimeUnit.SECONDS));
+                var failure=assertThrows(java.util.concurrent.ExecutionException.class,()->awaitWorker(waiting,5,TimeUnit.SECONDS));
                 assertTrue(failure.getCause() instanceof org.springframework.dao.DataAccessException);
                 assertEquals(0,jdbc.queryForObject("SELECT count(*) FROM attempts WHERE quiz_id=?",Integer.class,quizId));
                 blocker.rollback();asLearner();assertTrue(at(now).start(courseId,quizId).created());
@@ -1294,14 +1463,14 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
 
         @Test void concurrentDifferentDiagnosticStartsCaptureOnlyOneQuizForTheLearner() throws Exception {
             UUID first=UUID.randomUUID(),second=UUID.randomUUID();addQuiz(first,"diagnostic");addQuiz(second,"diagnostic");
-            try(ExecutorService workers=Executors.newFixedThreadPool(2)) {
+            try(var workers=new AttemptWorkers(2)) {
                 var barrier=new java.util.concurrent.CyclicBarrier(2);
                 java.util.function.Function<UUID,java.util.concurrent.Callable<Boolean>> call=id->()->{
-                    asLearner();try {barrier.await(5,TimeUnit.SECONDS);at(now).start(courseId,id);return true;}
+                    asLearner();try {barrier.await(5,TimeUnit.SECONDS);workers.inTransaction(()->at(now).start(courseId,id));return true;}
                     catch(com.codemastery.common.exception.BusinessRuleException conflict){assertEquals(org.springframework.http.HttpStatus.CONFLICT,conflict.getStatus());return false;}
                     finally{org.springframework.security.core.context.SecurityContextHolder.clearContext();}};
-                var a=workers.submit(call.apply(first));var b=workers.submit(call.apply(second));
-                assertTrue(a.get(10,TimeUnit.SECONDS)!=b.get(10,TimeUnit.SECONDS));
+                var a=workers.submitWithoutTransaction(call.apply(first));var b=workers.submitWithoutTransaction(call.apply(second));
+                assertTrue(awaitWorker(a,10,TimeUnit.SECONDS)!=awaitWorker(b,10,TimeUnit.SECONDS));
                 assertEquals(1,jdbc.queryForObject("SELECT count(*) FROM attempts WHERE user_id=?",Integer.class,learner));
             }
         }
@@ -1355,9 +1524,9 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                     fresh.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
                     fresh.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
                     assertThrows(IllegalStateException.class,()->fresh.execute(status->live.readLatestSkillEvidence(courseId,learner,Set.of(skillId))));
-                    try(ExecutorService worker=Executors.newSingleThreadExecutor()) {
-                        var failure=assertThrows(java.util.concurrent.ExecutionException.class,()->worker.submit(
-                                ()->live.readLatestSkillEvidence(courseId,learner,Set.of(skillId))).get(5,TimeUnit.SECONDS));
+                    try(var worker=new AttemptWorkers(1)) {
+                        var failure=assertThrows(java.util.concurrent.ExecutionException.class,()->awaitWorker(worker.submitWithoutTransaction(
+                                ()->live.readLatestSkillEvidence(courseId,learner,Set.of(skillId))),5,TimeUnit.SECONDS));
                         assertTrue(failure.getCause() instanceof IllegalStateException);
                     }
                     observed.set(true);return super.grade(items);
