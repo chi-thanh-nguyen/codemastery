@@ -5277,3 +5277,323 @@ with the documented former-hostname acme.sh finding; both timers `disabled`.
   and timer enablement; the GitHub `production` environment, `VM_SSH_PRIVATE_KEY` and its
   two reference variables; runner SSH reachability (NSG); an Azure storage account; an
   offline copy of the recipient key and passphrase.
+
+## DP01 CI package-index remediation — 25 November 2026
+
+Leader-authorized investigation of CI VM failures on `main` and PR #290, based
+on freshly fetched `main` `1e4c54be01c78b14aa4734eb6e6e50426dbe3fe6` and PR head
+`a5d250623b2fd32843f57cb8a0d79a2244260e62`. Authority remains requirements,
+approved architecture/structure, effective CT17/ADR009 runtime policy and
+ADR015 qualification; this record grants no exception, acceptance or deployment.
+
+### Cause and decision
+
+**Alpine: CONFIRMED_REPOSITORY_REMEDIATION_REQUIRED.** The release target
+requests `libexpat=2.10.0-r0` from the pinned base's official Alpine v3.24
+repositories. A fresh x86_64 APK probe on the exact base
+`nginxinc/nginx-unprivileged@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03`
+reproduced exit 4: installed `libexpat-2.9.0-r0`, needed by fontconfig's
+`so:libexpat.so.1`, cannot satisfy that exact world constraint. The signed current
+index offers 2.11.0-r0, not 2.10.0-r0. Fontconfig requires the ABI, not 2.9.0.
+
+[Alpine's package record](https://pkgs.alpinelinux.org/package/v3.24/main/x86_64/libexpat)
+and [aports commit e3335f476c69ffe92817447e265ce2f18323e4ae](https://gitlab.alpinelinux.org/alpine/aports/-/commit/e3335f476c69ffe92817447e265ce2f18323e4ae)
+identify the 25 November 12:55:11 UTC security upgrade. Its APKBUILD retains
+2.10.0's fixes for CVE-2026-113351, CVE-2026-115506, CVE-2026-117610 and
+CVE-2026-118370, and adds CVE-2026-124317, CVE-2026-128241 and CVE-2026-134703.
+The package still provides `so:libexpat.so.1` (1.14.0). This corroborates the
+3 November hardening record's two HIGH and two other findings on 2.9.0;
+returning to that inherited package would regress security.
+An independent scan of the exact inherited base with the current 25 November
+database reports all four of those libexpat advisories as HIGH, each fixed in
+2.10.0-r0. This is severity drift from the historical two-HIGH/two-other record,
+not a rewrite of that earlier result. None appears on the rebuilt frontend.
+
+The old official APK URL still returned HTTP 200 during this investigation.
+The confirmed defect is index unavailability for the exact pin, not permanent
+deletion of the old APK. Index replacement is strongly supported by the upstream
+record, current signed index, last observed successful build at 12:10 UTC and
+first observed APK failure at 13:11 UTC. Historical index bytes and each runner's
+CDN edge are unavailable, so exact propagation timing is not asserted.
+
+Raise only the release libexpat pin to 2.11.0-r0 and assert that installed
+revision in the existing ingress build regression. Keep both base digests,
+all other reviewed packages, Nginx 1.30.7/module pins, signing-key hash,
+signature/TLS verification, UID 101, immutable configuration and CA policy.
+Both frontend targets resolve their other exact pins. No unbounded upgrade,
+repository switch, retry-based APK workaround or security suppression is used.
+Re-pinning a whole base or adding snapshot infrastructure would expand the
+change without addressing an additional verified defect. Explicitly downloading
+the old APK would retain 2.10.0's now-fixed security issues and is rejected.
+
+**Maven, initial disposition: CONFIRMED_TRANSIENT_EXTERNAL_FAILURE_NO_CODE_CHANGE.**
+The [continuation below](#maven-bootstrap-reliability--25-november-2026) supersedes
+that decision after PR #293 exposed another recurrence. The main VM
+runtime job and E2E job, and PR #290's first ingress attempt, each record four
+HTTP 429 responses from Maven Central for the 3.9.16 tarball, with existing
+5/15/30-second pauses. The pinned JDK image has no curl/wget/unzip; the wrapper
+therefore selects tar.gz and its Java downloader. Host setup-java Maven caches
+are not mounted into these Docker stages; separate fresh runners repeat the
+bootstrap. No shared Docker cache is configured for these jobs. A bounded HEAD
+probe returned 200 and a clean amd64 backend build bootstrapped successfully;
+PR #290's unchanged backend also passed its runtime job at 14:00:33 UTC.
+These are recurring external rate-limit episodes, not evidence that the URL or
+application code is invalid. Existing bounded retries cannot guarantee recovery.
+No rate-limit stress test was performed. More retries, an unqualified mirror or
+shared cache would introduce additional policy/integrity concerns without a
+demonstrated need after recovery; no immediate Maven change is justified.
+At this observation cutoff, the host Wrapper properties had no
+`distributionSha256Sum`. The 26 November follow-up records the later policy.
+
+### Incident evidence (UTC, 25 November)
+
+| Run / attempt | Job | Execution / result |
+| --- | --- | --- |
+| [45586646767 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45586646767) | 139109839768 ingress | Main d8c6588, 09:34–09:36, success |
+| [45598582352 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45598582352) | 139151114692 ingress | PR #290 dc834fe, 10:49–10:51, success |
+| [45599953034 / 1, 2](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45599953034) | 139155927742, 139157037899 runtime | Main c5b9ac0, 10:58–10:59 and 11:00–11:01, Maven 429; ingress attempt 1 cancelled, not a failed/passed execution |
+| [45609807176 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45609807176/attempts/1) | 139190071527 ingress | 12:01–12:02, Maven 429 |
+| [45610936317 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45610936317/attempts/1) | 139193941685 ingress (carried as 139230203152 in attempt 2) | Other feature, execution 12:08–12:10, success |
+| [45609807176 / 2–7](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45609807176) | 139229013535, 139229776237, 139230332607, 139231927814, 139241870992, 139253549420 | Each full job log inspected; 13:11, 13:12, 13:13, 13:16, 13:33, 13:52 starts, same APK failure |
+| [45628708222 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45628708222) | 139255765615 ingress | Main 1e4c54b, 13:56, same APK failure |
+| [45628708308 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45628708308) | 139255769488 E2E | Main 1e4c54b, Maven 429 in backend build; browser tests not reached |
+| [45628968044 / 1–3](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45628968044) | 139256697100, 139269183011, 139269461087 ingress | PR #290 a5d2506; APK failure persists at 13:58, 14:17, 14:18 |
+| [45632313771 / 1](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45632313771) | 139268485681 ingress | PR #291 b2b1d1f, 14:16–14:17, same APK failure |
+
+All seven attempts of 45609807176 checked out synthetic merge
+`95fe14ec0a994c36db5b1ea1b1481562e53fea42`, merging 353a394 into c5b9ac0.
+Latest PR #290 ingress checked out `df44d3a7c6826673ac83b0697ae136fae7e23da9`,
+merging a5d2506 into 1e4c54b; main checked out 1e4c54b itself. Logs identify
+Ubuntu 24.04.5, runner image 20261116.133.1, runner 2.338.2. Rerun job lists
+can carry forward successful jobs: copied successes are not new executions.
+
+The six supplied revisions d8c6588, dc834fe, c5b9ac0, 353a394, 1e4c54b and
+a5d2506 all have frontend Dockerfile blob eb02aac9854d68303676577ae86b2ed34c870868.
+The complete PR #290 diff changes three Course Java production files, three
+test files and testing documentation only. The recent main feature commits
+change neither Dockerfile nor workflow. APK resolution runs independently of
+Course code; Maven fails before source COPY/compilation. CO12 and those recent
+features do not cause either observed failure. This does not qualify their
+application behavior or independent acceptance.
+
+### Security qualification and remaining gates
+
+See [the executed test record](testing.md#ci-package-index-remediation-qualification--25-november-2026).
+Clean builds use linux/amd64 emulation on an arm64 Docker Desktop host, no cached
+RUN steps; later regression builds may reuse layers. The final exported artifacts
+were scanned again after the regression rebuilds using ADR015's digest-pinned
+Trivy 0.76.2, database updated 2026-11-25T13:07:24.554567818Z, downloaded
+14:33:43 UTC, default and comprehensive modes, all severities, no ignore rules.
+
+| Artifact | Configuration SHA-256 in scanned archive | Findings in each mode |
+| --- | --- | --- |
+| Release frontend | 059814518ee7684b8038eed5794f4731671cdb24f081320ae5150a3f9981586a | 0 |
+| Local frontend | b2a330ede3449334fc0502a63accad88b9f717f65b70dc158cc7cc621a402ba0 | 0 |
+| Unchanged backend | 0830a9c8320e324509337cc5e8a6041431b8f3f544b6449a34e3f7dcfefe9f78 | 0 CRITICAL/HIGH; 29 MEDIUM, 5 LOW, each without a scanner-listed fix |
+
+The backend residuals include Ubuntu libexpat1, dash, tar, GnuTLS, util-linux,
+systemd, login/passwd and gpgv; no Java dependency finding. Zero frontend results
+do not qualify the backend or accept residual risks. Scans cover the merged
+filesystem, not an assertion that inherited layers contain no old package bytes.
+No feature branch, shared environment, deployment, release or merge was modified.
+Independent review, protected CI and any later release admission remain required.
+After protected integration, affected PRs should update from main and rerun CI;
+this investigation performs none of those integration actions.
+
+## Maven bootstrap reliability — 25 November 2026
+
+**CONFIRMED_RECURRING_EXTERNAL_FAILURE_RELIABILITY_HARDENING_REQUIRED.**
+[PR #293's first ingress run](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45638610536/job/139290718324)
+built both frontend targets and then failed on `codemastery-ci/backend:ingress-test`.
+Maven Central returned HTTP 429 at 0.777, 6.511, 22.25 and 52.96 seconds. The
+ingress checks after the image builds were skipped. Independent E2E and runtime
+jobs also exhausted the same bootstrap retries on 24 and 25 November, as did
+[one release rehearsal](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45302491334/job/138140130489).
+The rerun of main E2E succeeded. That measured recovery did not stop the next
+fresh runner from repeating the separate distribution request. GitHub logs do
+not identify the service's throttling key or runner egress policy.
+
+| Consumer | Distribution and cache behavior |
+| --- | --- |
+| Host development and `CI Backend` | Unix or Windows Wrapper 3.3.4; Apache Maven 3.9.16 ZIP, with Unix TAR.GZ fallback when unzip is absent. The wrapper can reuse an extracted installation. `setup-java` restores a host Maven cache scoped to the workflow's branch and dependency key. |
+| VM runtime privileges and HTTPS ingress | Separate runners and local Docker builders. Each image build uses the same offline Maven bootstrap stage. The ingress job builds the frontend targets first. |
+| Java trust-store verification | Targets the pinned JDK stage directly. It compiles the verifier with networking disabled and consumes no Maven files. |
+| Playwright E2E | Browser job uses the backend Dockerfile unless an existing backend image is supplied. Its checkout-local Docker cache and npm cache are separate from host Maven and release. |
+| Release candidate and rehearsal | Use the same Dockerfile via `release.sh` with `--platform linux/amd64`. Source checks, image export/reload, scanning, manifest and attestation gates still apply. |
+| Local Compose or standalone Docker build | Uses the same offline bootstrap, with content-addressed OCI layers and ordinary local BuildKit reuse. Deployment consumes its previously qualified release archive. |
+
+The Maven source is the [Docker Official Image](https://hub.docker.com/_/maven)
+`docker.io/library/maven:3.9.16-eclipse-temurin-25@sha256:93b8a14ea2f412782e4e842651273b4d903e35cc496284f178fbbe2d67d00976`.
+The amd64 and arm64 Maven distribution trees matched. The Dockerfile copies the
+Maven directory into the existing pinned JDK and removes the image's `ref`
+directory. It checks the URL, checks the full remaining tree against an independently
+derived SHA-512 with `RUN --network=none`, then prints the verified Maven version.
+Compilation runs once. The JRE stage receives the application JAR and the existing
+trust-store verification bind. Maven and the donor image's entrypoint, JDK, packages
+and configuration outside the verified tree do not enter the runtime image.
+
+The tree checksum is derived by downloading the TAR.GZ and separately checking
+SHA-512 against the [Apache release catalog](https://releases.apache.org/catalog/maven)
+and [Apache archive](https://archive.apache.org/dist/maven/maven-3/3.9.16/binaries/).
+Extract the verified archive into a clean directory with `tar -xzf ARCHIVE
+--strip-components=1 -C DIRECTORY`. Use GNU tar in the pinned JDK image and run
+`tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner --format=gnu
+-C DIRECTORY -cf /tmp/maven-tree.tar .`, then `sha512sum /tmp/maven-tree.tar`.
+The digest covers names, bytes, types and modes, with normalized ownership and
+timestamps. When updating Maven, verify both platform images against the new
+Apache tree, then update the Wrapper URL, OCI index, expected tree digest and
+regression expectations together. The ZIP archive has a different published checksum. Host wrapper
+checksums and extracted host cache verification require separate cross-platform
+work. Neither release nor Docker builds use that cache.
+
+Cold builders pull the pinned registry layers. A warm local builder can reuse the
+verified stage across application-source changes. A missing registry layer fails
+the build if it cannot be fetched. A changed Maven URL invalidates the verification
+step and a stale or mismatched pin fails before execution. A corrupt distribution
+fails its digest check. CI does not share exported cache entries or executable
+artifacts across pull requests and release. An untrusted pull request can change its
+own Dockerfile and checksums, so protected source review and release provenance
+remain the controls for trusted builds. No new workflow credentials are needed.
+
+Keeping or increasing bootstrap retries would leave fresh runners requesting the
+same Maven Central tarball. A checksum-verified CDN fallback reduces dependence
+on one endpoint but still transfers the archive and introduces retry and source
+selection code. Host or BuildKit cache export requires additional consumer wiring,
+cache scope and cold-start handling. The pinned distribution removes this download
+from every Docker consumer with zero direct distribution requests, including cold
+builds, at the cost of Docker Hub layer pulls and reviewing the pinned OCI image on
+Maven upgrades. Maven project dependencies, registry pulls, npm and package
+repositories remain external dependencies.
+
+The hosted [cache scope rules](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache)
+permit a pull request to restore eligible base-branch caches and scope its new
+entries to its merge ref. Restore prefixes can select older entries. A key match
+does not verify the bytes. These rules are not used as artifact trust guarantees.
+The pinned amd64 donor manifest describes nine compressed layers totaling about
+168 MiB, compared with an 8.8 MiB Maven TAR.GZ. Actual registry transfer depends
+on the builder's existing blobs. The reliability gain is zero Maven Central
+distribution calls and fewer independent Maven bootstrap outcomes, with cold
+transfer cost moved to the registry.
+
+The bounded CI review also found a separate registry HTTP 500 on a Chainguard
+manifest lookup and deterministic Java compilation errors after successful
+bootstrap. PR #291's release rehearsal stopped on the old libexpat pin. The
+sample did not establish recurring 503, unexpected 404, connection timeout,
+reset, npm, Nginx or other APK retrieval failures that justify additional
+repository changes. Future exact-pin retirement still requires a reviewed pin
+change. An immutable Alpine snapshot is outside this remediation.
+
+The Maven change is a separate commit in PR #293. At the decision point, its
+required ingress job was failing on Maven and main still had the retired
+libexpat pin. A separate main-based PR would fail on that pin. The combined PR
+lets reviewers assess both changes on the same CI merge checkout. After protected
+integration, PRs #290 and #291 can update from main and run their own checks.
+
+### Maven bootstrap self-review follow-up
+
+The required `VM HTTPS ingress` job now runs the offline integrity fixtures
+after its image builds. The fixtures reuse the builder and may reuse its
+already fetched OCI blobs. Every fixture reruns the verifier and checks the
+output of that verifier step, including the digest result and Maven version on
+success. The suite also requires failures to come from the verifier itself.
+
+The Docker URL check accepts the supported portable configuration of the
+checked-in Unix and Windows wrappers: one exact `distributionUrl=` key,
+the reviewed Apache ZIP URL, and a final LF or CRLF. Surrounding value
+whitespace is permitted. Ambiguous keys and malformed declarations are
+rejected. Wrapper repository overrides and its extracted host installations
+remain host behavior. They do not choose the Docker build distribution.
+
+Alpine v3.24 still indexes `libexpat=2.11.0-r0` at this review and its security
+database records the fixes for the two successive revisions. The release image
+uses its `libexpat.so.1` through fontconfig. The libexpat project tracks
+[unfixed issues](https://github.com/libexpat/libexpat/issues/1160), including
+[CVE-2025-66382](https://github.com/libexpat/libexpat/issues/1076). The scan is
+limited to its advisory data. Application reachability for that upstream issue
+was not established and remains part of release risk assessment.
+
+## PR #293 CI reliability follow-up — 26 November 2026
+
+The [initial inspection of CI VM run 45663373135](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45663373135)
+found six successful jobs and one failed ingress job in each of attempts 1
+and 2. Their checkout was the PR merge commit
+ff0c388707848e73b53860b133615e5c6d4057d4, with PR head 4c9fd4a and main
+1e4c54be. Both failures followed successful distribution verification and
+occurred while resolving the Spring Boot 4.1.1 parent POM from Maven Central.
+[Attempt 3](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45663373135/job/139636899469)
+passed all seven jobs, and the ingress job ran the 18 substantive tests and
+11 harness controls. The earlier [94118b6 failure](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45653036519/job/139342280667)
+hit the same dependency. These outcomes bound the observation to those jobs.
+
+Docker packaging uses the native Maven 3.9.16 / Resolver 1.9.27 HTTP
+transport. Its existing 429/503 retry count is three. Docker now sets the
+Resolver 1.x connector properties for a 15-second initial wait and a
+60-second per-response retry limit. A numeric or HTTP-date Retry-After of 60
+seconds or less sets the wait, and a past date or negative number retries
+immediately. A missing or unparseable value gives delays of 15, 30 and 45
+seconds. The package lifecycle is invoked once. The change applies to Docker, Compose,
+E2E, both VM backend-image consumers and off-host release construction. The
+Java trust-store verifier uses the pinned JDK directly.
+
+The Docker build uses ordinary builder layer reuse. Source changes rebuild
+the package layer and a fresh runner must still resolve project dependencies
+and plugins. Separating a go-offline prefetch would introduce a second
+resolution path and require proving complete plugin/profile coverage. A
+builder-local Maven mount would help reused builders with source changes but
+would start empty in the affected hosted jobs. No cross-job or cross-run
+Docker dependency cache, mirror or new registry was introduced. Host
+setup-java restores a project repository cache and a separate Wrapper
+distribution cache. The host verification cache is outside the release
+candidate build path.
+
+Apache Maven's separate ZIP and TAR.GZ have verified Apache SHA-512 checksums
+and detached signatures from key 84789D24DF77A32433CE1F079EB80E92EB2135B1.
+The host Wrapper checks the corresponding SHA-256 before extraction and
+publishes the installation in a cache namespace bound to its archive pin.
+The extracted cache retains the same local trust boundary on warm runs.
+See [the archive and signatures](https://archive.apache.org/dist/maven/maven-3/3.9.16/binaries/).
+
+The explicit MinIO test-image pull can retry the Docker daemon's HTTP
+500/502/503/504 report twice, after 5 and 10 seconds, using the original
+digest and platform on every attempt. The recovery and release builds can
+still fail while resolving a registry manifest or fetching content. These
+builds and their test suites retain their existing failure propagation.
+Alpine package availability still depends on the live signed index carrying
+the reviewed revisions.
+
+These changes concern CI and off-host build behavior. The runtime targets,
+artifact admission procedure and protected release and deployment controls
+continue to use ADR009, ADR015 and ADR017.
+
+### Host Wrapper pin enforcement — 26 November 2026
+
+The independent review of `5bf8a62` found that the host Wrapper archive pins
+could disappear without a failure (IR293-SEC-01). Both scripts checked a pin
+only when one was present. With both values blank or absent they took
+upstream's unpinned path, and both reused an installation already present in
+their unpinned cache namespace. The Unix script also let a later duplicate override
+an earlier pin, ignored a malformed TAR.GZ pin while installing the ZIP, and
+read a missing pin from an inherited shell variable. The positive Backend run
+and the Docker verifier could not detect this. The committed pins match
+Apache's archives, and no unverified Maven was observed in CI.
+
+Both scripts now read both pins from the properties file before they choose an
+installation. They require one exact declaration of each, with 64 lowercase
+hexadecimal characters, and treat case, spacing and separator variants of a
+name as further declarations. Archive verification always runs before
+extraction. Upstream's unpinned mode and mvnd distributions are therefore
+unsupported. The cache identity, staging, publication and warm-reuse trust model
+are unchanged. The Backend job runs
+`infrastructure/vm/tests/test-maven-wrapper-pins.sh` before Java setup. It
+exercises the committed scripts against a synthetic distribution from a local
+file mirror, with no shared Maven cache. The Backend step does not enforce OS
+network isolation. Its PowerShell extraction-order observation and durable
+sensitivity controls are recorded in the
+[targeted follow-up](testing.md#pr-293-powershell-extraction-order-regression-remediation--26-november-2026). Native Windows PowerShell 5.1 and
+`cmd.exe` execution has not been qualified. Evidence is in
+[testing.md](testing.md#pr-293-host-wrapper-pin-remediation-ir293-sec-01--26-november-2026).
+
+The Retry-After description above was corrected in the same follow-up
+(IR293-R2-01). The earlier text described every valid header as governing the
+wait; Resolver 1.9.27 retries immediately for a negative number or past date.
+The Docker retry properties are unchanged.
