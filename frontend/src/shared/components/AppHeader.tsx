@@ -294,7 +294,11 @@ export function AppHeader({ onMenuToggle, menuOpen, navItems = [], selectedNavId
         sx={{ position: 'sticky', top: 0, zIndex: 'appBar', bgcolor: roles.bg.frame, color: 'common.white', [theme.breakpoints.up('md')]: cut }}>
         <Box ref={bar} sx={{ position: 'relative', display: 'flex', alignItems: 'center', gap: { xs: 1, md: denseNavigation ? 1 : 2 },
             height: { xs: presentationTokens.topBarHeightCompact, sm: presentationTokens.topBarHeight }, px: { xs: 1.5, sm: 2.5, md: denseNavigation ? 1.5 : 3 },
-            maxWidth: 1600, mx: 'auto', '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': focusRingOnChrome }}>
+            maxWidth: 1600, mx: 'auto', '&& :focus-visible:not([tabindex="-1"]), && .Mui-focusVisible': focusRingOnChrome,
+            // A full count can need more space than the circle. Use the existing compact lockup
+            // on phones rather than abbreviating the count or shrinking neighbouring hit targets.
+            '@media (max-width:599.95px)': { '&:has([data-wide-header-badge])': { gap: .5,
+                '& [data-wordmark]': { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' } } } }}>
             {onMenuToggle && <IconButton aria-label="Toggle navigation" aria-expanded={!!menuOpen} onClick={onMenuToggle}
                 sx={{ display: { md: 'none' }, color: 'common.white', '&:hover': { bgcolor: roles.chrome.raised } }}><PresentationIcon name="menu" /></IconButton>}
             <Box sx={{ flexShrink: 0, minWidth: 0, display: 'flex' }}>
@@ -383,12 +387,24 @@ export function AccountMenuDivider() { return <Divider sx={{ my: .5 }} />; }
 /** Utility button on the frame. `current` marks the page it opens (as the drawer marks its active row). */
 export function HeaderIconButton({ label, icon, badge, onClick, href, current = false }: { label: string; icon: PresentationIconName; badge?: number; onClick?: (event: MouseEvent<HTMLElement>) => void; href?: string; current?: boolean }) {
     const name = badge ? `${label}, ${badge} unread` : label;
-    return <Tooltip title={label}>
+    // Four or more digits exceed the circle's free corner space. The in-flow badge
+    // reserves its actual width; the interactive circle and current/hover state stay 44px.
+    const wideBadge = !!badge && String(badge).length >= 4;
+    const button = <Tooltip title={label}>
         <IconButton aria-label={name} aria-current={current ? 'page' : undefined} onClick={onClick} {...(href ? { component: 'a', href } : {})}
-            sx={{ position: 'relative', color: 'common.white', bgcolor: current ? roles.chrome.raised : undefined, '&:hover': { bgcolor: roles.chrome.raised } }}>
-            <PresentationIcon name={icon} />
-            {!!badge && <Box component="span" aria-hidden sx={{ position: 'absolute', top: 0, right: -2, minWidth: 20, height: 20, px: .5, borderRadius: `${radius.pill}px`,
+            sx={{ position: 'relative', flexShrink: 0, ...(wideBadge ? { gridArea: 'utility', justifySelf: 'center' } : {}),
+                color: 'common.white', bgcolor: current ? roles.chrome.raised : undefined, '&:hover': { bgcolor: roles.chrome.raised } }}>
+            <PresentationIcon name={icon} sx={wideBadge ? { fontSize: 20 } : undefined} />
+            {!!badge && !wideBadge && <Box component="span" aria-hidden sx={{ position: 'absolute', top: 0, right: 0, minWidth: 20, height: 20, px: .5, borderRadius: `${radius.pill}px`,
                 bgcolor: roles.brand.badge, color: 'common.white', fontSize: '0.8125rem', fontWeight: 600, lineHeight: '20px', textAlign: 'center', border: `2px solid ${roles.bg.frame}`, boxSizing: 'content-box' }}>{badge}</Box>}
         </IconButton>
     </Tooltip>;
+    return wideBadge ? <Box component="span" data-wide-header-badge sx={{ display: 'inline-grid', gridTemplateAreas: '"utility"', minWidth: 44, height: 44, flexShrink: 0 }}>
+        {button}
+        {/* Above the glyph, inside reserved horizontal space and the compact bar's height.
+            Pointer transparency supplements containment; it is not the overlap fix. */}
+        <Box component="span" aria-hidden sx={{ gridArea: 'utility', alignSelf: 'start', justifySelf: 'end', transform: 'translateY(-8px)', pointerEvents: 'none',
+            minWidth: 20, px: .5, borderRadius: `${radius.pill}px`, bgcolor: roles.brand.badge, color: 'common.white',
+            fontSize: '0.8125rem', fontWeight: 600, lineHeight: '16px', whiteSpace: 'nowrap', border: `2px solid ${roles.bg.frame}` }}>{badge}</Box>
+    </Box> : button;
 }

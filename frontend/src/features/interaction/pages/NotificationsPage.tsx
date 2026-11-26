@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import type { MouseEvent } from 'react';
 import { useOutletContext } from 'react-router';
 import { Alert, Box, Button, Typography } from '@mui/material';
 import { Page } from '../../../layouts/DashboardLayout';
@@ -9,7 +10,7 @@ import { PaginationBar } from '../../../shared/components/DataTable';
 import { NotificationItem } from '../components/NotificationItem';
 import type { NotificationRow } from '../components/NotificationItem';
 import type { NotificationsState } from '../hooks/useNotifications';
-import { radius, roles } from '../../../app/theme/theme';
+import { focusRing, radius, roles } from '../../../app/theme/theme';
 import type { NotificationView } from '../types/interactionTypes';
 
 function NotificationList({ notifications, onMarkRead, pending }: { notifications: NotificationRow[]; onMarkRead?: (id: string) => void; pending?: boolean }) {
@@ -70,20 +71,32 @@ export function notificationDay(createdAt: string, now = new Date()) {
 /** Receives the single Workspace-owned FE28 state through the existing router outlet. */
 export function LiveNotificationsPage() {
     const state = useOutletContext<NotificationsState>();
+    const results = useRef<HTMLDivElement>(null);
+    // A keyboard action can disappear or become disabled on the very next render.
+    // Move synchronously to its stable, named results owner, before that happens.
+    // No async restoration, retained list or session-spanning focus work is needed;
+    // a later Tab/click/navigation remains entirely the user's choice.
+    const focusResults = (event: MouseEvent<HTMLElement>) => {
+        const button = event.target instanceof Element ? event.target.closest('button') : null;
+        if (event.detail === 0 && button && !button.disabled && document.activeElement === button) {
+            results.current?.focus({ preventScroll: true });
+        }
+    };
     const rows: NotificationRow[] = state.notifications.map((item) => ({ ...item, dayGroup: notificationDay(item.createdAt),
         createdAtLabel: new Date(item.createdAt.toUpperCase()).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' }) }));
     return <Page width="reading">
         <PageHeader title="Notifications" actions={<Button variant="outlined" disabled={state.unreadCount === null || state.unreadCount === 0 || !!state.pending}
-            aria-busy={state.pending === 'all' || undefined} onClick={() => { void state.markAllRead(); }}>Mark all as read</Button>} />
+            aria-busy={state.pending === 'all' || undefined} onClick={(event) => { focusResults(event); void state.markAllRead(); }}>Mark all as read</Button>} />
         <Filter value={state.filter} onChange={state.setFilter} />
         {state.feedback && <Alert severity={state.feedback.severity} role={state.feedback.severity === 'error' ? 'alert' : 'status'} sx={{ mb: 3 }}>{state.feedback.message}</Alert>}
         {state.pending && <Typography role="status" sx={{ mb: 2 }}>Marking notifications as read…</Typography>}
-        <Box id="notification-results" role={state.error ? 'alert' : undefined} aria-busy={state.loading || !!state.pending}>
-            {state.loading ? <LoadingView message="Loading notifications…" /> : state.error
+        <Box id="notification-updates" ref={results} role="region" aria-label="Notifications" tabIndex={-1}
+            aria-busy={state.loading || !!state.pending} onClickCapture={focusResults} sx={{ '&:focus-visible': focusRing }}>
+            <Box id="notification-results" role={state.error ? 'alert' : undefined} aria-busy={state.loading || !!state.pending}>{state.loading ? <LoadingView message="Loading notifications…" /> : state.error
                 ? <ErrorView title="Couldn't load notifications" message={state.error} onRetry={state.reload} />
-                : rows.length ? <NotificationList notifications={rows} onMarkRead={(id) => { void state.markRead(id); }} pending={!!state.pending} /> : empty}
+                : rows.length ? <NotificationList notifications={rows} onMarkRead={(id) => { void state.markRead(id); }} pending={!!state.pending} /> : empty}</Box>
+            {!state.loading && !state.error && <Box sx={{ mt: 3 }}><PaginationBar page={state.page} totalPages={state.totalPages} totalItems={state.totalElements}
+                pageSize={20} itemsOnPage={rows.length} onChange={state.setPage} noun="notifications" nounOne="notification" /></Box>}
         </Box>
-        {!state.loading && !state.error && <Box sx={{ mt: 3 }}><PaginationBar page={state.page} totalPages={state.totalPages} totalItems={state.totalElements}
-            pageSize={20} itemsOnPage={rows.length} onChange={state.setPage} noun="notifications" nounOne="notification" /></Box>}
     </Page>;
 }

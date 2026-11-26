@@ -83,3 +83,39 @@ it('supports arrow keys and Home/End within the notification segmented filter', 
     await act(async () => unread.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true })));
     expect(state.setFilter).toHaveBeenCalledWith('all'); expect(document.activeElement).toBe(all);
 });
+
+// FE28-R01: focus belongs to the stable results owner, never an async callback.
+it.each(['Mark as read', 'Mark all as read', 'Go to page 2'])('keeps meaningful focus through keyboard %s and loading', async (action) => {
+    await render();
+    const button = [...host.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === action || node.getAttribute('aria-label') === action)!;
+    button.focus(); await act(async () => button.click());
+    const results = host.querySelector<HTMLElement>('#notification-updates')!;
+    state = { ...state, loading: true, notifications: [], totalPages: 0 }; await render();
+    expect(document.activeElement).toBe(results); expect(results.getAttribute('aria-busy')).toBe('true');
+    expect(results.getAttribute('role')).toBe('region'); expect(results.getAttribute('aria-label')).toBe('Notifications');
+    state = { ...state, loading: false, notifications: [], unreadCount: 0 }; await render();
+    expect(document.activeElement).toBe(results); expect(host.textContent).toContain("You're all caught up");
+    expect(results.tabIndex).toBe(-1);
+});
+
+it('does not reclaim focus after a user chooses another control during reconciliation', async () => {
+    await render(); const action = [...host.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === 'Mark as read')!;
+    action.focus(); await act(async () => action.click());
+    state = { ...state, loading: true, notifications: [] }; await render();
+    const filter = host.querySelector<HTMLButtonElement>('button[value="all"]')!; filter.focus();
+    state = { ...state, loading: false, notifications: [{ ...row, read: true }] }; await render();
+    expect(document.activeElement).toBe(filter);
+});
+
+it('keeps pointer activation native instead of moving focus to the results region', async () => {
+    await render(); const action = [...host.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === 'Mark as read')!;
+    action.focus(); await act(async () => action.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })));
+    expect(document.activeElement).toBe(action); expect(state.markRead).toHaveBeenCalledWith(id);
+});
+
+it('gives keyboard retry the same stable owner and preserves the error announcement', async () => {
+    state = { ...state, error: 'Unable to connect.' }; await render();
+    const retry = [...host.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === 'Try again')!;
+    retry.focus(); await act(async () => retry.click()); expect(document.activeElement?.id).toBe('notification-updates');
+    expect(state.reload).toHaveBeenCalledOnce(); expect(host.querySelector('[role="alert"]')?.textContent).toContain('Unable to connect.');
+});

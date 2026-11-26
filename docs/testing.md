@@ -8511,3 +8511,129 @@ under the Leader's explicit instruction and confirmed metadata arrangement;
 publication uses the Leader's authenticated `chi-thanh-nguyen` account. No global
 identity, credential ownership, signature or review approval is fabricated. This
 record and the surviving PR disclose AI-assisted implementation and verification.
+
+## FE28 independent-finding remediation — 26 November 2026
+
+### Authority and bounded decisions
+
+The Project Leader explicitly authorized targeted remediation of PR #280 findings
+`IR-FE28-01` (P2, large-count badge intercepting Home) and `FE28-R01` (P3, keyboard
+focus continuity), regression tests, author verification/audit, commit/push and PR
+handoff. Original reviewed HEAD is `35b921247d030a5b434aa370124140b52caa514b`;
+main and merge-base remain `cc6cb54ddedf226966a51c9614fc5fc5756267bb`. No additional
+main integration or PR #279 history change is included. Codex performed this work
+under the existing, explicitly authorized contributor metadata arrangement; this
+is author evidence, not independent closure, CODEOWNER approval or release authority.
+
+- **Badge:** keep the 44px circular anchor, native href/click handler, current state
+  and full exact accessible count. Counts of four or more digits use an in-flow
+  grid badge whose intrinsic width reserves horizontal space. A 20px-high badge
+  sits above the 20px glyph within the header; the circle remains 44px. Below 600px
+  that wider utility selects the existing mark-only lockup and 4px slot gaps.
+  This is a bounded responsive presentation choice, not a count cap or a global
+  breakpoint/token change. Small badges remain inside their circle's horizontal
+  bounds. The wide badge is noninteractive; pointer transparency supplements the
+  reserved layout, not a substitute for preventing visual overlap. All digits,
+  semantic colours, top-bar height and utility order are preserved. Clipping,
+  `99+`, numeric truncation, changing DTOs and expanding the interactive circle into
+  a wide pill were rejected. There are no other production HeaderIconButton callers
+  beyond NotificationBell; existing shared tests cover the unbadged Help consumer.
+- **Focus:** on a focused button's keyboard click (`detail === 0`), synchronously
+  move focus, with `preventScroll`, to the local named `notification-updates`
+  region. Its list/loading/error/empty and pagination children may change without
+  removing that owner. The existing `notification-results` list/filter target stays
+  separate. Tab continues into available row/retry/pagination controls; Shift+Tab
+  returns to the selected filter. Pointer clicks retain native focus behaviour.
+  No delayed focus callback can reclaim focus after user movement, route departure,
+  unmount, logout, session/account replacement or eligibility loss. No old list data,
+  async operation ticket, provider, hook, transport or mutation policy is added.
+  Retaining stale rows, modifying shared PaginationBar and restoring focus after an
+  async response were unnecessary alternatives. Existing success/empty/unknown-count
+  copy and S01–S03 remain unchanged.
+
+### Reproduction and targeted execution
+
+The final regression selectors fail on the unmodified production baseline: each
+Chromium/WebKit engine records one real badge collision/wrong-navigation failure
+and three BODY-focus failures (single read, mark-all and pagination). At 360px and
+100000 unread, Linux Chromium measured Home `x=64,width=186.3125`, badge
+`x=242.3125,width=62`; `elementFromPoint(246.3125,23)` and an actual click select
+`/notifications`. Document scrollWidth remains 360, demonstrating why overflow-only
+assertions miss this defect. Final tests pass after the bounded presentation fix.
+
+Executed from `frontend/`:
+
+```bash
+npm test -- src/features/interaction src/routes/index.test.tsx src/shared/components/presentation.test.tsx src/shared/components/presentation.browser.test.ts
+npm run typecheck
+VITE_API_BASE_URL=/api npm run build
+npm run test:browser -- --fe28 --playwright <installed-module> --url <owned-production-build-url> --out <external-evidence-directory> --engine chromium,webkit,firefox
+npm run test:browser -- --fe28-remediation --playwright <installed-module> --url <owned-production-build-url> --out <external-evidence-directory> --engine chromium,webkit
+# --reproduce selects the four before-fix failures; --case <substring> selects
+# bounded reruns/supplements without repeating unrelated matrices.
+```
+
+Selected Vitest: **362 pass**, including six new component outcomes (18 page tests).
+Typecheck/build and `git diff --check` pass; the existing Vite large-chunk advisory
+remains. The existing FE28 browser suite passes **57/57** (19 per engine), including
+Firefox on Linux. Remediation browser outcomes are recorded by named scenario and
+engine, deduplicating repeated focused runs: six role/theme count matrices, sixteen
+keyboard scenarios, two supplemental navigation/containment scenarios and one
+uncaught-error diagnostic per Chromium/WebKit engine: **50 distinct pass outcomes,
+0 unresolved failures** after the documented fixture corrections.
+
+Count matrix: 0, 1, 9, 99, 999, 99999, 100000, 123456789, 2147483647,
+9007199254740991 (client safe-integer ceiling), plus unknown; full set at
+320/360/390/400px, stress/zero/unknown at 599/600/768/899/900/901/1024/1199/1200/1201/
+1280/1440px. Both roles and Light/Dark/System are checked. Supplementary MAX_SAFE
+geometry covers all neighbouring targets, reserved badge bounds, uncovered glyph,
+hit-test edges and actual production editor native Control-click plus Stay/Leave.
+System OS changes remain covered. Keyboard checks include delayed mutation/list
+responses, both filters, last unread removal, mark-all zero/concurrent creation,
+last-page shrink/recovery, mutation/list failures and explicit retries, deliberate
+focus movement, departure, logout, same-account session replacement, account
+replacement and role ineligibility. Traces/screenshots/receipts stay outside Git.
+
+Host macOS Chromium/WebKit were blocked during initialization by the execution
+sandbox; Firefox also aborted before an application page. Verification instead used
+the already cached arm64 Linux `mcr.microsoft.com/playwright:v1.63.0-noble` image
+(`sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27`),
+with no browser install, privileged container, Docker-socket mount, external network
+or application backend. Each disposable container served the actual production
+build on its own loopback and used the existing harness with controlled REST data;
+containers and servers were removed. Chromium 153.0.8010.12, WebKit 26.6 and Firefox
+155.0 were observed. This is Linux developer evidence, not native macOS acceptance.
+
+Initial evidence is retained: a selector-scope mismatch was fixed by keeping
+pagination outside `notification-results`; the native-popup init script now skips
+opaque about:blank storage; the ADR014 double now restores a session after successful
+sign-in and matches the Instructor list's query string. Two initial WebKit matrix
+timeouts followed a document navigation into the double's erroneous refused restore;
+the affected Instructor matrix was rerun with accurate session fixtures. The
+empty Teaching state has two legitimate Create course links; the native-navigation
+locator was narrowed to its title-row action and rerun in both engines. No existing
+assertions were weakened. Console HTTP errors attributable to initial refused restore,
+deliberate 500 responses or the earlier incomplete Instructor double are classified
+separately from JavaScript/page errors; corrected diagnostic runs have no page errors.
+
+### Narrow author audit and retained gates
+
+The runtime delta is limited to AppHeader and LiveNotificationsPage. The notification
+hook/client/row, shared PaginationBar, routes, AuthProvider and HTTP client are
+byte-identical to the reviewed baseline. Server-authoritative reconciliation,
+cancellation, serialization, session isolation and no automatic mutation replay
+remain intact. No backend, schema, producer, dependency, theme architecture,
+governance or deployment change is included. The confirmed preparation defect was
+selector compatibility, corrected before final verification; no remaining introduced
+application defect was confirmed in the bounded audit.
+
+The responsive/accessibility checkpoint is author-verified for these two findings;
+independent delta closure is still required at the new pushed HEAD. Functional
+implementation, author acceptance evidence, independent QA/CODEOWNER approval,
+required CI, protected integration and release/deployment remain distinct. Whole
+Issue #210 Done or independent 100% acceptance is not claimed. Real-backend, ownership,
+persistence and broad session/transport evidence from the unchanged reviewed revision
+is reused; no full frontend/backend/E2E/infrastructure suite was repeated. CI was not
+polled or awaited. Native browser zoom, screen readers and physical devices remain
+unverified. The next independent review should assess only this complete delta and
+its relevant header/focus/shared-consumer regressions against `35b9212`.
