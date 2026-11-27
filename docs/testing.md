@@ -13321,3 +13321,100 @@ defect. Verdict: **AS17_CODE_COMPLETE_AUTHOR_VERIFIED** (Assessment producer cod
 tests). Separate and still open: CO16/AD16 producers, IN12 `PlatformMetricsService`
 composition and REST, FE23 UI, QA06 execution of B7-O11 end to end, independent
 CODEOWNER review, required hosted CI, protected squash merge, release and deployment.
+
+## AS18 conditional tagged-question coverage completion and author self-audit — 28 November 2026
+
+Scope: AS18 #164 in PR #307, under the Project Leader's “AS18 Full Implementation
+Completion, Bounded Upstream Remediation, and Final Self-Audit of PR #307”
+instruction. Author self-audit with AI assistance (Claude Code), not independent
+CODEOWNER review. Incoming PR HEAD `afc6731` (a concurrent contributor fix `0d23575`
+landed during the work and is kept unchanged); integrated with `main` `6c9c193`.
+Production/test revision for every result below: `e6b2c6a`.
+
+**Effective contracts.** `CT40-COVERAGE-2026-11-08-r1` (ADR005 §3.3),
+`CT40-SKILL-TAG-2026-11-08-r1` (§3.2), ADR005 §5/§13.3 guard semantics, ADR011 §4
+step 6 and §12 execution scope (B6-V09), `AS08-ANCESTRY-2026-11-26-r1` (ADR007 §16)
+and the one bounded new decision **`AS18-EXEC-COVERAGE-2026-11-28-r1`** (ADR007 §17,
+`DELEGATED_APPROVED`): `QuestionBankService.readCoverageForExecution` is the second
+and last direct caller of `SkillGraphService.requireAssessmentSkillsInCourse`, only
+after the execution scope is verified, because Course-wide readiness asks for skills
+no frozen Quiz captured.
+
+**Implemented boundaries** (existing `QuestionBankService`, no REST, no migration):
+
+| Boundary | Behavior |
+|---|---|
+| `CoverageSnapshot(UUID courseId, Map<UUID, Long> questionCounts)` | Nested, deeply immutable, no null key/value, nonnegative counts, no answer keys |
+| `readCoverage(courseId, skillIds)` | Null Course → `IllegalArgumentException`; only an owner REPEATABLE READ snapshot (its own or joined) or the Course-root READ COMMITTED write unit is accepted, else safe 500 before any query; then CT03 ownership, null set/element rejection, empty → empty map, CT40 `readSkillIds` scope with the same safe 404 for foreign/unknown skills, exact requested keys with explicit zeros |
+| `readCoverageForExecution(courseId, skillIds)` | `AttemptService.requireExecutionScope` first (actual read-write READ COMMITTED transaction, Assessment-private marker for this Course on this thread and physical transaction); no actor; empty → empty map without queries; ancestry through the §17 caller, a foreign skill is safe 500 |
+| Population (both) | Every stored Question of each requested skill, all kinds and difficulties, used or unused, hidden or published membership, counted once by ID; a row failing V004/data-model §11, a null provider result, a row of an unrequested skill or a repeated ID is an integrity failure, never a zero |
+| `QuestionRepository.findAllInSkills` | Assessment-private JPQL over its own `questions` table; materializes rows because a count-only query cannot detect malformed definitions |
+
+**Upstream dependencies.** AS01/AS05 question persistence and validation, AD07
+`readSkillIds` and the AS08 ancestry assertion, CO14 `withCourseConfigurationWrite`,
+AS08 execution marker and AS12 synchronous publication were sufficient; no upstream
+code was added. The AD07-owned change is the §17 caller and one Javadoc line in
+`SkillGraphService` (about 1% of AD07's scope).
+
+**Findings and dispositions.** AS18-R01 (P2) confirmed: the incoming PostgreSQL test
+updated a `true_false` row in violation of `ck_questions_true_false` and leaked its
+extra skill (reproduced at `afc6731`: `DataIntegrityViolationException`, suppressed FK
+cleanup failure); fixed by the contributor in `0d23575` and by new cases that corrupt a
+`single_choice` option to blank, which V004 stores and data-model §11 rejects. AS18-R02
+(P2) confirmed: the package-private `AttemptService` bridge satisfied the file
+allowlist without authorizing Course-wide input provenance; replaced by the §17
+decision and a direct call, removing the bridge. AS18-R03 (P2) confirmed: the
+annotation could silently join a read-only READ COMMITTED or read-write REPEATABLE
+READ context and read a mixed view; fixed by the context check (proven with the real
+`JpaTransactionManager`). AS18-R04 (P3) confirmed: the 5-argument constructor plus a
+compatibility constructor left `attemptService` null in reachable code; removed with
+the bridge (no dependency remains, the bean graph is acyclic). AS18-R05 (P3)
+confirmed: the incoming allowlist used string search and bare file names; replaced by
+the existing AST scanner with exact paths (`requireAssessmentSkillsInCourse`,
+`requireExecutionScope`, `readCoverageForExecution`, API-package bans). AS18-R06:
+covered by the PostgreSQL cases below; no privilege change was needed. New nit, not
+changed: the shared assertion's internal message still says “Quiz evidence” for a
+foreign coverage skill (safe 500, never exposed).
+
+**Executed commands (macOS, Docker 29.8.1, Testcontainers PostgreSQL, JDK 25).**
+
+```bash
+cd backend
+# Incoming HEAD afc6731: the incoming AS18 PostgreSQL test
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+  '-Dit.test=AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#as18CoverageReadsEnforceCt40ScopeExecutionMarkerIntegrityAndZeroCountsInPostgresql'
+# -> 1/0/1/0 (ck_questions_true_false), BUILD FAILURE
+# Final revision e6b2c6a
+./mvnw -B verify '-Dtest=QuestionBankServiceTest*,AttemptServiceTest*' '-Dit.test=AssessmentPersistenceIntegrationTest*'
+# -> unit 191/0/0/0 (QuestionBankServiceTest 111 incl. 23 AS18, AttemptServiceTest 80),
+#    PostgreSQL 84/0/0/0 (5 as18* cases), BUILD SUCCESS
+# Pre-merge tree 1f95aaf: AuthorizationIntegrationTest$QuestionBankEndpoints 9/0/0/0
+# Mutants (reverted): context check removed; execution-scope check removed;
+#   stored-row validation removed; ancestry call removed -> each fails the AS18 unit
+#   suite and at least one as18* PostgreSQL case; an extra readCoverageForExecution
+#   caller in SkillGraphService fails the AST allowlist
+```
+
+Counts are run/failures/errors/skipped. PostgreSQL oracles: B1-O05 (reuse counted
+once, unused and hidden-only members count, requested zero-count skill present,
+foreign skill 404, corrupt row fails closed); the AS18 part of B1-O04 (a guarded
+readiness read holds the Course root, a same-Course `create` waits on it — observed in
+`pg_stat_activity` from an independent connection — and lands after commit, while
+another Course's `create` commits meanwhile); B6-V09 (no transaction, owner snapshot,
+plain read-write READ COMMITTED, Course configuration guard and learner write guard
+without the marker, wrong-Course marker, another thread, `REQUIRES_NEW`,
+`NOT_SUPPORTED`, after return, after a listener failure with the Attempt still
+unsubmitted; unit probes inside `start` and answer-save callbacks); positive reads in
+manual submission and actorless `finalizeExpired`; a corrupt stored row makes the
+execution read fail the whole submission; both reads run under a role granted only
+the `infrastructure/vm/deploy.sh` runtime matrix. Not run, by risk: the full backend
+suites, E2E, frontend, VM and release suites; hosted CI was not awaited.
+
+**Self-audit and remaining gates.** A fresh pass over the final diff against `main`
+found no further actionable AS18 defect. Limitation: a read-write READ COMMITTED
+caller cannot prove from Assessment that it holds the Course root, so AD08 must call
+`readCoverage` inside `withCourseConfigurationWrite` for a readiness decision (ADR005
+§5). Verdict: **AS18_CODE_COMPLETE_AUTHOR_VERIFIED** (Assessment provider code and
+tests). Separate and still open: AD08 settings/enablement consumer, AD13 execution
+consumer, QA03/QA04 whole-flow evidence, independent CODEOWNER review, required
+hosted CI, protected squash merge, release and deployment.
