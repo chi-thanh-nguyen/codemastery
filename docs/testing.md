@@ -13418,3 +13418,124 @@ caller cannot prove from Assessment that it holds the Course root, so AD08 must 
 tests). Separate and still open: AD08 settings/enablement consumer, AD13 execution
 consumer, QA03/QA04 whole-flow evidence, independent CODEOWNER review, required
 hosted CI, protected squash merge, release and deployment.
+
+## AS18 targeted test remediation (AS18-IR-01, AS18-IR-02) and author self-audit — 28 November 2026
+
+Scope: AS18 #164 in PR #307, under the Project Leader's “Targeted Test Remediation —
+AS18-IR-01 & AS18-IR-02” instruction. Test-only: one file,
+`AssessmentPersistenceIntegrationTest.java`. This is an author self-audit with AI
+assistance (Claude Code), not an independent review. The independent review of
+`c03bf2d` (`6fce59d` after the metadata normalization below) returned
+`REQUEST_CHANGES` for the two P2 findings. Its other dispositions are unchanged and
+remain the reviewer's: AS18-R01 to R05 `VERIFIED_FIXED`, and R06 `PARTIALLY_FIXED`
+because of these two findings.
+
+| Finding | Root cause | Remediation |
+|---|---|---|
+| AS18-IR-01 (P2) | The `CoverageFixture` constructor ran each insert in its own autocommit statement under `NOT_SUPPORTED`. When a statement failed, the earlier rows stayed committed, and try-with-resources never called `close()` on the unconstructed object. The reviewer reproduced this with a `23514` failure on `Hidden only`: an extra Skill and the foreign Course remained, and teardown then failed on `fk_skills_course_id`. | `fixtureTransaction` runs setup in one bounded physical transaction: `READ COMMITTED`, 10 s timeout, `SET LOCAL lock_timeout`/`statement_timeout`. It asserts that it owns that transaction and commits before any worker starts. Cleanup deletes every row the fixture owns, FK-safely, in one bounded transaction, including Questions that workers authored in the fixture's skills. The first AS18 case's extra rows use the same transaction. |
+| AS18-IR-02 (P2) | `as18GuardedReadiness…` closed the fixture before shutting down the executor. A worker that timed out while holding a Course root therefore left `DELETE courses` waiting without a bound, and a later Question insert hit `fk_questions_skill_id`. | The authors now run through the existing `AttemptWorkers`, unchanged, which provides physical transaction ownership, PID tracking, `PENDING`/`CANCELLED`/`ADMITTED` commit admission and bounded termination. `CoverageWorkerRun.close()` calls `AttemptWorkers.close()` first: stop admission, release the blocker, cancel, then wait at most 10 s. Fixture rows are deleted only after the executor has terminated, every started worker transaction has completed, and no tracked backend has an open transaction, a lock wait or a lock. The decision depends on this gate, not on whether close succeeded or a Future was cancelled. If quiescence cannot be established, a bounded recovery terminates only this run's tracked worker backends that still hold a transaction or lock wait, then waits up to 5 s. The recovery is always reported as a failure, and fixture cleanup is withheld if the workers are still not quiescent. |
+
+The shared AS08 `assertWorkerResourcesReleased` helper now excludes its own backend
+(`pid<>pg_backend_pid()`). The connection pool can hand the probe a worker's
+returned connection, and the probe then reported its own statement as a leaked
+transaction. This was observed once during this work. A worker connection that is
+still in use cannot be handed out, so the exclusion does not weaken the check.
+
+**Regression oracles (real PostgreSQL).**
+`as18FailedCoverageFixtureSetupRollsBackEveryFixtureRowAndKeepsTheCourseUsable`
+injects a real `ck_questions_kind` (`23514`) failure inside the setup transaction
+after each of six milestones: extra Skill, foreign Course, foreign Skill, first
+Question, hidden Quiz and first membership. Each case first observes that the
+fixture's rows are visible inside the transaction. It then checks, through
+independent reads, that none survives, that the AS08 Course is intact (exactly one
+owned Course, its Skill, q1/q2 and its Quiz), that a new fixture, an owner coverage
+read and a guarded authoring call succeed, and that the outer teardown passes.
+`as18WorkerFailurePathsAreBoundedAndCleanFixturesOnlyAfterWorkerQuiescence` covers:
+
+- D1: a timeout while a worker holds the foreign Course root (`FOR UPDATE NOWAIT` → `55P03`) and an uncommitted Question.
+- D2: a worker action failure after a write.
+- D3: a main-thread failure while a same-Course worker waits for the root.
+- D4: interruption, with the flag preserved.
+- D6: a blocker rollback fault that the expected primary cannot conceal (`IR296` under `AS18 coverage cleanup failed`).
+
+Each D case requires a bound under 20 s, `CANCELLED`/`STATUS_ROLLED_BACK`, no FK
+failure in the worker, rolled-back completions recorded at the gate, no worker
+Question, no fixture row, released resources (`assertWorkerResourcesReleased`) and
+a later usable Course.
+
+`as18FixtureCleanupWaitsForAnAdmittedWorkerCommitBeforeDeletingFixtureRows` (D5) has
+a worker admitted before cancellation and holds its real commit on an advisory
+lock. While that commit is held, the cancelled Future, the alive closer, the intact
+foreign Course and the absent row prove that cleanup has not started. After
+release, the commit completes (`STATUS_COMMITTED` at the gate) before the committed
+Question is deleted with its fixture Skill.
+
+`as18NonCooperativeWorkerIsTerminatedBeforeFixtureCleanupAndCannotPass` has a worker
+that removes its own timeouts. The test shows that recovery terminates only its
+tracked PID, that the primary carries `AS08 workers exceeded the cleanup deadline`
+plus the recovery failure, and that cleanup runs only afterwards. The success-path
+oracle is unchanged: the same-Course `create` waits on the holder (observed from an
+independent connection), the other Course commits meanwhile, the snapshot is stable
+while the root is held, and coverage is fresh afterwards. Both workers end
+`ADMITTED`/`STATUS_COMMITTED`.
+
+**Executed commands (macOS, Docker 29.8.1, Testcontainers PostgreSQL, JDK 25;
+`-Djacoco.skip=true` for focused runs).** Tested revision: `26389e7`, tree
+`862225a`. Its metadata-normalized successor `5e22a57` has the identical tree,
+so the results apply to it unchanged.
+
+```bash
+cd backend
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true \
+  '-Dit.test=AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#as18*+failureBeforeBlockerCommit*+cleanupFailureCannotQualify*+rollbackAndCloseFailures*+jdbcCompletionWait*'
+# -> 32/0/0/0: 18 as18* (5 existing + 13 new) and 14 AS08 AttemptWorkers qualification cases
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true \
+  '-Dit.test=AssessmentPersistenceIntegrationTest*'
+# -> 97/0/0/0 (84 previous + 13 new), BUILD SUCCESS
+# as18* repeated twice more -> 18/0/0/0 each; runaway case about 10.2 s by design, others under 0.4 s
+# Mutants (temporary, restored byte-identically):
+#   M1 setup without the transaction -> all 6 setup-failure cases fail (1 to 9 leaked rows)
+#   M2 fixture cleanup before worker quiescence (pre-remediation order) -> D1 fails
+#      (5 s lock timeout surfaces as a concealed cleanup failure) and D5 fails
+#      (cleanup never reaches the worker gate); both runs stayed bounded
+```
+
+Counts are run/failures/errors/skipped. The production source, migrations,
+OpenAPI and decisions are byte-identical to `c03bf2d`. This includes
+`QuestionBankService`, `CoverageSnapshot`, ADR007 §17, CT40 semantics, runtime
+privileges, and the AS08, AS12 and AS17 code. Not run, by risk: the 191 unit tests,
+because no production or unit-test file changed; the full backend, frontend, E2E,
+VM and release suites; hosted CI was not awaited. The pre-remediation failures
+were not re-run on `c03bf2d`. M1 and M2 rebuild that behavior under the new
+oracles instead.
+
+**Metadata normalization.** The Project Leader confirmed mutual consent with
+`minhtan29042006`. On that basis, the Git author and committer of every
+PR-exclusive commit now carry that contributor's existing commit identity. Only
+the identity fields, and the parent links that follow from them, changed: trees,
+messages, dates, parent order and the main-side merge parent `6c9c193` are
+preserved. No commit was signed before or after. The two contributor commits are
+byte-identical. Provenance remains as before: `afc6731` and `0d23575` are the
+contributor's own work. The other commits, including this remediation, were made
+by the Project Leader with AI assistance (Claude Code) and carry the contributor
+identity only by this agreement. Pushed by `chi-thanh-nguyen`.
+
+| Before | After | Before | After |
+|---|---|---|---|
+| `afc6731` | `afc6731` | `2888cb2` | `8df2f81` |
+| `0d23575` | `0d23575` | `e6b2c6a` | `4dcb2ae` |
+| `1936891` | `d0461e3` | `c03bf2d` | `6fce59d` |
+| `54c8db2` | `875416a` | `26389e7` | `5e22a57` |
+| `1f95aaf` | `d9ce39a` | | |
+
+**Self-audit and remaining gates.** A fresh pass over the final delta found no
+remaining actionable instance of either finding and no new regression. One
+residual is accepted rather than fixed: a fixture leaks only if the worker pool
+itself cannot be created, or if the D5 or runaway test cannot obtain its holder
+connection. Both are infrastructure failures, and the outer teardown then fails
+visibly on an FK instead of passing. Verdict:
+**AS18_TARGETED_TEST_REMEDIATION_COMPLETE_AUTHOR_VERIFIED**. AS18-IR-01 and
+AS18-IR-02 are `FIXED_AUTHOR_VERIFIED`, not independently verified. Still open: a
+narrow independent delta review, Assessment/Adaptive CODEOWNER review, required
+hosted CI and CodeQL, protected squash merge, the AD08/AD13 consumers, QA03/QA04,
+release and deployment.
