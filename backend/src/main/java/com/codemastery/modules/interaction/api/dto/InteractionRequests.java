@@ -12,6 +12,61 @@ public final class InteractionRequests {
     private static final Pattern UUID_TEXT = Pattern.compile(
             "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
 
+    private static final tools.jackson.databind.json.JsonMapper JSON = tools.jackson.databind.json.JsonMapper.builder()
+            .enable(tools.jackson.core.StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+
+    public static Map<String, Object> readBody(jakarta.servlet.http.HttpServletRequest request) {
+        try {
+            byte[] bytes = request.getInputStream().readAllBytes();
+            String text = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
+            var node = JSON.readTree(text);
+            if (node == null || !node.isObject()) throw invalid();
+            return JSON.convertValue(node, new tools.jackson.core.type.TypeReference<Map<String, Object>>() {});
+        } catch (java.io.IOException | tools.jackson.core.JacksonException ex) {
+            throw invalid();
+        }
+    }
+
+    public static void requireJson(String contentType) throws org.springframework.web.HttpMediaTypeNotSupportedException {
+        org.springframework.http.MediaType type = null;
+        try { if (contentType != null) type = org.springframework.http.MediaType.parseMediaType(contentType); }
+        catch (org.springframework.http.InvalidMediaTypeException ex) { throw new org.springframework.web.HttpMediaTypeNotSupportedException(ex.getMessage()); }
+        if (type == null || !org.springframework.http.MediaType.APPLICATION_JSON.includes(type))
+            throw new org.springframework.web.HttpMediaTypeNotSupportedException(type, java.util.List.of(org.springframework.http.MediaType.APPLICATION_JSON));
+    }
+
+    public static void noQuery(jakarta.servlet.http.HttpServletRequest request) {
+        if (request.getQueryString() != null && !request.getQueryString().isEmpty()) throw invalid();
+    }
+
+    public static int pageValue(org.springframework.util.MultiValueMap<String, String> params, String name, int fallback) {
+        var values = params.get(name);
+        if (values == null) return fallback;
+        if (values.size() != 1 || !values.getFirst().matches("[0-9]+")) throw invalid();
+        try { return Integer.parseInt(values.getFirst()); } catch (NumberFormatException ex) { throw invalid(); }
+    }
+
+    /** Parser result only: body shape validation is deferred until a usable parent is concealed/admitted. */
+    public record DiscussionPostWrite(String content, UUID parentPostId, boolean validShape) {
+        public DiscussionPostWrite(String content, UUID parentPostId) { this(content, parentPostId, true); }
+
+        public static DiscussionPostWrite parse(Map<String, Object> body) {
+            if (body == null) throw invalid();
+            Object parent = body.get("parentPostId");
+            if (parent != null && !(parent instanceof String)) throw BusinessRuleException.invalidField("parentPostId");
+            UUID parentId;
+            try { parentId = parent == null ? null : parseId((String) parent); }
+            catch (BusinessRuleException ex) { throw BusinessRuleException.invalidField("parentPostId"); }
+            boolean valid = body.get("content") instanceof String
+                    && java.util.Set.of("content", "parentPostId").containsAll(body.keySet());
+            return new DiscussionPostWrite(valid ? (String) body.get("content") : null, parentId, valid);
+        }
+    }
+
     private InteractionRequests() {
     }
 

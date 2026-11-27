@@ -11115,10 +11115,13 @@ authorized protected squash integration remain gates. No GitHub approval, merge,
 Issue closure, Project update, grant expansion, release or deployment is performed.
 Downstream owner Enrollment admission and complete adaptive acceptance stay open.
 
-## IN06.report content report intake (#181) â€” 27 November 2026
+## IN06.report initial intake checkpoint (#181) — 27 November 2026
+
+**Historical incoming revision `a8eea307`.** The coverage and limitations below
+describe the original PR, superseded by the IN06 completion record later in this document.
 
 IN06 (`Refs #181`) checkpoint `IN06.report` implements CT30 report intake
-([ADR012 Â§6.3, Â§6.5](decisions/012-batch-07-contract-approvals.md)): `POST /api/lessons/{lessonId}/reports`
+([ADR012 §6.3, §6.5](decisions/012-batch-07-contract-approvals.md)): `POST /api/lessons/{lessonId}/reports`
 and `POST /api/lessons/{lessonId}/discussion/{postId}/reports`, through `ContentReportController`,
 `ContentReportService`, `InteractionRequests`, `InteractionResponses` and the `SecurityConfig` rule. This record
 lists the suites added and what they do and do not cover. It claims no execution result; the pull request
@@ -11131,7 +11134,7 @@ records the executed `./mvnw verify`.
 | `integration/InteractionReportIntakeIntegrationTest` | PostgreSQL Testcontainer, MockMvc | 401 for anonymous callers, 403 for an Administrator, concealed 404 for non-members, other Instructors and hidden Lessons, 201 receipt with `Cache-Control: no-store`, the stored Lesson and post report rows, owner preview of a hidden Lesson, duplicates, concealed posts writing nothing, 400 for malformed paths before admission and for invalid bodies after admission, 415 for a non-JSON media type |
 
 Not covered by these suites: Q&A posting, replies and reading, reply notifications, moderation resolution and the
-moderation queue (the other `IN06` checkpoints), the Â§19.2 runtime-privilege matrix for these tables, and
+moderation queue (the other `IN06` checkpoints), the §19.2 runtime-privilege matrix for these tables, and
 `InteractionAdminIntegrationTest`. A request body that is not parseable JSON, or is absent, is rejected as 400 by
 the framework before CT03 admission runs; bodies that parse are checked after admission. The placement of these
 suites is for review.
@@ -11492,3 +11495,167 @@ separate gates. No Issue closure, Project synchronization, formal GitHub approva
 protection change, merge or deployment is performed. Next: eligible CODEOWNER review
 and protected gates for this unchanged producer, with downstream implementation/QA
 handled in its own authorized scope.
+
+
+## IN06 complete code scope and implementation-side audit — 27 November 2026
+
+**Authority and provenance.** The Project Leader's explicit “Comprehensive IN06
+Completion, Bounded Upstream Implementation, Technical Decision Reconciliation and
+Post-Implementation Audit on Existing PR #303” instruction authorizes implementation,
+small upstream provider additions, bounded technical/test-placement decisions,
+main synchronization, task commits/push and PR title/body maintenance. OpenAI Codex
+performed the additional implementation, integration, review and remediation; this
+is author-side verification, not independent acceptance. The original verified Git
+identity `tihh647-ui <tihh647@gmail.com>` is used for author and committer metadata
+only, under the Leader's explicit task-specific arrangement. It is not evidence
+that the original contributor personally implemented or approved the additions.
+The authenticated GitHub account was checked as `chi-thanh-nguyen`; identity metadata
+and authenticated account names do not prove legal identity.
+
+**Baselines.** Incoming PR `a8eea307b274466b2b4f4cea9fdb80883e84d9d9`, main
+`fe3160d535b33652587e14e2fc55ca267f6a5222`, merge-base
+`daddc507f1bb109f66c988537c00cab7bc08f256`. Normal merge `3aab3f90` integrated
+main without rewriting original commits. Concurrent remote merge `fe7e24eec078c49df686256e03f1c45c4b1f9d37`
+was then preserved by normal merge `339fcf84`; its only tree difference from the local
+integration was one blank line in this document. No existing worktree was changed.
+The delivered immutable SHA and remote readback are recorded in PR #303.
+
+| Checkpoint | Incoming implementation | Delivered implementation and verification boundary |
+|---|---|---|
+| IN06.repo | Original PR #250 adapters in main; insufficient for full CT30/CT32 | Preserved targeted saves; added root-only question paging/counting, visible replies, parent SHARE/post UPDATE locks, status queue and ordered report locks. PostgreSQL and restricted-role tests cover actual rows and writes. |
+| IN06.qa | Empty Discussion service/controller | CT03-admitted question/reply REST, trusted identity, verbatim plain text, depth one, hidden ancestry concealment, author summaries in batches of 100, deterministic ordering and microsecond clocks. Direct CT11.create notification shares the reply transaction. |
+| IN06.report | Working Lesson/post intake with premature MVC body parsing | Preserved receipts, duplicate reports and target integrity; deferred strict JSON parsing until admission; duplicate fields, trailing values, invalid UTF-8 and closed body shapes are rejected. |
+| IN06.resolve | No Interaction moderation boundary | Four ADR012 §11.1 methods; active-admin identity boundary, content-first deterministic locks, refresh after lock waits, terminal decisions, targeted writes and participation in the Admin caller's transaction. IN21 still owns Admin REST, Course hiding and audit orchestration. |
+| IN06.rest | Only report intake bound | All four CT30 operations, stage ordering and no-store, synchronized OpenAPI and frontend contract types. No IN21 public route is enabled. |
+
+### Upstream assessment and bounded decisions
+
+Already available on main: CT03 Lesson admission; CT01 trusted identity and
+`userSummaries`; CT11/IN07 deterministic notification creation and r13 privileges;
+Course ancestry/content repositories. Reuse is verified against current source.
+
+Implemented `CT40-NOTIFICATION-CONTEXT-2026-11-15-r1` (ADR012 §3.1, CT40 #46;
+Course provider in the CO03/CO05 area, #55) as two actorless projections in the existing
+`CourseCatalogueService` plus one private Course ancestry repository query. The
+existing reads supply titles/publication state; no membership, owner, material,
+body or progress field crosses the boundary. Requested IDs are capped at 100,
+foreign/missing descendants are omitted and missing resources return empty.
+This is estimated at 10–15% of the owning Course provider/use-case scope by functional
+complexity, not LOC: no new public REST, policy, schema, Course authoring or full
+CT40 feature is implemented. Tests prove the exact allowed production caller paths.
+No large upstream implementation was necessary; other CT40 providers and IN21 are
+not required additions to this IN06 delivery.
+
+No new product/API/module contract was selected. Bounded implementation decisions
+under the task delegation are recorded as `IN06-IMPLEMENTATION-2026-11-27-r1`:
+
+- Preserve ADR012 §12 by reading strict UTF-8 JSON through a deferred supplier after
+  CT03 and path-target admission. Reject duplicate fields and trailing values; for
+  a usable body-supplied parent, conceal/admit that parent before other body field
+  rules. Framework `@RequestBody Map` could not preserve those stages.
+- Use database `LIMIT/OFFSET` with a long offset and a separate snapshot count for
+  question/queue pages; JPA's integer first-result API cannot represent every valid
+  CT18 page. SQL fixes both timestamp and UUID tie ordering.
+- CT32 mutations use MANDATORY propagation and reject read-only/explicit non-READ-COMMITTED
+  callers, so Interaction cannot commit before Admin's required hide/audit transaction.
+  Locked entities are refreshed to prevent pre-lock JPA identity-map state from reopening
+  a terminal report. Course-root/lesson hiding and audit rows are IN21's caller obligations.
+- Extend the existing BusinessRuleException with an optional code-owned field identifier
+  for CT18 errors (`parentPostId`, `content`, `reason`); legacy constructors and response
+  behavior remain unchanged. No new exception file/status, diagnostic disclosure or
+  rejected value is introduced.
+- `CT14-IN06-COMPLETION-PLACEMENT-2026-11-27-r1`: add
+  `modules/interaction/application/service/DiscussionServiceTest.java`, extend the
+  existing `CourseServiceTest` and `InteractionReportIntakeIntegrationTest` for focused
+  provider/Q&A/CT32/PostgreSQL cases. The latter reuses the original PR's committed
+  fixtures, real filter chain and shared AbstractIntegrationTest lifecycle. Existing
+  InteractionAdminIntegrationTest remains intact and is rerun for audit transaction
+  compatibility. This additive placement avoids restructuring existing suites.
+- CT17-P6 r17 ships only the ADR012 §19.2 discussion/report ceiling rows with script,
+  matrix-contract, containment and real-backend consumer probes; no deployed grant.
+
+Frontend compatibility was checked against concurrent FE13 PR #271 at
+`c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2`. Only its matching CT30 field definitions
+were mirrored into the existing interaction types file, retaining main's preview
+models and notification contract. No FE13/FE16 UI, route or hook is implemented here.
+
+### Post-implementation audit dispositions
+
+Confirmed and remediated: premature MVC body parsing; genuine incoming SecurityConfig
+regressions (notification/timed-attempt/material/Assignment bindings, no-store header
+writer, upload transport and form-filter protection, CORS Content-Disposition exposure);
+missing Q&A/context/moderation; large-page offset overflow; missing parent field-error
+projection; stale pre-lock report state and caller transaction enforcement.
+`SecurityConfig` now differs from current main only by the four exact CT30 method/path
+bindings. Existing refresh/session policies, uploads, default-deny and shared DTOs remain.
+
+The audit verified actual notification insert failure rollback and pre-commit
+invisibility; hidden-parent and cross-Lesson concealment; active/completed/left/locked
+actors; both parent-lock race orders; two competing hides and dismiss/hide ordering;
+terminal revalidation; report target isolation; restricted JPA writes; PostgreSQL UUID
+tie ordering and long pages; API field shape, safe errors, no-store, caller allowlists
+and the absence of new migrations/dependencies. Rejected hypotheses: direct Course
+persistence access by Interaction (none); duplicate notification service/event needed
+(existing IN07 suffices); IN21 public orchestration being IN06-owned (ADR012 assigns it
+to Admin). Report admission retains the approved statement-snapshot visibility; no
+additional report-intake serialization guarantee is invented. No known actionable
+IN06-owned finding remains; independent acceptance is not claimed.
+
+### Executed verification and limits
+
+Final commands, results and exact tested source revision are recorded below after
+execution. Hosted CI was not awaited or dispatched. No full frontend/E2E, entire
+backend suite, production grant, release, deployment or independent IN21 acceptance
+is claimed: there is no UI change, unrelated suites are outside the focused risk
+surface, and public Admin orchestration remains downstream. The graphify query used
+an older local graph only for navigation; source and contracts determined every edit.
+
+
+| Execution | Result |
+|---|---|
+| `cd backend && ./mvnw -q -Dtest='InteractionMapperTest,InteractionRequestsTest,ContentReportServiceTest,DiscussionServiceTest,CourseServiceTest,CourseContentRepositoryImplTest,NotificationServiceTest,AppConfigTest,PageResponseTest' -Dit.test='InteractionReportIntakeIntegrationTest,InteractionAdminIntegrationTest,InteractionRepositoryIntegrationTest,AuthorizationIntegrationTest,CourseCatalogueIntegrationTest,NotificationRepositoryIntegrationTest,SharedRestInfrastructureIntegrationTest' verify` | PASS: 192 unit tests and 210 integration tests; zero failures/errors/skips. This includes 117 existing authorization cases, 21 shared REST cases and all 42 AppConfigTest cases. |
+| `cd backend && ./mvnw -q -Dtest='InteractionRequestsTest,DiscussionServiceTest,ContentReportServiceTest' -Dit.test='InteractionReportIntakeIntegrationTest' verify` | PASS after the final body-parent precedence and stale-dismiss regression changes: 15 unit and 27 PostgreSQL integration tests; zero failures/errors/skips. Unchanged provider/shared/security suites retain the immediately preceding passing evidence. |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | PASS: all 27 relations match the cumulative dated matrix through r17; malformed inputs rejected. |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | PASS: 138 SQL probes, 36 expected rejection checks, idempotency/drift/escalation checks, V006/V008 upgrades and failure containment. New r17 probes assert real row values and rollback, plus immutable-column/DELETE/TRUNCATE denials. |
+| `BUILDX_CONFIG=<task scratch> docker build -t codemastery-in06:pr303 backend` | PASS using the existing Dockerfile and pinned dependencies. Final tested image ID: `sha256:5ad6a57707497cd4a262dead6f8888cdc45206e5000a89ec14c352c36cb6b47c`. No image was published or deployed. |
+| `BACKEND_IMAGE=sha256:5ad6a57707497cd4a262dead6f8888cdc45206e5000a89ec14c352c36cb6b47c BACKEND_PORT=18086 bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | PASS: 205 consumer/upgrade assertions; real backend under the exact r17 runtime matrix, all preserved consumers plus Q&A/report intake and reply notification, zero permission-denied/42501 log entries; real Flyway V008-to-V009 upgrade checks pass. |
+| `cd frontend && npm ci && npm run typecheck` | PASS. All seven new CT30 TypeScript contract property sets also match their OpenAPI schemas. No UI behavior is claimed. |
+| `git diff --check`, staged diff inspection and SecurityConfig comparison with main | PASS; no migration, dependency, secret, local configuration or generated artifact is included; shared SecurityConfig changes relative to main are only the exact CT30 bindings. |
+
+**Tested revision.** These commands ran on the isolated candidate based on integration
+commit `339fcf848465b4beefc2dc0dc375f2ec169f7e3a`; the final targeted rerun includes
+all delivered backend source and test changes. The immutable implementation commit
+and remote final HEAD are recorded in PR #303. Later evidence-only documentation/PR
+changes do not change the tested production sources. Earlier passing image
+`sha256:9d2bde863af75570ac1048d13b6b4b35d09851b6ae4f7671cbdd60c15b7d78f7`
+was superseded by the final immutable-image runtime run above.
+
+**Non-green exploratory execution.** An expanded selector
+`-Dtest='Interaction*Test,ContentReportServiceTest,DiscussionServiceTest,CourseServiceTest,CourseContentRepositoryImplTest,AuthServiceTest,NotificationServiceTest,AppConfigTest'`
+also selected Interaction integration classes in Surefire. That execution stopped
+before Failsafe: 448 tests, 61 failures, zero errors/skips. Every failure's first
+project frame was `AuthServiceTest.MailLogCapture.assertNoRecoveryInformation:988`
+(the missing application-log control assertion after Spring initialized logging),
+not an IN06 assertion or demonstrated sensitive-data disclosure. A disposable,
+unmodified main `fe3160d535b33652587e14e2fc55ca267f6a5222` reproduced the representative
+failure with:
+
+```sh
+cd backend
+./mvnw -q '-Dtest=InteractionAdminIntegrationTest,AuthServiceTest$SmtpSubmissionPolicy#nonListeningLoopbackEndpointFailsWithoutDisclosingCredentials' test
+```
+
+Baseline result: 10 tests, one identical log-control failure, nine passing audit
+integration tests. The other 60 same-frame failures were not independently replayed
+on main. This is baseline/order-sensitive test evidence, not a green full-suite
+claim. No assertion, logging/security control or SMTP production code was weakened.
+The initial documented AppConfigTest concern did not reproduce: its 42 cases passed.
+
+**Environment notes.** A first Docker build was blocked by sandbox write access to
+the user's buildx activity directory; a task-local BUILDX_CONFIG allowed the normal
+build without changing personal Docker configuration. The first added containment
+probe had a shell dollar-quoting error; the corrected script passed in full. The
+first new real-backend reply probe used a Learner fixture intentionally left by an
+earlier membership test and correctly got 404; using the existing active fixture
+made the complete consumer/upgrade run pass. These were tooling/fixture corrections,
+not production-policy changes. No hosted workflow was dispatched or awaited.

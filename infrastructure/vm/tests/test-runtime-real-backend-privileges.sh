@@ -520,6 +520,23 @@ call GET "$notification_path" "$token_adm"
 check "Administrator can list own notifications" "$STATUS/$(field totalElements)" 200/0
 check "mark-read and mark-all committed under the runtime role" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE is_read) || '/' || count(*) FROM public.notifications;")" 2/3
 
+echo "== IN06 discussion and reports (r17)"
+discussion=/api/lessons/$lesson/discussion
+call POST "$discussion" "$token_a" '{"content":"Runtime question"}'
+check "create question through CT03 under the runtime role" "$STATUS/$(field authorRole)" "201/Learner"
+interaction_question="$(field id)"
+call POST "$discussion" "$token_c" "{\"content\":\"Runtime reply\",\"parentPostId\":\"$interaction_question\"}"
+check "reply holds parent SHARE and writes its notification" "$STATUS/$(field parentPostId)" "201/$interaction_question"
+call GET "$discussion?size=1" "$token_a"
+check "question pagination embeds the reply" "$STATUS/$(field totalElements)/$(field content.0.replies.0.content)" "200/1/Runtime reply"
+call POST "/api/lessons/$lesson/reports" "$token_a" '{"reason":"Runtime lesson report"}'
+check "create Lesson report under runtime role" "$STATUS/$(field status)" "201/open"
+call POST "$discussion/$interaction_question/reports" "$token_a" '{"reason":"Runtime post report"}'
+check "create post report under runtime role" "$STATUS/$(field status)" "201/open"
+call POST "$discussion" "$token_adm" '{'
+check "Administrator admission precedes malformed JSON" "$STATUS" 403
+check "reply notification committed under runtime role" "$(psql_admin <<<"SELECT count(*) FROM public.notifications WHERE message LIKE 'New reply to your question in %';")" 1
+
 echo "== current account state is enforced (users SELECT on every protected request)"
 psql_admin >/dev/null <<<"UPDATE public.users SET account_status='locked' WHERE email='learner.c@example.test';"
 call GET "/api/me/courses" "$token_c"; check "locked account's existing token is rejected" "$STATUS" 401
@@ -587,7 +604,7 @@ echo "== no permission failure anywhere, and the matrix is unchanged"
 denials="$(docker logs "$backend" 2>&1 | count_permission_errors)"
 check "backend log entries reporting permission denied / SQLSTATE 42501" "$denials" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank, AS06 quiz composition, CO06 Instructor authoring, CO09 relational materials, AS09 owner assignments, the IN10 audit read, and IN07 notifications under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank, AS06 quiz composition, CO06 Instructor authoring, CO09 relational materials, AS09 owner assignments, the IN10 audit read, IN07 notifications and IN06 discussion/report intake under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE="${BACKEND_IMAGE:-codemastery-backend:privilege-test}" \

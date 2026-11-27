@@ -7217,7 +7217,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "CT03 requireLessonReadAccess on the Lesson (active/completed Learner member of the published Course and published Lesson, or owning Instructor including hidden preview); Administrator 403; other denials are the concealed 404. Questions newest first with all visible replies oldest first; hidden posts and replies of hidden questions never appear. CT30-ACCESS/POSTS/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "CT03 requireLessonReadAccess on the Lesson (active/completed Learner member of the published Course and published Lesson, or owning Instructor including hidden preview); Administrator 403; other denials are the concealed 404. Questions newest first with all visible replies oldest first; hidden posts and replies of hidden questions never appear. CT30-ACCESS/POSTS/REST-2026-11-15-r1. ADR012 is normative. Implemented by IN06 (#181) in PR #303; independent review, hosted CI and protected integration remain gates.",
         "security": [
           {
             "bearerAuth": []
@@ -7255,7 +7255,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7285,7 +7285,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       },
       "post": {
@@ -7293,7 +7293,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Same admission as the list. Creates a question (no parentPostId) or a one-level reply to a visible question of this Lesson; a reply to a reply is 400 and a hidden, missing or foreign parent is 404. Content is stored verbatim. A reply notifies the question author in the same transaction (CT30-NOTIFY-2026-11-15-r1). No edit or delete operation exists. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Same admission as the list. Creates a question (no parentPostId) or a one-level reply to a visible question of this Lesson; a reply to a reply is 400 and a hidden, missing or foreign parent is 404. Content is stored verbatim. A reply notifies the question author in the same transaction (CT30-NOTIFY-2026-11-15-r1). No edit or delete operation exists. ADR012 is normative. Implemented by IN06 (#181) in PR #303; independent review, hosted CI and protected integration remain gates.",
         "security": [
           {
             "bearerAuth": []
@@ -7312,7 +7312,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Created; specification only, NOT IMPLEMENTED.",
+            "description": "Created.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7345,7 +7345,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
         "requestBody": {
           "required": true,

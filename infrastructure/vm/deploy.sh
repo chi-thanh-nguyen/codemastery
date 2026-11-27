@@ -1361,7 +1361,8 @@ SQL
 # CT17-P6-PRIVILEGES-2026-11-25-r13 IN07 notifications row and the
 # CT17-P6-PRIVILEGES-2026-11-26-r14 CO09 material-write row and
 # CT17-P6-PRIVILEGES-2026-11-26-r15 AS08 timed-attempt rows and
-# CT17-P6-PRIVILEGES-2026-11-27-r16 AS09 submission row
+# CT17-P6-PRIVILEGES-2026-11-27-r16 AS09 submission row and
+# CT17-P6-PRIVILEGES-2026-11-27-r17 IN06 discussion/report rows
 # (all within the ADR012 §19.2 ceiling):
 # the complete runtime privilege matrix for the reviewed V001-V009 schema. Every relation in schema
 # public must be listed, and its reviewed columns are pinned, so a later migration
@@ -1389,9 +1390,9 @@ assignments              SELECT,INSERT  UPDATE(lesson_id,title,instructions,dead
 submissions              SELECT,INSERT  UPDATE(object_key,original_filename,submitted_at,grade_percentage,feedback,graded_at)       id,assignment_id,user_id,object_key,original_filename,submitted_at,grade_percentage,feedback,graded_at
 learner_skill_masteries  INSERT         SELECT(user_id,skill_id,state)+UPDATE(state) id,user_id,skill_id,state
 path_recommendations     INSERT         -                                        id,enrollment_id,lesson_id,recommendation_type,reason,recommended_at
-discussion_posts         -              -                                        id,lesson_id,author_id,parent_post_id,content,created_at,is_hidden
+discussion_posts         SELECT,INSERT  UPDATE(is_hidden)                                        id,lesson_id,author_id,parent_post_id,content,created_at,is_hidden
 notifications            SELECT,INSERT  UPDATE(is_read)                          id,user_id,message,is_read,created_at
-content_reports          -              -                                        id,reporter_id,discussion_post_id,lesson_id,reason,status,created_at,resolved_at
+content_reports          SELECT,INSERT  UPDATE(status,resolved_at)                                        id,reporter_id,discussion_post_id,lesson_id,reason,status,created_at,resolved_at
 audit_logs               SELECT,INSERT  -                                        id,actor_id,action,target_type,target_reference,occurred_at
 password_reset_tokens    SELECT,INSERT,DELETE -                                  id,user_id,token_digest,issued_at,expires_at
 refresh_sessions         SELECT,INSERT,DELETE UPDATE(revoked_at)                 id,user_id,created_at,expires_at,revoked_at
@@ -1611,10 +1612,10 @@ verify_runtime_privileges() {  # present (before migration) | complete (after mi
     || fail "Could not verify runtime privileges against the approved matrix; ingress remains closed."
   if [[ -n "${violations}" ]]; then
     printf '%s\n' "${violations}" | head -n 25 | sed 's/^/  violation: /' >&2
-    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write, r10 audit-log, r11 mastery-skip, r12 authoring, r13 notifications, r14 material, r15 timed-attempt and r16 submission rows); reconcile explicitly. Ingress remains closed."
+    fail "Runtime database privileges or objects differ from the CT17-P6 runtime matrix (r1 plus the r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write, r10 audit-log, r11 mastery-skip, r12 authoring, r13 notifications, r14 material, r15 timed-attempt, r16 submission and r17 Interaction rows); reconcile explicitly. Ingress remains closed."
   fi
   if [[ "${mode}" == "complete" ]]; then
-    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write, r10 audit-log, r11 mastery-skip, r12 authoring, r13 notifications, r14 material, r15 timed-attempt and r16 submission rows) verified (every public relation reviewed)"
+    DB_GRANTS_RESULT="exact CT17-P6 runtime matrix (r1 plus r2 AU07, r3 refresh-session, r4 progress/resume, r5 skill-graph, r6 question-bank, r7 quiz-composition, r8 mastery/history-write, r10 audit-log, r11 mastery-skip, r12 authoring, r13 notifications, r14 material, r15 timed-attempt, r16 submission and r17 Interaction rows) verified (every public relation reviewed)"
   fi
   log "  ok: runtime privileges equal the approved matrix (${mode} schema)"
 }

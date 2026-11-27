@@ -79,6 +79,12 @@ public class CourseContentRepositoryImpl implements CourseContentRepository {
                 .toList();
     }
 
+    @Override
+    public Optional<UUID> findLessonCourseId(UUID lessonId) {
+        return jdbc.query("SELECT ch.course_id FROM public.lessons l JOIN public.chapters ch ON ch.id=l.chapter_id WHERE l.id=?",
+                (row, index) -> row.getObject(1, UUID.class), Objects.requireNonNull(lessonId)).stream().findFirst();
+    }
+
     // CO03.content reads. Direct statements never return pre-lock managed entities.
 
     @Override

@@ -10,6 +10,13 @@ public final class InteractionResponses {
     private InteractionResponses() {
     }
 
+    public record DiscussionPostResponse(UUID id, UUID lessonId, UUID parentPostId, UUID authorId,
+            String authorDisplayName, String authorRole, boolean mine, String content, Instant createdAt) {}
+    public record DiscussionReply(UUID id, UUID parentPostId, UUID authorId,
+            String authorDisplayName, String authorRole, boolean mine, String content, Instant createdAt) {}
+    public record DiscussionThread(UUID id, UUID authorId, String authorDisplayName, String authorRole,
+            boolean mine, String content, Instant createdAt, java.util.List<DiscussionReply> replies) {}
+
     public record ContentReportReceipt(UUID id, String status, Instant createdAt) {}
     public record UnreadCountResponse(long unreadCount) {
     }

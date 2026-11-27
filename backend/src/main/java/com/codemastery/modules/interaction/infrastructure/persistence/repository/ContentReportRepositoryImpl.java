@@ -34,6 +34,41 @@ public class ContentReportRepositoryImpl implements ContentReportRepository {
         return jpaRepository.findById(id).map(mapper::toDomain);
     }
 
+    @Override
+    public org.springframework.data.domain.Page<ContentReport> findByStatus(ContentReport.Status status,
+            org.springframework.data.domain.Pageable pageable) {
+        long total = jpaRepository.countByStatus(status.getCode());
+        java.util.List<ContentReport> rows = pageable.getOffset() >= total ? java.util.List.of()
+                : jpaRepository.findByStatus(status.getCode(), pageable.getPageSize(), pageable.getOffset()).stream().map(mapper::toDomain).toList();
+        return new org.springframework.data.domain.PageImpl<>(rows, pageable, total);
+    }
+
+    @Override
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public Optional<ContentReport> lockById(UUID id) {
+        return locked("SELECT * FROM public.content_reports WHERE id=:target FOR UPDATE", id).stream().findFirst();
+    }
+
+    @Override
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public java.util.List<ContentReport> lockOpenForTarget(UUID postId, UUID lessonId) {
+        if ((postId == null) == (lessonId == null)) throw new IllegalArgumentException("Exactly one report target required");
+        return locked("SELECT * FROM public.content_reports WHERE "
+                + (postId != null ? "discussion_post_id" : "lesson_id")
+                + "=:target AND status='open' ORDER BY id FOR UPDATE", postId != null ? postId : lessonId);
+    }
+
+    private java.util.List<ContentReport> locked(String sql, UUID target) {
+        var rows = entityManager.createNativeQuery(sql, ContentReportEntity.class).setParameter("target", target).getResultList();
+        java.util.List<ContentReport> result = new java.util.ArrayList<>();
+        for (Object value : rows) {
+            var row = (ContentReportEntity) value;
+            entityManager.refresh(row); // Re-read terminal state after waiting, even if selected before locking.
+            result.add(mapper.toDomain(row));
+        }
+        return result;
+    }
+
     /**
      * Inserts a new report, or updates only {@code status} and {@code resolved_at} of an existing
      * one. ADR012 §19.2 grants no UPDATE on any other column, so a full-row update is never issued

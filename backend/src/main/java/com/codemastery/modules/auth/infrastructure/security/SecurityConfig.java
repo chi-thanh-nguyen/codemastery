@@ -16,6 +16,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.header.writers.DelegatingRequestMatcherHeaderWriter;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
@@ -30,6 +31,39 @@ import java.util.function.Supplier;
 @EnableWebSecurity
 public class SecurityConfig {
 
+    private static final String MATERIAL_ROOT = "/api/instructor/courses/{courseId}/lessons/{lessonId}";
+    private static final RequestMatcher MATERIAL_UPLOADS = new OrRequestMatcher(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, MATERIAL_ROOT + "/file-materials"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/file-materials/{materialId}/file"));
+    // Share Security/MVC's segment-aware decoding, including before Security's filter chain.
+    // Exact methods and paths keep unrelated form processing and default-deny unchanged.
+    private static final RequestMatcher MATERIAL_OPERATIONS = new OrRequestMatcher(
+            MATERIAL_UPLOADS,
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, MATERIAL_ROOT + "/materials"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/materials/{materialId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/materials/{materialId}/publication"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/file-materials/{materialId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, MATERIAL_ROOT + "/file-materials/{materialId}/publication"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET,
+                    "/api/courses/{courseId}/lessons/{lessonId}/materials/{materialId}/file"));
+
+    private static final String ASSIGNMENT_ROOT = "/api/courses/{courseId}";
+    private static final RequestMatcher SUBMISSION_UPLOAD = PathPatternRequestMatcher.withDefaults()
+            .matcher(HttpMethod.PUT, ASSIGNMENT_ROOT + "/assignments/{assignmentId}/submission");
+    private static final RequestMatcher ASSIGNMENT_OPERATIONS = new OrRequestMatcher(
+            SUBMISSION_UPLOAD,
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, ASSIGNMENT_ROOT + "/assignments"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, ASSIGNMENT_ROOT + "/assignments"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, ASSIGNMENT_ROOT + "/assignments/{assignmentId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, ASSIGNMENT_ROOT + "/assignments/{assignmentId}/submission/file"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, ASSIGNMENT_ROOT + "/owned-assignments"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, ASSIGNMENT_ROOT + "/owned-assignments/{assignmentId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, ASSIGNMENT_ROOT + "/owned-assignments/{assignmentId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, ASSIGNMENT_ROOT + "/owned-assignments/{assignmentId}/publication"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, ASSIGNMENT_ROOT + "/owned-assignments/{assignmentId}/submissions"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, ASSIGNMENT_ROOT + "/owned-assignments/{assignmentId}/submissions/{submissionId}/file"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, ASSIGNMENT_ROOT + "/owned-assignments/{assignmentId}/submissions/{submissionId}/grade"));
+
     static final RequestMatcher PUBLIC_OPERATIONS = new OrRequestMatcher(
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/register"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/login"),
@@ -40,6 +74,21 @@ public class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/auth/password-resets"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}"));
+
+    private static final RequestMatcher NOTIFICATION_OPERATIONS = new OrRequestMatcher(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/me/notifications"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/me/notifications/unread-count"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/me/notifications/{notificationId}/read"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/me/notifications/read-all"));
+
+    private static final RequestMatcher ATTEMPT_OPERATIONS = new OrRequestMatcher(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}/quizzes/{quizId}/attempts"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/courses/{courseId}/quizzes/{quizId}/attempts"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}/result"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}/answers"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/courses/{courseId}/quizzes/{quizId}/attempts/{attemptId}/submission"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}/quizzes/{quizId}/owned-attempts/{attemptId}/result"));
 
     /** Adapts only Auth's validated principal, keeping infrastructure out of application consumers. */
     @Bean
@@ -79,11 +128,15 @@ public class SecurityConfig {
                 .logout(logout -> logout.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .cors(cors -> cors.configurationSource(corsConfigurationSource(corsSettings)))
+                .headers(headers -> headers.addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
+                        new OrRequestMatcher(NOTIFICATION_OPERATIONS, ATTEMPT_OPERATIONS), (request, response) -> response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store"))))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(restSecurityErrorHandler)
                         .accessDeniedHandler(restSecurityErrorHandler))
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(PUBLIC_OPERATIONS).permitAll()
+                        // CT11.read: all active account roles, with authentication before MVC validation.
+                        .requestMatchers(NOTIFICATION_OPERATIONS).authenticated()
                         // CT17 P4: nondetailed health for the private operator probe only. Ingress does not
                         // proxy /actuator; probe groups and other Actuator endpoints retain default-deny.
                         .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
@@ -141,29 +194,29 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/quizzes/{quizId}",
                                 "/api/courses/{courseId}/quizzes/{quizId}/publication").hasRole("INSTRUCTOR")
                         .requestMatchers(HttpMethod.DELETE, "/api/courses/{courseId}/quizzes/{quizId}").hasRole("INSTRUCTOR")
+                        // CT04/ADR007: exact Attempt methods; role before MVC, Course admission in application.
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/courses/{courseId}/quizzes/{quizId}/owned-attempts/{attemptId}/result").hasRole("INSTRUCTOR")
+                        .requestMatchers(ATTEMPT_OPERATIONS).hasRole("LEARNER")
                         // CT07-PRACTICE-RECOMMENDATION (ADR013 §19.4): self Learner. The chain decides only
                         // authentication: malformed UUIDs are 400 (order 2) before the role 403 (order 3),
                         // which CT03 inside CT33 readLearnerState decides before any lookup.
                         .requestMatchers(HttpMethod.GET,
                                 "/api/courses/{courseId}/lessons/{lessonId}/practice-recommendation").authenticated()
-                        // CT10.rest (ADR010 §§12, 14): owning Instructor assignment authoring and owner reads.
-                        // The chain decides only authentication here so stage 2 (415 media type and 400 path/query)
-                        // precedes stage 3 (CT03 role/ownership/scope 403/404); unimplemented B5 paths stay denied.
-                        .requestMatchers(HttpMethod.POST, "/api/courses/{courseId}/assignments").authenticated()
-                        .requestMatchers(HttpMethod.GET, "/api/courses/{courseId}/owned-assignments",
-                                "/api/courses/{courseId}/owned-assignments/{assignmentId}").authenticated()
-                        .requestMatchers(HttpMethod.PUT, "/api/courses/{courseId}/owned-assignments/{assignmentId}",
-                                "/api/courses/{courseId}/owned-assignments/{assignmentId}/publication").authenticated()
-                        // CT30.reports (ADR012 sections 6.5, 12): Learner or Instructor. The chain decides only authentication
-                        // here: 415 and malformed path values (stage 2) precede the role 403 and CT03 Lesson admission (stage 3)
-                        // that ContentReportService decides before any lookup. Discussion read/write routes stay denied.
-                        .requestMatchers(HttpMethod.POST, "/api/lessons/{lessonId}/reports",
-                                "/api/lessons/{lessonId}/discussion/{postId}/reports").authenticated()
+                        // CT09/CT10: request shape precedes CT03 admission in the application.
+                        .requestMatchers(ASSIGNMENT_OPERATIONS).authenticated()
+                        // CT09/CT21 material operations: exact paths only; stage 2 precedes application role checks.
+                        .requestMatchers(MATERIAL_OPERATIONS).authenticated()
+                        // ADR012 §12: authentication precedes media/path/query, then application CT03 admission.
+                        .requestMatchers(HttpMethod.GET, "/api/lessons/{lessonId}/discussion").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/lessons/{lessonId}/discussion",
+                                "/api/lessons/{lessonId}/reports", "/api/lessons/{lessonId}/discussion/{postId}/reports").authenticated()
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),
                         UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(new MaterialUploadTransport(), JwtAuthenticationFilter.class);
         return http.build();
     }
 
@@ -184,8 +237,29 @@ public class SecurityConfig {
         configuration.setAllowedOrigins(corsSettings.allowedOrigins());
         configuration.setAllowedMethods(List.of(HttpMethod.GET.name(), HttpMethod.POST.name(), HttpMethod.PUT.name(), HttpMethod.DELETE.name(), HttpMethod.OPTIONS.name()));
         configuration.setAllowedHeaders(List.of(HttpHeaders.AUTHORIZATION, HttpHeaders.CONTENT_TYPE));
+        configuration.setExposedHeaders(List.of(HttpHeaders.CONTENT_DISPOSITION));
         configuration.setAllowCredentials(false);
         source.registerCorsConfiguration("/**", configuration);
         return source;
+    }
+
+    /** The default form filter parses PUT bodies before Security. Material handlers own body admission. */
+    @Bean
+    org.springframework.boot.servlet.filter.OrderedFormContentFilter formContentFilter() {
+        return new org.springframework.boot.servlet.filter.OrderedFormContentFilter() {
+            @Override protected boolean shouldNotFilter(jakarta.servlet.http.HttpServletRequest request) {
+                return MATERIAL_OPERATIONS.matches(request) || ASSIGNMENT_OPERATIONS.matches(request);
+            }
+        };
+    }
+
+    /** ADR010 §11: do not drain a rejected protected upload merely to reuse its connection. */
+    private static final class MaterialUploadTransport extends org.springframework.web.filter.OncePerRequestFilter {
+        @Override protected void doFilterInternal(jakarta.servlet.http.HttpServletRequest request,
+                jakarta.servlet.http.HttpServletResponse response, jakarta.servlet.FilterChain chain)
+                throws java.io.IOException, jakarta.servlet.ServletException {
+            if (MATERIAL_UPLOADS.matches(request) || SUBMISSION_UPLOAD.matches(request)) response.setHeader(HttpHeaders.CONNECTION, "close");
+            chain.doFilter(request, response);
+        }
     }
 }

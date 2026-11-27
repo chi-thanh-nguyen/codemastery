@@ -21,7 +21,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * CT30.reports intake (IN06.report). Every operation first applies CT03 Lesson admission, then
+ * CT30 intake and the CT32 Interaction-owned moderation handoff. Intake first applies CT03 Lesson admission, then
  * resolves the target, then applies the body rules, in the order of ADR012 section 12: a report
  * never hides anything by itself and duplicates are allowed.
  */
@@ -91,6 +91,101 @@ public class ContentReportService {
                 .isPresent();
     }
 
+    /** CT32 Interaction-owned queue. Admin adds identity and Course context projections. */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public com.codemastery.common.api.PageResponse<ModerationReport> listReportsForModeration(String status, int page, int size) {
+        com.codemastery.common.api.PageResponse.validateRequest(page, size);
+        ContentReport.Status filter;
+        try { filter = ContentReport.Status.valueOf((status == null ? "open" : status).toUpperCase(java.util.Locale.ROOT)); }
+        catch (IllegalArgumentException ex) { throw new BusinessRuleException("Invalid report status"); }
+        if (status != null && !status.equals(filter.getCode())) throw new BusinessRuleException("Invalid report status");
+        requireAdmin();
+        var rows = reports.findByStatus(filter, org.springframework.data.domain.PageRequest.of(page, size));
+        return com.codemastery.common.api.PageResponse.from(rows.map(report -> {
+            DiscussionPost post = report.getDiscussionPostId() == null ? null : posts.findById(report.getDiscussionPostId())
+                    .orElseThrow(() -> new IllegalStateException("Report target disappeared"));
+            return new ModerationReport(report.getId(), report.getStatus().getCode(), report.getReason(), report.getCreatedAt(),
+                    report.getResolvedAt(), report.getReporterId(), post == null ? "lesson" : "discussion_post",
+                    post == null ? null : post.getId(), post == null ? null : post.getContent(),
+                    post == null ? null : post.getAuthorId(), post != null && post.isHidden(),
+                    post == null ? report.getLessonId() : post.getLessonId());
+        }));
+    }
+
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY, isolation = Isolation.READ_COMMITTED)
+    public ModerationDecision hidePostForReport(UUID reportId) {
+        requireAdmin();
+        requireDecisionTransaction();
+        var selected = requireReport(reportId);
+        if (selected.getDiscussionPostId() == null) throw new BusinessRuleException("Report is not a post target");
+        var post = posts.lockById(selected.getDiscussionPostId(), true)
+                .orElseThrow(() -> new IllegalStateException("Report target disappeared"));
+        var locked = reports.lockOpenForTarget(post.getId(), null);
+        requireSelectedOpen(reportId, locked);
+        posts.save(new DiscussionPost(post.getId(), post.getLessonId(), post.getAuthorId(), post.getParentPostId(),
+                post.getContent(), post.getCreatedAt(), true));
+        return resolve(locked, "hide", ContentReport.Status.RESOLVED);
+    }
+
+    /** Called after Admin's approved Course-root/lesson hide in the same transaction (ADR012 §11.2). */
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY, isolation = Isolation.READ_COMMITTED)
+    public ModerationDecision resolveLessonReports(UUID reportId, UUID lessonId) {
+        requireAdmin();
+        requireDecisionTransaction();
+        var selected = requireReport(reportId);
+        if (lessonId == null || !lessonId.equals(selected.getLessonId()) || selected.getDiscussionPostId() != null)
+            throw new BusinessRuleException("Report target does not match Lesson");
+        var locked = reports.lockOpenForTarget(null, lessonId);
+        requireSelectedOpen(reportId, locked);
+        return resolve(locked, "hide", ContentReport.Status.RESOLVED);
+    }
+
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY, isolation = Isolation.READ_COMMITTED)
+    public ModerationDecision dismissReport(UUID reportId) {
+        requireAdmin();
+        requireDecisionTransaction();
+        var selected = reports.lockById(reportId).orElseThrow(ContentReportService::unavailable);
+        requireOpen(selected);
+        return resolve(java.util.List.of(selected), "dismiss", ContentReport.Status.DISMISSED);
+    }
+
+    public record ModerationReport(UUID reportId, String status, String reason, java.time.Instant createdAt,
+            java.time.Instant resolvedAt, UUID reporterId, String targetType, UUID postId, String postContent,
+            UUID postAuthorId, boolean postHidden, UUID lessonId) {}
+    public record ModerationDecision(String decision, java.util.List<UUID> resolvedReportIds, String status,
+                                     java.time.Instant resolvedAt) {}
+
+    private void requireAdmin() {
+        if (identities.requireCurrentIdentity().role() != UserAccountService.IdentityRole.ADMINISTRATOR)
+            throw new org.springframework.security.access.AccessDeniedException("Administrator required");
+    }
+
+    private static void requireDecisionTransaction() {
+        var isolation = org.springframework.transaction.support.TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isCurrentTransactionReadOnly()
+                || isolation != null && isolation != java.sql.Connection.TRANSACTION_READ_COMMITTED)
+            throw new IllegalStateException("Moderation requires the caller's read-write READ COMMITTED transaction");
+    }
+
+    private ContentReport requireReport(UUID id) { return reports.findById(id).orElseThrow(ContentReportService::unavailable); }
+
+    private static void requireOpen(ContentReport report) {
+        if (report.getStatus() != ContentReport.Status.OPEN)
+            throw new BusinessRuleException(HttpStatus.CONFLICT, "Report is terminal");
+    }
+
+    private static void requireSelectedOpen(UUID id, java.util.List<ContentReport> locked) {
+        if (locked.stream().noneMatch(report -> id.equals(report.getId())))
+            throw new BusinessRuleException(HttpStatus.CONFLICT, "Report is terminal");
+    }
+
+    private ModerationDecision resolve(java.util.List<ContentReport> locked, String decision, ContentReport.Status status) {
+        var now = clock.instant().truncatedTo(ChronoUnit.MICROS);
+        for (var report : locked) reports.save(new ContentReport(report.getId(), report.getReporterId(),
+                report.getDiscussionPostId(), report.getLessonId(), report.getReason(), status, report.getCreatedAt(), now));
+        return new ModerationDecision(decision, locked.stream().map(ContentReport::getId).toList(), status.getCode(), now);
+    }
+
     private ContentReport create(UUID postId, UUID lessonId, String reason) {
         UUID reporter = identities.requireCurrentIdentity().userId();
         ContentReport report = new ContentReport(
@@ -102,7 +197,7 @@ public class ContentReportService {
     /** The reason is required and must contain a non-whitespace character; it is stored verbatim. */
     private static String requireReason(String reason) {
         if (reason == null || reason.codePoints().allMatch(ContentReportService::isWhitespace)) {
-            throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid report reason");
+            throw BusinessRuleException.invalidField("reason");
         }
         return reason;
     }
