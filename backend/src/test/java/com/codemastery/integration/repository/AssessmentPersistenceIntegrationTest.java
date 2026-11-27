@@ -2481,8 +2481,8 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
             jdbc.update("INSERT INTO skills (id, course_id, name) VALUES (?, ?, ?)", foreignSkill, foreignCourse, "Recursion");
 
             UUID unusedQ = UUID.randomUUID();
-            questionRepository.save(new Question(unusedQ, skillId, "Unused hard question", "true_false", "hard",
-                    new String[] {"True", "False"}, new Boolean[] {true, false}));
+            questionRepository.save(new Question(unusedQ, skillId, "Unused hard question", "single_choice", "hard",
+                    new String[] {"A", "B"}, new Boolean[] {true, false}));
 
             try {
                 assertThrows(IllegalStateException.class,
@@ -2532,11 +2532,13 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                 assertThrows(IllegalStateException.class,
                         () -> liveQuestionBank.readCoverageForExecution(courseId, Set.of(skillId)));
 
-                jdbc.update("UPDATE public.questions SET options = ARRAY['   ', 'False'] WHERE id=?", unusedQ);
+                jdbc.update("UPDATE public.questions SET options = ARRAY['   ', 'B'] WHERE id=?", unusedQ);
                 asOwner();
                 assertThrows(IllegalStateException.class,
                         () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId)));
             } finally {
+                jdbc.update("DELETE FROM questions WHERE id=?", unusedQ);
+                jdbc.update("DELETE FROM skills WHERE id=?", emptySkill);
                 jdbc.update("DELETE FROM skills WHERE id=?", foreignSkill);
                 jdbc.update("DELETE FROM courses WHERE id=?", foreignCourse);
             }
