@@ -904,7 +904,12 @@ class TimedAttempts {
         String assessment = "com/codemastery/modules/assessment/";
         String adaptive = "com/codemastery/modules/adaptive/application/";
         java.util.Map<String,java.util.Set<String>> allowed = java.util.Map.ofEntries(
-                java.util.Map.entry("requireAssessmentSkillsInCourse", java.util.Set.of(assessment + "application/service/AttemptService.java")),
+                java.util.Map.entry("requireAssessmentSkillsInCourse", java.util.Set.of(assessment + "application/service/AttemptService.java",
+                        assessment + "application/service/QuestionBankService.java")),
+                java.util.Map.entry("requireExecutionScope", java.util.Set.of(assessment + "application/service/AttemptService.java",
+                        assessment + "application/service/QuestionBankService.java")),
+                java.util.Map.entry("readCoverageForExecution", java.util.Set.of(adaptive + "mastery/MasteryUpdateService.java",
+                        adaptive + "decision/AdaptiveDecisionService.java")),
                 java.util.Map.entry("withLearnerAssessmentWrite", java.util.Set.of(assessment + "application/service/AttemptService.java")),
                 java.util.Map.entry("withAssessmentExpiryWrite", java.util.Set.of(assessment + "application/service/AttemptService.java")),
                 java.util.Map.entry("finalizeExpired", java.util.Set.of(assessment + "application/scheduler/AttemptAutoSubmitScheduler.java")),
@@ -928,7 +933,8 @@ class TimedAttempts {
                 if (relative.startsWith(assessment + "api/")) {
                     for (String forbidden : List.of("LatestSkillEvidence", "SkillEvidence", "LearnerAttemptSummary",
                             "QuizSubmittedEvent", "readLatestSkillEvidence", "readMyLatestSkillEvidence",
-                            "readOwnedLatestSkillEvidence", "listLearnerAttemptsForOwner")) {
+                            "readOwnedLatestSkillEvidence", "listLearnerAttemptsForOwner",
+                            "CoverageSnapshot", "readCoverage", "readCoverageForExecution")) {
                         assertFalse(scan.identifiers().contains(forbidden), file + " exposes " + forbidden);
                     }
                 }
@@ -948,7 +954,8 @@ class TimedAttempts {
 
     @ParameterizedTest
     @ValueSource(strings = {"readLatestSkillEvidence", "readMyLatestSkillEvidence",
-            "readOwnedLatestSkillEvidence", "listLearnerAttemptsForOwner"})
+            "readOwnedLatestSkillEvidence", "listLearnerAttemptsForOwner", "readCoverageForExecution",
+            "requireAssessmentSkillsInCourse"})
     void evidenceAllowlistDetectsSpacedCallsUnqualifiedCallsAndMethodReferences(String method) throws Exception {
         for (String statement : List.of("service . " + method + " (null);", method + " (null);",
                 "Object callback = service :: " + method + ";")) {

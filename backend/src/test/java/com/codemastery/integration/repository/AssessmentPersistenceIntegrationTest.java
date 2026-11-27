@@ -2469,76 +2469,281 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
         @Autowired
         private com.codemastery.modules.assessment.application.service.QuestionBankService liveQuestionBank;
 
+        /** AS18 fixture beyond the AS08 Course: every kind/difficulty, reuse, hidden and unused membership. */
+        final class CoverageFixture implements AutoCloseable {
+            final UUID emptySkill = UUID.randomUUID(), foreignCourse = UUID.randomUUID(), foreignSkill = UUID.randomUUID();
+            final UUID hiddenQuiz = UUID.randomUUID(), unusedTrueFalse = UUID.randomUUID(), hiddenOnlyMultiple = UUID.randomUUID();
+            final UUID unusedSingle = UUID.randomUUID(), foreignQuestion = UUID.randomUUID();
+
+            CoverageFixture() {
+                jdbc.update("INSERT INTO skills (id,course_id,name) VALUES (?,?,'Arrays')", emptySkill, courseId);
+                jdbc.update("INSERT INTO courses (id,instructor_id,title,description,publication_status,adaptive_enabled) "
+                        + "VALUES (?,?,'Foreign AS18','Fixture','published',false)", foreignCourse, owner);
+                jdbc.update("INSERT INTO skills (id,course_id,name) VALUES (?,?,'Recursion')", foreignSkill, foreignCourse);
+                jdbc.update("INSERT INTO questions VALUES (?,?,'Unused','true_false','hard',ARRAY['True','False'],ARRAY[false,true])",
+                        unusedTrueFalse, skillId);
+                jdbc.update("INSERT INTO questions VALUES (?,?,'Hidden only','multiple_choice','medium',ARRAY['A','B','C'],ARRAY[true,false,true])",
+                        hiddenOnlyMultiple, skillId);
+                jdbc.update("INSERT INTO questions VALUES (?,?,'Unused single','single_choice','medium',ARRAY['A','B'],ARRAY[false,true])",
+                        unusedSingle, skillId);
+                jdbc.update("INSERT INTO questions VALUES (?,?,'Foreign','single_choice','easy',ARRAY['A','B'],ARRAY[true,false])",
+                        foreignQuestion, foreignSkill);
+                // q1 is reused by the published AS08 quiz and this hidden quiz; it must count once.
+                jdbc.update("INSERT INTO quizzes VALUES (?,?,'Hidden AS18','test',60,'hidden')", hiddenQuiz, courseId);
+                jdbc.update("INSERT INTO quiz_questions VALUES (?,?,?,1)", UUID.randomUUID(), hiddenQuiz, q1);
+                jdbc.update("INSERT INTO quiz_questions VALUES (?,?,?,2)", UUID.randomUUID(), hiddenQuiz, hiddenOnlyMultiple);
+            }
+
+            /** q1, q2 (published), unusedTrueFalse, hiddenOnlyMultiple and unusedSingle. */
+            java.util.Map<UUID, Long> expected() { return java.util.Map.of(skillId, 5L, emptySkill, 0L); }
+
+            @Override public void close() {
+                // Course-owned rows of skillId and the quizzes are removed by deleteAttemptFixtures.
+                jdbc.update("DELETE FROM questions WHERE skill_id IN (?,?)", emptySkill, foreignSkill);
+                jdbc.update("DELETE FROM skills WHERE id IN (?,?)", emptySkill, foreignSkill);
+                jdbc.update("DELETE FROM courses WHERE id=?", foreignCourse);
+            }
+        }
+
+        <T> T inTransaction(boolean readOnly, int isolation, java.util.function.Supplier<T> action) {
+            TransactionTemplate tx = new TransactionTemplate(transactionManager);
+            tx.setReadOnly(readOnly); tx.setIsolationLevel(isolation);
+            return tx.execute(status -> action.get());
+        }
+
+        <T> RuntimeException failureOnAnotherThread(java.util.function.Supplier<T> action) {
+            var result = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try { action.get(); return null; }
+                catch (RuntimeException failure) { return failure; }
+            });
+            try { return result.get(10, TimeUnit.SECONDS); }
+            catch (Exception failure) { throw new IllegalStateException(failure); }
+        }
+
         @Test
-        void as18CoverageReadsEnforceCt40ScopeExecutionMarkerIntegrityAndZeroCountsInPostgresql() {
-            UUID emptySkill = UUID.randomUUID();
-            UUID foreignCourse = UUID.randomUUID();
-            UUID foreignSkill = UUID.randomUUID();
-            jdbc.update("INSERT INTO skills (id, course_id, name) VALUES (?, ?, ?)", emptySkill, courseId, "Arrays");
-            jdbc.update("INSERT INTO courses (id, instructor_id, title, description, publication_status, adaptive_enabled) "
-                            + "VALUES (?, ?, 'Foreign AS18', 'Fixture', 'published', false)",
-                    foreignCourse, owner);
-            jdbc.update("INSERT INTO skills (id, course_id, name) VALUES (?, ?, ?)", foreignSkill, foreignCourse, "Recursion");
+        void as18OwnerCoverageCountsTheCompleteValidPopulationAndFailsClosedInPostgresql() {
+            try (var fixture = new CoverageFixture()) {
+                asLearner();
+                assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                        () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId)));
+                as(admin, com.codemastery.modules.auth.domain.model.Role.ADMIN);
+                assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                        () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId)));
 
-            UUID unusedQ = UUID.randomUUID();
-            questionRepository.save(new Question(unusedQ, skillId, "Unused hard question", "true_false", "hard",
-                    new String[] {"True", "False"}, new Boolean[] {true, false}));
+                asOwner();
+                var empty = liveQuestionBank.readCoverage(courseId, Set.of());
+                assertEquals(courseId, empty.courseId());
+                assertEquals(java.util.Map.of(), empty.questionCounts());
+                var owner = liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.emptySkill));
+                assertEquals(courseId, owner.courseId());
+                assertEquals(fixture.expected(), owner.questionCounts());
+                assertThrows(UnsupportedOperationException.class, () -> owner.questionCounts().clear());
+                assertEquals(java.util.Map.of(fixture.emptySkill, 0L),
+                        liveQuestionBank.readCoverage(courseId, Set.of(fixture.emptySkill)).questionCounts());
+                // Foreign and unknown skills are concealed after admission; the other Course is not visible.
+                assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,
+                        () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.foreignSkill)));
+                assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,
+                        () -> liveQuestionBank.readCoverage(courseId, Set.of(UUID.randomUUID())));
+                assertEquals(java.util.Map.of(fixture.foreignSkill, 1L),
+                        liveQuestionBank.readCoverage(fixture.foreignCourse, Set.of(fixture.foreignSkill)).questionCounts());
 
-            try {
+                // Joined contexts: an owner snapshot and the Course-root write unit are coherent; others are refused.
+                assertEquals(fixture.expected(), snapshot(() -> liveQuestionBank.readCoverage(courseId,
+                        Set.of(skillId, fixture.emptySkill))).questionCounts());
+                assertEquals(fixture.expected(), guard.withCourseConfigurationWrite(courseId, () -> {
+                    assertFalse(TransactionSynchronizationManager.isCurrentTransactionReadOnly());
+                    return liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.emptySkill));
+                }).questionCounts());
+                assertThrows(IllegalStateException.class, () -> inTransaction(true,
+                        TransactionDefinition.ISOLATION_READ_COMMITTED, () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId))));
+                assertThrows(IllegalStateException.class, () -> inTransaction(true,
+                        TransactionDefinition.ISOLATION_DEFAULT, () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId))));
+                assertThrows(IllegalStateException.class, () -> inTransaction(false,
+                        TransactionDefinition.ISOLATION_REPEATABLE_READ, () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId))));
+
+                // A definition PostgreSQL accepts (V004 has no option-text check) but data-model §11 rejects.
+                assertEquals(1, jdbc.update("UPDATE public.questions SET options=ARRAY['   ','B'] WHERE id=?", fixture.unusedSingle));
                 assertThrows(IllegalStateException.class,
-                        () -> liveQuestionBank.readCoverageForExecution(courseId, Set.of(skillId)));
+                        () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.emptySkill)));
+                assertEquals(java.util.Map.of(fixture.emptySkill, 0L),
+                        liveQuestionBank.readCoverage(courseId, Set.of(fixture.emptySkill)).questionCounts());
+            }
+        }
+
+        @Test
+        void as18ExecutionCoverageRunsOnlyInsideSubmissionAndExpiryScopesInPostgresql() {
+            try (var fixture = new CoverageFixture(); var probe = new QuizEventProbe()) {
+                Set<UUID> readiness = Set.of(skillId, fixture.emptySkill);
+                // B6-V09 outside the callback: no transaction, owner snapshot, a held root without the marker.
+                assertThrows(IllegalStateException.class, () -> liveQuestionBank.readCoverageForExecution(courseId, readiness));
                 assertThrows(IllegalStateException.class,
-                        () -> snapshot(() -> liveQuestionBank.readCoverageForExecution(courseId, Set.of(skillId))));
+                        () -> snapshot(() -> liveQuestionBank.readCoverageForExecution(courseId, readiness)));
+                assertThrows(IllegalStateException.class, () -> inTransaction(false,
+                        TransactionDefinition.ISOLATION_READ_COMMITTED, () -> liveQuestionBank.readCoverageForExecution(courseId, readiness)));
+                asOwner();
+                guard.withCourseConfigurationWrite(courseId, () -> {
+                    assertThrows(IllegalStateException.class, () -> liveQuestionBank.readCoverageForExecution(courseId, readiness));
+                    return null;
+                });
                 asLearner();
                 guard.withLearnerAssessmentWrite(courseId, () -> {
-                    assertThrows(IllegalStateException.class,
-                            () -> liveQuestionBank.readCoverageForExecution(courseId, Set.of(skillId)));
+                    assertThrows(IllegalStateException.class, () -> liveQuestionBank.readCoverageForExecution(courseId, readiness));
                     return null;
                 });
 
-                assertThrows(org.springframework.security.access.AccessDeniedException.class,
-                        () -> snapshot(() -> liveQuestionBank.readCoverage(courseId, Set.of(skillId))));
+                List<com.codemastery.modules.assessment.application.service.QuestionBankService.CoverageSnapshot> observed =
+                        new java.util.concurrent.CopyOnWriteArrayList<>();
+                probe.onEvent = event -> {
+                    assertThrows(IllegalStateException.class,
+                            () -> liveQuestionBank.readCoverageForExecution(fixture.foreignCourse, Set.of(fixture.foreignSkill)));
+                    assertThrows(IllegalStateException.class,
+                            () -> liveQuestionBank.readCoverageForExecution(courseId, Set.of(skillId, fixture.foreignSkill)));
+                    assertTrue(failureOnAnotherThread(() -> liveQuestionBank.readCoverageForExecution(courseId, readiness))
+                            instanceof IllegalStateException);
+                    TransactionTemplate requiresNew = new TransactionTemplate(transactionManager);
+                    requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                    requiresNew.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+                    assertThrows(IllegalStateException.class,
+                            () -> requiresNew.execute(status -> liveQuestionBank.readCoverageForExecution(courseId, readiness)));
+                    TransactionTemplate suspended = new TransactionTemplate(transactionManager);
+                    suspended.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+                    assertThrows(IllegalStateException.class,
+                            () -> suspended.execute(status -> liveQuestionBank.readCoverageForExecution(courseId, readiness)));
+                    assertEquals(java.util.Map.of(), liveQuestionBank.readCoverageForExecution(courseId, Set.of()).questionCounts());
+                    observed.add(liveQuestionBank.readCoverageForExecution(courseId, readiness));
+                };
 
-                asOwner();
-                var emptySnapshot = liveQuestionBank.readCoverage(courseId, Set.of());
-                assertEquals(courseId, emptySnapshot.courseId());
-                assertEquals(java.util.Map.of(), emptySnapshot.questionCounts());
+                var manual = at(now).start(courseId, quizId).attempt();
+                at(now.plusSeconds(1)).submit(courseId, quizId, manual.attemptId(), answers(true));
+                assertEquals(1, observed.size());
+                assertEquals(courseId, observed.getFirst().courseId());
+                assertEquals(fixture.expected(), observed.getFirst().questionCounts());
+                assertThrows(IllegalStateException.class, () -> liveQuestionBank.readCoverageForExecution(courseId, readiness));
 
-                var ownerSnapshot = liveQuestionBank.readCoverage(courseId, Set.of(skillId, emptySkill));
-                assertEquals(java.util.Map.of(skillId, 3L, emptySkill, 0L), ownerSnapshot.questionCounts());
-                assertThrows(UnsupportedOperationException.class, () -> ownerSnapshot.questionCounts().clear());
-                assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,
-                        () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId, foreignSkill)));
+                // Actorless expiry follows the same scope with no security context at all.
+                probe.onEvent = event -> observed.add(liveQuestionBank.readCoverageForExecution(courseId, readiness));
+                var expiring = at(now.plusSeconds(2)).start(courseId, quizId).attempt();
+                org.springframework.security.core.context.SecurityContextHolder.clearContext();
+                at(expiring.expiresAt().plusSeconds(1)).finalizeExpired(expiring.attemptId());
+                assertEquals(2, observed.size());
+                assertEquals(fixture.expected(), observed.getLast().questionCounts());
+                org.junit.jupiter.api.Assertions.assertNotNull(
+                        attemptRepository.findById(expiring.attemptId()).orElseThrow().submitted_at());
 
-                try (var probe = new QuizEventProbe()) {
-                    List<com.codemastery.modules.assessment.application.service.QuestionBankService.CoverageSnapshot> inExecution =
-                            new ArrayList<>();
-                    probe.onEvent = event -> {
-                        assertThrows(IllegalStateException.class,
-                                () -> liveQuestionBank.readCoverageForExecution(foreignCourse, Set.of(foreignSkill)));
-                        assertThrows(IllegalStateException.class,
-                                () -> liveQuestionBank.readCoverageForExecution(courseId, Set.of(foreignSkill)));
-                        assertEquals(java.util.Map.of(),
-                                liveQuestionBank.readCoverageForExecution(courseId, Set.of()).questionCounts());
-                        inExecution.add(liveQuestionBank.readCoverageForExecution(courseId, Set.of(skillId, emptySkill)));
-                    };
-                    asLearner();
-                    var attempt = at(now).start(courseId, quizId).attempt();
-                    at(now.plusSeconds(1)).submit(courseId, quizId, attempt.attemptId(), answers(true));
-                    assertEquals(1, inExecution.size());
-                    assertEquals(java.util.Map.of(skillId, 3L, emptySkill, 0L), inExecution.getFirst().questionCounts());
+                // A listener failure after a successful read rolls the unit back and leaves no scope behind.
+                asLearner();
+                probe.onEvent = event -> observed.add(liveQuestionBank.readCoverageForExecution(courseId, readiness));
+                probe.failWhen = event -> true;
+                var failing = at(now.plusSeconds(100)).start(courseId, quizId).attempt();
+                assertThrows(IllegalStateException.class,
+                        () -> at(now.plusSeconds(101)).submit(courseId, quizId, failing.attemptId(), answers(true)));
+                assertEquals(3, observed.size());
+                assertNull(jdbc.queryForObject("SELECT submitted_at FROM attempts WHERE id=?", java.sql.Timestamp.class,
+                        failing.attemptId()));
+                assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+                assertTrue(TransactionSynchronizationManager.getResourceMap().isEmpty());
+                assertThrows(IllegalStateException.class, () -> liveQuestionBank.readCoverageForExecution(courseId, readiness));
+
+                // A stored corrupt definition fails the execution read, so the submission commits nothing.
+                probe.failWhen = event -> false;
+                assertEquals(1, jdbc.update("UPDATE public.questions SET options=ARRAY['A','   '] WHERE id=?", fixture.unusedSingle));
+                assertThrows(IllegalStateException.class,
+                        () -> at(now.plusSeconds(102)).submit(courseId, quizId, failing.attemptId(), answers(true)));
+                assertNull(jdbc.queryForObject("SELECT submitted_at FROM attempts WHERE id=?", java.sql.Timestamp.class,
+                        failing.attemptId()));
+            }
+        }
+
+        @Test
+        void as18CoverageReadsUseTheQualifiedRuntimeRoleWithoutNewPrivileges() throws Exception {
+            String role = "as18_" + UUID.randomUUID().toString().replace("-", "");
+            jdbc.execute("CREATE ROLE " + role + " NOLOGIN");
+            try (var fixture = new CoverageFixture(); var probe = new QuizEventProbe()) {
+                jdbc.execute("GRANT USAGE ON SCHEMA public TO " + role);
+                String script = java.nio.file.Files.readString(java.nio.file.Path.of("..", "infrastructure", "vm", "deploy.sh"));
+                String matrix = script.split("RUNTIME_PRIVILEGE_MATRIX='\n", 2)[1].split("\n'", 2)[0];
+                for (String line : matrix.split("\n")) {
+                    String[] fields = line.trim().split("\\s+");
+                    if (!fields[1].equals("-")) jdbc.execute("GRANT " + fields[1] + " ON TABLE public." + fields[0] + " TO " + role);
+                    if (!fields[2].equals("-")) jdbc.execute("GRANT " + fields[2].replace('+', ',') + " ON TABLE public." + fields[0] + " TO " + role);
                 }
-
-                assertThrows(IllegalStateException.class,
-                        () -> liveQuestionBank.readCoverageForExecution(courseId, Set.of(skillId)));
-
-                jdbc.update("UPDATE public.questions SET options = ARRAY['   ', 'False'] WHERE id=?", unusedQ);
+                Set<UUID> readiness = Set.of(skillId, fixture.emptySkill);
                 asOwner();
-                assertThrows(IllegalStateException.class,
-                        () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId)));
+                assertEquals(fixture.expected(), snapshot(() -> {
+                    jdbc.execute("SET LOCAL ROLE " + role);
+                    assertEquals(role, jdbc.queryForObject("SELECT current_user", String.class));
+                    return liveQuestionBank.readCoverage(courseId, readiness);
+                }).questionCounts());
+
+                List<java.util.Map<UUID, Long>> observed = new java.util.concurrent.CopyOnWriteArrayList<>();
+                probe.onEvent = event -> {
+                    assertEquals(role, jdbc.queryForObject("SELECT current_user", String.class));
+                    observed.add(liveQuestionBank.readCoverageForExecution(courseId, readiness).questionCounts());
+                };
+                asLearner();
+                TransactionTemplate tx = new TransactionTemplate(transactionManager);
+                tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+                var attempt = tx.execute(status -> { jdbc.execute("SET LOCAL ROLE " + role); return at(now).start(courseId, quizId).attempt(); });
+                tx.execute(status -> { jdbc.execute("SET LOCAL ROLE " + role);
+                    return at(now.plusSeconds(1)).submit(courseId, quizId, attempt.attemptId(), answers(true)); });
+                assertEquals(List.of(fixture.expected()), observed);
             } finally {
-                jdbc.update("DELETE FROM skills WHERE id=?", foreignSkill);
-                jdbc.update("DELETE FROM courses WHERE id=?", foreignCourse);
+                jdbc.execute("DROP OWNED BY " + role); jdbc.execute("DROP ROLE " + role);
+            }
+        }
+
+        @Test
+        void as18GuardedReadinessReadSerializesSameCourseAuthoringAndIsolatesOtherCourses() throws Exception {
+            ExecutorService executor = Executors.newFixedThreadPool(2);
+            try (var fixture = new CoverageFixture()) {
+                asOwner();
+                var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+                var input = new com.codemastery.modules.assessment.application.service.QuestionBankService.QuestionInput(
+                        skillId, "Concurrent", "single_choice", "easy", List.of("A", "B"), List.of(true, false));
+                var foreignInput = new com.codemastery.modules.assessment.application.service.QuestionBankService.QuestionInput(
+                        fixture.foreignSkill, "Other Course", "single_choice", "easy", List.of("A", "B"), List.of(true, false));
+                java.util.function.Function<com.codemastery.modules.assessment.application.service.QuestionBankService.QuestionInput,
+                        java.util.concurrent.Callable<UUID>> author = (question) -> () -> {
+                    org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(authentication);
+                    try { return liveQuestionBank.create(question.skillId().equals(skillId) ? courseId : fixture.foreignCourse,
+                            question).id(); }
+                    finally { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+                };
+                java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<UUID>> sameCourse =
+                        new java.util.concurrent.atomic.AtomicReference<>();
+                java.util.concurrent.atomic.AtomicReference<UUID> otherCourseQuestion = new java.util.concurrent.atomic.AtomicReference<>();
+                var held = guard.withCourseConfigurationWrite(courseId, () -> {
+                    var before = liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.emptySkill));
+                    int holder = jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class);
+                    sameCourse.set(executor.submit(author.apply(input)));
+                    // Poll from an independent connection: pg_stat_activity is snapshotted per transaction.
+                    org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(10)).until(() -> {
+                        try (var monitor = dataSource.getConnection(); var statement = monitor.prepareStatement(
+                                "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND ?=ANY(pg_blocking_pids(pid))")) {
+                            statement.setInt(1, holder);
+                            try (var row = statement.executeQuery()) { return row.next() && row.getInt(1) == 1; }
+                        }
+                    });
+                    assertFalse(sameCourse.get().isDone());
+                    try { otherCourseQuestion.set(executor.submit(author.apply(foreignInput)).get(10, TimeUnit.SECONDS)); }
+                    catch (Exception failure) { throw new IllegalStateException(failure); }
+                    assertEquals(before, liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.emptySkill)));
+                    assertFalse(sameCourse.get().isDone());
+                    return before;
+                });
+                assertEquals(fixture.expected(), held.questionCounts());
+                UUID created = sameCourse.get().get(10, TimeUnit.SECONDS);
+                assertEquals(java.util.Map.of(skillId, 6L, fixture.emptySkill, 0L),
+                        liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.emptySkill)).questionCounts());
+                assertEquals(java.util.Map.of(fixture.foreignSkill, 2L),
+                        liveQuestionBank.readCoverage(fixture.foreignCourse, Set.of(fixture.foreignSkill)).questionCounts());
+                assertEquals(skillId, jdbc.queryForObject("SELECT skill_id FROM questions WHERE id=?", UUID.class, created));
+                assertEquals(fixture.foreignSkill, jdbc.queryForObject("SELECT skill_id FROM questions WHERE id=?", UUID.class,
+                        otherCourseQuestion.get()));
+            } finally {
+                executor.shutdownNow();
+                assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
             }
         }
     }
