@@ -1,3 +1,5 @@
+import { ProductionSubmissionListPage } from '../features/instructor/grading/pages/SubmissionListPage';
+import { ProductionGradeSubmissionPage } from '../features/instructor/grading/pages/GradeSubmissionPage';
 import { ProductionLessonEditorPage } from '../features/instructor/course-management/pages/LessonEditorPage';
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
@@ -253,6 +255,8 @@ export function AppRouter({ catalogue, preview }: { catalogue?: ReactNode; previ
         profile: <ProfilePage />,
         notifications: <LiveNotificationsPage key={auth.generation} />,
         teaching: <TeachingHomePage key={auth.generation} />,
+        grading: <ProductionSubmissionListPage key={auth.generation} />,
+        'grade-submission': <ProductionGradeSubmissionPage key={auth.generation} />,
         'create-course': <CreateCoursePage key={auth.generation} />,
         'course-editor': <CourseEditorShell key={auth.generation} />,
         'course-frame': <CourseEditorFrame />,

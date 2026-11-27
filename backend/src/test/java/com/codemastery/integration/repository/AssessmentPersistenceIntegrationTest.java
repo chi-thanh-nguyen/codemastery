@@ -1091,7 +1091,7 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
         void asOwner() { as(owner,com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR); }
         com.codemastery.modules.assessment.application.service.AttemptService at(Instant instant) {
             return new com.codemastery.modules.assessment.application.service.AttemptService(attemptRepository, quizRepository,
-                    grading, access, identities, guard, skillGraph, java.time.Clock.fixed(instant,java.time.ZoneOffset.UTC));
+                    grading, access, identities, guard, skillGraph, java.time.Clock.fixed(instant,java.time.ZoneOffset.UTC), eventBusContext);
         }
         com.codemastery.modules.assessment.application.service.AttemptService.AnswersInput answers(boolean correct) {
             return new com.codemastery.modules.assessment.application.service.AttemptService.AnswersInput(List.of(
@@ -1657,7 +1657,7 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
             org.mockito.Mockito.doAnswer(call->{ call.callRealMethod();throw new IllegalStateException("Injected after flush");})
                     .when(spy).updateAnswers(org.mockito.ArgumentMatchers.anyList());
             var failing=new com.codemastery.modules.assessment.application.service.AttemptService(spy,quizRepository,grading,access,identities,
-                    guard,skillGraph,java.time.Clock.fixed(now.plusSeconds(1),java.time.ZoneOffset.UTC));
+                    guard,skillGraph,java.time.Clock.fixed(now.plusSeconds(1),java.time.ZoneOffset.UTC), eventBusContext);
             assertThrows(IllegalStateException.class,()->failing.submit(courseId,quizId,attempt.attemptId(),answers(true)));
             Attempt persisted=attemptRepository.findById(attempt.attemptId()).orElseThrow();
             assertNull(persisted.submitted_at());assertNull(persisted.score_percentage());
@@ -1861,7 +1861,7 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                 }
             };
             var service=new com.codemastery.modules.assessment.application.service.AttemptService(attemptRepository,quizRepository,inspector,
-                    access,identities,guard,skillGraph,java.time.Clock.fixed(now.plusSeconds(1),java.time.ZoneOffset.UTC));
+                    access,identities,guard,skillGraph,java.time.Clock.fixed(now.plusSeconds(1),java.time.ZoneOffset.UTC), eventBusContext);
             service.submit(courseId,quizId,attempt.attemptId(),answers(true));assertTrue(observed.get());
             assertThrows(IllegalStateException.class,()->live.readLatestSkillEvidence(courseId,learner,Set.of(skillId)));
         }
@@ -2207,6 +2207,262 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
             } finally {
                 jdbc.update("DELETE FROM courses WHERE id=?", hiddenCourse);
                 jdbc.update("DELETE FROM users WHERE id=?", otherInstructor);
+            }
+        }
+
+        @Autowired
+        private org.springframework.context.ConfigurableApplicationContext eventBusContext;
+
+        /** A scoped producer probe, never a production subscriber or AD13/CT28 acceptance double. */
+        final class QuizEventProbe implements
+                org.springframework.context.ApplicationListener<org.springframework.context.PayloadApplicationEvent<?>>,
+                AutoCloseable {
+            final List<com.codemastery.modules.assessment.application.event.QuizSubmittedEvent> events =
+                    new java.util.concurrent.CopyOnWriteArrayList<>();
+            final List<Integer> completions = new java.util.concurrent.CopyOnWriteArrayList<>();
+            volatile java.util.function.Predicate<com.codemastery.modules.assessment.application.event.QuizSubmittedEvent>
+                    failWhen = event -> false;
+            volatile java.util.function.Consumer<com.codemastery.modules.assessment.application.event.QuizSubmittedEvent>
+                    onEvent = event -> {};
+
+            QuizEventProbe() { eventBusContext.addApplicationListener(this); }
+
+            @Override public void onApplicationEvent(org.springframework.context.PayloadApplicationEvent<?> payload) {
+                if (!(payload.getPayload() instanceof com.codemastery.modules.assessment.application.event.QuizSubmittedEvent event)
+                        || !courseId.equals(event.courseId())) return;
+                assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+                assertFalse(TransactionSynchronizationManager.isCurrentTransactionReadOnly());
+                assertEquals(TransactionDefinition.ISOLATION_READ_COMMITTED,
+                        TransactionSynchronizationManager.getCurrentTransactionIsolationLevel());
+                assertEquals(learner, event.learnerId());
+                assertEquals(List.of(q1, q2), event.answers().stream()
+                        .map(com.codemastery.modules.assessment.application.event.QuizSubmittedEvent.AnswerEvidence::questionId).toList());
+                assertEquals(List.of(1, 3), event.answers().stream()
+                        .map(com.codemastery.modules.assessment.application.event.QuizSubmittedEvent.AnswerEvidence::position).toList());
+                assertTrue(event.answers().stream().allMatch(answer -> skillId.equals(answer.skillId())));
+                // Uses the real execution-only seam while the marker and held Course root are active.
+                var latest = live.readLatestSkillEvidence(courseId, learner, Set.of(skillId)).bySkill().get(skillId);
+                org.junit.jupiter.api.Assertions.assertNotNull(latest);
+                var stored = attemptRepository.findById(event.attemptId()).orElseThrow();
+                assertEquals(stored.submitted_at(), event.submittedAt());
+                assertEquals(stored.started_at(), event.startedAt());
+                assertEquals(stored.expires_at(), event.expiresAt());
+                assertEquals(stored.attempt_number(), event.attemptNumber());
+                var answers = attemptRepository.findAnswersInPositionOrder(event.attemptId());
+                for (int i = 0; i < answers.size(); i++) {
+                    assertEquals(answers.get(i).is_correct(), event.answers().get(i).correct());
+                }
+                // An independent physical connection cannot see the terminal write yet, and NOWAIT
+                // proves the Course root is still held at publication, not merely earlier in the call.
+                try (var connection = dataSource.getConnection()) {
+                    connection.setAutoCommit(false);
+                    try {
+                        try (var statement = connection.prepareStatement("SELECT submitted_at FROM attempts WHERE id=?")) {
+                            statement.setObject(1, event.attemptId());
+                            try (var row = statement.executeQuery()) {
+                                assertTrue(row.next()); assertNull(row.getTimestamp(1));
+                            }
+                        }
+                        try (var statement = connection.prepareStatement("SELECT id FROM courses WHERE id=? FOR UPDATE NOWAIT")) {
+                            statement.setObject(1, courseId);
+                            SQLException locked = assertThrows(SQLException.class, () -> statement.executeQuery().close());
+                            assertEquals("55P03", locked.getSQLState());
+                        }
+                    } finally { connection.rollback(); }
+                } catch (SQLException failure) { throw new IllegalStateException(failure); }
+                events.add(event);
+                TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                    @Override public void afterCompletion(int status) { completions.add(status); }
+                });
+                onEvent.accept(event);
+                if (failWhen.test(event)) throw new IllegalStateException("test-scoped synchronous listener failure");
+            }
+
+            @Override public void close() {
+                eventBusContext.removeApplicationListener(this);
+                assertFalse(((org.springframework.context.support.AbstractApplicationContext) eventBusContext)
+                        .getApplicationListeners().contains(this));
+            }
+        }
+
+        void assertCommittedMasks(UUID attemptId, boolean firstCorrect, boolean submitted) {
+            // Each repository call runs outside the completed producer transaction.
+            Attempt stored = attemptRepository.findById(attemptId).orElseThrow();
+            assertEquals(submitted, stored.submitted_at() != null);
+            assertEquals(submitted ? new BigDecimal(firstCorrect ? "50.00" : "0.00") : null, stored.score_percentage());
+            var answers = attemptRepository.findAnswersInPositionOrder(attemptId);
+            assertArrayEquals(new Boolean[] {firstCorrect, false}, answers.getFirst().selected_options());
+            assertArrayEquals(new Boolean[] {false, false}, answers.getLast().selected_options());
+            assertEquals(submitted ? firstCorrect : null, answers.getFirst().is_correct());
+            assertEquals(submitted ? false : null, answers.getLast().is_correct());
+        }
+
+        @Test
+        void manualSubmitAndExpiryPublishValidatedQuizSubmittedEventOnceAfterFlushingAndRollbackOnListenerFailure() {
+            try (var probe = new QuizEventProbe()) {
+                asLearner();
+                var first = at(now).start(courseId, quizId).attempt();
+                at(now).saveAnswers(courseId, quizId, first.attemptId(), answers(false));
+                snapshot(() -> at(now).read(courseId, quizId, first.attemptId()));
+                snapshot(() -> at(now).history(courseId, quizId, 0, 20));
+                assertThrows(com.codemastery.common.exception.BusinessRuleException.class,
+                        () -> snapshot(() -> at(now).readResult(courseId, quizId, first.attemptId())));
+                assertTrue(probe.events.isEmpty());
+                Thread producerThread = Thread.currentThread();
+                probe.onEvent = event -> assertEquals(producerThread, Thread.currentThread());
+                var submitted = at(now.plusSeconds(1)).submit(courseId, quizId, first.attemptId(), answers(true));
+                assertEquals(1, probe.events.size());
+                assertEquals(first.attemptId(), probe.events.getFirst().attemptId());
+                assertEquals(submitted.submittedAt(), probe.events.getFirst().submittedAt());
+                assertEquals("practice", probe.events.getFirst().quizKind());
+                assertEquals(List.of(true, false), probe.events.getFirst().answers().stream()
+                        .map(com.codemastery.modules.assessment.application.event.QuizSubmittedEvent.AnswerEvidence::correct).toList());
+                assertCommittedMasks(first.attemptId(), true, true);
+                at(now.plusSeconds(2)).submit(courseId, quizId, first.attemptId(), answers(false));
+                assertEquals(1, probe.events.size());
+
+                var second = at(now.plusSeconds(3)).start(courseId, quizId).attempt();
+                at(now.plusSeconds(4)).saveAnswers(courseId, quizId, second.attemptId(), answers(true));
+                at(second.expiresAt()).finalizeExpired(second.attemptId());
+                assertEquals(2, probe.events.size());
+                assertEquals(second.attemptId(), probe.events.get(1).attemptId());
+                assertEquals(second.expiresAt(), probe.events.get(1).submittedAt());
+                assertCommittedMasks(second.attemptId(), true, true);
+                at(second.expiresAt().plusSeconds(1)).finalizeExpired(second.attemptId());
+                assertEquals(2, probe.events.size());
+
+                var third = at(now.plusSeconds(70)).start(courseId, quizId).attempt();
+                at(now.plusSeconds(71)).saveAnswers(courseId, quizId, third.attemptId(), answers(false));
+                probe.failWhen = event -> true;
+                assertThrows(IllegalStateException.class,
+                        () -> at(now.plusSeconds(72)).submit(courseId, quizId, third.attemptId(), answers(true)));
+                assertCommittedMasks(third.attemptId(), false, false);
+                assertThrows(IllegalStateException.class, () -> live.readLatestSkillEvidence(courseId, learner, Set.of(skillId)));
+                probe.failWhen = event -> false;
+                at(now.plusSeconds(73)).submit(courseId, quizId, third.attemptId(), answers(true));
+                assertCommittedMasks(third.attemptId(), true, true);
+                assertEquals(List.of(TransactionSynchronization.STATUS_COMMITTED, TransactionSynchronization.STATUS_COMMITTED,
+                        TransactionSynchronization.STATUS_ROLLED_BACK, TransactionSynchronization.STATUS_COMMITTED), probe.completions);
+                assertEquals(4, probe.events.size(), "One failed invocation is not a second committed transition");
+            }
+        }
+
+        @Test
+        void springManagedProducerUsesTheRequiredContextPublisher() {
+            try (var probe = new QuizEventProbe()) {
+                asLearner();
+                var attempt = live.start(courseId, quizId).attempt();
+                var result = live.submit(courseId, quizId, attempt.attemptId(), answers(true));
+                assertEquals(1, probe.events.size());
+                assertEquals(result.submittedAt(), probe.events.getFirst().submittedAt());
+                assertEquals(List.of(TransactionSynchronization.STATUS_COMMITTED), probe.completions);
+                assertCommittedMasks(attempt.attemptId(), true, true);
+            }
+        }
+
+        @Test
+        void schedulerRetriesRolledBackPublicationAndGradesLatestCommittedOtherTabMasks() {
+            try (var probe = new QuizEventProbe()) {
+                asLearner();
+                var attempt = at(now).start(courseId, quizId).attempt();
+                at(now.plusSeconds(1)).saveAnswers(courseId, quizId, attempt.attemptId(), answers(false));
+                at(now.plusSeconds(2)).saveAnswers(courseId, quizId, attempt.attemptId(), answers(true)); // another tab's N
+                probe.failWhen = event -> attempt.attemptId().equals(event.attemptId());
+                assertThrows(IllegalStateException.class,
+                        () -> at(now.plusSeconds(3)).submit(courseId, quizId, attempt.attemptId(), answers(false))); // A's M
+                assertCommittedMasks(attempt.attemptId(), true, false);
+                UUID otherQuiz = UUID.randomUUID(); addQuiz(otherQuiz, "test");
+                var other = at(now).start(courseId, otherQuiz).attempt();
+                var scheduler = new com.codemastery.modules.assessment.application.scheduler.AttemptAutoSubmitScheduler(
+                        attemptRepository, at(now.plusSeconds(100)), 1000, 1,
+                        java.time.Clock.fixed(now.plusSeconds(100), java.time.ZoneOffset.UTC));
+                assertEquals(1, scheduler.runPass());
+                assertCommittedMasks(attempt.attemptId(), true, false);
+                assertCommittedMasks(other.attemptId(), false, true);
+                assertEquals(0, scheduler.runPass());
+                assertCommittedMasks(attempt.attemptId(), true, false);
+                probe.failWhen = event -> false;
+                assertEquals(1, scheduler.runPass());
+                assertCommittedMasks(attempt.attemptId(), true, true);
+                assertEquals(attempt.expiresAt(), probe.events.getLast().submittedAt());
+                assertEquals(0, scheduler.runPass());
+                assertEquals(5, probe.events.size());
+                assertEquals(3, Collections.frequency(probe.completions, TransactionSynchronization.STATUS_ROLLED_BACK));
+                assertEquals(2, Collections.frequency(probe.completions, TransactionSynchronization.STATUS_COMMITTED));
+            }
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(strings = {"answers", "terminal", "readback"})
+        void persistenceOrIncompleteRefreshedGradingFailsClosedWithoutPublication(String fault) {
+            try (var probe = new QuizEventProbe()) {
+                asLearner();
+                var attempt = at(now).start(courseId, quizId).attempt();
+                at(now.plusSeconds(1)).saveAnswers(courseId, quizId, attempt.attemptId(), answers(true));
+                com.codemastery.modules.assessment.infrastructure.persistence.repository.AttemptRepositoryImpl target =
+                        org.springframework.test.util.AopTestUtils.getUltimateTargetObject(attemptRepository);
+                var spy = org.mockito.Mockito.spy(target);
+                if (fault.equals("terminal")) {
+                    org.mockito.Mockito.doAnswer(call -> {
+                        call.callRealMethod(); throw new IllegalStateException("test failure after terminal flush");
+                    }).when(spy).save(org.mockito.ArgumentMatchers.any());
+                } else {
+                    org.mockito.Mockito.doAnswer(call -> {
+                        call.callRealMethod();
+                        if (fault.equals("answers")) throw new IllegalStateException("test failure after answer flush");
+                        // Simulate an inconsistent persisted row with a stale managed entity present.
+                        jdbc.update("UPDATE attempt_answers SET is_correct=NULL WHERE attempt_id=? AND question_id=?", attempt.attemptId(), q1);
+                        return null;
+                    }).when(spy).updateAnswers(org.mockito.ArgumentMatchers.anyList());
+                }
+                var service = new com.codemastery.modules.assessment.application.service.AttemptService(spy, quizRepository,
+                        grading, access, identities, guard, skillGraph,
+                        java.time.Clock.fixed(now.plusSeconds(2), java.time.ZoneOffset.UTC), eventBusContext);
+                assertThrows(IllegalStateException.class, () -> service.submit(courseId, quizId, attempt.attemptId(), answers(false)));
+                assertTrue(probe.events.isEmpty());
+                assertCommittedMasks(attempt.attemptId(), true, false);
+                at(now.plusSeconds(3)).submit(courseId, quizId, attempt.attemptId(), answers(true));
+                assertCommittedMasks(attempt.attemptId(), true, true);
+                assertEquals(1, probe.events.size());
+            }
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(strings = {"duplicate", "manualFirst", "expiryFirst"})
+        void concurrentTerminalWritersPublishOneCommittedTransition(String order) throws Exception {
+            asLearner();
+            var attempt = at(now).start(courseId, quizId).attempt();
+            at(now.plusSeconds(1)).saveAnswers(courseId, quizId, attempt.attemptId(), answers(true));
+            var entered = new java.util.concurrent.CountDownLatch(1);
+            var release = new java.util.concurrent.CountDownLatch(1);
+            try (var probe = new QuizEventProbe(); var workers = new AttemptWorkers(2)) {
+                probe.onEvent = event -> {
+                    entered.countDown();
+                    try { assertTrue(release.await(5, TimeUnit.SECONDS)); }
+                    catch (InterruptedException failure) { Thread.currentThread().interrupt(); throw new IllegalStateException(failure); }
+                };
+                java.util.concurrent.Callable<Object> manual = () -> {
+                    asLearner(); return at(now.plusSeconds(2)).submit(courseId, quizId, attempt.attemptId(), answers(false));
+                };
+                java.util.concurrent.Callable<Object> expiry = () -> {
+                    at(attempt.expiresAt()).finalizeExpired(attempt.attemptId()); return null;
+                };
+                var first = workers.submit(order.equals("expiryFirst") ? expiry : manual);
+                try {
+                    assertTrue(entered.await(5, TimeUnit.SECONDS));
+                    var second = workers.submit(order.equals("manualFirst") ? expiry : manual);
+                    workers.awaitRootWait();
+                    release.countDown();
+                    awaitWorker(first, 10, TimeUnit.SECONDS);
+                    awaitWorker(second, 10, TimeUnit.SECONDS);
+                } finally { release.countDown(); }
+                assertEquals(1, probe.events.size());
+                assertEquals(List.of(TransactionSynchronization.STATUS_COMMITTED), probe.completions);
+                assertCommittedMasks(attempt.attemptId(), order.equals("expiryFirst"), true);
+                assertEquals(order.equals("expiryFirst") ? attempt.expiresAt() : now.plusSeconds(2), probe.events.getFirst().submittedAt());
+                at(now.plusSeconds(100)).submit(courseId, quizId, attempt.attemptId(), answers(false));
+                at(now.plusSeconds(100)).finalizeExpired(attempt.attemptId());
+                assertEquals(1, probe.events.size());
             }
         }
     }

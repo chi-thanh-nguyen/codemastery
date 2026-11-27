@@ -1,3 +1,5 @@
+import { gradingPath } from '../../grading/hooks/useSubmissions';
+import { isDestinationLive } from '../../../../routes/routePaths';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, Box, Button, Skeleton, Typography } from '@mui/material';
@@ -333,7 +335,7 @@ function AssignmentsView({ courseId, page, onPage, courseContext, onRefused }: {
                 render: (assignment) => <span className="cm-tabular">{assignment.gradedCount}</span>,
             },
         ]}
-        actions={(assignment) => <Button component={Link} to={assignmentPath(courseId, assignment.id)} variant="outlined" size="small" aria-label={`Open assignment: ${assignment.title}`}>Open</Button>}
+        actions={(assignment) => <><Button component={Link} to={assignmentPath(courseId, assignment.id)} variant="outlined" size="small" aria-label={`Open assignment: ${assignment.title}`}>Open</Button>{assignment.submissionCount > 0 && isDestinationLive('/teach/grading', 'Instructor') && <Button component={Link} to={gradingPath(courseId, assignment.id)} variant="outlined" size="small" aria-label={`Grade: ${assignment.title}`}>Grade</Button>}</>}
         footer={data && <PaginationBar page={data.page} totalPages={data.totalPages} totalItems={data.totalElements} pageSize={data.size} itemsOnPage={data.content.length} onChange={onPage} noun="assignments" nounOne="assignment" />} />;
 }
 
