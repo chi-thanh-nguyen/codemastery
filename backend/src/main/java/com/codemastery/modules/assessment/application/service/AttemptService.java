@@ -4,6 +4,7 @@ import com.codemastery.common.api.PageResponse;
 import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.ResourceNotFoundException;
 import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService;
+import com.codemastery.modules.assessment.application.event.QuizSubmittedEvent;
 import com.codemastery.modules.assessment.application.service.QuizGradingService.Grade;
 import com.codemastery.modules.assessment.application.service.QuizGradingService.GradedItem;
 import com.codemastery.modules.assessment.application.service.QuizGradingService.GradingItem;
@@ -37,6 +38,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.TransactionDefinition;
@@ -135,6 +137,7 @@ public class AttemptService {
     private final UserAccountService identities;
     private final CourseManagementService courseGuard;
     private final SkillGraphService skillGraph;
+    private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
 
     @Autowired
@@ -143,8 +146,11 @@ public class AttemptService {
                           QuizGradingService gradingService,
                           CourseAccessService courseAccess,
                           UserAccountService identities,
-                          CourseManagementService courseGuard, SkillGraphService skillGraph) {
-        this(attempts, quizzes, gradingService, courseAccess, identities, courseGuard, skillGraph, Clock.systemUTC());
+                          CourseManagementService courseGuard,
+                          SkillGraphService skillGraph,
+                          ApplicationEventPublisher eventPublisher) {
+        this(attempts, quizzes, gradingService, courseAccess, identities, courseGuard, skillGraph,
+                Clock.systemUTC(), eventPublisher);
     }
 
     public AttemptService(AttemptRepository attempts,
@@ -152,8 +158,10 @@ public class AttemptService {
                           QuizGradingService gradingService,
                           CourseAccessService courseAccess,
                           UserAccountService identities,
-                          CourseManagementService courseGuard, SkillGraphService skillGraph,
-                          Clock clock) {
+                          CourseManagementService courseGuard,
+                          SkillGraphService skillGraph,
+                          Clock clock,
+                          ApplicationEventPublisher eventPublisher) {
         this.attempts = Objects.requireNonNull(attempts, "attempts");
         this.quizzes = Objects.requireNonNull(quizzes, "quizzes");
         this.gradingService = Objects.requireNonNull(gradingService, "gradingService");
@@ -162,6 +170,7 @@ public class AttemptService {
         this.clock = Objects.requireNonNull(clock, "clock");
         this.courseGuard = Objects.requireNonNull(courseGuard, "courseGuard");
         this.skillGraph = Objects.requireNonNull(skillGraph, "skillGraph");
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher");
     }
 
     public record SkillEvidence(UUID skillId, UUID attemptId, UUID quizId, int attemptNumber,
@@ -512,7 +521,7 @@ public class AttemptService {
                 throw new BusinessRuleException(HttpStatus.CONFLICT, "Attempt has expired");
             }
 
-            return gradeAndFinalize(courseId, attempt, capturedAnswers, questionsById, validatedMasks, now);
+            return gradeAndFinalize(courseId, quiz, attempt, capturedAnswers, questionsById, validatedMasks, now);
         }));
     }
 
@@ -650,7 +659,7 @@ public class AttemptService {
                 savedMasks.put(answer.question_id(), List.copyOf(mask));
             }
 
-            gradeAndFinalize(courseId, lockedAttempt, capturedAnswers, questionsById, savedMasks,
+            gradeAndFinalize(courseId, lockedQuiz, lockedAttempt, capturedAnswers, questionsById, savedMasks,
                     lockedAttempt.expires_at());
             return null;
         }));
@@ -707,11 +716,13 @@ public class AttemptService {
     }
 
     private AttemptResult gradeAndFinalize(UUID courseId,
+                                           Quiz quiz,
                                            Attempt attempt,
                                            List<AttemptAnswer> capturedAnswers,
                                            Map<UUID, Member> questionsById,
                                            Map<UUID, List<Boolean>> masksByQuestionId,
                                            Instant submittedAt) {
+        requireStoredQuizStructure(courseId, quiz);
         requireCapturedAnswers(attempt, capturedAnswers, questionsById);
         List<GradingItem> gradingItems = new ArrayList<>(capturedAnswers.size());
         int prevPosition = 0;
@@ -777,7 +788,36 @@ public class AttemptService {
                 submittedAt,
                 grade.scorePercentage()
         ));
-        return toAttemptResult(courseId, submittedAttempt, gradedAnswers, questionsById);
+        requireStoredAttempt(quiz.id(), attempt.user_id(), submittedAttempt);
+        // ADR011 §4: both writes above flush. Reuse the repository's refresh-capable read
+        // under the already-held answer locks so evidence comes from persisted grading,
+        // including when this persistence context already contains the pre-grade entities.
+        List<AttemptAnswer> persistedAnswers = attempts.findAnswersInPositionOrderForUpdate(attempt.id());
+        requireCapturedAnswers(submittedAttempt, persistedAnswers, questionsById);
+        List<QuizSubmittedEvent.AnswerEvidence> answerEvidence = new ArrayList<>(persistedAnswers.size());
+        for (AttemptAnswer gradedAnswer : persistedAnswers) {
+            Question question = question(questionsById, gradedAnswer.question_id());
+            if (question == null || question.skill_id() == null || gradedAnswer.is_correct() == null) {
+                throw new IllegalStateException("Submitted answer evidence is incomplete");
+            }
+            answerEvidence.add(new QuizSubmittedEvent.AnswerEvidence(
+                    gradedAnswer.question_id(),
+                    gradedAnswer.position(),
+                    question.skill_id(),
+                    gradedAnswer.is_correct()));
+        }
+        eventPublisher.publishEvent(new QuizSubmittedEvent(
+                submittedAttempt.id(),
+                submittedAttempt.user_id(),
+                courseId,
+                quiz.id(),
+                quiz.kind(),
+                submittedAttempt.attempt_number(),
+                submittedAttempt.started_at(),
+                submittedAttempt.expires_at(),
+                submittedAttempt.submitted_at(),
+                answerEvidence));
+        return toAttemptResult(courseId, submittedAttempt, persistedAnswers, questionsById);
     }
 
     private Map<UUID, List<Boolean>> validateAndCanonicalizeAnswers(AnswersInput input,

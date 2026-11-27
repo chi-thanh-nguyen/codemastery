@@ -1,5 +1,112 @@
 # Development Setup
 
+## FE17 targeted recovery, selection and responsive remediation — 27 November 2026
+
+PR #288 / Issue #202: author-verified correction of FE17-IR-01 (P1), IR-02 (P2)
+and IR-03 (P3), under the Project Leader's targeted remediation instruction.
+Reviewed baseline `11ba8e49` was REQUEST_CHANGES; the historical delivery record
+below remains evidence of that revision, not independent acceptance. Ordinary
+main integration is merge `4e3a6260`, parents `11ba8e49` and main `daddc507`;
+AS16 backend and both historical testing records are preserved without conflicts.
+
+- Reviewed-submission eligibility is separate from the refreshed authoritative
+  row. Unknown-result recovery retains the draft and current-result information.
+  If the exact token or bound evidence changes, downloading the current file and
+  explicit review are required before eligibility advances. Each recovery read
+  has a new identity and grading remains locked while it is pending/failed/unknown.
+  The PUT boundary checks reviewed eligibility independently of disabled controls.
+  Ordinary initial grading/regrading has no new mandatory download rule.
+- Download completion does not prove the bytes' timestamp under ADR010 §11;
+  filenames are not version identities. No new API/header/schema is introduced,
+  and further replacement still yields the existing exact-token backend 409.
+- Selected Course/Assignment labels are independent of visible paginated windows.
+  Existing decoded page summaries are reused; a missing selected summary is
+  resolved with one approved `getOwnedCourse` or `b5ReadOwnedAssignment` supporting
+  owner read. URL identities remain authoritative; generation/resource changes
+  invalidate summaries and obsolete requests. This is an additional use of an
+  existing owner operation, not a new backend contract or public catalogue read.
+- S21 has one top action region, before potentially long title/recovery content.
+  Its Save/Update action retains native form association and the existing
+  validation, confirmation and busy/refusal locks. No global shell/layout change.
+
+No dependency/configuration change or setup step is required. OpenAI Codex
+performed this remediation and implementation-author self-audit; Claude Code did
+not execute this session. Verified heizseung metadata is assigned under explicit
+Leader authority and does not establish personal implementation or independent
+review. Normal push is by chi-thanh-nguyen. The original reconstruction/G4/FE16
+provenance below is retained. See the new FE17 record in `docs/testing.md` for
+actual focused, rendered and disposable real backend/storage evidence, failures
+corrected in tests, limitations and separate independent/QA/integration gates.
+
+
+## FE17 Instructor grading delivery and delegated decisions — 27 November 2026
+
+Refs #202; implementation and author verification in PR #288. This is the
+Project Leader's explicitly authorized FE17 reconstruction, including bounded
+FE16 handoffs. It is not independent acceptance or a deployment instruction.
+
+- Production Instructor routes are `/teach/grading?courseId=<uuid>&assignmentId=<uuid>`
+  and `/teach/grading/:submissionId?courseId=<uuid>&assignmentId=<uuid>`.
+  `WORKSPACE_ROUTES` registers both through the existing FE32 role guard and
+  navigation model. No other route is activated.
+- **G4:** selected `courseId` and `assignmentId`, under the Leader's explicit
+  task-scoped decision delegation, after checking CT16.routes, DESIGN S21,
+  D9-4/D10-2/D11-3 and existing consumers. Alternatives were different names
+  (unnecessary incompatibility) or path/API changes (outside the existing
+  contract). This records delegated selection, not a personal owner statement.
+  The bounded-scan limitation remains intentional; no single-submission GET exists.
+- Course and assignment lists reuse CO06 and AS09 clients. The FE17 client adds
+  the approved submission list, protected binary download and grade operations.
+  All six S21 operations use the shared authenticated transport. No storage URL,
+  object key, browser-persisted file, notification guarantee or mastery write is added.
+- Navigation carries only an opaque reference to a validated row held in this
+  document, bound to the current session generation and all route identities.
+  Retained history after reload cannot resolve it. Direct loads use page size
+  100 and no more than the first response's page count; an unsuccessful lookup
+  remains unknown, with explicit retry. Assignment title uses current-document
+  context or one `b5ReadOwnedAssignment`, falling back to `Assignment`.
+- Feedback is required plain text and sent verbatim. Initial grading and regrading
+  accept 0–100 with at most two decimal places. `submittedAt` is copied unchanged,
+  including microseconds. A 409 preserves the draft and refreshes the bounded
+  submission read; the current file must be downloaded and explicitly acknowledged
+  as reviewed before another deliberate save. An unconfirmed mutation is never
+  replayed or called successful: the UI reads current state, retains the draft,
+  and requires explicit review before another save.
+- **Bounded FE16 (#201):** Grade in the Assignments view when `submissionCount > 0`,
+  and Open grading in the existing editor. Both carry the two identities and use
+  route availability; editor navigation retains its dirty-state guard. Estimated
+  additional scope is about 5% of FE16: two navigation actions, compared with its
+  paginated list, create/read/update editor, publication, deadline/lesson controls,
+  validation and recovery lifecycle. No broader FE16 completion or G7 change is claimed.
+- AS09 (#160), SH05 (#154), CO06 (#172), FE32 (#224) and FE34 (#255) already supply
+  the required producers/foundations on main `13d9ca7`. No additional backend,
+  storage, privilege or theme capability was needed. The shared download widget
+  gains only an optional label and completion callback; existing PDF consumers
+  keep their defaults. IN15 (#187) subscriptions remain separate downstream work;
+  its listener scaffold does not block authoritative grade persistence.
+- **History and attribution:** original PR #288 HEAD
+  `bf059fddd3e69ffe2a446f6b751de8f0b5c25d31` is retained in local ref
+  `refs/backups/pr288-before-fe17-20261127`. Its four effective commits are
+  `3ebcdf4`, `c92467f`, `775bbc9`, `bf059fd`; merge-base was
+  `cc6cb54ddedf226966a51c9614fc5fc5756267bb`. The old FE08 effective patch matches
+  PR #286 by stable patch ID, not just filenames; #286 remains untouched.
+  FE17 starts directly at verified main `13d9ca7e58ead77ecc66efc8408199059d57588a`.
+  The reused remote branch name `feature/learning-progress-ui` is explicitly
+  authorized. Exact history and verification provenance are in Git and the PR body.
+- The Leader explicitly assigns new commit Author and Committer metadata to
+  `Le Phan Quoc Thang <thangle12012006@gmail.com>`, independently verified against
+  existing commit `3ebcdf419cc81df11f22eca2ebbba2fba4799e6c` and its GitHub
+  `heizseung` association. The authenticated pusher is `chi-thanh-nguyen`.
+  OpenAI Codex performed the implementation and author self-audit, using Graphify
+  for navigation, Impeccable for design checks, and Playwright for browser evidence.
+  Attribution does not assert that heizseung personally implemented or reviewed it.
+
+No new dependency, environment variable, public API, migration or operational
+setting is needed. DESIGN and effective ADRs remain unchanged. Independent
+review, QA, exact-head hosted CI, protected integration and operational acceptance
+remain separate. See the FE17 record in `docs/testing.md` for executed evidence.
+
+
 ## AS09 assignment/submission consumer — 27 November 2026
 
 PR #297 completes backend Assignment authoring/learner reads, PDF/ZIP submission

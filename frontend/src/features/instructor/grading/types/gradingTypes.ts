@@ -24,3 +24,5 @@ export interface GradeSubmissionWrite {
     feedback: string;
     submittedAt: string;
 }
+
+export type SubmissionPage = import('../../../../shared/types/apiTypes').PageResponse<SubmissionSummary>;
