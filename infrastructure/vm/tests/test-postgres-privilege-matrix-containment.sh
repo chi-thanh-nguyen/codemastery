@@ -304,6 +304,33 @@ probe "path_recommendations: read (r8 grants INSERT only)"    42501 "SELECT 1 FR
 probe "path_recommendations: rewrite history"                 42501 "UPDATE public.path_recommendations SET reason=reason, recommended_at=recommended_at;"
 probe "path_recommendations: erase history"                   42501 "DELETE FROM public.path_recommendations;"
 probe "learner_skill_masteries/path_recommendations: TRUNCATE" 42501 "TRUNCATE public.path_recommendations, public.learner_skill_masteries;"
+# IN06 r17: actual rows and persisted effects, all rolled back by probe().
+probe "Interaction: parent SHARE, content-first lock and targeted terminal writes" ok "
+INSERT INTO public.discussion_posts(id,lesson_id,author_id,parent_post_id,content,created_at,is_hidden)
+VALUES ('00000000-0000-0000-0000-0000000017a1','00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-0000000000a1',NULL,'Question',clock_timestamp(),false);
+SELECT id FROM public.discussion_posts WHERE id='00000000-0000-0000-0000-0000000017a1' FOR SHARE;
+INSERT INTO public.content_reports(id,reporter_id,discussion_post_id,lesson_id,reason,status,created_at,resolved_at)
+VALUES ('00000000-0000-0000-0000-0000000017b1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000017a1',NULL,'Reason','open',clock_timestamp(),NULL);
+SELECT id FROM public.discussion_posts WHERE id='00000000-0000-0000-0000-0000000017a1' FOR UPDATE;
+SELECT id FROM public.content_reports WHERE discussion_post_id='00000000-0000-0000-0000-0000000017a1' AND status='open' ORDER BY id FOR UPDATE;
+UPDATE public.discussion_posts SET is_hidden=true WHERE id='00000000-0000-0000-0000-0000000017a1';
+UPDATE public.content_reports SET status='resolved',resolved_at=clock_timestamp() WHERE id='00000000-0000-0000-0000-0000000017b1';
+DO \$\$ BEGIN
+IF NOT (SELECT is_hidden FROM public.discussion_posts WHERE id='00000000-0000-0000-0000-0000000017a1') OR
+NOT EXISTS (SELECT 1 FROM public.content_reports WHERE id='00000000-0000-0000-0000-0000000017b1' AND status='resolved' AND resolved_at IS NOT NULL)
+THEN RAISE EXCEPTION 'Interaction write missing'; END IF;
+END \$\$;"
+[[ "$(psql_admin <<<"SELECT count(*) FROM public.discussion_posts WHERE id='00000000-0000-0000-0000-0000000017a1';")" == 0 ]]
+for column in id lesson_id author_id parent_post_id content created_at; do
+  probe "discussion_posts: immutable $column" 42501 "UPDATE public.discussion_posts SET $column=$column WHERE false;"
+done
+for column in id reporter_id discussion_post_id lesson_id reason created_at; do
+  probe "content_reports: immutable $column" 42501 "UPDATE public.content_reports SET $column=$column WHERE false;"
+done
+for relation in discussion_posts content_reports; do
+  probe "$relation: erase" 42501 "DELETE FROM public.$relation WHERE false;"
+  probe "$relation: TRUNCATE" 42501 "TRUNCATE public.$relation;"
+done
 probe "notifications: re-key"                                42501 "UPDATE public.notifications SET id=id WHERE false;"
 probe "notifications: change recipient"                      42501 "UPDATE public.notifications SET user_id=user_id WHERE false;"
 probe "notifications: rewrite message"                       42501 "UPDATE public.notifications SET message=message WHERE false;"

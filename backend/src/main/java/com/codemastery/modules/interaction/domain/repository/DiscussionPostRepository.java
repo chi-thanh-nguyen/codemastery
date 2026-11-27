@@ -10,6 +10,10 @@ import java.util.UUID;
 public interface DiscussionPostRepository {
 
     Optional<DiscussionPost> findById(UUID id);
+    /** Caller holds a write transaction; shared parent lock serializes with moderation hiding. */
+    Optional<DiscussionPost> lockById(UUID id, boolean exclusive);
+    Page<DiscussionPost> findVisibleQuestions(UUID lessonId, Pageable pageable);
+    java.util.List<DiscussionPost> findVisibleReplies(java.util.Set<UUID> questionIds);
     DiscussionPost save(DiscussionPost post);
 
     /**
