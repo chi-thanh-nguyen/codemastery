@@ -13214,3 +13214,21 @@ Final-code real smoke: **1 passed / 0 skipped**, 26.6 seconds, run
 `cm-e2e-1a21e204563-d1bbfe`. The same production journey above passed after SA-R1;
 all seven owned resources were verified absent, the preview exited and the temporary
 build was removed. No browser-specific risk justified repeating the other projects.
+
+### Remediation revision and narrow-review handoff
+
+Implementation revision: **`78e2697e1432260281a332e69ee04ee633b06bcc`**. Its production
+and test files are byte-identical to the working tree used by the final 66-case
+assignment run, 207-route run and typecheck. The recovered 9-case probe, build and
+final real smoke used the same production files; one additional duplicate-confirm
+control was appended afterwards and passed with the final 66-case suite/typecheck.
+This publication anchor changes documentation only; it is not another test run.
+
+Final author verdict: **FE11_TARGETED_REMEDIATION_COMPLETE_AUTHOR_VERIFIED**.
+FE11-IR-01 and FE11-IR-02: **FIXED_AUTHOR_VERIFIED**. No independent `VERIFIED_FIXED`
+claim is made. FE11-owned code completeness is restored under author verification;
+whole-Issue/upstream delivery and the previous independent REQUEST_CHANGES still
+require their separate gates. Recommended next step: **Final Narrow Delta-focused
+Independent Review — FE11-IR-01 & FE11-IR-02, Synchronous Mutation Admission,
+Replacement Confirmation Integrity and Contract-Compliant Error Recovery
+Preservation**, including SA-R1's operation-bound Cancel regressions.
