@@ -11135,7 +11135,6 @@ moderation queue (the other `IN06` checkpoints), the Â§19.2 runtime-privilege 
 `InteractionAdminIntegrationTest`. A request body that is not parseable JSON, or is absent, is rejected as 400 by
 the framework before CT03 admission runs; bodies that parse are checked after admission. The placement of these
 suites is for review.
-
 ## AS12 completion and producer self-audit — 27 November 2026
 
 **Authority and disposition.** The Project Leader's explicit AS12 completion task
