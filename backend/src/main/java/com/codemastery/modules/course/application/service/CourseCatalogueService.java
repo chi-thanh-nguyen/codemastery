@@ -73,6 +73,38 @@ public class CourseCatalogueService {
                 names.get(course.instructorId()), course.prerequisiteDescription(), assemblePublicSyllabus(course.id()));
     }
 
+    /** ADR012 §3.1: actorless projection, only for the approved Interaction/Admin callers. */
+    @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
+    public java.util.Optional<CourseContext> readCourseContext(UUID courseId, Set<UUID> lessonIds) {
+        Objects.requireNonNull(courseId, "courseId");
+        Set<UUID> ids = Set.copyOf(lessonIds);
+        if (ids.size() > 100) throw new IllegalArgumentException("At most 100 Lesson IDs per call");
+        return courseRepository.findById(courseId).map(course -> {
+            Map<UUID, LessonName> names = new LinkedHashMap<>();
+            for (UUID id : ids) courseContentRepository.findLesson(courseId, id).ifPresent(lesson ->
+                    names.put(id, new LessonName(id, lesson.title(), lesson.publicationStatus().getStatus())));
+            return new CourseContext(course.id(), course.title(), course.publicationStatus().getStatus(), Map.copyOf(names));
+        });
+    }
+
+    @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
+    public java.util.Optional<LessonContext> readLessonContext(UUID lessonId) {
+        Objects.requireNonNull(lessonId, "lessonId");
+        return courseContentRepository.findLessonCourseId(lessonId).flatMap(courseId ->
+                readCourseContext(courseId, Set.of(lessonId)).flatMap(course -> {
+                    LessonName lesson = course.lessons().get(lessonId);
+                    return lesson == null ? java.util.Optional.empty() : java.util.Optional.of(new LessonContext(
+                            courseId, course.courseTitle(), course.coursePublicationStatus(), lessonId,
+                            lesson.title(), lesson.publicationStatus()));
+                }));
+    }
+
+    public record CourseContext(UUID courseId, String courseTitle, String coursePublicationStatus,
+                                Map<UUID, LessonName> lessons) {}
+    public record LessonName(UUID lessonId, String title, String publicationStatus) {}
+    public record LessonContext(UUID courseId, String courseTitle, String coursePublicationStatus,
+                                UUID lessonId, String lessonTitle, String lessonPublicationStatus) {}
+
     /** Fail closed if a non-published row ever reaches the public mapping. */
     private static Course requirePublishedRow(Course course) {
         if (course == null || course.publicationStatus() != PublishStatus.PUBLISHED) {

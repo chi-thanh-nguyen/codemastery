@@ -261,15 +261,40 @@ probe "questions: TRUNCATE"                                   42501 "TRUNCATE pu
 probe "quizzes: move a quiz to another Course"               42501 "UPDATE public.quizzes SET course_id=course_id;"
 probe "quizzes/quiz_questions: TRUNCATE"                      42501 "TRUNCATE public.quiz_questions, public.quizzes;"
 probe "quiz_questions: rewrite membership in place"           42501 "UPDATE public.quiz_questions SET position=position, quiz_id=quiz_id;"
-probe "attempts: read owners, timing or scores"               42501 "SELECT user_id, started_at, expires_at, score_percentage FROM public.attempts;"
-probe "attempts: start an attempt (AS08 not implemented)"     42501 "INSERT INTO public.attempts SELECT * FROM public.attempts WHERE false;"
-probe "attempt_answers: read captured selections"             42501 "SELECT selected_options, is_correct FROM public.attempt_answers;"
-probe "attempts: rewrite scores"                             42501 "UPDATE public.attempts SET score_percentage=100;"
+probe "attempts: read owners, timing or scores"               ok "SELECT user_id, started_at, expires_at, score_percentage FROM public.attempts;"
+probe "attempts/answers: real capture INSERT and mutable answer writes (AS08)" ok "
+INSERT INTO public.attempts (id,user_id,quiz_id,attempt_number,started_at,expires_at)
+VALUES ('00000000-0000-0000-0000-0000000015a1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000005b3',2,now(),now()+interval '5 minutes');
+INSERT INTO public.attempt_answers (id,attempt_id,question_id,position,selected_options)
+VALUES ('00000000-0000-0000-0000-0000000015b1','00000000-0000-0000-0000-0000000015a1','00000000-0000-0000-0000-0000000005b2',1,ARRAY[false,false]);
+UPDATE public.attempt_answers SET selected_options=ARRAY[true,false], is_correct=true
+WHERE id='00000000-0000-0000-0000-0000000015b1';
+DO \$\$ BEGIN IF (SELECT count(*) FROM public.attempt_answers WHERE id='00000000-0000-0000-0000-0000000015b1'
+  AND selected_options=ARRAY[true,false] AND is_correct=true) <> 1 THEN RAISE EXCEPTION 'AS08 mutable answer write missing'; END IF; END \$\$;"
+probe "attempt_answers: read captured selections"             ok "SELECT selected_options, is_correct FROM public.attempt_answers;"
+# The controlled active fixture must be updated, not just a zero-row privilege probe.
+# V004 requires submitted_at and score_percentage to become non-null together.
+probe "attempts: write both terminal columns on the active fixture (AS08)" ok "
+UPDATE public.attempts SET submitted_at=expires_at, score_percentage=100
+WHERE id='00000000-0000-0000-0000-0000000006b1';
+DO \$\$ BEGIN IF (SELECT count(*) FROM public.attempts WHERE id='00000000-0000-0000-0000-0000000006b1'
+  AND submitted_at=expires_at AND score_percentage=100) <> 1 THEN RAISE EXCEPTION 'AS08 terminal write missing'; END IF; END \$\$;"
+probe "attempts: terminal probe rolled back its fixture (AS08)" ok "
+DO \$\$ BEGIN IF (SELECT count(*) FROM public.attempts WHERE id='00000000-0000-0000-0000-0000000006b1'
+  AND submitted_at IS NULL AND score_percentage IS NULL) <> 1
+  OR EXISTS (SELECT 1 FROM public.attempts WHERE id='00000000-0000-0000-0000-0000000015a1')
+  OR EXISTS (SELECT 1 FROM public.attempt_answers WHERE id='00000000-0000-0000-0000-0000000015b1')
+THEN RAISE EXCEPTION 'AS08 probe escaped rollback'; END IF; END \$\$;"
+probe "attempts: delete"                                    42501 "DELETE FROM public.attempts;"
+probe "attempts: immutable identity and timer"                42501 "UPDATE public.attempts SET user_id=user_id, quiz_id=quiz_id, attempt_number=attempt_number, started_at=started_at, expires_at=expires_at;"
+probe "attempt_answers: immutable capture"                   42501 "UPDATE public.attempt_answers SET attempt_id=attempt_id, question_id=question_id, position=position;"
 probe "attempt_answers: delete"                              42501 "DELETE FROM public.attempt_answers;"
-probe "submissions: self-grade"                              42501 "UPDATE public.submissions SET grade_percentage=100;"
-probe "submissions: read files, learners or feedback"         42501 "SELECT object_key, user_id, feedback FROM public.submissions;"
-probe "submissions: create (learner submission not implemented)" 42501 "INSERT INTO public.submissions SELECT * FROM public.submissions WHERE false;"
+probe "submissions: grade (r16)"                             ok "UPDATE public.submissions SET grade_percentage=100, feedback='ok', graded_at=clock_timestamp();"
+probe "submissions: read files, learners or feedback (r16)"   ok "SELECT object_key, user_id, feedback FROM public.submissions;"
+probe "submissions: create (r16)"                            ok "INSERT INTO public.submissions SELECT * FROM public.submissions WHERE false;"
 probe "assignments: move to another Course or re-key"         42501 "UPDATE public.assignments SET course_id=course_id, id=id;"
+probe "submissions: immutable IDs"                           42501 "UPDATE public.submissions SET id=id, assignment_id=assignment_id, user_id=user_id;"
+probe "submissions: delete denied"                           42501 "DELETE FROM public.submissions;"
 probe "assignments/submissions: delete"                       42501 "DELETE FROM public.assignments;"
 probe "assignments/submissions: TRUNCATE"                     42501 "TRUNCATE public.submissions, public.assignments;"
 probe "learner_skill_masteries: re-key or re-target a row"     42501 "UPDATE public.learner_skill_masteries SET id=id, user_id=user_id, skill_id=skill_id;"
@@ -279,6 +304,33 @@ probe "path_recommendations: read (r8 grants INSERT only)"    42501 "SELECT 1 FR
 probe "path_recommendations: rewrite history"                 42501 "UPDATE public.path_recommendations SET reason=reason, recommended_at=recommended_at;"
 probe "path_recommendations: erase history"                   42501 "DELETE FROM public.path_recommendations;"
 probe "learner_skill_masteries/path_recommendations: TRUNCATE" 42501 "TRUNCATE public.path_recommendations, public.learner_skill_masteries;"
+# IN06 r17: actual rows and persisted effects, all rolled back by probe().
+probe "Interaction: parent SHARE, content-first lock and targeted terminal writes" ok "
+INSERT INTO public.discussion_posts(id,lesson_id,author_id,parent_post_id,content,created_at,is_hidden)
+VALUES ('00000000-0000-0000-0000-0000000017a1','00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-0000000000a1',NULL,'Question',clock_timestamp(),false);
+SELECT id FROM public.discussion_posts WHERE id='00000000-0000-0000-0000-0000000017a1' FOR SHARE;
+INSERT INTO public.content_reports(id,reporter_id,discussion_post_id,lesson_id,reason,status,created_at,resolved_at)
+VALUES ('00000000-0000-0000-0000-0000000017b1','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000017a1',NULL,'Reason','open',clock_timestamp(),NULL);
+SELECT id FROM public.discussion_posts WHERE id='00000000-0000-0000-0000-0000000017a1' FOR UPDATE;
+SELECT id FROM public.content_reports WHERE discussion_post_id='00000000-0000-0000-0000-0000000017a1' AND status='open' ORDER BY id FOR UPDATE;
+UPDATE public.discussion_posts SET is_hidden=true WHERE id='00000000-0000-0000-0000-0000000017a1';
+UPDATE public.content_reports SET status='resolved',resolved_at=clock_timestamp() WHERE id='00000000-0000-0000-0000-0000000017b1';
+DO \$\$ BEGIN
+IF NOT (SELECT is_hidden FROM public.discussion_posts WHERE id='00000000-0000-0000-0000-0000000017a1') OR
+NOT EXISTS (SELECT 1 FROM public.content_reports WHERE id='00000000-0000-0000-0000-0000000017b1' AND status='resolved' AND resolved_at IS NOT NULL)
+THEN RAISE EXCEPTION 'Interaction write missing'; END IF;
+END \$\$;"
+[[ "$(psql_admin <<<"SELECT count(*) FROM public.discussion_posts WHERE id='00000000-0000-0000-0000-0000000017a1';")" == 0 ]]
+for column in id lesson_id author_id parent_post_id content created_at; do
+  probe "discussion_posts: immutable $column" 42501 "UPDATE public.discussion_posts SET $column=$column WHERE false;"
+done
+for column in id reporter_id discussion_post_id lesson_id reason created_at; do
+  probe "content_reports: immutable $column" 42501 "UPDATE public.content_reports SET $column=$column WHERE false;"
+done
+for relation in discussion_posts content_reports; do
+  probe "$relation: erase" 42501 "DELETE FROM public.$relation WHERE false;"
+  probe "$relation: TRUNCATE" 42501 "TRUNCATE public.$relation;"
+done
 probe "notifications: re-key"                                42501 "UPDATE public.notifications SET id=id WHERE false;"
 probe "notifications: change recipient"                      42501 "UPDATE public.notifications SET user_id=user_id WHERE false;"
 probe "notifications: rewrite message"                       42501 "UPDATE public.notifications SET message=message WHERE false;"
@@ -306,11 +358,11 @@ drift="$(harden_after_migration)"
   || { echo "drift was not reported: $drift" >&2; exit 1; }
 verify_runtime_privileges complete >/dev/null
 echo "  owner-granted excess (table and column level) reported, revoked and re-verified"
-# r6 grants SELECT on questions (CT23 owner reads include keys); submissions stay unreadable.
-admin <<<"GRANT SELECT ON public.submissions TO PUBLIC;"
+# PUBLIC must not inherit any write permission, including r15/r16 columns.
+admin <<<"GRANT DELETE ON public.submissions TO PUBLIC;"
 harden_after_migration >/dev/null
-expect_failure "SELECT on submissions through PUBLIC" "table privilege SELECT on public.submissions: expected false" verify_runtime_privileges complete
-admin <<<"REVOKE SELECT ON public.submissions FROM PUBLIC;"
+expect_failure "DELETE on submissions through PUBLIC" "table privilege DELETE on public.submissions: expected false" verify_runtime_privileges complete
+admin <<<"REVOKE DELETE ON public.submissions FROM PUBLIC;"
 admin <<<"CREATE ROLE cm_grantor NOLOGIN; GRANT UPDATE ON public.users TO cm_grantor WITH GRANT OPTION; SET ROLE cm_grantor; GRANT UPDATE ON public.users TO $APP; RESET ROLE;"
 harden_after_migration >/dev/null
 expect_failure "UPDATE users from another grantor survives reset" "table privilege UPDATE on public.users: expected false" verify_runtime_privileges complete
@@ -497,9 +549,9 @@ admin <<<"ALTER TABLE public.flyway_history_moved RENAME TO flyway_schema_histor
 as_mig <<<"ALTER TABLE public.enrollments ADD COLUMN unexpected_column integer;"
 expect_failure "unreviewed column on the predecessor" "columns differ from the reviewed matrix on public.enrollments" provision_db_roles
 as_mig <<<"ALTER TABLE public.enrollments DROP COLUMN unexpected_column;"
-admin <<<"GRANT SELECT ON public.submissions TO PUBLIC;"
-expect_failure "excess privilege through PUBLIC on the predecessor" "table privilege SELECT on public.submissions: expected false" provision_db_roles
-admin <<<"REVOKE SELECT ON public.submissions FROM PUBLIC;"
+admin <<<"GRANT DELETE ON public.submissions TO PUBLIC;"
+expect_failure "excess privilege through PUBLIC on the predecessor" "table privilege DELETE on public.submissions: expected false" provision_db_roles
+admin <<<"REVOKE DELETE ON public.submissions FROM PUBLIC;"
 admin <<<"GRANT UPDATE (last_visited_at) ON public.enrollments TO \"$APP\";" 2>/dev/null \
   && { echo "Granted a privilege on a column that does not exist" >&2; exit 1; }
 provision_db_roles >/dev/null

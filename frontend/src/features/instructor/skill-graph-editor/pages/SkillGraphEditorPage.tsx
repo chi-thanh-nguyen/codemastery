@@ -31,8 +31,8 @@ import { PublicationPill, errorMessage } from '../../course-management/pages/Que
 type ProductionSkillTab = 'graph' | 'mapping';
 
 export function CourseSkillsSection() {
-    const { courseId, course, skillGraph, notifySkillsChanged } = useCourseEditorContext()!;
-    const mutations = useSkillGraphMutations(courseId);
+    const { courseId, course, skillGraph, notifySkillsChanged, graphMutations, writesBlocked } = useCourseEditorContext()!;
+    const mutations = useSkillGraphMutations(courseId, graphMutations, writesBlocked);
     const [tab, setTab] = useState<ProductionSkillTab>('graph');
     // The open aside form: `skillId` null adds a skill. The key changes only for a deliberate new opening, so a
     // partially saved draft (for example a created skill whose prerequisite was refused) stays on screen.
@@ -257,8 +257,7 @@ export function CourseSkillsSection() {
             graph={graph}
             skills={editableSkills}
             mutations={mutations}
-            onCourseReload={course.reload}
-            onGraphChanged={notifySkillsChanged} />}
+            onCourseReload={course.reload} />}
         <ConfirmDialog open={confirmDelete !== null} isDestructive title="Delete this skill?"
             message="This can't be undone." confirmLabel="Delete skill"
             onCancel={() => setConfirmDelete(null)}
@@ -310,13 +309,12 @@ function ProductionSkillForm({ skill, skills, busy, serverError, onSave, onCance
     </Box>;
 }
 
-function ProductionLessonMapping({ courseChapters, graph, skills, mutations, onCourseReload, onGraphChanged }: {
+function ProductionLessonMapping({ courseChapters, graph, skills, mutations, onCourseReload }: {
     courseChapters: { id: string; title: string; position: number; lessons: { id: string; title: string; position: number; publicationStatus: 'hidden' | 'published' }[] }[];
     graph: OwnedSkillGraph;
     skills: GraphSkill[];
     mutations: ReturnType<typeof useSkillGraphMutations>;
     onCourseReload: () => void;
-    onGraphChanged: () => void;
 }) {
     const rereadLessons = useRef(new Set<string>());
     const [savingLessonId, setSavingLessonId] = useState<string | null>(null);
@@ -381,12 +379,10 @@ function ProductionLessonMapping({ courseChapters, graph, skills, mutations, onC
             if (mode === 'map') await mutations.mapLesson(lessonId, skillId);
             else await mutations.unmapLesson(lessonId, skillId);
             setPendingFocus({ lessonId, graph });
-            onGraphChanged();
         } catch (error) {
             if (isCancelled(error)) return;
             if (outcomeUnknown(error)) {
                 setPendingFocus({ lessonId, graph });
-                onGraphChanged();
             } else {
                 setPendingFocus({ lessonId, graph: null });
                 setRowErrors((current) => ({

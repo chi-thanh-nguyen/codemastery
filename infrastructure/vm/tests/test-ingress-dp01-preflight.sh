@@ -45,6 +45,9 @@ MINIO_ROOT_PASSWORD=$(secret)
 STORAGE_ACCESS_KEY=ci-app
 STORAGE_SECRET_KEY=$(secret)
 JWT_SECRET=$(openssl rand -hex 32)
+APP_QUIZ_AUTO_SUBMIT_ENABLED=false
+APP_QUIZ_AUTO_SUBMIT_DELAY_MS=1000
+APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE=2
 CORS_ALLOWED_ORIGINS=$origin
 EOF
 # Non-root operator custody: user-owned 0600 file in a user-owned 0700 directory.

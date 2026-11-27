@@ -2228,6 +2228,35 @@ record and its authorization remain intact. This r14 record is based on effectiv
 r13; it changes no privilege beyond the already authorized CO09 material extension.
 The previous independent review is historical evidence, not approval of this merge.
 
+### CT17-P6-PRIVILEGES-2026-11-27-r16 — AS09 submissions (within ADR012 §19.2, 27 November 2026)
+
+The Project Leader's explicit **“AS09 Full-Scope Completion, Bounded Upstream
+Implementation, and Post-Implementation Audit”** task authorizes this consumer,
+its dated matrix extension, deployment-script synchronization and tests. This
+replaces only r12's submission row, within the unchanged ADR012 §19.2 ceiling:
+
+| Relation (schema) | Runtime privileges | Consumer |
+|---|---|---|
+| `submissions` (public) | SELECT, INSERT; UPDATE (object_key, original_filename, submitted_at, grade_percentage, feedback, graded_at) | AS09 learner reads, file replacement, owner listing/download/grading, CT27 producer admission |
+
+Full SELECT is exercised by the Submission entity projection; INSERT stores a
+first submission; the six column UPDATE grants cover replacement and grade writes
+and PostgreSQL row locks. Assignment grants remain r12. Identity updates (`id`,
+`assignment_id`, `user_id`), DELETE, TRUNCATE and DDL remain denied. This changes
+no effective contract ceiling or production privilege. The executable matrix,
+contract/containment tests and real PostgreSQL/MinIO consumer tests ship together.
+Author-side verification, independent CODEOWNER review, CI, protected integration,
+operator provisioning, residual-risk acceptance and deployment are separate gates.
+
+Sequencing provenance: the Project Leader's **“AS09 Safe Main Integration,
+Targeted Remediation and Post-Integration Self-Audit”** task authorizes this
+renumbering because merged AS08 PR #296 already occupies
+`CT17-P6-PRIVILEGES-2026-11-26-r15`. AS08 r15 remains intact; this r16 extension
+builds on it and changes only the Submission row. The AS09 candidate was formerly
+`CT17-P6-PRIVILEGES-2026-11-27-r15` at `b36d9397`; its exact-SHA verification
+records remain historical evidence, not verification of this integrated candidate.
+No privilege authority or approved ceiling is expanded by the renumbering.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -5627,3 +5656,184 @@ The Retry-After description above was corrected in the same follow-up
 (IR293-R2-01). The earlier text described every valid header as governing the
 wait; Resolver 1.9.27 retries immediately for a negative number or past date.
 The Docker retry properties are unchanged.
+
+
+### CT17-P6-PRIVILEGES-2026-11-26-r15 — AS08 timed attempts (26 November 2026)
+
+**DELEGATED_APPROVED within the existing ADR012 §19.2 ceiling.** The Project
+Leader's AS08 completion task explicitly authorizes the necessary runtime bindings
+and bounded technical selection. This revision replaces only the r6/r7 Attempt
+rows below; every other row, inventory and migration is unchanged. It grants
+nothing on a live database and authorizes no deployment or operational risk.
+
+| Relation | Runtime privileges | Implemented consumer |
+|---|---|---|
+| `attempts` (assessment) | SELECT, INSERT; UPDATE (submitted_at, score_percentage) | AS08 scoped reads, numbering, discovery, row locking, capture and terminal transition |
+| `attempt_answers` (assessment) | SELECT, INSERT; UPDATE (selected_options, is_correct) | AS08 captured reads/locks, answer replacement and exact-mask grading |
+
+The adapters use dynamic, mutable-column updates. No DELETE, TRUNCATE, ownership,
+DDL, grant option, attempt identity/timer rewrite or captured answer membership
+rewrite is allowed. SELECT covers the complete scalar projections; PostgreSQL
+row locks use the existing approved mutable-column UPDATE privileges. No migration
+or schema expansion is needed. The executable matrix, containment assertions and
+consumer tests ship together. AS12 publication, AD13 execution and operational
+statement/transaction deadline qualification remain separate gates.
+
+## Shared CI reliability remediation — 26 November 2026
+
+This implementation follows DP01, ADR003's byte-clean PostgreSQL image, ADR008
+CT34-FIXTURES r2, ADR010 CT09 and ADR007 CT38 quiz-expiry. It changes no normative
+contract, approval, required check, deployment or release-admission policy.
+
+The investigation baseline is main `23402754743e0d35048e74cbabebfa133e5e6da3`.
+PR #293 is merged as `31d9288`; PR #280 is merged as the baseline above. Their
+successful historical runs do not qualify this remediation's final revision.
+
+### Package inputs
+
+Signed Alpine v3.24 indexes for x86_64 and aarch64 currently offer libxml2
+`2.13.9-r5`; the retired `2.13.9-r3` constraint prevents PostgreSQL and the release
+frontend from building. This cascades into Backend Testcontainers, E2E, VM ingress
+and Release rehearsal. Both Dockerfiles now select exactly `2.13.9-r5` on the same
+base digests. The upstream [APKBUILD](https://github.com/alpinelinux/aports/blob/3.24-stable/main/libxml2/APKBUILD)
+retains the r3 fix, adds the r4 backports, and records r5 fixes for CVE-2026-0989,
+CVE-2026-11979 and CVE-2026-1757. Other reviewed Alpine and nginx.org pins remain
+exact. APK signature verification, the nginx.org key check, PostgreSQL's flattened
+filesystem and foreign-volume refusal remain in place.
+
+Previous alpine-release/zlib/libexpat incidents have the same availability
+boundary: an OCI base digest is immutable, while a release repository may retire
+an exact package revision. A pin is a reviewed selection, not an availability
+promise. Preserve fail-closed builds and qualify replacement revisions on both
+architectures, through every affected image consumer and the normal release
+scan. No unbounded upgrades, unsigned package store or new snapshot service is
+introduced. A retained, independently qualified immutable package/image service
+would require its own ownership, trust and retention decisions.
+
+### Maven project dependencies
+
+Distribution bootstrap and project dependency resolution are separate. Run
+[45844066644](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45844066644)
+failed resolving the Spring Boot parent after the verified Maven distribution
+was available. The existing three Resolver retries already waited about 90
+seconds; increasing them or retrying the whole package lifecycle is not the fix.
+
+The backend Dockerfile now resolves dependencies/plugins in the source-free
+`maven-dependencies` stage before copying `src`. Its Maven repository is an
+ordinary layer, not a cache mount. E2E, both backend-building VM jobs and Release
+rehearsal restore/export this stage as a standard BuildKit local cache using
+Actions cache. An isolated docker-container builder (BuildKit v0.35.1, pinned to OCI index
+`sha256:baf6138eb8c37644800c7c913fba051e840ebb9ba13eaf92d92ef9a1712d0b4c`)
+exports the cache, so the
+runner's image-store configuration does not control export support; the existing
+Docker build consumers import it explicitly through
+`CODEMASTERY_MAVEN_LAYER_CACHE`. Local builds work without this optional tooling
+input. It contains a path, no credential, and is never a product setting.
+
+Keys include runner OS/architecture, the complete backend Dockerfile, POM and
+`.mvn` inputs. There are no broad restore prefixes. GitHub's ref/default-branch
+cache visibility prevents a PR cache from becoming main's cache. Only the
+source-free stage is exported: no test result, source build, settings.xml,
+host `.m2`, repository credential or runtime secret is imported into it. Cached
+content remains inside the trusted Actions-runner/BuildKit boundary. The final
+runtime copies only the packaged JAR and keeps its existing trust-store verifier,
+non-root identity and file permissions.
+
+A cold cache still needs Maven Central and downloads the go-offline goal's
+plugin dependencies. A source-only build can reuse the dependency layer; changed
+POM/build inputs require fresh resolution. Dependency cache restoration is an
+optimization, never qualification evidence. The actual package lifecycle still
+runs once with bounded Resolver retries; missing dynamically resolved artifacts
+can still require the network. Eviction, first builds, upstream throttling and
+new dependency graphs remain external availability limits. An operated repository
+manager would require separate infrastructure authority. Release candidate
+admission and promotion workflows are unchanged; rehearsal caching grants no
+release permission.
+
+References: [Sonatype 429 guidance](https://central.sonatype.org/faq/429-error/),
+[Docker cache optimization](https://docs.docker.com/build/cache/optimize/),
+[GitHub Actions cache boundaries](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache).
+
+### E2E storage and harness observations
+
+Every default disposable stack now creates a private MinIO server and a one-shot
+initializer using the existing local Compose image digests and initialization
+script. Neither storage container publishes a host port or reuses a named data
+volume. Per-run random administrative credentials remain distinct from the
+backend's bucket-scoped application credentials. The backend receives the actual
+private storage endpoint, bucket, region and explicit path-style mode.
+
+Initialization runs once. Its existing `mc ready` has a 120-second bound; setup
+requires the initializer's confirmed zero exit within 150 seconds, reports
+redacted state/logs on failure and never starts the backend after a failed init.
+Both containers and any anonymous volumes use the existing creation-intent,
+immutable-ID, fencing and recovery protocol. Cancellation and partial creation
+retain unresolved obligations for the same recovery engine. Successful setup
+sets `E2E_MATERIAL_FILES=1` for FE14's existing PDF journeys. External mode keeps
+its existing explicit-authorization and fixture exclusions.
+
+The disposable backend also receives explicit disabled quiz-expiry test values
+(false/1000 ms/batch 2), compatible with PR #296's CT38 validation. These are
+fixture inputs, not deployment defaults or timed-quiz scheduler qualification.
+
+The lifecycle test observer now performs one read and tolerates only ENOENT
+while a completed record is archived and the next record is published. Production
+admission already opens once under its locks; no production fencing, process
+identity or recovery assertion is relaxed. Maven bootstrap tests export the
+actual offline verifier's output together with its exact status and execution
+sentinel, rather than parsing BuildKit progress. Both exact checksum rejection
+formats (with and without `sha512sum:`) are accepted; the digest, sentinel,
+execution-order and malformed-Dockerfile controls remain mandatory.
+
+### Executed integration and residual security boundary
+
+Disposable integration with PR #279 at
+`36be38f03cbb797c83be4e43a0dba758800ddc5b` ran all 20 FE14 project/case
+combinations with real storage: 14 passed, five existing browser-specific skips
+and one failure. The direct WebKit multipart test returns HTTP 201 and verifies
+one authoritative material row; Chromium/Firefox upload recovery, file
+replacement and downloaded bytes pass. The remaining WebKit full-authoring case
+fails *after* file operations at the unchanged page-overflow assertion:
+377-pixel document width versus a 360-pixel viewport (feature test line 120,
+shared assertion `auth-fixture.ts:142`). This is a frontend integration finding
+for the FE14 authoring branch, not another storage 500. It is retained without
+skipping or weakening the assertion or importing unrelated feature UI. Normal
+teardown and coordinator finalization confirm every owned resource absent.
+
+A fresh Trivy 0.76.1 database (updated 26 November, 13:14 UTC) reports zero
+findings for the rebuilt amd64 PostgreSQL image. Both rebuilt frontend targets
+have one MEDIUM finding on the unchanged `nginx=1.30.7-r1`:
+CVE-2026-132779, scanner-listed fix `1.30.8-r0`. No CRITICAL/HIGH findings or
+new libxml2 findings are reported. This is not a zero-finding or release-admitted
+frontend. A separately qualified Nginx/module security update or the effective
+release authority's exact-artifact disposition remains necessary; this CI
+availability repair does not apply a scanner exception or accept that risk.
+
+The optional cache argument is conditional in the release and ingress shell
+consumers. It uses no empty array expansion under nounset, preserving the
+operator's Bash 3.2 path when the CI-only input is absent. A regression executes
+the actual consumer shell for absent, empty and spaced paths on native Bash.
+
+
+### CT17-P6-PRIVILEGES-2026-11-27-r17 — IN06 discussion and reports (27 November 2026)
+
+**Authority.** The Project Leader's explicit IN06 completion instruction delegates this
+consumer revision within ADR012 §19.2. OpenAI Codex implemented it in PR #303. This
+replaces only the two deferred r1 rows below and preserves r2–r16, all 27 relations,
+all reviewed columns and immutable/Flyway history. It authorizes tooling, not grants
+on a shared or deployed database. No migration is added or edited.
+
+| Relation | Privileges | Consumer and rationale |
+|---|---|---|
+| `discussion_posts` (interaction) | SELECT, INSERT; UPDATE (is_hidden) | CT30 question/reply reads and inserts; parent FOR SHARE; CT32 FOR UPDATE and targeted hiding |
+| `content_reports` (interaction) | SELECT, INSERT; UPDATE (status, resolved_at) | CT30 intake; CT32 queue, deterministic report FOR UPDATE and terminal resolution/dismissal |
+
+No DELETE, immutable-column UPDATE, table-wide UPDATE, DDL, TRUNCATE, REFERENCES,
+TRIGGER, MAINTAIN or grant option is permitted. Existing r13 notifications cover the
+reply notification in the same transaction. `deploy.sh`, matrix-contract and
+containment probes and real-backend runtime-role consumer tests ship together.
+The focused PostgreSQL suite additionally invokes real JPA adapters under a local
+restricted role to prove parent locks and targeted moderation writes. IN21's Admin
+REST/orchestration/audit remains a downstream responsibility. Provisioning on actual
+hosts, independent infrastructure/CODEOWNER review, hosted CI and protected integration
+remain separate gates. Execution results are recorded in `docs/testing.md`.

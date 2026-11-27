@@ -8,6 +8,7 @@ import jakarta.persistence.Table;
 import java.util.UUID;
 
 @Entity
+@org.hibernate.annotations.DynamicUpdate
 @Table(name = "attempt_answers")
 public class AttemptAnswerEntity{
 

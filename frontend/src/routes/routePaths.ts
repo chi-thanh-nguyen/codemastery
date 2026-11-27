@@ -64,6 +64,8 @@ export const WORKSPACE_ROUTES: RouteObject[] = [
     { id: 'profile', path: ROUTE_PATHS.PROFILE, handle: { protected: true } },
     { id: 'instructor', handle: { roles: ['Instructor'] }, children: [
         { id: 'teaching', path: ROUTE_PATHS.TEACH },
+        { id: 'grading', path: ROUTE_PATHS.TEACH_GRADING },
+        { id: 'grade-submission', path: ROUTE_PATHS.TEACH_SUBMISSION },
         { id: 'create-course', path: ROUTE_PATHS.TEACH_COURSE_NEW },
         { id: 'course-editor', path: ROUTE_PATHS.TEACH_COURSE, children: [
             { id: 'course-frame', children: [
@@ -73,6 +75,7 @@ export const WORKSPACE_ROUTES: RouteObject[] = [
                 { id: 'course-assessments', path: ROUTE_PATHS.TEACH_COURSE_ASSESSMENTS },
                 { id: 'course-settings', path: ROUTE_PATHS.TEACH_COURSE_SETTINGS },
             ] },
+            { id: 'course-lesson', path: ROUTE_PATHS.TEACH_LESSON },
             { id: 'course-quiz', path: ROUTE_PATHS.TEACH_QUIZ },
             { id: 'course-assignment', path: ROUTE_PATHS.TEACH_ASSIGNMENT },
         ] },

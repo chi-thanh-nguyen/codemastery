@@ -218,7 +218,7 @@ async function main() {
         for (const engine of engines) {
             const fixtureUrl = flag('fixture-url');
             if (args.includes('--fe32') && !fixtureUrl) throw new Error('--fe32 requires --fixture-url serving createFE32Fixture output; never activate production routes.');
-            const result = args.includes('--fe28-remediation') ? await runFE28RemediationEngine(playwright, engine, baseUrl) : args.includes('--fe28') ? await runFE28Engine(playwright, engine, baseUrl) : args.includes('--fe32') ? await runFE32Engine(playwright, engine, baseUrl, fixtureUrl) : await runEngine(playwright, engine, baseUrl);
+            const result = args.includes('--fe17') ? await runFE17Engine(playwright, engine, baseUrl) : args.includes('--fe28-remediation') ? await runFE28RemediationEngine(playwright, engine, baseUrl) : args.includes('--fe28') ? await runFE28Engine(playwright, engine, baseUrl) : args.includes('--fe32') ? await runFE32Engine(playwright, engine, baseUrl, fixtureUrl) : await runEngine(playwright, engine, baseUrl);
             report.engines.push(result); failed += result.failed.length;
         }
     } finally {
@@ -2177,3 +2177,188 @@ async function runFE28RemediationEngine(playwright, engine, baseUrl) {
 // Lifecycle helpers are exported for presentation.browser.test.ts; the harness runs only when executed directly.
 module.exports = { buildMarker, markBuild, waitForUrl, createFE32Fixture, workspaceGeometry, assertWorkspaceGeometry, runFE32Engine };
 if (require.main === module) main().catch((error) => { console.error(error); process.exitCode = 1; });
+
+
+/** FE17 production workflows with controlled HTTP. Never represents real backend/storage integration. */
+async function runFE17Engine(playwright, engine, baseUrl) {
+    const result = { engine, version: null, passed: [], failed: [], measurements: [], notExercised: ['Real backend/storage integration', 'VoiceOver/NVDA and physical devices'] };
+    const dir = path.join(out, engine); fs.mkdirSync(dir, { recursive: true });
+    let browser;
+    try { browser = await playwright[engine].launch({ headless: true }); }
+    catch (error) { result.launchError = String(error); return result; }
+    result.version = browser.version();
+    const check = async (name, run) => { if (flag('case') && !name.includes(flag('case'))) return; try { await run(); result.passed.push(name); console.log(`PASS [${engine}] ${name}`); } catch (error) { result.failed.push({ name, error: String(error) }); console.log(`FAIL [${engine}] ${name}: ${error}`); } };
+    const c = primaryId, a = '00000000-0000-4000-8003-000000000001', id = '00000000-0000-4000-8003-000000000002';
+    const query = `?courseId=${c}&assignmentId=${a}`, listPath = '/teach/grading' + query, gradePath = `/teach/grading/${id}` + query;
+    const open = async (width = 1280, preference = 'light', role = 'Instructor') => {
+        const context = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: 'dark', acceptDownloads: true });
+        await context.addInitScript(v => localStorage.setItem('codemastery.theme',v), preference);
+        const page = await context.newPage(), api = createApi(); page.setDefaultTimeout(7000); api.state.role = role; api.state.restore = true;
+        const state = { writes: [], reads: [], manyCourses: false, manyAssignments: false, long: false, ownerReads: [], conflict: false, unknown: false, empty: false, fail: null, hold: null,
+            row: { id, assignmentId: a, learnerId: instructorId, learnerDisplayName: 'Synthetic learner', originalFilename: 'submission.zip', submittedAt: '2026-11-20T09:15:02.123456Z', graded: false, gradePercentage: null, feedback: null, gradedAt: null } };
+        const assignment = () => ({ id:a, courseId:c, lessonId:null, title:state.long?'W'.repeat(201):'Programming lab', instructions:'Submit a ZIP.', deadlineAt:'2026-12-01T12:00:00Z', publicationStatus:'published', submissionCount:1, gradedCount:state.row.graded?1:0 });
+        const paged = (content,url) => { const page = +(url.searchParams.get('page') || 0), size = +(url.searchParams.get('size') || 20); return {content:content.slice(page*size,(page+1)*size),page,size,totalElements:content.length,totalPages:Math.ceil(content.length/size)}; };
+        await page.route('**/api/**', async route => {
+            const req=route.request(), url=new URL(req.url()), p=url.pathname;
+            if (p === '/api/instructor/courses') return route.fulfill(ok(paged([...(state.manyCourses ? Array.from({length:20},(_,i)=>({id:`00000000-0000-4000-8004-${String(i).padStart(12,'0')}`,title:`Other course ${i}`,description:'Programming',publicationStatus:'published'})) : []),{id:c,title:'Synthetic course',description:'Programming',publicationStatus:'published'}],url)));
+            if (p === `/api/instructor/courses/${c}`) { state.ownerReads.push(p); return route.fulfill(ok({id:c,title:'Synthetic course',description:'Programming',publicationStatus:'published',prerequisiteDescription:null,chapters:[]})); }
+            if (p.endsWith('/skill-graph')) return route.fulfill(ok({courseId:c,skills:[],prerequisites:[],mappings:[]}));
+            if (p === `/api/courses/${c}/owned-assignments`) return route.fulfill(ok(paged([...(state.manyAssignments?Array.from({length:20},(_,i)=>({...assignment(),id:`00000000-0000-4000-8005-${String(i).padStart(12,'0')}`,title:`Other assignment ${i}`})):[]),assignment()],url)));
+            if (p === `/api/courses/${c}/owned-assignments/${a}`) { state.ownerReads.push(p); return route.fulfill(ok(assignment())); }
+            if (p.includes('/submissions')) {
+                assert(req.headers().authorization?.startsWith('Bearer '), 'authenticated transport');
+                if (p.endsWith('/grade')) {
+                    state.writes.push(req.postDataJSON());
+                    if (state.hold) await state.hold;
+                    if (state.conflict) { state.row.submittedAt='2026-11-20T09:15:02.123457Z'; state.row.originalFilename='replacement.zip'; return route.fulfill({status:409,contentType:'application/problem+json',body:JSON.stringify({type:'about:blank',title:'Conflict',status:409,detail:'Changed',instance:p})}); }
+                    if (state.unknown) return route.abort();
+                    Object.assign(state.row,req.postDataJSON(),{graded:true,gradedAt:'2026-11-20T10:00:00Z'}); return route.fulfill(ok(state.row));
+                }
+                if (p.endsWith('/file')) return route.fulfill({status:200,headers:{'Content-Type':'application/zip','Content-Disposition':"attachment; filename=\"submission.zip\"; filename*=UTF-8''submission.zip"},body:Buffer.from([80,75,3,4])});
+                state.reads.push(url.search);
+                if (state.fail) return route.fulfill(problem(state.fail,'Failed',p));
+                return route.fulfill(ok(paged(state.empty?[]:[state.row],url)));
+            }
+            return api.handle(route);
+        });
+        return {context,page,state};
+    };
+    const goto = (page,path) => page.goto(new URL(path,baseUrl).href);
+    const fill = async page => { await page.getByLabel('Grade (0–100)').fill('82.25'); await page.getByRole('textbox',{name:/^Feedback/}).fill('  Good work.\nReview loops. '); };
+    const save = async page => { await page.getByRole('button',{name:'Save grade',exact:true}).click(); await page.getByRole('dialog',{name:'Save grade?'}).getByRole('button',{name:'Save grade',exact:true}).click(); };
+    const geometry = async page => {
+        await page.evaluate(() => document.fonts.ready);
+        const bad=await page.locator('main button, main input, main textarea, main h1').evaluateAll(nodes => nodes.filter(n => n.getClientRects().length).map(n=>({text:n.textContent?.slice(0,40),x:n.getBoundingClientRect().x,right:n.getBoundingClientRect().right})).filter(r=>r.x < -1 || r.right > innerWidth+1));
+        assert.deepEqual(bad,[],'no clipped controls/headings');
+        assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth+1),'no horizontal page scroll');
+    };
+    try {
+        await check('production course/assignment selection, API order, counts, protected ZIP and grading/regrading', async () => {
+            const x=await open(); const {page,state}=x;
+            try {
+                await goto(page,'/teach/grading'); await page.getByRole('combobox',{name:'Course'}).click(); await page.getByRole('option',{name:'Synthetic course',exact:true}).click(); await page.getByRole('button',{name:'View submissions: Programming lab'}).click();
+                await page.getByRole('button',{name:"Grade Synthetic learner's submission"}).click();
+                await page.getByLabel('Grade (0–100)').waitFor(); assert.equal(state.reads.length,1,'same-document row avoids scan');
+                const download=page.waitForEvent('download'); await page.getByRole('button',{name:'Download',exact:true}).click(); assert.equal((await download).suggestedFilename(),'submission.zip');
+                await fill(page); await save(page); await page.getByRole('status').filter({hasText:'Grade saved.'}).waitFor();
+                assert.equal(state.writes[0].submittedAt,'2026-11-20T09:15:02.123456Z'); assert.equal(state.writes[0].feedback,'  Good work.\nReview loops. ');
+                await page.getByRole('button',{name:'Update grade',exact:true}).waitFor();
+                await page.getByLabel('Grade (0–100)').fill('100'); await page.getByRole('button',{name:'Update grade',exact:true}).click(); await page.getByRole('dialog').getByRole('button',{name:'Update grade'}).click();
+                await page.getByText('Current grade: 100 / 100',{exact:false}).waitFor(); assert.equal(state.writes.length,2);
+                await page.getByRole('link',{name:'Back to submissions'}).click(); await page.getByText('100 / 100',{exact:true}).waitFor();
+            } finally {await x.context.close();}
+        });
+        for(const width of [360,768,1024,1280,1440]) for(const preference of ['light','dark','system']) await check(`S21 list/form/dialog ${width}px ${preference}`,async()=>{
+            const x=await open(width,preference); const {page}=x;
+            try {
+                await goto(page,listPath); await page.getByRole('button',{name:"Grade Synthetic learner's submission"}).waitFor(); await geometry(page);
+                if(width>=900) assert.equal(await page.locator('header nav a[aria-current="page"][href="/teach/grading"]').count(),1);
+                await page.screenshot({path:path.join(dir,`list-${width}-${preference}.png`),fullPage:true});
+                await page.getByRole('button',{name:"Grade Synthetic learner's submission"}).click(); await page.getByLabel('Grade (0–100)').waitFor(); await geometry(page);
+                await page.getByLabel('Grade (0–100)').focus(); await page.keyboard.press('Tab'); assert.equal(await page.getByRole('textbox',{name:/^Feedback/}).evaluate(n=>n===document.activeElement),true);
+                await fill(page); await page.getByRole('button',{name:'Save grade',exact:true}).click(); await page.getByRole('dialog').waitFor(); await page.keyboard.press('Escape'); await page.getByRole('dialog').waitFor({state:'hidden'});
+                if(preference==='system') {await page.emulateMedia({colorScheme:'light'}); await page.waitForFunction(()=>document.documentElement.dataset.colorScheme==='light');}
+                await page.evaluate(()=>window.scrollTo(0,0)); await page.waitForFunction(()=>window.scrollY===0);
+                await page.screenshot({path:path.join(dir,`form-${width}-${preference}.png`),fullPage:true});
+                result.measurements.push({width,preference,scheme:await page.evaluate(()=>document.documentElement.dataset.colorScheme)});
+            } finally {await x.context.close();}
+        });
+
+        const actionGeometry = async (page, label, viewport, preference, stateName) => {
+            await page.locator('.MuiDialog-root').waitFor({state:'detached'});
+            await page.evaluate(async () => { await document.fonts.ready; window.scrollTo(0,0); await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))); });
+            const button=page.locator('button[type=submit][form]');
+            assert.equal(await button.count(),1,'one coherent submit action');
+            const bounds=await button.evaluate(b=>{
+                const r=b.getBoundingClientRect(),clips=[];
+                for(let n=b.parentElement;n;n=n.parentElement){const style=getComputedStyle(n),a=n.getBoundingClientRect();if(/hidden|clip|auto|scroll/.test(style.overflowY)&& (r.top<a.top-1||r.bottom>a.bottom+1))clips.push(n.tagName);}
+                return {x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom,scrollY:window.scrollY,clips,associated:!!b.form};
+            });
+            assert.equal(bounds.scrollY,0); assert(bounds.y>=0&&bounds.bottom<=viewport.height&&bounds.x>=0&&bounds.right<=viewport.width,JSON.stringify(bounds));
+            assert.deepEqual(bounds.clips,[]); assert(bounds.associated,'native form association');
+            if(await button.isEnabled()) {const clear=await button.evaluate(b=>{const r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));});assert(clear,'action not obscured');}
+            result.measurements.push({kind:'primary-action',viewport,preference,state:stateName,...bounds});
+            if(label) await page.screenshot({path:path.join(dir,`action-${viewport.width}-${preference}-${label}.png`)});
+        };
+        for(const viewport of [{width:1280,height:720},{width:390,height:844}]) for(const preference of ['light','dark','system']) await check(`IR03 initial viewport ${viewport.width}x${viewport.height} ${preference}: initial/draft/busy/recovery/regrade/long`,async()=>{
+            const x=await open(viewport.width,preference);const {page,state}=x;let release;
+            try {
+                await page.setViewportSize(viewport);await goto(page,gradePath);await page.getByLabel('Grade (0–100)').waitFor();
+                await actionGeometry(page,'initial',viewport,preference,'initial');
+                // The external button remains an accessible keyboard-operated native submitter.
+                await page.getByRole('button',{name:'Save grade',exact:true}).focus();await page.keyboard.press('Enter');
+                await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-invalid')==='true');
+                await fill(page);await actionGeometry(page,null,viewport,preference,'populated-draft');
+                state.hold=new Promise(r=>{release=r;});await save(page);await page.getByRole('button',{name:'Saving grade…',exact:true}).waitFor();
+                await actionGeometry(page,null,viewport,preference,'busy');state.unknown=true;release();state.hold=null;
+                await page.getByRole('button',{name:'I have reviewed the current result'}).waitFor();await actionGeometry(page,'recovery',viewport,preference,'unknown-recovery');
+                state.unknown=false;await page.getByRole('button',{name:'I have reviewed the current result'}).click();await save(page);
+                await page.getByRole('button',{name:'Update grade',exact:true}).waitFor();await actionGeometry(page,null,viewport,preference,'regrading');
+                state.long=true;state.row.learnerDisplayName='Learner '.repeat(12);state.row.originalFilename='f'.repeat(250)+'.zip';
+                state.row.feedback='Long feedback with plain text.\n'.repeat(30);
+                await page.reload();await page.getByRole('heading',{level:1,name:'W'.repeat(201)}).waitFor();
+                await actionGeometry(page,'long',viewport,preference,'long-content');await geometry(page);
+                if(preference==='system'){await page.emulateMedia({colorScheme:'light'});await page.waitForFunction(()=>document.documentElement.dataset.colorScheme==='light');await actionGeometry(page,null,viewport,preference,'system-os-change');}
+            } finally {release?.();await x.context.close();}
+        });
+        await check('IR02 later-page selected labels survive pagination, S19 handoff, refresh, new tab and Back/Forward',async()=>{
+            const x=await open();const {page,state}=x;
+            try {
+                state.manyCourses=true;state.manyAssignments=true;
+                await goto(page,`/teach/courses/${c}/assignments/${a}`);await page.getByRole('link',{name:'Open grading',exact:true}).click();
+                const selected=async p=>{await p.getByRole('heading',{level:2,name:'Programming lab',exact:true}).waitFor();assert.equal(await p.getByRole('combobox',{name:'Course'}).innerText(),'Synthetic course');};
+                await selected(page);assert.equal(state.ownerReads.filter(p=>p===`/api/instructor/courses/${c}`).length,2,'editor + selected Course reads');
+                const count=state.ownerReads.length;
+                await page.getByRole('button',{name:'Go to page 2',exact:true}).nth(0).click();await selected(page);
+                await page.getByRole('button',{name:'Go to page 2',exact:true}).last().click();await selected(page);
+                await page.getByRole('button',{name:'Go to page 1',exact:true}).nth(0).click();await selected(page);
+                await page.getByRole('button',{name:'Go to page 1',exact:true}).last().click();await selected(page);
+                assert.equal(state.ownerReads.length,count,'paging never repeats selected-summary reads');
+                await page.reload();await selected(page);
+                await goto(page,'/teach/grading');await page.goBack();await selected(page);await page.goForward();await page.goBack();await selected(page);
+                // A fresh document/context resolves labels independently through the same production route.
+                const y=await open();try{y.state.manyCourses=true;y.state.manyAssignments=true;await goto(y.page,listPath);await selected(y.page);}finally{await y.context.close();}
+                assert(state.reads.every(q=>q.includes('size=20')));await page.screenshot({path:path.join(dir,'selection-later-page.png')});
+            }finally{await x.context.close();}
+        });
+        for(const sameName of [true,false]) await check(`IR01 unknown plus ${sameName?'same':'different'} filename replacement cannot grade before review`,async()=>{
+            const x=await open();const {page,state}=x;
+            try{
+                await goto(page,gradePath);await fill(page);state.unknown=true;await save(page);await page.getByRole('button',{name:'I have reviewed the current result'}).waitFor();
+                // A further read observes the replacement while unknown outcome remains unresolved.
+                state.row.submittedAt='2026-11-20T09:15:02.123457Z';if(!sameName)state.row.originalFilename='new.zip';state.fail=500;
+                // Trigger the recovery read while the mutation is still unknown, then retry the failed read.
+                await page.getByRole('button',{name:'I have reviewed the current result'}).click();await save(page);
+                await page.getByText("Submission couldn't be loaded.",{exact:true}).waitFor();state.fail=null;await page.getByRole('button',{name:'Try again',exact:true}).click();
+                const review=page.getByRole('button',{name:'I have reviewed the new file'});await review.waitFor();assert.equal(await review.isDisabled(),true);
+                assert.equal(await page.getByRole('button',{name:'Save grade',exact:true}).isDisabled(),true);assert.equal(state.writes.length,2);
+                await page.locator('form').evaluate(f=>f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));assert.equal(state.writes.length,2);
+                const download=page.waitForEvent('download');await page.getByRole('button',{name:'Download',exact:true}).click();await download;
+                assert.equal(await page.getByRole('button',{name:'Save grade',exact:true}).isDisabled(),true);await review.click();state.unknown=false;await save(page);
+                await page.getByRole('status').filter({hasText:'Grade saved.'}).waitFor();assert.equal(state.writes[2].submittedAt,state.row.submittedAt);
+            }finally{await x.context.close();}
+        });
+        await check('409 refresh retains draft and requires new file review; no mutation replay',async()=>{
+            const x=await open();const {page,state}=x;
+            try {await goto(page,gradePath);await fill(page);state.conflict=true;await save(page);
+                await page.getByText('The learner replaced the file after you opened it. Review the new file before grading.',{exact:true}).waitFor();assert.equal(await page.getByLabel('Grade (0–100)').inputValue(),'82.25');
+                assert.equal(await page.getByRole('button',{name:'I have reviewed the new file'}).isDisabled(),true);
+                const download=page.waitForEvent('download');await page.getByRole('button',{name:'Download',exact:true}).click();await download;await page.getByRole('button',{name:'I have reviewed the new file'}).click();assert.equal(state.writes.length,1);
+                state.conflict=false;await save(page);await page.getByRole('status').filter({hasText:'Grade saved.'}).waitFor();assert.equal(state.writes[1].submittedAt,'2026-11-20T09:15:02.123457Z');
+            }finally{await x.context.close();}
+        });
+        await check('unknown mutation outcome remains unconfirmed and is never replayed',async()=>{
+            const x=await open();try{await goto(x.page,gradePath);await fill(x.page);x.state.unknown=true;await save(x.page);await x.page.getByText(/We couldn't confirm whether your grade was saved/).waitFor();assert.equal(x.state.writes.length,1);assert.equal(await x.page.locator('button[type=submit][form]').isDisabled(),true);await x.page.getByRole('button',{name:'I have reviewed the current result'}).click();assert.equal(x.state.writes.length,1);}finally{await x.context.close();}
+        });
+        await check('reload rejects retained document state; direct scan size 100; unknown lookup and explicit retry',async()=>{
+            const x=await open();try{await goto(x.page,listPath);await x.page.getByRole('button',{name:"Grade Synthetic learner's submission"}).click();await x.page.getByLabel('Grade (0–100)').waitFor();await x.page.reload();await x.page.getByLabel('Grade (0–100)').waitFor();assert(x.state.reads.some(q=>q.includes('size=100')));x.state.empty=true;await goto(x.page,gradePath);await x.page.getByText(/We couldn't find this submission in the current list/).waitFor();assert.equal(await x.page.getByRole('button',{name:'Save grade',exact:true}).count(),0);x.state.empty=false;await x.page.getByRole('button',{name:'Try again',exact:true}).click();await x.page.getByLabel('Grade (0–100)').waitFor();}finally{await x.context.close();}
+        });
+        await check('owned-course pagination keeps a course chosen beyond the first page selected',async()=>{const x=await open();try{x.state.manyCourses=true;await goto(x.page,'/teach/grading');await x.page.getByRole('button',{name:'Go to page 2',exact:true}).click();await x.page.getByRole('combobox',{name:'Course'}).click();await x.page.getByRole('option',{name:'Synthetic course',exact:true}).click();await x.page.getByRole('button',{name:'View submissions: Programming lab'}).waitFor();assert.equal(await x.page.getByRole('combobox',{name:'Course'}).innerText(),'Synthetic course');}finally{await x.context.close();}});
+        await check('S19 Grade and Open grading handoffs preserve Course/Assignment identities',async()=>{
+            const x=await open();try{await goto(x.page,`/teach/courses/${c}/assessments?view=assignments`);const grade=x.page.getByRole('link',{name:'Grade: Programming lab',exact:true});await grade.waitFor();assert.equal(await grade.getAttribute('href'),listPath);await x.page.getByRole('link',{name:'Open assignment: Programming lab',exact:true}).click();await x.page.getByRole('link',{name:'Open grading',exact:true}).waitFor();assert.equal(await x.page.getByRole('link',{name:'Open grading',exact:true}).getAttribute('href'),listPath);}finally{await x.context.close();}
+        });
+        for (const role of ['Learner','Administrator']) await check(`role isolation ${role}`,async()=>{const x=await open(1280,'light',role);try{await goto(x.page,gradePath);await x.page.getByRole('heading',{name:"You don't have access to this page"}).waitFor();assert.equal(x.state.reads.length,0);}finally{await x.context.close();}});
+        await check('invalid link offers Back to grading without a submission request',async()=>{const x=await open();try{await goto(x.page,`/teach/grading/${id}`);await x.page.getByRole('heading',{name:"We can't open this submission from this link."}).waitFor();assert.equal(x.state.reads.length,0);}finally{await x.context.close();}});
+    } finally {await browser.close();}
+    return result;
+}

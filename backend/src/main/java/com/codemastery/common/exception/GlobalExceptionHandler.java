@@ -49,7 +49,8 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(BusinessRuleException.class)
     public ResponseEntity<Object> handleBusinessRule(BusinessRuleException exception, WebRequest request) {
-        return response(exception.getStatus(), HttpHeaders.EMPTY, request, List.of(), exception.getPublicDetail());
+        return response(exception.getStatus(), HttpHeaders.EMPTY, request, exception.getValidationField() == null ? List.of()
+                : List.of(validationError(exception.getValidationField(), null)), exception.getPublicDetail());
     }
 
     @ExceptionHandler(Exception.class)

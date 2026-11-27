@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.math.BigDecimal;
 
 @Entity
+@org.hibernate.annotations.DynamicUpdate
 @Table(name = "attempts")
 public class AttemptEntity{
 
@@ -27,12 +28,15 @@ public class AttemptEntity{
     private Integer attempt_number;
 
     @Column(name = "started_at", nullable = false)
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.TIMESTAMP_WITH_TIMEZONE)
     private Instant started_at;
 
     @Column(name = "expires_at", nullable = false)
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.TIMESTAMP_WITH_TIMEZONE)
     private Instant expires_at;
 
     @Column(name = "submitted_at")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.TIMESTAMP_WITH_TIMEZONE)
     private Instant submitted_at;
 
     @Column(name = "score_percentage", precision = 5, scale = 2)

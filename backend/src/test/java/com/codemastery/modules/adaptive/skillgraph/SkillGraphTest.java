@@ -13,6 +13,7 @@ import com.codemastery.modules.course.application.service.CourseManagementServic
 import com.codemastery.modules.course.application.service.CourseStructureService;
 import com.codemastery.modules.course.application.service.CourseStructureService.LessonReference;
 import com.codemastery.modules.course.application.service.CourseStructureService.StructureSnapshot;
+import com.codemastery.support.fixtures.SkillGraphFixtures;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -31,7 +32,10 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -58,6 +62,188 @@ class SkillGraphTest {
 
     private static SkillPrerequisite edge(UUID skillId, UUID prerequisiteSkillId) {
         return new SkillPrerequisite(UUID.randomUUID(), COURSE, skillId, prerequisiteSkillId);
+    }
+
+    /** FT02 structural consumers only; these local sentinels are not CT15 datasets or CT36 oracles. */
+    @Nested
+    class StructuralFixtures {
+
+        private static final UUID EDGE = UUID.fromString("eeeeeeee-0000-0000-0000-000000000005");
+        private static final UUID MAPPING = UUID.fromString("ffffffff-0000-0000-0000-000000000006");
+
+        @ParameterizedTest
+        @ValueSource(booleans = {false, true})
+        void preservesSkillValuesAndNullableDescription(boolean withDescription) {
+            String description = withDescription ? "Caller description" : null;
+            Skill value = SkillGraphFixtures.skill(SKILL_A, COURSE, " Caller name ", description);
+
+            assertAll(
+                    () -> assertEquals(SKILL_A, value.id()),
+                    () -> assertEquals(COURSE, value.courseId()),
+                    () -> assertEquals(" Caller name ", value.name()),
+                    () -> assertEquals(description, value.description()));
+            assertEquals(value, SkillGraphFixtures.skillBuilder().id(SKILL_A).courseId(COURSE)
+                    .name(" Caller name ").description(description).build());
+            if (!withDescription) {
+                assertEquals(value, SkillGraphFixtures.skill(SKILL_A, COURSE, " Caller name "));
+            }
+        }
+
+        @Test
+        void preservesCourseQualifiedPrerequisiteDirectionThroughFactoryAndBuilder() {
+            SkillPrerequisite value = SkillGraphFixtures.skillPrerequisite(EDGE, COURSE, SKILL_B, SKILL_A);
+
+            assertAll(
+                    () -> assertEquals(EDGE, value.id()),
+                    () -> assertEquals(COURSE, value.courseId()),
+                    () -> assertEquals(SKILL_B, value.skillId()),
+                    () -> assertEquals(SKILL_A, value.prerequisiteSkillId()));
+            assertEquals(value, SkillGraphFixtures.skillPrerequisiteBuilder().id(EDGE).courseId(COURSE)
+                    .skillId(SKILL_B).prerequisiteSkillId(SKILL_A).build());
+        }
+
+        @Test
+        void preservesLessonMappingIdentityAndReferencesThroughFactoryAndBuilder() {
+            LessonSkill value = SkillGraphFixtures.lessonSkill(MAPPING, LESSON, SKILL_B);
+
+            assertAll(
+                    () -> assertEquals(MAPPING, value.id()),
+                    () -> assertEquals(LESSON, value.lessonId()),
+                    () -> assertEquals(SKILL_B, value.skillId()));
+            assertEquals(value, SkillGraphFixtures.lessonSkillBuilder().id(MAPPING)
+                    .lessonId(LESSON).skillId(SKILL_B).build());
+        }
+
+        @Test
+        void referenceBuildersReplaceEveryFieldWithoutChangingEarlierRecords() {
+            var skills = SkillGraphFixtures.skillBuilder().id(SKILL_A).courseId(COURSE)
+                    .name("First").description("First description");
+            var prerequisites = SkillGraphFixtures.skillPrerequisiteBuilder().id(EDGE).courseId(COURSE)
+                    .skillId(SKILL_B).prerequisiteSkillId(SKILL_A);
+            var mappings = SkillGraphFixtures.lessonSkillBuilder().id(MAPPING).lessonId(LESSON).skillId(SKILL_B);
+            Skill firstSkill = skills.build();
+            SkillPrerequisite firstEdge = prerequisites.build();
+            LessonSkill firstMapping = mappings.build();
+
+            assertAll(
+                    () -> assertEquals(new Skill(SKILL_C, OTHER_COURSE, "Second", null),
+                            skills.id(SKILL_C).courseId(OTHER_COURSE).name("Second").description(null).build()),
+                    () -> assertEquals(new SkillPrerequisite(MAPPING, OTHER_COURSE, SKILL_C, SKILL_B),
+                            prerequisites.id(MAPPING).courseId(OTHER_COURSE)
+                                    .skillId(SKILL_C).prerequisiteSkillId(SKILL_B).build()),
+                    () -> assertEquals(new LessonSkill(EDGE, SKILL_C, SKILL_A),
+                            mappings.id(EDGE).lessonId(SKILL_C).skillId(SKILL_A).build()),
+                    () -> assertEquals(new Skill(SKILL_A, COURSE, "First", "First description"), firstSkill),
+                    () -> assertEquals(new SkillPrerequisite(EDGE, COURSE, SKILL_B, SKILL_A), firstEdge),
+                    () -> assertEquals(new LessonSkill(MAPPING, LESSON, SKILL_B), firstMapping));
+        }
+
+        @Test
+        void referenceOnlyConstructionAddsNoDefaultsOrGraphValidation() {
+            // Unchecked records support incomplete inputs; this does not assert database validity.
+            assertAll(
+                    () -> assertEquals(new Skill(null, null, null, null),
+                            SkillGraphFixtures.skill(null, null, null, null)),
+                    () -> assertEquals(new Skill(null, null, null, null), SkillGraphFixtures.skillBuilder().build()),
+                    () -> assertEquals(new SkillPrerequisite(null, null, null, null),
+                            SkillGraphFixtures.skillPrerequisite(null, null, null, null)),
+                    () -> assertEquals(new SkillPrerequisite(null, null, null, null),
+                            SkillGraphFixtures.skillPrerequisiteBuilder().build()),
+                    () -> assertEquals(new LessonSkill(null, null, null),
+                            SkillGraphFixtures.lessonSkill(null, null, null)),
+                    () -> assertEquals(new LessonSkill(null, null, null), SkillGraphFixtures.lessonSkillBuilder().build()));
+        }
+
+        @ParameterizedTest
+        @ValueSource(booleans = {false, true})
+        void graphHelpersForwardReferencesIntoAnImmutableContainer(boolean useBuilder) {
+            Skill first = SkillGraphFixtures.skill(SKILL_A, COURSE, "A", null);
+            Skill second = SkillGraphFixtures.skill(SKILL_B, COURSE, "B", "Description");
+            SkillPrerequisite prerequisite = SkillGraphFixtures.skillPrerequisite(EDGE, COURSE, SKILL_B, SKILL_A);
+            LessonSkill mapping = SkillGraphFixtures.lessonSkill(MAPPING, LESSON, SKILL_B);
+            List<Skill> skills = new ArrayList<>(List.of(second, first));
+            List<SkillPrerequisite> prerequisites = new ArrayList<>(List.of(prerequisite));
+            List<LessonSkill> mappings = new ArrayList<>(List.of(mapping));
+
+            SkillGraph graph = useBuilder
+                    ? SkillGraphFixtures.skillGraphBuilder().courseId(COURSE).skills(skills)
+                            .prerequisites(prerequisites).mappings(mappings).build()
+                    : SkillGraphFixtures.skillGraph(COURSE, skills, prerequisites, mappings);
+            skills.clear();
+            prerequisites.clear();
+            mappings.clear();
+
+            assertAll(
+                    () -> assertEquals(COURSE, graph.courseId()),
+                    () -> assertEquals(2, graph.skills().size()),
+                    () -> assertSame(first, graph.skills().stream().filter(s -> s.id().equals(SKILL_A)).findFirst().orElseThrow()),
+                    () -> assertSame(second, graph.skills().stream().filter(s -> s.id().equals(SKILL_B)).findFirst().orElseThrow()),
+                    () -> assertEquals(List.of(prerequisite), graph.prerequisites()),
+                    () -> assertSame(prerequisite, graph.prerequisites().getFirst()),
+                    () -> assertEquals(List.of(mapping), graph.mappings()),
+                    () -> assertSame(mapping, graph.mappings().getFirst()),
+                    () -> assertThrows(UnsupportedOperationException.class, () -> graph.skills().add(first)),
+                    () -> assertThrows(UnsupportedOperationException.class, () -> graph.prerequisites().add(prerequisite)),
+                    () -> assertThrows(UnsupportedOperationException.class, () -> graph.mappings().add(mapping)));
+            assertNull(graph.skills().stream().filter(s -> s.id().equals(SKILL_A)).findFirst().orElseThrow().description());
+        }
+
+        @Test
+        void emptyFactoryAndDefaultBuilderCreateValidEmptyDrafts() {
+            for (SkillGraph graph : List.of(SkillGraphFixtures.emptySkillGraph(COURSE),
+                    SkillGraphFixtures.skillGraphBuilder().courseId(COURSE).build(),
+                    SkillGraphFixtures.skillGraph(COURSE, List.of(), List.of(), List.of()))) {
+                assertAll(
+                        () -> assertEquals(COURSE, graph.courseId()),
+                        () -> assertEquals(List.of(), graph.skills()),
+                        () -> assertEquals(List.of(), graph.prerequisites()),
+                        () -> assertEquals(List.of(), graph.mappings()));
+            }
+        }
+
+        @Test
+        void graphBuilderReplacesCourseAndCollectionsWithoutChangingEarlierGraph() {
+            Skill original = SkillGraphFixtures.skill(SKILL_A, COURSE, "Original");
+            Skill prerequisite = SkillGraphFixtures.skill(SKILL_B, COURSE, "Prerequisite");
+            Skill replacement = SkillGraphFixtures.skill(SKILL_C, OTHER_COURSE, "Replacement");
+            SkillPrerequisite edge = SkillGraphFixtures.skillPrerequisite(EDGE, COURSE, SKILL_A, SKILL_B);
+            var builder = SkillGraphFixtures.skillGraphBuilder().courseId(COURSE).skills(List.of(original, prerequisite))
+                    .prerequisites(List.of(edge))
+                    .mappings(List.of(SkillGraphFixtures.lessonSkill(MAPPING, LESSON, SKILL_A)));
+            SkillGraph first = builder.build();
+            SkillGraph second = builder.courseId(OTHER_COURSE).skills(List.of(replacement))
+                    .prerequisites(List.of()).mappings(List.of()).build();
+
+            assertAll(
+                    () -> assertEquals(COURSE, first.courseId()),
+                    () -> assertEquals(List.of(original, prerequisite), first.skills()),
+                    () -> assertEquals(List.of(edge), first.prerequisites()),
+                    () -> assertEquals(List.of(new LessonSkill(MAPPING, LESSON, SKILL_A)), first.mappings()),
+                    () -> assertEquals(OTHER_COURSE, second.courseId()),
+                    () -> assertEquals(List.of(replacement), second.skills()),
+                    () -> assertEquals(List.of(), second.prerequisites()),
+                    () -> assertEquals(List.of(), second.mappings()));
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"courseId", "skills", "prerequisites", "mappings"})
+        void explicitNullGraphInputsReachProductionValidation(String input) {
+            UUID courseId = input.equals("courseId") ? null : COURSE;
+            List<Skill> skills = input.equals("skills") ? null : List.of();
+            List<SkillPrerequisite> prerequisites = input.equals("prerequisites") ? null : List.of();
+            List<LessonSkill> mappings = input.equals("mappings") ? null : List.of();
+
+            // Null forwarding only: the Representation group owns the graph-invariant oracles.
+            assertAll(
+                    () -> assertThrows(NullPointerException.class,
+                            () -> SkillGraphFixtures.skillGraph(courseId, skills, prerequisites, mappings)),
+                    () -> assertThrows(NullPointerException.class,
+                            () -> SkillGraphFixtures.skillGraphBuilder().courseId(courseId).skills(skills)
+                                    .prerequisites(prerequisites).mappings(mappings).build()));
+            if (input.equals("courseId")) {
+                assertThrows(NullPointerException.class, () -> SkillGraphFixtures.emptySkillGraph(null));
+            }
+        }
     }
 
     @Nested

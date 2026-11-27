@@ -11,24 +11,9 @@ trap 'rm -rf "$work"' EXIT
 mkdir -m 700 "$work/env" "$work/certs"
 origin=https://deploy-ci.example.invalid
 secret() { openssl rand -hex 16; }
-# Synthetic CI-only inputs. This is not an approved release override.
-cat > "$work/env/.env" <<EOF
-POSTGRES_DB=codemastery
-POSTGRES_USER=cm_bootstrap
-POSTGRES_PASSWORD=$(secret)
-DB_NAME=codemastery
-DB_USER=cm_runtime
-DB_PASSWORD=$(secret)
-SPRING_FLYWAY_URL=jdbc:postgresql://postgres:5432/codemastery
-SPRING_FLYWAY_USER=cm_migrator
-SPRING_FLYWAY_PASSWORD=$(secret)
-MINIO_ROOT_USER=ci-root
-MINIO_ROOT_PASSWORD=$(secret)
-STORAGE_ACCESS_KEY=ci-app
-STORAGE_SECRET_KEY=$(secret)
-JWT_SECRET=$(openssl rand -hex 32)
-CORS_ALLOWED_ORIGINS=$origin
-EOF
+# Exercise smoke's actual generator in isolation, without invoking its deployment path.
+bash -c 'source "$1"; write_smoke_env "$2" "$3"' _ \
+  infrastructure/release/release.sh "$origin" "$work/env/.env"
 chmod 600 "$work/env/.env"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=deploy-ci.example.invalid \
   -keyout "$work/certs/privkey.pem" -out "$work/certs/fullchain.pem" 2>/dev/null
@@ -104,6 +89,29 @@ if ! output="$(preflight 2>&1)" || [[ "$output" != *"PREFLIGHT OK"* ]]; then
   exit 1
 fi
 printf '%s\n' "$output" | grep 'HOST_PLATFORM'
+# Prove the actual generated inputs pass, then each omission/invalid value fails.
+# Start every negative case from a newly generated file, never a populated fixture.
+for key in APP_QUIZ_AUTO_SUBMIT_ENABLED APP_QUIZ_AUTO_SUBMIT_DELAY_MS APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE; do
+  for mutation in missing invalid; do
+    bash -c 'source "$1"; write_smoke_env "$2" "$3"' _ \
+      infrastructure/release/release.sh "$origin" "$work/env/.env"
+    python3 - "$work/env/.env" "$key" "$mutation" <<'PYENV'
+import pathlib, sys
+path, key, mutation = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+lines = [line for line in path.read_text().splitlines() if not line.startswith(key + "=")]
+if mutation == "invalid":
+    lines.append(key + "=" + ("invalid" if key.endswith("ENABLED") else "0"))
+path.write_text("\n".join(lines) + "\n")
+PYENV
+    if output="$(preflight 2>&1)"; then
+      echo "Preflight accepted $mutation smoke input $key." >&2; exit 1
+    fi
+    [[ "$output" == *"$key"* ]] || { echo "Wrong smoke input rejection: $key" >&2; exit 1; }
+    printf '  refused generated smoke input: %s (%s)\n' "$key" "$mutation"
+  done
+done
+bash -c 'source "$1"; write_smoke_env "$2" "$3"' _ \
+  infrastructure/release/release.sh "$origin" "$work/env/.env"
 reject() {
   local expected="$1" name="$2" output
   cat > "$work/$name.yml"
@@ -324,3 +332,5 @@ if ! output="$(preflight 2>&1)" || [[ "$output" != *"PREFLIGHT OK"* ]]; then
   echo "Valid serving certificate/key material was rejected after negative cases." >&2
   exit 1
 fi
+
+echo "PASS: generated smoke environment and rendered Compose preflight regressions"

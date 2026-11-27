@@ -24,6 +24,17 @@ import { addCoursePrerequisite, createCourseSkill, getOwnedSkillGraph, mapCourse
 import type { OwnedSkillGraph } from '../../skill-graph-editor/api/skillGraphApi';
 import { instantMicros, sameAssignment, sameInstant } from './AssignmentEditorPage';
 
+import type { SharedCourseContextState } from '../hooks/useCourseEditor';
+let sharedProbe: SharedCourseContextState;
+vi.mock('../hooks/useCourseEditor', async original => {
+    const actual = await original<typeof import('../hooks/useCourseEditor')>();
+    return { ...actual, useSharedCourseState: (courseId: string) => {
+        const state = actual.useSharedCourseState(courseId); sharedProbe = state; return state;
+    } };
+});
+// Simulates an independent consumer/read while a write is pending, without bypassing the new write barrier.
+const refreshSharedCourse = () => act(async () => { sharedProbe.course.reload(); });
+
 vi.mock('../api/assessmentAuthoringApi', async (original) => ({
     ...await original<object>(), listQuestions: vi.fn(), createQuestion: vi.fn(), readQuestion: vi.fn(), replaceUnusedQuestion: vi.fn(), deleteUnusedQuestion: vi.fn(),
     listOwnedQuizzes: vi.fn(), createQuiz: vi.fn(), readOwnedQuiz: vi.fn(), replaceUnusedHiddenQuiz: vi.fn(), deleteUnusedHiddenQuiz: vi.fn(), setQuizPublication: vi.fn(),
@@ -914,7 +925,7 @@ describe('D1-R1: acknowledged Settings wait for an eligible shared read', () => 
             await type('Prerequisites (optional)', acknowledged.prerequisiteDescription!);
             await click('Save changes');
             // Same frontend order, different possible commits: B before A; A then B; or A then restored X.
-            await click('Publish course'); await click('Publish course', confirmDialog('Publish course?'));
+            await refreshSharedCourse();
             expect(document.querySelector('main h1')?.textContent).toBe(observed.title);
             await act(async () => write.resolve(acknowledged));
             expect(field('Course title')).toBe(input);
@@ -954,7 +965,7 @@ describe('D1-R1: acknowledged Settings wait for an eligible shared read', () => 
             expect(getOwnedCourse).toHaveBeenCalledTimes(4);
         });
 
-    it('ignores a pre-acknowledgment publication read resolving after the Settings reload', async () => {
+    it('ignores a pre-acknowledgment shared read resolving after the Settings reload', async () => {
         vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
         const write = pendingCourse(), publicationRead = pendingCourse(), refresh = pendingCourse();
         vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture())
@@ -963,7 +974,7 @@ describe('D1-R1: acknowledged Settings wait for an eligible shared read', () => 
         vi.mocked(setOwnedCoursePublication).mockResolvedValueOnce(ownedCourseFixture({ publicationStatus: 'published' }));
         await mountApp(`/teach/courses/${courseId}/settings`);
         await type('Course title', 'A'); await click('Save changes');
-        await click('Publish course'); await click('Publish course', confirmDialog('Publish course?'));
+        await refreshSharedCourse();
         await act(async () => write.resolve(ownedCourseFixture({ title: 'A' })));
         expect(vi.mocked(getOwnedCourse).mock.calls[1][1]?.signal?.aborted).toBe(true);
         await act(async () => publicationRead.resolve(ownedCourseFixture({ title: 'Stale B' })));
@@ -975,7 +986,7 @@ describe('D1-R1: acknowledged Settings wait for an eligible shared read', () => 
         expect(getOwnedCourse).toHaveBeenCalledTimes(3);
     });
 
-    it('allows a post-acknowledgment publication read to supersede the Settings read', async () => {
+    it('allows a post-acknowledgment shared read to supersede the Settings read', async () => {
         vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
         const oldRead = pendingCourse(), publicationRead = pendingCourse();
         vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture())
@@ -984,7 +995,7 @@ describe('D1-R1: acknowledged Settings wait for an eligible shared read', () => 
         vi.mocked(setOwnedCoursePublication).mockResolvedValueOnce(ownedCourseFixture({ title: 'B', publicationStatus: 'published' }));
         await mountApp(`/teach/courses/${courseId}/settings`);
         await type('Course title', 'A'); await click('Save changes');
-        await click('Publish course'); await click('Publish course', confirmDialog('Publish course?'));
+        await refreshSharedCourse();
         await act(async () => oldRead.resolve(ownedCourseFixture({ title: 'Abandoned A' })));
         expect(field('Course title').value).toBe('A');
         expect(saveStatuses()).toContain(refreshingSettings);
@@ -994,7 +1005,7 @@ describe('D1-R1: acknowledged Settings wait for an eligible shared read', () => 
         expect(getOwnedCourse).toHaveBeenCalledTimes(3);
     });
 
-    it('does not let a first-save read reconcile a second acknowledgement or overwrite its draft', async () => {
+    it('waits for first-save recovery before a second acknowledgment and preserves its draft', async () => {
         vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
         const firstRead = pendingCourse(), secondWrite = pendingCourse(), secondRead = pendingCourse(), retry = pendingCourse();
         vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture())
@@ -1003,7 +1014,9 @@ describe('D1-R1: acknowledged Settings wait for an eligible shared read', () => 
         await mountApp(`/teach/courses/${courseId}/settings`);
         await type('Course title', 'A'); await click('Save changes');
         await type('Course title', 'C'); await click('Save changes');
+        expect(updateOwnedCourse).toHaveBeenCalledTimes(1);
         await act(async () => firstRead.resolve(ownedCourseFixture({ title: 'Older B' })));
+        await click('Save changes');
         expect(field('Course title').value).toBe('C');
         await act(async () => secondWrite.resolve(ownedCourseFixture({ title: 'C' })));
         expect(field('Course title').value).toBe('C');
@@ -1017,7 +1030,7 @@ describe('D1-R1: acknowledged Settings wait for an eligible shared read', () => 
         expect(updateOwnedCourse).toHaveBeenCalledTimes(2);
     });
 
-    it('rejects a delayed first-save read after the second save and keeps the second result', async () => {
+    it('requires first-save recovery before the second save and keeps its later result', async () => {
         vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
         const firstRead = pendingCourse(), secondRead = pendingCourse();
         vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture())
@@ -1027,7 +1040,9 @@ describe('D1-R1: acknowledged Settings wait for an eligible shared read', () => 
         await mountApp(`/teach/courses/${courseId}/settings`);
         await type('Course title', 'A'); await click('Save changes');
         await type('Course title', 'C'); await click('Save changes');
+        expect(updateOwnedCourse).toHaveBeenCalledTimes(1);
         await act(async () => firstRead.resolve(ownedCourseFixture({ title: 'A' })));
+        await click('Save changes');
         expect(field('Course title').value).toBe('C');
         expect(saveStatuses()).toContain(refreshingSettings);
         await act(async () => secondRead.resolve(ownedCourseFixture({ title: 'C' })));
@@ -1135,8 +1150,7 @@ describe('U5: Course Settings keeps "Saved" and drafts across re-reads', () => {
         await click('Save changes');
         expect(input.disabled).toBe(true);
         // A committed first; its reply is delayed. A later writer commits B, which this shared read sees.
-        await click('Publish course');
-        await click('Publish course', confirmDialog('Publish course?'));
+        await refreshSharedCourse();
         await settle();
         expect(document.querySelector('main h1')?.textContent).toBe('Newer external commit');
         await act(async () => resolveSave(saved));
@@ -1193,7 +1207,7 @@ describe('U5: Course Settings keeps "Saved" and drafts across re-reads', () => {
             .mockReturnValueOnce(new Promise<OwnedCourse>((resolve) => { resolveRead = resolve; }));
         await mountApp(`/teach/courses/${courseId}/settings`);
         await type('Course title', 'Acknowledged title'); await click('Save changes');
-        await click('Publish course'); await click('Publish course', confirmDialog('Publish course?'));
+        await refreshSharedCourse();
         await act(async () => resolveSave(ownedCourseFixture({ title: 'Acknowledged title' })));
         expect(field('Course title').value).toBe('Acknowledged title');
         expect(saveStatuses()).toContain(refreshingSettings);
@@ -1279,8 +1293,7 @@ describe('U5: Course Settings keeps "Saved" and drafts across re-reads', () => {
             .mockResolvedValue(ownedCourseFixture({ publicationStatus: 'published', description: 'Changed by another tab.' }));
         vi.mocked(setOwnedCoursePublication).mockResolvedValue(ownedCourseFixture({ publicationStatus: 'published' }));
         await mountApp(`/teach/courses/${courseId}/settings`);
-        await click('Publish course');
-        await click('Publish course', confirmDialog('Publish course?'));
+        await refreshSharedCourse();
         await settle();
         expect(field('Description').value).toBe('Changed by another tab.');
         expect(text()).not.toContain('Unsaved changes');
@@ -1301,7 +1314,9 @@ describe('D1-R2: Settings acknowledgment survives tab replacement', () => {
         const firstRead = pendingCourse(), secondRead = pendingCourse();
         const saved = acknowledged();
         vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture())
-            .mockReturnValueOnce(firstRead.promise).mockReturnValueOnce(secondRead.promise);
+            .mockReturnValueOnce(firstRead.promise);
+        if (outcome !== 'pending') vi.mocked(getOwnedCourse).mockResolvedValueOnce(saved);
+        vi.mocked(getOwnedCourse).mockReturnValueOnce(secondRead.promise);
         vi.mocked(updateOwnedCourse).mockResolvedValueOnce(saved)
             .mockResolvedValueOnce({ ...saved, description: 'Description C' });
         await mountApp(`/teach/courses/${courseId}/settings`);
@@ -1319,12 +1334,14 @@ describe('D1-R2: Settings acknowledgment survives tab replacement', () => {
         expect(getOwnedSkillGraph).toHaveBeenCalledTimes(1);
         expect(updateOwnedCourse).toHaveBeenCalledTimes(1);
         await type('Description', 'Description C'); await click('Save changes');
+        expect(updateOwnedCourse).toHaveBeenCalledTimes(1);
+        if (outcome === 'pending') await act(async () => firstRead.resolve(saved));
+        else await click('Try again');
+        await click('Save changes');
         expect(vi.mocked(updateOwnedCourse).mock.calls[1][1]).toEqual({
             title: saved.title, description: 'Description C', prerequisiteDescription: saved.prerequisiteDescription,
         });
-        expect(getOwnedCourse).toHaveBeenCalledTimes(3);
-        // A superseded first-save read must not reconcile the second acknowledgement.
-        if (outcome === 'pending') await act(async () => firstRead.resolve(ownedCourseFixture({ title: 'Obsolete read' })));
+        expect(getOwnedCourse).toHaveBeenCalledTimes(outcome === 'pending' ? 3 : 4);
         expectMetadata({ ...saved, description: 'Description C' });
         expect(saveStatuses()).toContain(refreshingSettings);
         await act(async () => secondRead.resolve({ ...saved, title: 'Eligible after C', description: 'Description C' }));
@@ -1411,13 +1428,15 @@ describe('D1-R2: Settings acknowledgment survives tab replacement', () => {
             .mockRejectedValueOnce(outcome === 'refused' ? http(400, 'Invalid metadata') : new ApiError('network', 'Unknown write'));
         await mountApp(`/teach/courses/${courseId}/settings`);
         await type('Course title', 'Acknowledged A'); await click('Save changes');
+        await act(async () => firstRead.resolve(acknowledged()));
         await type('Course title', 'Unconfirmed C'); await click('Save changes');
         expect(field('Course title').value).toBe('Unconfirmed C'); expect(saveStatuses()).toContain('Unsaved changes');
         if (outcome === 'unknown') expect(text()).toContain("We couldn't confirm whether your changes were saved.");
         await click('Content'); await click('Leave', confirmDialog('Leave without saving?')); await click('Settings');
-        expectMetadata(acknowledged()); expect(saveStatuses()).toContain(refreshingSettings);
-        const eligible = outcome === 'unknown' ? unknownRead : firstRead;
-        if (outcome === 'unknown') await act(async () => firstRead.resolve(ownedCourseFixture({ title: 'Superseded' })));
+        expectMetadata(acknowledged());
+        if (outcome === 'unknown') expect(sharedProbe.course.revalidating).toBe(true);
+        const eligible = unknownRead;
+        if (outcome === 'refused') await refreshSharedCourse();
         expectMetadata(acknowledged());
         await act(async () => eligible.resolve(ownedCourseFixture({ title: 'Observed actual state' })));
         expectMetadata(ownedCourseFixture({ title: 'Observed actual state' }));
