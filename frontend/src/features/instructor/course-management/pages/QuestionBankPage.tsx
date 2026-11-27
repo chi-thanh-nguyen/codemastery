@@ -82,6 +82,10 @@ export function formatDeadlineDisplay(isoString: string): { absolute: string; re
 export interface CourseLessonSource {
     status: 'loading' | 'ready' | 'error';
     data: OwnedCourse | null;
+    /** Current identity-safe owner-read result; absent in legacy presentation-only overrides. */
+    error?: unknown;
+    /** Includes a refresh while the last successful tree remains visible. */
+    loading?: boolean;
     reload: () => void;
 }
 

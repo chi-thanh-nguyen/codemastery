@@ -1754,3 +1754,196 @@ describe('D1-R2: Settings acknowledgment survives tab replacement', () => {
         expect(saveStatuses()).not.toContain(refreshingSettings); expect(saveStatuses()).not.toContain(unrefreshedSettings);
     });
 });
+
+
+// Targeted independent-review remediation: payload and production shared-context boundaries.
+describe('FE16-IR deadline intent', () => {
+    const clocks = [
+        ['UTC', '2026-12-01T12:00:00.123456Z'],
+        ['UTC', '2026-12-01T12:00:00.123999Z'],
+        ['America/New_York', '2026-11-01T05:30:00.123456Z'],
+        ['America/New_York', '2026-11-01T06:30:00.123456Z'],
+    ];
+    it.each(clocks.flatMap(([timezone, original]) => ['original', 'changed', 'sent'].map(intent => ({ timezone, original, intent }))))(
+        'keeps $intent unsent intent through confirmation ($timezone, $original)', async ({ timezone, original: deadlineAt, intent }) => {
+            const previous = process.env.TZ;
+            try {
+                process.env.TZ = timezone;
+                const original = assignment({ deadlineAt });
+                const sentInput = '2027-01-02T12:30';
+                const sentIso = localInputToRfc3339(sentInput)!;
+                const confirmed = assignment({ title: 'Earlier write', deadlineAt: sentIso });
+                vi.mocked(readOwnedAssignment).mockResolvedValueOnce(original).mockRejectedValueOnce(http(503)).mockResolvedValueOnce(confirmed);
+                vi.mocked(replaceAssignment).mockRejectedValueOnce(http(503)).mockImplementationOnce(async (_c, _a, write) => assignment(write));
+                await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+                await type('Assignment title', 'Earlier write'); await type('Deadline', sentInput); await click('Save changes');
+                expect(vi.mocked(replaceAssignment).mock.calls[0][2].deadlineAt).toBe(sentIso);
+                const newerInput = intent === 'original' ? toLocalDateTimeInput(deadlineAt) : intent === 'changed' ? '2028-06-01T08:09' : sentInput;
+                if (intent !== 'sent') await type('Deadline', newerInput);
+                await type('Instructions', 'Newer unsent instructions');
+                await click('Try again');
+                expect(field('Deadline').value).toBe(newerInput);
+                expect(text()).toContain('Earlier changes were saved. Your current edits are not saved.');
+                expect((find('Save changes') as HTMLButtonElement).disabled).toBe(false);
+                await click('Save changes');
+                const payload = vi.mocked(replaceAssignment).mock.calls[1][2];
+                expect(payload.instructions).toBe('Newer unsent instructions');
+                expect(payload.deadlineAt).toBe(intent === 'original' ? deadlineAt : localInputToRfc3339(newerInput));
+                expect(replaceAssignment).toHaveBeenCalledTimes(2);
+                expect(readOwnedAssignment).toHaveBeenCalledTimes(3);
+            } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
+        });
+
+    it.each(['different-microsecond', 'unknown'])('keeps intent when recovery is %s', async result => {
+        const original = assignment();
+        vi.mocked(readOwnedAssignment).mockResolvedValueOnce(original).mockRejectedValueOnce(http(503));
+        if (result === 'unknown') vi.mocked(readOwnedAssignment).mockRejectedValueOnce(new ApiError('network', 'Unavailable'));
+        else vi.mocked(readOwnedAssignment).mockResolvedValueOnce(assignment({ title: 'Earlier write', deadlineAt: '2026-12-01T12:00:00.123999Z' }));
+        vi.mocked(replaceAssignment).mockRejectedValueOnce(http(503)).mockImplementationOnce(async (_c, _a, write) => assignment(write));
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Assignment title', 'Earlier write'); await click('Save changes');
+        await type('Instructions', 'Newer unsent instructions'); await click('Try again');
+        expect(text()).toContain("We couldn't confirm whether your changes were saved.");
+        expect(text()).not.toContain('Earlier changes were saved.');
+        await click('Save changes');
+        expect(vi.mocked(replaceAssignment).mock.calls[1][2].deadlineAt).toBe(original.deadlineAt);
+        expect(replaceAssignment).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('FE16-IR Course refusal in production composition', () => {
+    async function createWithLesson() {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        await mountApp(`/teach/courses/${courseId}/assignments/new`);
+        await type('Assignment title', 'Private creation'); await type('Instructions', '# Private draft');
+        await type('Deadline', '2027-01-02T12:30'); await choose('Related lesson', 'While Loops');
+        await click('Create assignment');
+    }
+    it.each([403, 404])('retains a protected read-only draft after the Course GET returns %s', async status => {
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockRejectedValueOnce(http(status));
+        vi.mocked(createAssignment).mockRejectedValue(http(404));
+        await createWithLesson(); await settle(3);
+        expect(getOwnedCourse).toHaveBeenCalledTimes(2);
+        expect(field('Instructions').value).toBe('# Private draft'); expect(field('Instructions').disabled).toBe(true);
+        expect(text()).toContain(status === 403 ? "You don't have access to this course." : "This course isn't available.");
+        expect(buttons().some(node => node.textContent === 'Create assignment')).toBe(false);
+        expect(text()).not.toContain('The selected lesson is no longer available');
+        const unload = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(unload); expect(unload.defaultPrevented).toBe(true);
+        await click('Back to catalogue'); await click('Stay', confirmDialog('Leave without saving?'));
+        expect(field('Instructions').value).toBe('# Private draft');
+        await click('Back to catalogue'); await click('Leave', confirmDialog('Leave without saving?'));
+        expect(location).toBe('/courses'); expect(createAssignment).toHaveBeenCalledTimes(1);
+    });
+    it.each(['missing', 'present', 'network', 'protocol', '503'])('classifies a %s Course reread without inventing refusal', async outcome => {
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture());
+        if (outcome === 'missing') vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture({ chapters: [] }));
+        else if (outcome === 'present') vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture());
+        else vi.mocked(getOwnedCourse).mockRejectedValueOnce(outcome === '503' ? http(503) : new ApiError(outcome as 'network' | 'protocol', 'Unavailable'));
+        vi.mocked(createAssignment).mockRejectedValue(http(404));
+        await createWithLesson(); await settle(3);
+        expect(getOwnedCourse).toHaveBeenCalledTimes(2); expect(createAssignment).toHaveBeenCalledTimes(1);
+        expect(field('Instructions').disabled).toBe(false); expect(field('Instructions').value).toBe('# Private draft');
+        expect(text()).not.toContain("This course isn't available."); expect(text()).not.toContain("You don't have access");
+        if (outcome === 'missing') {
+            expect(text()).toContain('The selected lesson is no longer available');
+            await choose('Related lesson', 'No related lesson');
+        } else if (outcome !== 'present') expect(text()).toContain('We could not refresh the course.');
+        else expect(text()).not.toContain('The selected lesson is no longer available');
+        await click('Create assignment');
+        expect(createAssignment).toHaveBeenCalledTimes(2); // transient failure is not a permanent lock
+        expect(vi.mocked(createAssignment).mock.calls[1][1].lessonId).toBe(outcome === 'missing' ? null : lessonHiddenId);
+    });
+    it('guards the mutation handler during the shared Course refresh and never replays on settlement', async () => {
+        let settleRead!: (body: OwnedCourse) => void;
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockReturnValueOnce(new Promise(resolve => { settleRead = resolve; }));
+        vi.mocked(createAssignment).mockRejectedValue(http(404));
+        await createWithLesson();
+        expect(sharedProbe.course.loading).toBe(true);
+        const button = find('Create assignment') as HTMLButtonElement;
+        expect(button.disabled).toBe(true);
+        await click('Create assignment'); await click('Create assignment');
+        expect(createAssignment).toHaveBeenCalledTimes(1);
+        await act(async () => settleRead(ownedCourseFixture()));
+        expect((find('Create assignment') as HTMLButtonElement).disabled).toBe(false);
+        expect(createAssignment).toHaveBeenCalledTimes(1); expect(getOwnedCourse).toHaveBeenCalledTimes(2);
+    });
+    it.each(['course', 'session', 'sign-out'])('suppresses an obsolete refusal after %s replacement', async boundary => {
+        let rejectRead!: (error: unknown) => void;
+        vi.mocked(getOwnedCourse).mockResolvedValueOnce(ownedCourseFixture()).mockReturnValueOnce(new Promise((_resolve, reject) => { rejectRead = reject; }))
+            .mockResolvedValue(ownedCourseFixture());
+        vi.mocked(createAssignment).mockRejectedValue(http(404));
+        await createWithLesson();
+        const options = vi.mocked(getOwnedCourse).mock.calls[1][1]!;
+        if (boundary === 'course') { await act(async () => root.unmount()); root = createRoot(host); }
+        if (boundary !== 'course') auth = { ...auth, generation: 2, isAuthenticated: boundary !== 'sign-out', user: boundary === 'sign-out' ? null : auth.user, isCurrent: generation => generation === 2 };
+        const nextCourse = boundary === 'course' ? loops.id : courseId;
+        vi.mocked(getOwnedCourse).mockResolvedValue(ownedCourseFixture({ id: nextCourse }));
+        await mountApp(`/teach/courses/${nextCourse}/assignments/new`);
+        await act(async () => rejectRead(http(403)));
+        expect(options.isCurrent?.()).toBe(false); expect(options.signal?.aborted).toBe(true);
+        expect(text()).not.toContain('# Private draft'); expect(text()).not.toContain("You don't have access");
+        if (boundary !== 'sign-out') { expect(field('Assignment title').value).toBe(''); expect(field('Instructions').disabled).toBe(false); }
+        expect(createAssignment).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('FE16-IR native boundary representation', () => {
+    const boundaries = [
+        ['UTC', '0000-01-01T00:00:00Z', true],
+        ['UTC', '0000-06-01T12:00:00.123456Z', true],
+        ['America/New_York', '0000-01-01T00:00:00.123456Z', true],
+        ['America/New_York', '0001-01-01T00:00:00.123456Z', true],
+        ['Pacific/Kiritimati', '9999-12-31T23:59:59.999999Z', true],
+        ['UTC', '0001-01-01T00:00:00.123456Z', false],
+        ['UTC', '0050-06-01T12:00:01.123456Z', false],
+        ['America/New_York', '9999-12-31T23:59:59.999999Z', false],
+    ] as const;
+    it.each(boundaries)('keeps %s / %s exact through unrelated Save and Hide (fallback %s)', async (timezone, deadlineAt, fallback) => {
+        const previous = process.env.TZ;
+        try {
+            process.env.TZ = timezone;
+            vi.mocked(readOwnedAssignment).mockResolvedValue(assignment({ deadlineAt, publicationStatus: 'published' }));
+            vi.mocked(replaceAssignment).mockImplementation(async (_c, _a, write) => assignment({ ...write, publicationStatus: 'published' }));
+            vi.mocked(setAssignmentPublication).mockResolvedValue(assignment({ deadlineAt: '2028-01-01T00:00:00Z' }));
+            await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+            if (fallback) { expect(text()).toContain(deadlineAt); expect(host.querySelector('[aria-label="Existing deadline (UTC)"] time')?.getAttribute('datetime')).toBe(deadlineAt); expect(host.querySelector('input[type="datetime-local"]')).toBeNull(); }
+            else expect(field('Deadline').value.replace(/\.000$/, '')).toBe(toLocalDateTimeInput(deadlineAt));
+            await type('Assignment title', 'Boundary title'); await type('Instructions', '# Boundary instructions');
+            await click('Hide assignment'); await click('Hide assignment', confirmDialog('Hide assignment?'));
+            await click('Save changes');
+            expect(vi.mocked(replaceAssignment).mock.calls[0][2]).toMatchObject({ deadlineAt, title: 'Boundary title', instructions: '# Boundary instructions' });
+        } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
+    });
+    it('requires a valid deliberate replacement, reveals errors, then uses the native instant', async () => {
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment({ deadlineAt: '0000-01-01T00:00:00.123456Z' }));
+        vi.mocked(replaceAssignment).mockImplementation(async (_c, _a, write) => assignment(write));
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await click('Replace deadline'); expect(field('Deadline').value).toBe('');
+        await click('Save changes'); expect(replaceAssignment).not.toHaveBeenCalled();
+        expect(field('Deadline').getAttribute('aria-invalid')).toBe('true'); expect(document.activeElement).toBe(field('Deadline'));
+        expect(text()).toContain('Choose a valid deadline date and time.');
+        await type('Deadline', '2026-02-30T12:00'); await click('Save changes'); expect(replaceAssignment).not.toHaveBeenCalled();
+        await type('Deadline', '2028-06-01T08:09'); await click('Save changes');
+        expect(vi.mocked(replaceAssignment).mock.calls[0][2].deadlineAt).toBe(localInputToRfc3339('2028-06-01T08:09'));
+        expect(host.querySelector('[aria-label="Existing deadline (UTC)"]')).toBeNull();
+    });
+});
+
+it.each(['published', 'hidden'] as const)('FE16-IR keeps a boundary deadline during dirty %s recovery and a subsequent explicit Save', async target => {
+    const deadlineAt = '0000-01-01T00:00:00.123456Z';
+    const initial = target === 'hidden' ? 'published' : 'hidden';
+    vi.mocked(readOwnedAssignment).mockResolvedValueOnce(assignment({ deadlineAt, publicationStatus: initial }))
+        .mockRejectedValueOnce(http(503)).mockResolvedValueOnce(assignment({ deadlineAt: '2028-01-01T00:00:00Z', publicationStatus: target }));
+    vi.mocked(setAssignmentPublication).mockRejectedValue(http(503));
+    vi.mocked(replaceAssignment).mockImplementation(async (_c, _a, write) => assignment(write));
+    await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+    const action = target === 'hidden' ? 'Hide assignment' : 'Publish assignment';
+    await click(action); await click(action, confirmDialog(action + '?'));
+    await type('Assignment title', 'Newer boundary draft'); await click('Try again');
+    expect(host.querySelector('[aria-label="Existing deadline (UTC)"] time')?.textContent).toBe(deadlineAt);
+    await click('Save changes'); expect(vi.mocked(replaceAssignment).mock.calls[0][2].deadlineAt).toBe(deadlineAt);
+    expect(setAssignmentPublication).toHaveBeenCalledTimes(1); expect(readOwnedAssignment).toHaveBeenCalledTimes(3);
+    await click('Replace deadline'); expect(document.activeElement).toBe(field('Deadline'));
+    await type('Deadline', '2028-06-01T08:09'); await click('Save changes');
+    expect(vi.mocked(replaceAssignment).mock.calls[1][2].deadlineAt).toBe(localInputToRfc3339('2028-06-01T08:09'));
+});

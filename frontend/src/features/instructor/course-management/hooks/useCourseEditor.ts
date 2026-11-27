@@ -73,6 +73,8 @@ export interface SharedCourseContextState {
         status: 'loading' | 'ready' | 'error';
         data: OwnedCourse | null;
         error: unknown;
+        /** Pending owner read, including refresh of a retained tree; optional for legacy overrides. */
+        loading?: boolean;
         /** Sequence of the GET that supplied data; retained bodies keep their old sequence. */
         successfulRead: number;
         /** Schedules the shared read and returns its minimum eligible initiation sequence. */
@@ -252,11 +254,12 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
         status: courseStatus,
         data: courseData,
         error: courseRead.error,
+        loading: courseRead.loading,
         successfulRead,
         reload: reloadCourse,
         revalidate: revalidateCourse,
         revalidating,
-    }), [courseStatus, courseData, courseRead.error, successfulRead, reloadCourse, revalidateCourse, revalidating]);
+    }), [courseStatus, courseData, courseRead.error, courseRead.loading, successfulRead, reloadCourse, revalidateCourse, revalidating]);
 
     const skills = useMemo<SkillSource>(() => ({
         status: skillGraph.error ? 'error' : skillGraph.graph ? 'ready' : 'loading',

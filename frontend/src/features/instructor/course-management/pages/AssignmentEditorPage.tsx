@@ -42,7 +42,9 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
 /** Formats an RFC 3339 instant into a local `datetime-local` input string (`YYYY-MM-DDTHH:mm` or `:ss`). */
 export function toLocalDateTimeInput(isoString: string): string {
     const date = new Date(isoString);
-    if (Number.isNaN(date.getTime())) return '';
+    // Native local dates have no year zero. Keep extended local years in the exact-instant fallback
+    // as well: the local parser below deliberately supports four-digit positive years only.
+    if (Number.isNaN(date.getTime()) || date.getFullYear() < 1 || date.getFullYear() > 9999) return '';
     const base = `${String(date.getFullYear()).padStart(4, '0')}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
     const seconds = date.getSeconds();
     return seconds ? `${base}:${pad2(seconds)}` : base;
@@ -126,6 +128,13 @@ export function sameInstant(left: string, right: string): boolean {
     return a !== null && b !== null && a.seconds === b.seconds && a.micros === b.micros;
 }
 
+/** UTC display without a millisecond round-trip of the stored fraction. Only decoded deadlines reach it. */
+export function exactDeadlineUtc(value: string): string {
+    const instant = instantMicros(value)!;
+    const seconds = new Date(instant.seconds * 1000).toISOString().replace('.000Z', '');
+    return `${seconds}${instant.micros ? `.${String(instant.micros).padStart(6, '0')}` : ''}Z`;
+}
+
 export function sameAssignment(draft: AssignmentFormDraft, baseline: { input: string; iso: string } | null, current: B5OwnedAssignment): boolean {
     const write = assignmentWrite(draft, baseline);
     const sameLesson = (write.lessonId ?? '').toLowerCase() === (current.lessonId ?? '').toLowerCase();
@@ -145,7 +154,7 @@ const ASSIGNMENT_FIELD_MAP = {
 
 type AssignmentAlert =
     | { type: 'error'; message: string }
-    | { type: 'not-found' | 'course-not-found' | 'unknown-create' | 'no-access' }
+    | { type: 'not-found' | 'course-not-found' | 'unknown-create' | 'no-access' | 'lesson-refused' }
     | { type: 'unknown'; current: B5OwnedAssignment | null; retry: () => void };
 
 const messageOf = (error: unknown) => error instanceof ApiError ? error.message : 'Something went wrong on our side. Try again in a moment.';
@@ -168,14 +177,19 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     const timeZone = useMemo(localTimeZone, []);
 
     const [assignment, setAssignment] = useState<B5OwnedAssignment | null>(null);
-    const [baselineDeadline, setBaselineDeadline] = useState<{ input: string; iso: string } | null>(null);
+    // The persisted state lives in `assignment`; this binding belongs only to the retained draft.
+    // A reconciliation may advance assignment without reinterpreting the draft's exact instant.
+    const [deadlineIntent, setDeadlineIntent] = useState<{ input: string; iso: string } | null>(null);
     const [entry, setEntry] = useState<'loading' | 'ready' | 'failed'>(creating ? 'ready' : 'loading');
     const [refusal, setRefusal] = useState<number | undefined>(undefined);
     const [revision, setRevision] = useState(0);
     const [draft, setDraft] = useState<AssignmentFormDraft>(emptyAssignmentDraft);
     const [dirty, setDirty] = useState(false);
     const [gone, setGone] = useState(false);
-    const [noAccess, setNoAccess] = useState(false);
+    const [writeRefused, setNoAccess] = useState(false);
+    const courseRefusal = failureStatus(course?.error);
+    const noAccess = writeRefused || courseRefusal === 403 || courseRefusal === 404;
+    const courseReadPending = course?.loading ?? course?.status === 'loading';
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [alert, setAlert] = useState<AssignmentAlert | null>(null);
     const [notice, setNotice] = useState<string | null>(() => (location.state as { notice?: unknown } | null)?.notice === CREATED ? CREATED : null);
@@ -184,6 +198,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     const [preview, setPreview] = useState(false);
     const instructionsRegion = useId();
     const form = useRef<HTMLDivElement>(null);
+    const focusDeadlineReplacement = useRef(false);
     const [validationRevision, setValidationRevision] = useState(0);
 
     useEffect(() => {
@@ -201,8 +216,8 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
 
     const dirtyRef = useRef(dirty);
     dirtyRef.current = dirty;
-    const draftRef = useRef(draft), deadlineRef = useRef(baselineDeadline);
-    draftRef.current = draft; deadlineRef.current = baselineDeadline;
+    const draftRef = useRef(draft), deadlineRef = useRef(deadlineIntent);
+    draftRef.current = draft; deadlineRef.current = deadlineIntent;
     const rereadLessons = useRef(new Set<string>());
     const { read } = editor;
 
@@ -215,7 +230,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     const applyLoaded = useCallback((loaded: B5OwnedAssignment, overwriteDraft: boolean) => {
         setAssignment(loaded);
         if (overwriteDraft) {
-            setBaselineDeadline({ input: toLocalDateTimeInput(loaded.deadlineAt), iso: loaded.deadlineAt });
+            setDeadlineIntent({ input: toLocalDateTimeInput(loaded.deadlineAt), iso: loaded.deadlineAt });
             setDraft(draftFromAssignment(loaded));
             setDirty(false);
         }
@@ -282,6 +297,13 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     });
 
     const change = (patch: Partial<AssignmentFormDraft>) => {
+        if (patch.deadlineInput !== undefined) {
+            // Capture a deliberate selection now, against current persisted state, never against an
+            // obsolete draft binding. Later GETs cannot change this selection's precision or DST offset.
+            const persisted = assignment && { input: toLocalDateTimeInput(assignment.deadlineAt), iso: assignment.deadlineAt };
+            const iso = patch.deadlineInput ? resolveDeadlineIso(patch.deadlineInput, persisted) : null;
+            setDeadlineIntent(iso ? { input: patch.deadlineInput, iso } : null);
+        }
         setDraft((current) => ({ ...current, ...patch }));
         setDirty(true);
         setErrors({});
@@ -310,13 +332,13 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     }, [assignment, read, applyLoaded]);
 
     async function create() {
-        if (noAccess || gone) return;
-        const next = validateAssignment(draft, baselineDeadline);
+        if (noAccess || gone || editor.busy || courseReadPending) return;
+        const next = validateAssignment(draft, deadlineIntent);
         showErrors(next);
         if (Object.keys(next).length) return;
         setAlert(null); setNotice(null);
         try {
-            const created = await editor.create(assignmentWrite(draft, baselineDeadline));
+            const created = await editor.create(assignmentWrite(draft, deadlineIntent));
             setDirty(false); dirtyRef.current = false;
             navigate(assignmentPath(courseId, created.id), { replace: true, state: { notice: CREATED } });
         } catch (error) {
@@ -328,8 +350,11 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
                 if (Object.keys(mapped).length) { showErrors(mapped); return; }
             }
             if (status === 404 && draft.lessonId) {
+                // The POST's concealed 404 cannot identify the cause. Reuse the shared, identity-safe
+                // owner read; only its result can establish Course refusal or an unavailable Lesson.
+                rereadLessons.current.add(draft.lessonId.toLowerCase());
                 course?.reload();
-                showErrors({ lessonId: 'The selected lesson is no longer available in this course.' });
+                setAlert({ type: 'lesson-refused' });
                 return;
             }
             if (status === 404) { setNoAccess(true); setAlert({ type: 'course-not-found' }); return; }
@@ -338,12 +363,12 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     }
 
     async function save() {
-        if (!assignment || noAccess || gone) return;
-        const next = validateAssignment(draft, baselineDeadline);
+        if (!assignment || noAccess || gone || editor.busy || courseReadPending) return;
+        const next = validateAssignment(draft, deadlineIntent);
         showErrors(next);
         if (Object.keys(next).length) return;
         const sent = draft;
-        const sentBaseline = baselineDeadline;
+        const sentBaseline = deadlineIntent;
         setAlert(null); setNotice(null);
         try {
             const saved = await editor.replace(assignment.id, assignmentWrite(sent, sentBaseline));
@@ -386,10 +411,9 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
                     // It must not mark those newer, unsent edits as saved or disable their Save action.
                     const unchanged = JSON.stringify(draftRef.current) === JSON.stringify(sent)
                         && JSON.stringify(deadlineRef.current) === JSON.stringify(sentBaseline);
-                    // Confirmation advances the persisted baseline just like a successful PUT.
-                    // Otherwise returning to an older displayed date could restore its stale microseconds.
+                    // recheck already advanced persisted `assignment`. Preserve newer deadline intent;
+                    // a subsequent deliberate edit will bind to that newly confirmed persisted state.
                     if (unchanged) applyLoaded(current, true);
-                    else setBaselineDeadline({ input: toLocalDateTimeInput(current.deadlineAt), iso: current.deadlineAt });
                     setNotice(unchanged ? 'Saved' : 'Earlier changes were saved. Your current edits are not saved.');
                 });
                 return;
@@ -400,7 +424,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
 
     async function publication(targetStatus: AssignmentPublicationStatus) {
         setConfirm(null);
-        if (!assignment || noAccess || gone) return;
+        if (!assignment || noAccess || gone || editor.busy || courseReadPending) return;
         setAlert(null); setNotice(null);
         try {
             const updated = await editor.setPublication(assignment.id, targetStatus);
@@ -444,6 +468,9 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     const courseFailed = course?.status === 'error' && !course.data;
     const courseLoading = course?.status === 'loading' && !course.data;
     const lessonMissing = !!draft.lessonId && !courseLoading && !courseFailed && !knownLessons.has(draft.lessonId.toLowerCase());
+    const lessonError = errors.lessonId ?? (alert?.type === 'lesson-refused' && !courseReadPending && !course?.error && course?.data && lessonMissing
+        ? 'The selected lesson is no longer available in this course.' : undefined);
+    const boundaryDeadline = deadlineIntent?.input === '' && draft.deadlineInput === '' ? deadlineIntent.iso : null;
 
     const lessonMenuItems: ReactNode[] = [<MenuItem key="__none" value="">No related lesson</MenuItem>];
     if (lessonMissing && draft.lessonId) {
@@ -462,8 +489,16 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     }
 
     const alertView = (() => {
-        if (!alert) return null;
-        switch (alert.type) {
+        const visibleAlert = courseRefusal === 403 ? { type: 'no-access' } as const
+            : courseRefusal === 404 ? { type: 'course-not-found' } as const : alert;
+        if (!visibleAlert) return null;
+        switch (visibleAlert.type) {
+            case 'lesson-refused':
+                return <Alert severity="warning">{courseReadPending
+                    ? 'The creation was refused. Checking the course and related lesson…'
+                    : course?.error
+                        ? 'The creation was refused. We could not refresh the course. Your edits are still here; check the course before another attempt.'
+                        : 'The creation was refused. Check the related lesson before trying again. Your edits are still here.'}</Alert>;
             case 'course-not-found':
                 return <Alert severity="warning" action={<Button size="small" variant="text" onClick={() => go('/courses')}>Back to catalogue</Button>}>
                     This course isn&apos;t available. Your edits are still here.
@@ -481,14 +516,14 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
                     We couldn&apos;t confirm whether the assignment was created. Check the assignment list before creating it again.
                 </Alert>;
             case 'unknown':
-                return <Alert severity="warning" action={alert.current === null && !editor.busy ? <Button size="small" variant="text" onClick={alert.retry}>Try again</Button> : undefined}>
+                return <Alert severity="warning" action={visibleAlert.current === null && !editor.busy ? <Button size="small" variant="text" onClick={visibleAlert.retry}>Try again</Button> : undefined}>
                     We couldn&apos;t confirm whether your changes were saved.
-                    {alert.current && <Box component="span" sx={{ display: 'block', mt: 1 }}>
-                        Current version: {alert.current.title} · {formatDeadlineDisplay(alert.current.deadlineAt).absolute} · {alert.current.publicationStatus === 'published' ? 'Published' : 'Hidden'}
+                    {visibleAlert.current && <Box component="span" sx={{ display: 'block', mt: 1 }}>
+                        Current version: {visibleAlert.current.title} · {formatDeadlineDisplay(visibleAlert.current.deadlineAt).absolute} · {visibleAlert.current.publicationStatus === 'published' ? 'Published' : 'Hidden'}
                     </Box>}
                 </Alert>;
             case 'error':
-                return <Alert severity="error">{alert.message}</Alert>;
+                return <Alert severity="error">{visibleAlert.message}</Alert>;
         }
     })();
 
@@ -506,8 +541,8 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
                 {!gone && !noAccess && isDestinationLive('/teach/grading', 'Instructor') && <Button component={Link} to={gradingPath(courseId, assignment.id)} variant="outlined" size="small" onClick={event => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); go(gradingPath(courseId, assignment.id)); } }}>Open grading</Button>}
             </Box>}
             actions={assignment && !gone && !noAccess && (published
-                ? <Button variant="outlined" onClick={() => setConfirm('hide')} disabled={editor.busy} startIcon={<PresentationIcon name="eye-off" />}>Hide assignment</Button>
-                : <Button variant="contained" onClick={() => setConfirm('publish')} disabled={editor.busy || dirty} startIcon={<PresentationIcon name="eye" />}>Publish assignment</Button>)} />
+                ? <Button variant="outlined" onClick={() => setConfirm('hide')} disabled={editor.busy || courseReadPending} startIcon={<PresentationIcon name="eye-off" />}>Hide assignment</Button>
+                : <Button variant="contained" onClick={() => setConfirm('publish')} disabled={editor.busy || courseReadPending || dirty} startIcon={<PresentationIcon name="eye" />}>Publish assignment</Button>)} />
         {assignment && !published && !gone && !noAccess && dirty && <Typography variant="body2" sx={{ color: 'text.secondary', mt: -2 }}>Save your changes before publishing.</Typography>}
         {alertView}
         <Box ref={form}>
@@ -533,11 +568,19 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
                         helperText={errors.instructions ?? 'Markdown plain text. Line breaks and indentation are kept.'} />}
             </Box>
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, alignItems: 'start' }}>
-                <TextField label="Deadline" type="datetime-local" value={draft.deadlineInput} required disabled={readOnly}
+                {boundaryDeadline ? <Box role="group" aria-label="Existing deadline (UTC)" sx={{ minWidth: 0, display: 'grid', gap: 1 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>Existing deadline (UTC)</Typography>
+                    <Typography component="time" dateTime={exactDeadlineUtc(boundaryDeadline)} sx={{ overflowWrap: 'anywhere' }}>{exactDeadlineUtc(boundaryDeadline)}</Typography>
+                    <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                        This deadline cannot be shown in the local date-time field. Its exact instant is kept when you edit other details.
+                    </Typography>
+                    <Button variant="outlined" disabled={readOnly} onClick={() => { focusDeadlineReplacement.current = true; change({ deadlineInput: '' }); }}>Replace deadline</Button>
+                </Box> : <TextField label="Deadline" type="datetime-local" value={draft.deadlineInput} required disabled={readOnly}
+                    inputRef={(input: HTMLInputElement | null) => { if (input && focusDeadlineReplacement.current) { focusDeadlineReplacement.current = false; input.focus(); } }}
                     onChange={(event) => change({ deadlineInput: event.target.value })}
                     error={!!errors.deadline}
                     helperText={errors.deadline ?? `Time zone: ${timeZone}. Any date and time may be set, including a past deadline.`}
-                    slotProps={{ inputLabel: { shrink: true }, htmlInput: { step: 1 } }} />
+                    slotProps={{ inputLabel: { shrink: true }, htmlInput: { step: 1 } }} />}
                 {courseFailed
                     ? <Alert severity="error" action={course ? <Button size="small" variant="text" onClick={course.reload}>Try again</Button> : undefined}>
                         Lessons couldn&apos;t be loaded.
@@ -545,8 +588,8 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
                     : <TextField select label="Related lesson" value={courseLoading ? '' : draft.lessonId ?? ''}
                         disabled={readOnly || courseLoading}
                         onChange={(event) => change({ lessonId: event.target.value ? event.target.value : null })}
-                        error={!!errors.lessonId}
-                        helperText={errors.lessonId ?? (courseLoading
+                        error={!!lessonError}
+                        helperText={lessonError ?? (courseLoading
                             ? 'Loading lessons…'
                             : totalLessons === 0
                                 ? 'This course has no lessons yet.'
@@ -575,8 +618,8 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
             bgcolor: roles.bg.raised, borderRadius: `${radius.lg}px`, boxShadow: shadow.raised, p: 2,
             display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center' }}>
             {!noAccess && !gone && (creating
-                ? <Button variant="contained" onClick={() => void create()} disabled={editor.busy} aria-busy={editor.busy || undefined}>Create assignment</Button>
-                : <Button variant="contained" onClick={() => void save()} disabled={editor.busy || !dirty} aria-busy={editor.busy || undefined}>Save changes</Button>)}
+                ? <Button variant="contained" onClick={() => void create()} disabled={editor.busy || courseReadPending} aria-busy={editor.busy || courseReadPending || undefined}>Create assignment</Button>
+                : <Button variant="contained" onClick={() => void save()} disabled={editor.busy || courseReadPending || !dirty} aria-busy={editor.busy || courseReadPending || undefined}>Save changes</Button>)}
             {status && <Typography role="status" variant="body2" sx={{ color: 'text.secondary' }}>{status}</Typography>}
         </Box>
         <ConfirmDialog open={confirm === 'publish'} title="Publish assignment?"

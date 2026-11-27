@@ -1,5 +1,118 @@
 # Testing
 
+## FE16-IR-01/02/03 targeted remediation — 27 November 2026
+
+**FE16_TARGETED_REMEDIATION_COMPLETE_AUTHOR_VERIFIED.** Refs #201, PR #270.
+OpenAI Codex implemented and performed the bounded author self-audit under the
+Project Leader's explicit instruction. Each finding is **FIXED_AUTHOR_VERIFIED**;
+independent `VERIFIED_FIXED` remains reserved for the next reviewer. The earlier
+full-scope author assertions below are historical; the supplied independent
+review subsequently found two P2 and one P3 at `bd742f4` and requested changes.
+
+### Baseline and negative controls
+
+Reviewed HEAD `bd742f4c2774105675234ed2bbe250e3fd87fe26`; refreshed main and
+merge-base `e2106f68c612468f1d6e4eb5f86c086256010bc7`; PR open on main.
+The supplied complete report/archive, probes and all ten prior dispositions were
+inspected. Its eight independent probes were run on the unchanged reviewed source:
+**6 FAIL / 2 PASS / 0 SKIP**, reproducing all three findings. UTC lost `.123456`;
+New York's second fold occurrence changed from `06:30:00.123456Z` to
+`05:30:00.000Z`; both definitive Course refusals admitted a second POST; native
+year-zero deadlines rendered blank. Paired pre-confirmation payload controls
+passed. Original failure logs/probe source are retained outside tracked files.
+
+### Corrections and affected preservation
+
+| Finding | Root cause and bounded correction | Positive evidence |
+| --- | --- | --- |
+| IR-01 P2 | A mutable persisted baseline also interpreted the retained native draft. Keep draft-owned exact intent separate from persisted Assignment and immutable sent binding; capture deliberate edits against current persisted state | 14 new payload/recovery cases: original/changed/sent deadline, both fold occurrences, sub-millisecond differences, differing and failed GET. Existing PS-A01 cases prove later deliberate return does not resurrect old microseconds |
+| IR-02 P2 | FE16 discarded error classification at CourseLessonSource and blamed a selected Lesson before Course read settlement. Add optional error/loading visibility from the existing shared owner read; current 403/404 and pending reads guard actual mutation handlers and controls | 11 new actual AppRouter/shared-context cases: 403/404 read-only/POST count 1, successful missing/present Lesson, network/protocol/503 correction, pending repeated clicks/no replay, obsolete Course/session/sign-out response, Stay/Leave and unload |
+| IR-03 P3 | UTC representability exceeds positive four-digit local/native support. Exact labeled UTC fallback retains the draft binding; deliberate replacement focuses the native control and validates normally | 9 new component cases for year 0000/microseconds, lower/upper timezone crossings, years 0001/0050/9999, unrelated edits/Hide and empty/invalid replacement; two additional dirty Publish/Hide recovery and explicit Save cases |
+
+**36 new regressions** in the existing authoring suite. The six earlier A01–A06
+and PS-A01–A04 affected cases remain covered by the passing complete authoring
+suite: exact dirty-Hide payload, no false deletion/Saved, Preview validation/focus,
+calendar/DST-gap checks, unchanged no-Lesson refusal and departure protection.
+No automatic mutation replay, synchronization validator, private persistence,
+backend/public contract, shared decoder, dependency or route activation change.
+
+N7 keeps local validation/safe form-level fallback. FE14/shared-context and FE15
+consumers run in the focused selection; Course read bounds remain enforced.
+Accepted FE17 HEAD `b69e4acd` and main `e2106f68` share tree
+`27ca5f24e9f94ddcd123a8b19a84a83ad4d114cd`. Grading files, shared decoder,
+HTTP/operation hooks, production route registration and accepted browser harness
+remain unchanged. IR-01/02/03/R-A01 grading invariants retain the prior independent
+evidence; both S19 handoff scenarios were rerun. FE13 #271 remains exactly
+`c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2`; #288 remains merged and untouched.
+
+### Actual focused execution
+
+Run in the isolated remediation checkout based on `bd742f4`; the final delivery
+commit and published HEAD are identified in PR #270 rather than self-referentially
+embedded here. Existing lockfiles matched the prior review checkout before APFS
+copy of locked dependencies; no installation/manifest change. All test-local TZ
+changes restore the original environment in finally blocks.
+
+```sh
+npm --prefix frontend test -- src/features/instructor/course-management/pages/fe16Independent.probe.test.tsx --maxWorkers=1
+# Reviewed source: 6 FAIL / 2 PASS. Temporary probe moved outside source afterwards.
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/features/instructor/course-management/api/assessmentAuthoringApi.test.ts src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/routes/index.test.tsx --maxWorkers=2 --testTimeout=15000
+# 466 PASS / 0 FAIL / 0 SKIP, 5 files, including 34 newly added tests.
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx -t 'FE16-IR keeps a boundary' --maxWorkers=1
+# Two subsequently added recovery cases: 2 PASS / 146 intentionally unselected.
+# 468 distinct focused tests have applicable passing evidence, not a fresh 468-test run.
+npm --prefix frontend run build
+# Final source/test tree: typecheck and production build PASS; existing >500kB advisory.
+npm --prefix frontend run test:browser -- --fe17 --case S19 --engine chromium --out ../evidence/handoff
+# 2 PASS / 0 FAIL; 2 unrelated scenarios not exercised. CONTROLLED HTTP, not REST persistence.
+E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts --grep FE16-IR --project=chromium-desktop --workers=1
+# 1 PASS / 0 FAIL / 0 SKIP. Real disposable frontend/backend/PostgreSQL/MinIO; no HTTP interception.
+git diff --check
+git fsck --full --no-dangling
+```
+
+Real browser test runs three independent timezone contexts (UTC, America/New_York,
+Pacific/Kiritimati), actual year-zero/early-year/upper-boundary persistence, exact
+outgoing PUT, reload, Publish/dirty Hide, labeled fallback and focused empty/valid
+replacement including nonzero seconds. It rejects real out-of-UTC-range and
+sub-microsecond writes with 400. Six geometry observations at 360x600/1440x720,
+System light/dark, assert no overflow, accessible fallback and >=44px replacement
+action, and enabled Save center hit. Browser engine: Chromium 153.0.8010.12.
+Run `cm-e2e-1a21c548088-a81b4e` verified all seven owned Docker resources absent,
+plus preview/build/runner/finalizer cleanup. The first two runs also cleaned up.
+Separate isolated Playwright CLI Chrome native DOM evidence confirms year zero
+and negative local year sanitize blank, while 0001 and positive 10000 are accepted.
+
+Preserved harness failures: initial new component assertions assumed jsdom's
+seconds serialization omitted `.000`, and attempted to invoke a disabled MUI
+wrapper without its event. Fixtures were corrected to compare incidental native
+serialization and exercise actual pending-click/POST behavior; product was not
+changed for those assumptions. First E2E measured before the responsive header
+commit; use the existing header-mode wait and retain strict geometry. Second
+E2E used a label selector inconsistent with the actual accessible native textbox;
+use its role/name. Final real run passes; no product assertion was weakened.
+Impeccable context/hardening guidance and detector were used (detector `[]`);
+Graphify navigation was stale and source-verified, not correctness evidence.
+The local clone inherited a stale commit-graph cache: object-only full fsck passed;
+a reachable commit-graph rebuild restored ordinary full fsck, without changing
+objects, refs, source history or the original repository.
+
+### Bounded author self-audit and remaining gates
+
+Challenged draft reinterpretation, stale-precision resurrection, same-display
+instants, immutable recovery snapshots, pending/unknown/definitive Course reads,
+wrong-resource/session settlement, mutation eligibility, fallback blanks/range,
+validation/focus/navigation and shared consumers. No confirmed remediation defect
+remains. Existing historical 559/759-test, REST and broad geometry evidence was
+inspected/reused only for unchanged behavior, never counted as fresh execution.
+Omitted as disproportionate: full backend/frontend/history selections, complete
+FE14/15/17 browser matrices, unrelated learners, infrastructure/release tests and
+hosted-CI waiting. New native-boundary verification uses Chromium; WebKit/Firefox,
+human AT, physical devices and formal zoom/conformance acceptance were not rerun.
+Formal independent narrow review, CODEOWNER/QA, exact-head hosted gates, protected
+integration, release and deployment remain separate; no merge, self-approval,
+Issue/Project write, CI dispatch, release or deployment is performed.
+
 ## FE16 post-squash completion and full-scope author verification — 27 November 2026
 
 **Disposition: FE16_IMPLEMENTATION_COMPLETE_RESTACKED_AUTHOR_VERIFIED.** Refs #201,

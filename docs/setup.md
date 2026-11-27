@@ -1,5 +1,80 @@
 # Development Setup
 
+## FE16 targeted independent-review remediation — 27 November 2026
+
+Refs #201, PR #270. The Project Leader explicitly authorizes correction of
+FE16-IR-01/02/03, focused regressions, task-local decisions, author self-audit and
+incremental publication. Independent `REQUEST_CHANGES` applies to reviewed HEAD
+`bd742f4c2774105675234ed2bbe250e3fd87fe26`, not to the remediated revision.
+Main/merge-base remains `e2106f68c612468f1d6e4eb5f86c086256010bc7`.
+The complete supplied independent report and evidence archive were inspected;
+their six negative assertions were reproduced before editing production code.
+The historical records below keep their original results and revision scope.
+
+### `FE16-DEADLINE-INTENT-2026-11-27-r1`
+
+Refines the implementation of DRAFT r1 and RECOVERY-BASELINE r1. Persisted
+Assignment state, retained draft deadline intent and an immutable sent snapshot
+have separate ownership. The draft binding captures the exact instant at load
+or deliberate deadline selection. A current owner GET advances persisted state;
+retaining a newer draft never swaps its binding. An unchanged sent draft may
+adopt the confirmed body and become Saved; newer edits remain explicitly unsaved.
+A later deliberate selection resolves against the current persisted Assignment,
+not the older draft binding. This preserves both DST-fold identity/microseconds
+and PS-A01's prohibition on resurrecting obsolete fractional seconds.
+
+Reject merely reverting persisted-baseline advancement, retaining only native
+text, comparing milliseconds, or inferring intent from text equality after a
+GET. They cannot preserve both earlier and newer edits. Publication and differing
+or unknown recovery results retain draft intent; another mutation is explicit.
+Full replacement, last-save-wins, single flight and cancellation remain unchanged.
+
+### `FE16-COURSE-REFUSAL-2026-11-27-r1`
+
+The existing identity-safe shared Course owner read supplies `error` and a
+pending-read flag to FE16 through additive, optional interface members. It retains
+FE14's one shared pipeline, sequence, error and session semantics. No polling,
+new endpoint or parallel read owner is added. A selected-Lesson POST 404 is
+ambiguous: one Course refresh follows; only a current definitive Course 403/404
+establishes read-only refusal. The draft and Stay/Leave/unload guards remain;
+create/save/publication handlers enforce the same refusal and pending-read guard.
+A successful tree missing the Lesson permits correction. Network/protocol/5xx
+is an unconfirmed refresh, never deletion or ownership loss, and does not impose
+a permanent mutation lock. Nothing is replayed. Suppress the redundant missing-
+Lesson reread for the ID already inspected by this POST recovery.
+
+Reject blaming the Lesson from POST 404 alone, using `status` without error
+classification, or using the broader Course mutation-revalidation flag as a
+permanent FE16 lock after transient failure. Other shared consumers retain their
+existing policies; optional members preserve existing context overrides.
+
+### `FE16-NATIVE-BOUNDARY-2026-11-27-r1`
+
+The normal control remains native `datetime-local`; its supported local parser
+remains positive four-digit years with calendar/DST-gap and UTC-range checks.
+For a decoded deadline outside that local domain, show a labeled exact UTC
+`time` value with all microseconds and an explicit Replace deadline action.
+Replacement focuses the native control and clears the old binding; an empty or
+invalid replacement cannot be submitted. Unrelated edits/recovery/publication
+keep the existing exact instant. No server response is rejected for this UI limit.
+
+Chrome accepts positive local year 10000, but native year zero/negative years
+sanitize to blank. Direct JavaScript parsing of a five-digit local year also
+needs expanded-year normalization outside the existing parser. Use the same
+truthful UTC fallback for extended local years instead of expanding that parser
+in this bounded correction. Reject clamping, year-zero coercion, a new picker,
+contract narrowing or changes to the shared Assignment decoder. UTC 0000–9999
+and backend/OpenAPI precision remain unchanged.
+
+Authority for all three task-local refinements is this remediation instruction;
+N7, POST-SQUASH, G4/G7, CT10/16/18/21/37, architecture and security remain effective.
+No DESIGN/ADR/OpenAPI, FE13 or FE17-owned source change is needed. OpenAI Codex
+implemented and author-verified the corrections; this is not independent closure.
+Git attribution remains `Le Phan Quoc Thang <thangle12012006@gmail.com>` associated
+with `heizseung`; authenticated publication uses `chi-thanh-nguyen`. Metadata does
+not prove personal implementation, signing, review or pushing by heizseung.
+Focused execution, limitations and preserved behavior are recorded in testing.
+
 ## FE16 post-squash integration and recovery decisions — 27 November 2026
 
 Refs #201, existing PR #270. The Project Leader explicitly authorizes full FE16
