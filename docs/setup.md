@@ -1,5 +1,94 @@
 # Development Setup
 
+## FE16 refusal persistence and exact deadline remediation — 27 November 2026
+
+Refs #201, PR #270. Authority: the Project Leader's explicit targeted instruction
+for FE16-R-A01, R-A02 and R-A03, including bounded technical refinements, tests,
+author verification, incremental commit/push and PR-body maintenance. Baseline
+`d8b021ba55738335a43f1bd2d5f0958ef8da2996`, tree
+`3cd876dd3988b056d1cc4f92e1713aa530ab72b7`; main/merge-base
+`fe3160d535b33652587e14e2fc55ca267f6a5222`. The five published commits already
+include AS12; no additional integration or history reconstruction is necessary.
+The final independent report, its probes/archive, prior remediation evidence,
+live #201/#270 and failed hosted E2E job 140435509480 were inspected. The report's
+REQUEST_CHANGES is not independently superseded by this author correction.
+Historical records below retain their original revision and evidence scope.
+
+### `FE16-COURSE-REFUSAL-PERSISTENCE-2026-11-27-r1`
+
+Refines COURSE-REFUSAL r1's implementation without changing shared owner-read
+semantics. The existing Course shell owns FE16's established 403/404 together
+with its Course/session identity and actual read sequence. This lifetime survives
+Assignment child remounts. A pending, transient or protocol read cannot remove
+it; only a later, current, settled decoded owner GET clears the derived refusal.
+The owner-read lifecycle still rejects obsolete/superseded/session responses.
+Changing Course/session discards this evidence. Recreating the whole Course owner
+requires its own new authoritative read; no cross-owner private cache is added.
+Direct mutation refusal and Assignment disappearance remain separate editor state.
+
+The additive FE16-only Course members are `assignmentRefusal` and
+`assignmentWritesBlocked`. Reload synchronously closes the latter before GET
+initiation, so stale Create/Save/Publish/Hide or open confirmation handlers cannot
+slip through the scheduling gap. Existing error/loading/data/successfulRead remain
+truthful attempt state. Refusal copy, read-only controls, grading availability and
+Stay/Leave/unload protection use established refusal. Deliberate retry remains
+available and successful recovery never replays a write. Initial transient-only
+failures retain their prior behavior. FE14/FE15 do not consume the new policy.
+
+Reject deriving authority from absence of error, stale retained data, successful
+reads from another identity, an editor-local latch lost on remount, global
+useOwnerRead changes, a shared mutation lock, polling or another Course fetch.
+No browser/private draft persistence or backend authorization change is added.
+Controlled production-composition regressions assert actual mutation counts,
+read-only presentation, current recovery, obsolete success and navigation.
+
+### `FE16-EXACT-DEADLINE-2026-11-27-r1`
+
+The existing assessment API module owns the bounded `parseAssignmentDeadline`
+helper and exact UTC serialization; no new file, dependency or project-wide date
+abstraction. Admission keeps its existing strict four-digit/calendar/offset and
+1..6 fractional-digit response grammar. Validated numeric components construct
+fraction-free calendar seconds using setUTCFullYear (including years 0000–0099),
+apply the offset, and compare UTC seconds to the inclusive 0000–9999 bounds.
+Microseconds stay separate; decoded deadline strings and outgoing payloads stay
+verbatim. Comparison alone also accepts zero sub-microsecond request spellings,
+as the backend does; extracting the helper does not broaden response admission.
+
+Native input and localized Assignment display derive Date from whole seconds,
+never the complete microsecond string. Existing exact draft-intent and immutable
+sent snapshots remain separate from persisted Assignment state. This preserves
+IR-01, both DST-fold occurrences, deliberate replacements and PS-A01. List/read,
+creation/replacement/publication and FE17 owner-Assignment selectors share the
+same decoder. Submission version tokens are still echoed unchanged.
+
+Reject removing UTC-range checks, clamping, rounding or normalizing stored
+strings, Date.UTC's 0–99 remapping, and using the old permissive comparison helper
+as an admission parser. This corrects an actual shared-decoder defect under the
+new explicit authorization; it does not change ADR010/OpenAPI/backend range,
+precision, endpoints or the native-input supported domain. NATIVE-BOUNDARY r1's
+prior recommendation against a decoder workaround is refined only to permit
+this contract-preserving correction, not contract narrowing.
+
+### `FE16-RECOVERY-ERA-2026-11-27-r1`
+
+The shared owner deadline formatter shows exact UTC for UTC year zero or local
+years outside 0001–9999. Thus 0000/BCE cannot be confused with 0001/CE, and local
+year crossings cannot silently misrepresent the calendar. Ordinary localized
+absolute dates, timezone labels and relative captions remain. S19 uses the actual
+current recovery response, not the retained draft or an older persisted value.
+The same bounded correction applies to the Assignments list and grading selector.
+Native UTC fallback, accessible labeling and deliberate Replace remain unchanged.
+Reject substituting draft state, hiding the boundary or a broad formatting redesign.
+
+N7, G4/G7, existing DRAFT/RECOVERY-BASELINE, CT10/16/18/21/37 and ADR014 remain
+effective; no DESIGN, canonical ADR, OpenAPI, backend, route or dependency change.
+Accepted FE17 production behavior, original FE13 history and AS12 integration are
+preserved. OpenAI Codex implemented and author-verified this delta. Git metadata
+attribution to heizseung does not establish personal implementation, signing,
+independent review or pushing by that contributor. Verification limits, including
+unavailable real browsers, are explicit in testing; independent review, exact-head
+hosted checks, formal QA and protected integration remain separate.
+
 ## FE16 targeted independent-review remediation — 27 November 2026
 
 Refs #201, PR #270. The Project Leader explicitly authorizes correction of

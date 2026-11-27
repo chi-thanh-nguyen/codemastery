@@ -17,6 +17,8 @@ import { PresentationIcon } from '../../../../shared/components/PresentationIcon
 import { ApiError } from '../../../../shared/types/apiTypes';
 import type { AssignmentDraft } from '../types/courseManagementTypes';
 import type { AssignmentPublicationStatus, B5AssignmentWrite, B5OwnedAssignment } from '../api/assessmentAuthoringApi';
+import { exactDeadlineUtc, parseAssignmentDeadline } from '../api/assessmentAuthoringApi';
+export { exactDeadlineUtc } from '../api/assessmentAuthoringApi';
 import { failureStatus, fieldErrorsFrom, isCancelled, outcomeUnknown, useAssignmentEditor } from '../hooks/useAssessmentEditor';
 import { useCourseEditorContext } from '../hooks/useCourseEditor';
 import {
@@ -41,7 +43,9 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
 
 /** Formats an RFC 3339 instant into a local `datetime-local` input string (`YYYY-MM-DDTHH:mm` or `:ss`). */
 export function toLocalDateTimeInput(isoString: string): string {
-    const date = new Date(isoString);
+    const instant = parseAssignmentDeadline(isoString);
+    if (!instant) return '';
+    const date = new Date(instant.seconds * 1000);
     // Native local dates have no year zero. Keep extended local years in the exact-instant fallback
     // as well: the local parser below deliberately supports four-digit positive years only.
     if (Number.isNaN(date.getTime()) || date.getFullYear() < 1 || date.getFullYear() > 9999) return '';
@@ -110,29 +114,17 @@ const rfc3339Instant = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.
 export function instantMicros(value: string): { seconds: number; micros: number } | null {
     const match = rfc3339Instant.exec(value);
     if (!match) return null;
-    const [, year, month, day, hour, minute, second, fraction = '', zulu, sign, offsetHours, offsetMinutes] = match;
+    const fraction = match[7] ?? '';
     if (fraction.length > 6 && !/^0+$/.test(fraction.slice(6))) return null;
-    // setUTCFullYear keeps years 0000–0099 literal (Date.UTC would map them to 1900–1999).
-    const date = new Date(0);
-    date.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
-    date.setUTCHours(Number(hour), Number(minute), Number(second), 0);
-    const local = date.getTime();
-    if (Number.isNaN(local)) return null;
-    const offset = zulu ? 0 : (sign === '-' ? -1 : 1) * (Number(offsetHours) * 3600 + Number(offsetMinutes) * 60);
-    return { seconds: local / 1000 - offset, micros: Number(fraction.slice(0, 6).padEnd(6, '0')) };
+    // Comparison also accepts the backend request spelling with zero sub-microsecond digits.
+    // Response admission remains the stricter 1..6-digit grammar in the API decoder.
+    return parseAssignmentDeadline(fraction.length > 6 ? value.replace(`.${fraction}`, `.${fraction.slice(0, 6)}`) : value);
 }
 
 /** True when both texts name the same instant to the microsecond (offsets and trailing zeros may differ). */
 export function sameInstant(left: string, right: string): boolean {
     const a = instantMicros(left), b = instantMicros(right);
     return a !== null && b !== null && a.seconds === b.seconds && a.micros === b.micros;
-}
-
-/** UTC display without a millisecond round-trip of the stored fraction. Only decoded deadlines reach it. */
-export function exactDeadlineUtc(value: string): string {
-    const instant = instantMicros(value)!;
-    const seconds = new Date(instant.seconds * 1000).toISOString().replace('.000Z', '');
-    return `${seconds}${instant.micros ? `.${String(instant.micros).padStart(6, '0')}` : ''}Z`;
 }
 
 export function sameAssignment(draft: AssignmentFormDraft, baseline: { input: string; iso: string } | null, current: B5OwnedAssignment): boolean {
@@ -187,7 +179,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     const [dirty, setDirty] = useState(false);
     const [gone, setGone] = useState(false);
     const [writeRefused, setNoAccess] = useState(false);
-    const courseRefusal = failureStatus(course?.error);
+    const courseRefusal = course?.assignmentRefusal ?? failureStatus(course?.error);
     const noAccess = writeRefused || courseRefusal === 403 || courseRefusal === 404;
     const courseReadPending = course?.loading ?? course?.status === 'loading';
     const [errors, setErrors] = useState<Record<string, string>>({});
@@ -332,7 +324,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     }, [assignment, read, applyLoaded]);
 
     async function create() {
-        if (noAccess || gone || editor.busy || courseReadPending) return;
+        if (noAccess || gone || editor.busy || courseReadPending || course?.assignmentWritesBlocked?.()) return;
         const next = validateAssignment(draft, deadlineIntent);
         showErrors(next);
         if (Object.keys(next).length) return;
@@ -363,7 +355,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     }
 
     async function save() {
-        if (!assignment || noAccess || gone || editor.busy || courseReadPending) return;
+        if (!assignment || noAccess || gone || editor.busy || courseReadPending || course?.assignmentWritesBlocked?.()) return;
         const next = validateAssignment(draft, deadlineIntent);
         showErrors(next);
         if (Object.keys(next).length) return;
@@ -424,7 +416,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
 
     async function publication(targetStatus: AssignmentPublicationStatus) {
         setConfirm(null);
-        if (!assignment || noAccess || gone || editor.busy || courseReadPending) return;
+        if (!assignment || noAccess || gone || editor.busy || courseReadPending || course?.assignmentWritesBlocked?.()) return;
         setAlert(null); setNotice(null);
         try {
             const updated = await editor.setPublication(assignment.id, targetStatus);

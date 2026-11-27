@@ -9,6 +9,7 @@ import { appTheme } from '../../../../app/theme/theme';
 import { AuthContext } from '../../../../app/providers/AuthProvider';
 import type { AuthContextValue } from '../../../../app/providers/AuthProvider';
 import { ApiError } from '../../../../shared/types/apiTypes';
+import { bindAuthSession } from '../../../../shared/api/httpClient';
 import * as api from '../api/gradingApi';
 import { gradingPath, readReviewedState, reviewedState, useReviewedSubmission } from '../hooks/useSubmissions';
 import { ProductionGradeSubmissionPage, gradeErrors } from './GradeSubmissionPage';
@@ -91,6 +92,31 @@ it('keeps draft locked when conflict refresh fails; retry is a read', async () =
 });
 it('lists assignments and unfiltered submissions, deriving To grade from producer counts', async () => {
     await mount(gradingPath(c,a)); expect(text()).toContain('To grade'); expect(text()).toContain('Student'); expect(text()).toContain('work.zip'); expect(text()).not.toContain('Ungraded'); expect(listOwnedCourses).toHaveBeenCalled(); expect(listOwnedAssignments).toHaveBeenCalled(); expect(api.listSubmissions).toHaveBeenCalledWith(c,a,0,20,expect.objectContaining({signal:expect.any(AbortSignal)}));
+});
+
+it.each([false, true])('FE16-R-A02 keeps a boundary Assignment selected through the actual decoder (missing from page: %s)', async missing => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080');
+    const actual = await vi.importActual<typeof import('../../course-management/api/assessmentAuthoringApi')>('../../course-management/api/assessmentAuthoringApi');
+    const boundary = { ...assignment, deadlineAt: '9999-12-31T23:59:59.999999Z' };
+    const responsePage = missing ? { ...page([{ ...assignment, id: s, title: 'Other assignment' }]), totalElements: 21, totalPages: 2 }
+        : page([boundary]);
+    const fetcher = vi.fn(async (url: string) => new Response(JSON.stringify(url.includes('owned-assignments?') ? responsePage : boundary),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetcher);
+    const unbind = bindAuthSession({ capture: () => ({ generation: 1, accessToken: 'synthetic-boundary-token', expiresAt: Date.now() + 60000 }),
+        isCurrent: g => g === auth.generation, invalidate: vi.fn() });
+    try {
+        vi.mocked(listOwnedAssignments).mockImplementation(actual.listOwnedAssignments);
+        vi.mocked(readOwnedAssignment).mockImplementation(actual.readOwnedAssignment);
+        await mount(gradingPath(c, a));
+        expect(text()).toContain('Lab'); expect(text()).toContain('work.zip');
+        expect(api.listSubmissions).toHaveBeenCalledWith(c, a, 0, 20, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+        expect(listOwnedAssignments).toHaveBeenCalledWith(c, 0, 20, expect.any(Object));
+        expect(readOwnedAssignment).toHaveBeenCalledTimes(missing ? 1 : 0);
+        if (missing) expect(readOwnedAssignment).toHaveBeenCalledWith(c, a, expect.any(Object));
+        expect(fetcher).toHaveBeenCalledTimes(missing ? 2 : 1);
+        expect(api.gradeSubmission).not.toHaveBeenCalled();
+    } finally { unbind(); vi.unstubAllEnvs(); }
 });
 it('does not publish an abandoned direct-link response', async () => {
     let resolve!: (v: typeof row) => void; vi.mocked(api.findSubmission).mockImplementation(() => new Promise(r => { resolve = r; })); await mount(); expect(text()).toContain('Loading submission…'); const signal = vi.mocked(api.findSubmission).mock.calls[0][3]!.signal!; await act(async () => root.unmount()); expect(signal.aborted).toBe(true); await act(async () => resolve(row)); root = createRoot(host); expect(host.textContent).toBe('');

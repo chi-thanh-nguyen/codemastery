@@ -1,5 +1,151 @@
 # Testing
 
+## FE16-R-A01 / R-A02 / R-A03 targeted remediation — 27 November 2026
+
+Refs #201, PR #270. Reviewed/published baseline:
+`d8b021ba55738335a43f1bd2d5f0958ef8da2996` (tree
+`3cd876dd3988b056d1cc4f92e1713aa530ab72b7`); refreshed main and merge-base:
+`fe3160d535b33652587e14e2fc55ca267f6a5222`. The existing five commits include
+AS12. This is incremental author remediation, not a new independent acceptance.
+OpenAI Codex implemented and author-verified the change under the Leader's
+explicit instruction. All earlier FE16/FE17/AS12 records below remain historical.
+
+### Negative evidence and corrected invariants
+
+The complete final narrow independent report/archive and prior author remediation
+archive were accessible and inspected. Before production edits, its unmodified
+26-case component probe was run on exact baseline: **15 PASS / 11 FAIL / 0 SKIP**.
+Failures were six 403/404 × network/protocol/503 Create retries, three equivalent
+Save/Publish/Hide boundaries and two year-zero current-version presentations.
+After the production correction the same unmodified probe passed **26/26**.
+The probes use actual AppRouter → CourseEditorShell → useSharedCourseState →
+useOwnerRead → CourseAssignmentEditor → AssignmentEditor, with controlled feature
+responses and the real Lessons Try again control. They are not REST acceptance.
+
+Hosted run [45978295528, job 140435509480](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45978295528/job/140435509480)
+was inspected directly: **147 PASS / 2 FAIL / 11 SKIP** at baseline. Both
+`FE16-IR boundary deadlines retain exact UTC instants and allow deliberate native replacement`
+failures are WebKit desktop/mobile, missing the exact
+`9999-12-31T23:59:59.999999Z` fallback. The prior independent real WebKit and native
+engine evidence identifies whole-string fractional rounding into UTC year 10000.
+This is historical real-browser negative evidence, not a fresh local browser run.
+
+- R-A01: refusal lives in the existing Course/session owner, survives pending and
+  transient retries and same-owner editor remount, and clears only on a later
+  current decoded GET. A synchronous scheduling barrier guards stale callbacks
+  and open publication confirmations. Six original Create cases retain **one**
+  POST after the attempted retry; the three original existing-editor cases send
+  **zero** refused PUTs. Current success permits only a deliberate next write.
+  Additional cases cover repeated refusal, initial transient controls, obsolete
+  same-Course/Course/session success, direct-write refusal, sign-out, read-only
+  drafts, grading availability, Stay/Leave and unload protection.
+- R-A02: numeric calendar validation, fraction-free UTC seconds, offset arithmetic
+  and separate microseconds admit exact UTC 0000–9999 without native fractional
+  parsing. Tests exercise lower/upper controls, leap/early years, offset crossings,
+  invalid calendars/times/offsets/ranges, 1..6-digit response grammar and trailing
+  line-break rejection. Backend request parsing may admit zero digits below the
+  microsecond; strict frontend response admission still rejects those spellings.
+  Every owner response boundary preserves the original string and PUT payload.
+  A Date negative control throws if complete microsecond text reaches Date in
+  decoding, native-input or display paths. FE17 tests use the actual shared
+  HTTP/decoder for both current-page and bounded direct-read selector cases,
+  preserving Course/Assignment identity, pagination and no unintended grade write.
+- R-A03: authoritative current-version year 0000 and equivalent-offset forms use
+  unambiguous exact UTC. Local year-zero/negative/10000 crossings are covered;
+  positive year 0001 and ordinary localized/relative display remain distinct.
+  A different retained draft stays unsaved and sends its original exact deadline
+  on the next explicit Save. Shared Assignments-list rows remain usable with
+  grading identities. Native replacement assertions remain unchanged.
+
+The original IR-01 draft/persisted/sent state model is preserved. Existing tests
+cover `.123456Z` versus `.123999Z`, both New York fold occurrences, newer unsent
+edits, later deliberate changes, no obsolete precision, differing/failed recovery
+and dirty Publish/Hide. This rerun does not create a new independent IR-01 closure.
+
+### Executed author verification
+
+Node 24.21.0; locked packages and pinned Playwright 1.63.0 were reused only after
+lockfile equality. No dependency was changed. Commands below ran from repository
+root on the remediation working tree; published source/tree hashes are recorded
+in the external delivery manifest.
+
+```sh
+# Before/after: the same temporary independent probe, removed before commit.
+npm --prefix frontend test -- src/features/instructor/course-management/pages/fe16DeltaIndependent.probe.test.tsx --maxWorkers=1
+# Before 15 PASS / 11 FAIL; after 26 PASS / 0 FAIL; 0 SKIP in each.
+
+npm --prefix frontend test -- \
+  src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx \
+  src/features/instructor/course-management/api/assessmentAuthoringApi.test.ts \
+  src/features/instructor/grading/pages/grading.test.tsx \
+  --maxWorkers=1 --testTimeout=15000
+# 326 PASS / 0 FAIL / 0 SKIP, three affected suites; 69 new tests.
+
+npm --prefix frontend test -- \
+  src/features/instructor/course-management/hooks/assessmentHooks.test.tsx \
+  src/features/instructor/course-management/pages/fe14Authoring.test.tsx \
+  src/routes/index.test.tsx \
+  -t 'owner|Course|course|Settings|refresh|Assignment|assignment|grading|Instructor|session|FE16|N[1-6]|D1' --maxWorkers=2
+# 134 PASS / 0 FAIL / 142 deliberately unselected, three other suites.
+
+npm --prefix frontend run build
+# PASS: TypeScript and production build; existing >500 kB chunk advisory only.
+```
+
+The 326 and 134 selections use disjoint files. Filtered debugging selections and
+26 independent probes overlap their requirements and are not added to those
+counts. The prior 468/559/759 selections were not mechanically repeated. The
+unchanged production grading/route/backend/E2E blobs, FE13 remote head and
+historical documentation preservation are checked separately before publication.
+Impeccable context/harden guidance and the once-run detector (`[]`) were used;
+Graphify's old graph supplied no useful current relationships, so source was
+inspected directly. Neither tool is acceptance or browser evidence.
+
+Initial new-test failures exposed fixture assumptions: a failed Course shell has
+no New assignment button, upper UTC can require a local-year fallback, and grading
+query order is not identity. The tests now assert actual navigation, exact fallback
+and parsed query identities. The first actual-decoder FE17 fixture omitted the
+required public API origin; it now supplies/restores a test-only origin. One broad
+run used Vitest's default 5-second component timeout while other selections ran,
+timed out in an unchanged repeated-Settings-navigation case, and produced cascading
+act failures. That case and all new lifecycle cases passed in isolation; the final
+serial affected-suite run uses the same 15-second component timeout as the previous
+author evidence. No product assertion or E2E timeout was weakened.
+
+### Real-browser / REST execution limitation
+
+The unchanged boundary scenario and all five hosted projects remain intact. The
+requested local WebKit desktop/mobile invocation was attempted with external URL,
+image and account overrides unset. First, sandbox write denial stopped the runner
+before admission. After narrowly granting its required registry permission, run
+`cm-e2e-1a21cebc34c-b180fe` was admitted but setup failed before tests: Docker
+Buildx could not write its activity file. The narrow Buildx permission was then
+granted. However sandbox also denies `kern.boottime`; the unmodified lifecycle
+requires a non-null boot identity and correctly refuses to recover its inventory.
+`npm --prefix e2e run stack:down` was attempted and remains incomplete for that
+reason. Do not erase the record or bypass the guard. Exact run-label inspection
+finds zero containers, images, volumes or networks; its temporary build directory
+and incomplete inventory are preserved, not falsely reported as cleaned.
+
+Direct pinned WebKit, Chromium and Firefox launches were also attempted; all
+aborted in this sandbox. Chromium explicitly reports Mach bootstrap permission
+denied; WebKit/Firefox abort before a page opens. Thus **no new local real-browser
+or REST E2E test completed**: WebKit desktop, WebKit mobile, Chromium desktop and
+Firefox remain **UNVERIFIED**. Source-level rounding dependence is removed and
+controlled tests pass, but the same hosted failure is not claimed eliminated by
+fresh engine execution. The unchanged real REST test must still verify creation,
+read, exact fallback, PUT, reload, publication and replacement in a permissive
+approved disposable environment. Local success is never substituted for hosted CI.
+
+Author dispositions: **R-A01 FIXED_AUTHOR_VERIFIED; R-A02 FIXED_VERIFICATION_LIMITED;
+R-A03 FIXED_AUTHOR_VERIFIED**. Overall
+**FE16_TARGETED_REMEDIATION_COMPLETE_VERIFICATION_LIMITED**. Independent
+VERIFIED_FIXED, formal AT/device/zoom QA, exact-head required CI and protected
+integration remain separate. No backend/AS12 full suite, unrelated learner,
+release/infrastructure qualification, broad screenshot matrix, manual CI dispatch,
+merge, self-approval, Issue closure, Project state change, release, deployment or
+hosted-CI waiting.
+
 ## FE16-IR-01/02/03 targeted remediation — 27 November 2026
 
 **FE16_TARGETED_REMEDIATION_COMPLETE_AUTHOR_VERIFIED.** Refs #201, PR #270.

@@ -4,7 +4,7 @@ import { bindAuthSession } from '../../../../shared/api/httpClient';
 import {
     createAssignment, createQuestion, createQuiz, deleteUnusedHiddenQuiz, deleteUnusedQuestion, listOwnedAssignments, listOwnedQuizzes,
     listQuestions, questionShapeValid, readOwnedAssignment, readOwnedQuiz, readQuestion, replaceAssignment, replaceUnusedHiddenQuiz,
-    replaceUnusedQuestion, setAssignmentPublication, setQuizPublication,
+    replaceUnusedQuestion, setAssignmentPublication, setQuizPublication, parseAssignmentDeadline, exactDeadlineUtc,
 } from './assessmentAuthoringApi';
 import {
     createCourseChapter, createCourseLesson, createOwnedCourse, getOwnedCourse, listOwnedCourses,
@@ -188,6 +188,55 @@ describe('CT10.rest owner assignment bindings', () => {
     ])('rejects %s', async (_, bad) => {
         fetcher.mockResolvedValue(json(bad));
         await expect(readOwnedAssignment(courseId, assignmentId)).rejects.toMatchObject({ kind: 'protocol' });
+    });
+
+    it.each([
+        '0000-01-01T00:00:00Z', '0000-01-01T00:00:00.123456Z', '0000-02-29T23:59:59.999999Z',
+        '0001-01-01T00:00:00Z', '0050-06-01T01:02:03Z', '2000-02-29T12:00:00Z',
+        '9999-12-31T23:59:59.999Z', '9999-12-31T23:59:59.999999Z',
+        '0000-01-01T01:00:00.123456+01:00', '9999-12-31T22:59:59.999999-01:00',
+        '0001-01-01T00:30:00+01:00', '9998-12-31T23:30:00-01:00',
+        '2026-12-01t12:59:59.999999z', '2026-12-01T00:00:00-00:00',
+    ])('FE16-R-A02 keeps valid exact deadline %s through every owner response boundary', async deadlineAt => {
+        const value = { ...assignment, deadlineAt };
+        fetcher.mockResolvedValueOnce(json(page([value]))).mockResolvedValueOnce(json(value))
+            .mockResolvedValueOnce(json(value, 201)).mockResolvedValueOnce(json(value))
+            .mockResolvedValueOnce(json({ ...value, publicationStatus: 'published' }));
+        expect((await listOwnedAssignments(courseId)).content[0].deadlineAt).toBe(deadlineAt);
+        expect((await readOwnedAssignment(courseId, assignmentId)).deadlineAt).toBe(deadlineAt);
+        expect((await createAssignment(courseId, { ...write, deadlineAt })).deadlineAt).toBe(deadlineAt);
+        expect((await replaceAssignment(courseId, assignmentId, { ...write, deadlineAt })).deadlineAt).toBe(deadlineAt);
+        expect((await setAssignmentPublication(courseId, assignmentId, 'published')).deadlineAt).toBe(deadlineAt);
+        expect(JSON.parse(call(3).init.body as string).deadlineAt).toBe(deadlineAt);
+    });
+
+    it.each([
+        '0000-01-01T00:00:00.000001+00:01', '9999-12-31T23:59:00-00:01',
+        '2026-02-29T00:00:00Z', '1900-02-29T00:00:00Z', '2026-04-31T00:00:00Z',
+        '2026-00-01T00:00:00Z', '2026-13-01T00:00:00Z', '2026-01-00T00:00:00Z',
+        '2026-01-01T24:00:00Z', '2026-01-01T00:60:00Z', '2026-01-01T00:00:60Z',
+        '2026-01-01T00:00:00+24:00', '2026-01-01T00:00:00+01:60',
+        '2026-01-01T00:00:00.1234560Z', '2026-01-01T00:00:00.1234567Z',
+        '2026-01-01T00:00:00.Z', '2026-01-01 00:00:00Z', '2026-01-01T00:00:00',
+        '2026-01-01T00:00:00Z\n', '2026-01-01T00:00:00Z\r',
+    ])('FE16-R-A02 rejects malformed or out-of-range response deadline %s', async deadlineAt => {
+        fetcher.mockResolvedValue(json({ ...assignment, deadlineAt }));
+        await expect(readOwnedAssignment(courseId, assignmentId)).rejects.toMatchObject({ kind: 'protocol' });
+    });
+
+    it('FE16-R-A02 validates without parsing a fractional string through the host Date engine', async () => {
+        const NativeDate = Date;
+        vi.stubGlobal('Date', class extends NativeDate {
+            constructor(value: number | string = 0) {
+                if (typeof value === 'string' && value.includes('.')) throw new Error('Host fractional parsing is forbidden');
+                super(value);
+            }
+        });
+        const deadlineAt = '9999-12-31T23:59:59.999999Z';
+        fetcher.mockResolvedValue(json({ ...assignment, deadlineAt }));
+        expect((await readOwnedAssignment(courseId, assignmentId)).deadlineAt).toBe(deadlineAt);
+        expect(parseAssignmentDeadline(deadlineAt)).toEqual({ seconds: 253402300799, micros: 999999 });
+        expect(exactDeadlineUtc('0000-01-01T01:00:00.123456+01:00')).toBe('0000-01-01T00:00:00.123456Z');
     });
 });
 

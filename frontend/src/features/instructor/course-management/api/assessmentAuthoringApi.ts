@@ -67,7 +67,7 @@ export const MAX_PAGE_SIZE = 100;
 export const DEFAULT_PAGE_SIZE = 20;
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const rfc3339Micros = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?([Zz]|[+-]\d{2}:\d{2})$/;
+const rfc3339Micros = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(?:([Zz])|([+-])(\d{2}):(\d{2}))$/;
 const questionKinds: readonly QuestionKind[] = ['single_choice', 'multiple_choice', 'true_false'];
 const difficulties: readonly QuestionDifficulty[] = ['easy', 'medium', 'hard'];
 const quizKinds: readonly QuizKind[] = ['diagnostic', 'practice', 'test'];
@@ -78,17 +78,35 @@ const text = (value: unknown): value is string => typeof value === 'string' && /
 const id = (value: unknown): value is string => typeof value === 'string' && uuid.test(value);
 const same = (left: string, right: string) => left.toLowerCase() === right.toLowerCase();
 
-function rfc3339Valid(value: unknown): value is string {
-    if (typeof value !== 'string') return false;
+/** Strict owner-Assignment response grammar; exact seconds and microseconds never share a float. */
+export function parseAssignmentDeadline(value: unknown): { seconds: number; micros: number } | null {
+    if (typeof value !== 'string') return null;
     const match = rfc3339Micros.exec(value);
-    if (!match) return false;
+    if (!match || match[0] !== value) return null;
     const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
     const hour = Number(match[4]), minute = Number(match[5]), second = Number(match[6]);
     const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
     const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    if (month < 1 || month > 12 || day < 1 || day > days[month - 1] || hour > 23 || minute > 59 || second > 59) return false;
-    const instant = new Date(value.toUpperCase());
-    return !Number.isNaN(instant.getTime()) && instant.getUTCFullYear() >= 0 && instant.getUTCFullYear() <= 9999;
+    const offsetHours = Number(match[10] ?? 0), offsetMinutes = Number(match[11] ?? 0);
+    if (month < 1 || month > 12 || day < 1 || day > days[month - 1] || hour > 23 || minute > 59 || second > 59
+        || offsetHours > 23 || offsetMinutes > 59) return null;
+    // Numeric, fraction-free construction avoids WebKit rounding .999999 into the next year.
+    // setUTCFullYear also preserves literal years 0000–0099, unlike Date.UTC.
+    const calendar = new Date(0);
+    calendar.setUTCFullYear(year, month - 1, day);
+    calendar.setUTCHours(hour, minute, second, 0);
+    const offset = (match[9] === '-' ? -1 : 1) * (offsetHours * 3600 + offsetMinutes * 60);
+    const seconds = calendar.getTime() / 1000 - offset;
+    // The admitted fractions are 0..999999, so inclusive whole-second bounds are exact.
+    if (seconds < -62167219200 || seconds > 253402300799) return null;
+    return { seconds, micros: Number((match[7] ?? '').padEnd(6, '0')) };
+}
+
+/** Exact UTC representation of a decoded Assignment deadline, without rounding its fraction. */
+export function exactDeadlineUtc(value: string): string {
+    const instant = parseAssignmentDeadline(value)!;
+    const seconds = new Date(instant.seconds * 1000).toISOString().replace('.000Z', '');
+    return `${seconds}${instant.micros ? `.${String(instant.micros).padStart(6, '0')}` : ''}Z`;
 }
 
 function exact(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -141,7 +159,7 @@ function decodeQuiz(value: unknown): B3QuizOwned {
 function decodeAssignment(value: unknown): B5OwnedAssignment {
     const row = exact(value, ['id', 'courseId', 'lessonId', 'title', 'instructions', 'deadlineAt', 'publicationStatus', 'submissionCount', 'gradedCount']);
     if (!id(row.id) || !id(row.courseId) || (row.lessonId !== null && !id(row.lessonId)) ||
-        !text(row.title) || !text(row.instructions) || !rfc3339Valid(row.deadlineAt) ||
+        !text(row.title) || !text(row.instructions) || typeof row.deadlineAt !== 'string' || !parseAssignmentDeadline(row.deadlineAt) ||
         !publicationStatuses.includes(row.publicationStatus as AssignmentPublicationStatus) ||
         !integer(row.submissionCount, 0, MAX_TIME_LIMIT_SECONDS) ||
         !integer(row.gradedCount, 0, row.submissionCount as number)) throw protocolError();
