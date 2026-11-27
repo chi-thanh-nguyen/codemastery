@@ -48,3 +48,10 @@ export interface LearnerAssignment extends Omit<LearnerAssignmentSummary, 'submi
     instructions: string;
     submission: LearnerSubmission | null;
 }
+
+/** CT23 learner summary; shared S10 seam, compatible with FE10's attempt implementation. */
+export interface B3QuizSummary {
+    id: string; courseId: string; title: string; kind: QuizKind;
+    timeLimitSeconds: number; published: boolean; questionCount: number;
+}
+export type B3QuizSummaryPage = import('../../../shared/types/apiTypes').PageResponse<B3QuizSummary>;

@@ -12848,3 +12848,387 @@ GitHub approval submitted, Issue closed, Project field changed, merge performed,
 release published, deployment run or operational grant executed. The automated
 technical review cycle is closed for the reviewed code; those gates do not justify
 another precautionary code-review cycle.
+
+## FE11 comprehensive completion and author self-audit — 27 November 2026
+
+Task authority, effective contracts, two ordinary main integrations, bounded FE10
+scope and substantial FE08 exclusion are recorded in [setup](setup.md#fe11-learner-assignment-completion-and-bounded-composition--27-november-2026).
+The exact tested source is the FE11 working tree over integration
+`3d0415903867bc61c8defa92747db07b1716a691` (main `99abc407`); the publication follow-up
+below identifies the implementation commit. These are Codex **author executions**,
+not independent review, QA acceptance, hosted CI or production qualification.
+
+### Incoming-to-final implementation coverage
+
+Trace: ADR010/CT16/CT37 + OpenAPI → AssignmentController → AssignmentService /
+SubmissionService → assignmentApi request/decoder → useAssignment → S10/S13 →
+WORKSPACE_ROUTES/AppRouter/role navigation → named unit/component and real E2E tests.
+Owner-grading output comes from FE17 and AS09; storage from SH05. The consumed
+backend and OpenAPI are inherited unchanged. Each row is a reporting checkpoint,
+not a replacement for official Project fields.
+
+| Checkpoint | Incoming `2c5aa49` | Final disposition / evidence |
+| --- | --- | --- |
+| C1 raw multipart PDF/ZIP and filename | DEFECTIVE: FormData constructed, body undefined | IMPLEMENTED_VERIFIED_BY_INSPECTION; actual native Request multipart serialization, one `file`, no caller boundary; real 201/bytes |
+| C2 first/replacement status | DEFECTIVE: only 200 | IMPLEMENTED_VERIFIED_BY_INSPECTION; `[200,201]`, no replay, 202/203/204/206 negative controls |
+| C3 own protected download | MISSING | IMPLEMENTED_VERIFIED_BY_INSPECTION; exact own endpoint, binary shared transport, authoritative name, revoked URL; PDF and ZIP, closed/graded |
+| C4 detail/submission decoding | PARTIALLY_IMPLEMENTED: strings instead of instants, no lifecycle/grade consistency or request identity | IMPLEMENTED_VERIFIED_BY_INSPECTION; exact fields, UUID scope, valid UTC microseconds, safe filename, grade 0–100 / two decimals / grouped nullability, graded time order |
+| C4 list decoding | MISSING | IMPLEMENTED_VERIFIED_BY_INSPECTION; exact course/page/size/counts/status and duplicate identities; independent server paging |
+| C5 first submission / replacement | DEFECTIVE: stale auth closure, mutation pending only React state | IMPLEMENTED_VERIFIED_BY_INSPECTION; synchronous one-flight reservation, invocation admission and confirmed current timestamp |
+| C5 uncertainty / failed reconciliation | MISSING | IMPLEMENTED_VERIFIED_BY_INSPECTION; later authoritative GET, locked failure, deliberate read retry, no mutation replay |
+| C5 ordering/cancellation | DEFECTIVE: un-aborted mutations and stale settlement | IMPLEMENTED_VERIFIED_BY_INSPECTION; generation/resource identity, signals, read initiation sequence; route/session/logout/unmount suppression |
+| C5 deadline/grading/replacement race | PARTIALLY_IMPLEMENTED | IMPLEMENTED_VERIFIED_BY_INSPECTION; server open authoritative, confirmation withdrawn by refresh, 409 from current state, later read wins over upload result |
+| C5 known 400/403/404/409/413/415 | PARTIALLY_IMPLEMENTED | IMPLEMENTED_VERIFIED_BY_INSPECTION; safe rejection/access/closed/graded/size paths, independent backend admission |
+| C6 instructions / feedback / grade | DEFECTIVE: paragraph splitter and unsupported aggregation/mastery copy | IMPLEMENTED_VERIFIED_BY_INSPECTION; actual shared Markdown, plain feedback with preserved lines, Grade /100 and graded time; no unsupported claims |
+| C6 deadline and file presentation | PARTIALLY_IMPLEMENTED | IMPLEMENTED_VERIFIED_BY_INSPECTION; timezone/relative date, butter ≤48h / neutral / server Closed, progress/current row and confirmation |
+| C6 loading/empty/error/recovery | PARTIALLY_IMPLEMENTED | IMPLEMENTED_VERIFIED_BY_INSPECTION; shared states; failed reads never admit mutation; exact rejoin message |
+| C6 responsive/theme/keyboard | PARTIALLY_IMPLEMENTED, no execution | IMPLEMENTED_VERIFIED_BY_INSPECTION with scoped browser evidence below; native zoom/screen-reader acceptance remains unexecuted |
+| C7 S10 Assignment list/Open | MISSING | IMPLEMENTED_VERIFIED_BY_INSPECTION; separately paginated Assignment list with none/submitted/graded/closed, all read states, production Open |
+| C7 shared Quiz summary seam | BLOCKED_BY_UPSTREAM initially | Bounded FE10 read/table/paging delivered; full quiz journey remains FE10, not absorbed |
+| C8 S13 production route | MISSING | IMPLEMENTED_VERIFIED_BY_INSPECTION; Learner only, direct entry/reload, identity, My courses context and no fixture data |
+| C8 Course → S10 navigation | MISSING | IMPLEMENTED_VERIFIED_BY_INSPECTION; current membership action and shared destination gates |
+| C8 Related Lesson destination | BLOCKED_BY_UPSTREAM | FE11 canonical guarded handoff implemented; FE08 #193/#286 production S8 remains unavailable; no dead link or route activation |
+| C9 shared consumers/preview | No regression tests | Existing numeric transport/auth/FE14/FE16/FE17/Markdown/preview consumers exercised; no backend, CI or dependency changes |
+
+Issue #196 currently has **12 acceptance criteria** (8 behavior, 4 presentation).
+They are covered by the rows above; this task does not tick Issue checkboxes or
+change Project fields. Full design/QA acceptance is not inferred from code or
+unit counts. The full Related Lesson journey remains blocked by FE08; full Quiz
+attempt integration remains FE10. IN15 delivery is separate from grade visibility.
+
+### Focused commands and observed results
+
+Commands run from `frontend/`, unless stated otherwise:
+
+```bash
+npm ci --ignore-scripts --offline
+npm run test -- src/features/assessment/api/assignmentApi.test.ts src/shared/api/httpClient.test.ts
+npm run test -- src/features/assessment/pages/assignment.test.tsx src/routes/index.test.tsx src/features/learning/pages/MyCoursesPage.test.tsx src/shared/components/presentation.test.tsx
+npm run test -- src/routes/index.test.tsx src/features/assessment src/shared/api/httpClient.test.ts src/shared/components/MarkdownRenderer.test.tsx src/features/instructor/grading src/features/instructor/course-management src/features/auth src/features/learning src/features/catalogue src/shared/components/presentation.test.tsx src/app/preview
+npm run test -- src/features/instructor/course-management src/features/instructor/grading src/routes/index.test.tsx src/features/assessment
+npm run test -- src/features/assessment/pages/assignment.test.tsx src/shared/components/presentation.test.tsx
+npm run test -- src/features/assessment/pages/assignment.test.tsx
+npm run test -- src/features/assessment/api/assignmentApi.test.ts
+npm run typecheck
+npm run build
+```
+
+- Offline installs: frontend 230 packages / E2E 5 packages, both exit 0, no dependency/lock change.
+- Initial operation/transport run: **182 PASS / 2 files** after correcting the API
+  test environment from jsdom to Node for native File/FormData/Request serialization.
+  The mixed environments initially lost the test filename/bytes and lacked Blob.text;
+  real browsers and production transport were not changed to fit the test.
+- Component/route/membership/presentation run: **340 PASS / 4 files**.
+- Broad affected-consumer run before FE16 main advance: **1,085 PASS / 21 files**.
+- Post-FE16 integration affected-owner/route/assessment run: **799 PASS / 12 files**.
+- After the Download viewport correction: **119 PASS / 2 files**.
+- Final added concurrent grading/replacement reconciliation case: **32 PASS** in
+  assignment.test.tsx; API boundary suite including invalid explicit status sets:
+  **65 PASS**. Those cases overlap the earlier runs and are not additive evidence.
+- Final corrected affected API/component/route/preview/transport/Markdown run:
+  **621 PASS / 7 files**, exit 0; counts overlap prior executions.
+- Final type-only reuse of existing AS09 wire types and explicit empty-file
+  component coverage: **97 PASS / 2 files**; production bundle remains
+  `index-BGDGgHqa.js` (no runtime change after the final real E2E).
+- Typecheck and production build: **PASS**, including after integrating main.
+  Vite reports the existing >500 kB chunk warning; no assertion or build is suppressed.
+- Test authoring corrections: timezone assertion now uses the actual explicit
+  display timezone; route denial expects the actual shared access-denied copy;
+  Vitest array cases are wrapped so the invalid status-set array is not expanded
+  into unrelated numeric arguments. None changes an implementation oracle to
+  accept defective behavior. A combined final run containing the last two
+  misbound table cases is recorded as failed, with the corrected 65-case suite
+  then passing separately. jsdom also emits existing unsupported document-navigation
+  diagnostics; the tests still complete and their assertions are retained.
+
+### Real disposable backend/PostgreSQL/MinIO verification
+
+From `e2e/` (the repository lifecycle acquires isolated ownership before execution):
+
+```bash
+npm ci --ignore-scripts --offline
+npm test -- tests/learner-assignment.spec.ts --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --workers=1
+```
+
+Final run **`cm-e2e-1a21de75c70-825dc5`**, **3 PASS, 0 SKIP, exit 0**, 51.5 seconds:
+Chromium desktop, Chromium mobile emulation, WebKit desktop. Actual production
+Course membership navigation → separately read Assignments → Open → Markdown →
+raw first PDF (201) → protected download with exact bytes → replacement Cancel
+without mutation → confirmed ZIP replacement (200) → exact ZIP download → separate
+Instructor browser context with FE17 protected download and grade-confirmation UI →
+retained exact submittedAt and numeric grade in server read → learner Refresh /
+plain feedback / 85.25 out of 100 → closed Assignment still downloadable → full
+browser reload/session restoration → other enrolled learner cannot download this
+learner's submission (404) → leaving revokes current access (403/rejoin UI).
+Both Choose a file and graded Download bounds are asserted within the initial
+**1280×720 and 390×844** viewport, with no horizontal page overflow.
+No HTTP interception, mocked persistence or substitute storage is used by this test.
+The fixture builds this checkout; real PostgreSQL and initialized private MinIO
+supply committed data and bytes. The lifecycle verified all seven run-owned
+resources absent, temporary build removed and run complete.
+
+Earlier same-command runs: the first run failed all three at the newly authored
+login helper (it sent an extra displayName; the strict API correctly returned 400).
+The helper was corrected to send only email/password. The next run
+`cm-e2e-1a21de1c5bf-2bc5ff` passed 3/3 using the owner grading API. The final run
+above adds the actual FE17 grading UI and viewport regression after main integration.
+These superseded runs are not counted again. Every run used normal lifecycle
+cleanup; no hosted workflow was dispatched, retried, waited on or polled.
+
+### Rendered evidence and self-audit remediation
+
+Playwright CLI task-owned Chrome session `fe11`, isolated local Vite URL printed
+by the process (`http://127.0.0.1:52236`), production S10/S13 with **controlled
+synthetic REST responses**. These observations establish browser presentation
+and interactions, separately from the real fixture test above. Impeccable's context
+engine is not installed; its documented fallback used current DESIGN directly,
+Operate/harden guidance and source/browser inspection. No engine download, skill
+hook, DESIGN rewrite or tool dependency was introduced. No graph exists in the
+checkout, so graphify's documented source-inspection fallback was used.
+
+- S13: widths 320, 360, 390, 768, 1024, 1280, 1440 in Light, Dark and System
+  (21 combinations): no horizontal overflow. Actual shared Theme menu selection;
+  System follows an emulated OS light→dark change (canvas rgb(246,246,247)→rgb(21,23,28)).
+- Keyboard: Tab/Enter opened the native chooser; a synthetic PDF was submitted
+  and reconciled; replacement opened with Cancel focused. The CLI yielded at each
+  native chooser and handled it through `upload`. Escape re-enabled the file control;
+  the immediate DOM-count probe still saw the dialog during its exit transition,
+  so that probe is not reported as a passed dialog-removal assertion.
+- S10: the same seven widths, responsive stacked rows, production Open and route
+  h1 focus. No raw score/grade inferred from summary payloads.
+- No-submission Choose a file: y607.36 / height48 at 390×844;
+  y625.78 / height48 at 1280×720; visible without scrolling even with long instructions.
+- **SA-01 (P2), confirmed and fixed:** graded content originally preceded the
+  current file action. Download was y892.05 at 1280×720 and y852.83 at 390×844,
+  outside both viewports. Move the submission action before grade/instructions;
+  remove the nested stat tile. Final y537.69 / height48 and y527.27 / height48,
+  respectively. Component order regression and real E2E viewport assertions pass.
+- CSS `zoom:2` at 1280 gives document scroll width1675, traced to inherited shared
+  header elements; **main content itself does not overflow**. CSS zoom leaves media
+  queries at the unzoomed width and is not native browser zoom. This failed
+  emulation is retained as a limitation; it is not a passed 200% browser-zoom
+  check or proof of a new production FE11 defect. Native toolbar zoom and screen
+  reader verification remain unexecuted. Normal 320 px reflow passes.
+
+The final author audit re-read the current Issue criteria, consumed contracts,
+current-main DESIGN, complete effective PR and integrated consumers. The incoming
+upload/status/decoder/download/lifecycle/Markdown/route/list findings are remediated.
+No confirmed actionable FE11-owned implementation defect remains after the focused
+corrections. The FE08 production destination and FE10 full quiz flow are explicitly
+excluded upstream integration work, not silently marked complete.
+
+### Evidence limits and remaining gates
+
+Backend implementation is unchanged, so unrelated backend/Adaptive/Admin/deployment/
+recovery suites are omitted. Existing consumed AS09/SH05 behavior is exercised by
+the narrowly scoped real browser/storage test instead of rerunning the full backend
+matrix. Firefox, physical phones, VoiceOver/NVDA, native browser zoom, load/race
+matrices against real storage and full CT19/QA08 are unexecuted; component doubles
+cover deterministic uncertainty/ordering races and do not prove their real database
+interleavings. The inherited CT19 fixture policy discrepancy documented in FE14's
+record is not changed or accepted here. No claim of notification delivery, operational
+acceptance, protected merge readiness, release or deployment is made.
+
+The new test files' structural authority and task-specific purpose are recorded
+in `docs/repository-structure.md`. All other modified files serve the consumed
+Assignment client/lifecycle/presentation, bounded FE10 summary seam, production
+route/navigation or traceable test/decision evidence. No backend/API/CI/dependency,
+Issue checklist, Project field or unrelated PR branch is modified. The required
+independent CODEOWNER/QA review, live hosted checks and protected integration remain.
+
+### FE11 implementation revision and handoff anchor
+
+Implementation commit: **`98c6fd14f57922df5d4c04faf6e620e084d3b1bc`**.
+The working tree exercised by the final focused runs/build is identical to this
+commit's production and test files. Final changes after the real E2E were type-only
+aliases to main's existing AS09 wire types and an additional empty-file component
+assertion; 97 tests and build passed afterwards, with the identical production
+bundle hash. This follow-up changes documentation only; prior results are not
+represented as another execution. The effective PR remains based on main `99abc407`.
+
+Final task verdict: **FE11_OWNED_CODE_COMPLETE_UPSTREAM_INTEGRATION_BLOCKED**.
+FE11-owned implementation is code complete under the explicit task; complete
+production integration including Related Lesson still requires FE08 #193 / #286.
+S10 Assignments, S13, shared transport compatibility and the real submission/
+Instructor grading/result/download journey have author evidence. Full FE10 Quiz
+attempt integration, independent review/QA, hosted checks and protected merge are
+separate. Review should concentrate on the operation-specific status set, strict
+runtime decoding, mutation/reconciliation/session ordering, S10 shared ownership
+and retained upstream destination gates. No self-approval, merge, release or
+application deployment is authorized or performed.
+
+## FE11 targeted IR-01/IR-02 remediation — 28 November 2026
+
+Authority: the Project Leader's explicit “Targeted Remediation — FE11-IR-01 &
+FE11-IR-02” task, including implementation, regression tests, author self-audit,
+documentation, commit and ordinary fast-forward publication to PR #305. Refs #196;
+the existing bounded FE10 #195 handoff is retained. Codex performed this work.
+
+### Baseline and independent history
+
+Incoming/reviewed HEAD: `75b6db7f6c2ed21182806c2f859264e581088908`; live main and
+merge-base: `99abc4072b9893971d7cf15fe3174b25b3da63b9`, six ahead/zero behind.
+A fresh isolated clone preserved existing checkouts. No incoming delta or main
+integration was necessary. Both findings remained reproducible. The independent
+**REQUEST_CHANGES** verdict on that revision remains historical evidence; the
+27 November author code-complete claim above was superseded by that review.
+Author remediation does not independently close it.
+
+The complete prior independent report was recovered from its Codex chat. The
+reviewer's `fe11-review-evidence.zip` and `review-integrity.json` were accessible;
+original `probes/lifecycle-required.test.tsx`, observational sources and logs were
+inspected. The unmodified desired-invariant source (only import paths adapted to
+the isolated clone) reproduced **7 failures / 2 passing controls** before changes,
+and passed **9/9** afterwards. These are recovered probes, not reconstructed cases.
+The observational suite asserts obsolete admission as its expected result; it was
+inspected, not misreported as a post-fix success suite.
+
+### Corrections and author dispositions
+
+- **FE11-IR-01 — FIXED_AUTHOR_VERIFIED.** The old render-written `snapshot` could
+  remain eligible after GET settlement released the read reservation. Every hook
+  transition now synchronously publishes one authoritative State object before
+  calling `setState`. Read initiation installs loading/checking; accepted success
+  installs current data; failure clears data and installs error before release.
+  Controller/sequence/resource/session checks still reject obsolete settlements.
+  Rendering never writes authority. A layout-effect acknowledgement records only
+  a matching committed publication; invocation additionally requires the callback's
+  State object to match that publication. Thus even fast PUT/GET settlement cannot
+  admit an action before the reloaded file and uncertainty notice are presented.
+- The production file-change handler uses the same invocation guard. Replacement
+  selection captures filename and the exact opaque submitted-time string; dialog
+  copy uses that captured evidence. Current eligibility and matching evidence gate
+  the dialog, and refresh/closure/grading/error withdraws it. Old confirmation
+  callbacks fail at the hook; repeated confirmation cannot obtain another mutation
+  reservation. No `Date` conversion is applied to the token.
+- **FE11-IR-02 — FIXED_AUTHOR_VERIFIED.** Remove feature 400/415 explanations and
+  consume the shared safe `ApiError.message`: 400 without admitted fields is
+  `Please check the supplied information.`; 415 is
+  `The request could not be completed.`. Preserve exact 413 copy and 409 wording
+  derived from reloaded graded/open state, including neutral eligible-state
+  conflict recovery. No shared transport/error allowlist was changed.
+- **Adjacent author finding SA-R1 — FIXED_AUTHOR_VERIFIED.** A captured Cancel
+  callback read the current mutation ref and could abort a later upload, including
+  after resource replacement in a reused hook. Two deterministic tests reproduced
+  it before correction. Cancel now checks current identity and the exact controller
+  captured for its rendered operation. This is bounded to the same hook.
+
+### Deterministic regression and transition matrix
+
+All committed cases live in the existing `assignment.test.tsx`. Deferred promises,
+React `act` scopes and the existing deadline scheduler preserve settlement before
+commit; no arbitrary delay, early forced render or weakened dispatch assertion is
+used. The production deadline cases drain the original probe's eight promise
+microtasks while the old file input/confirmation button is still displayed.
+
+| Ordering / protected invariant | Incoming execution | Remediated execution |
+| --- | --- | --- |
+| Reviewer refresh success closed / failure / newly existing submission, old callback before commit | 3 failures: actual PUT dispatched | 3 pass: zero PUT; deliberate successful read recovers legitimate submission |
+| Reviewer first PUT + reconciliation complete, old null-token callback before commit | Failure: second unconfirmed PUT | Pass: exactly one PUT; new confirmed replacement still works |
+| Reviewer production deadline GET then file-change before closed/replacement/failure commits | 3 failures: actual PUT dispatched | 3 pass: zero PUT and no replacement dialog from obsolete selection |
+| Reviewer controls: committed closure; pending server work after cancelled response | Both pass | Both pass; cancellation still does not promise rollback or cause replay |
+| Stale hook confirmation after closed/graded/error/changed/same read evidence | 5 failures | 5 pass; new callback required even if token unchanged; adjacent microseconds remain distinct |
+| Uncertain network/unusable-success/cancelled settlement then GET before presentation | 3 failures | 3 pass: no second PUT until committed evidence and deliberate action |
+| Obsolete production confirmation event after closed/graded/changed/error/same read | 5 failures | 5 pass: zero PUT; no silent filename substitution |
+| Shared safe 400/415 fallback | 2 failures | 2 pass |
+| Obsolete Cancel against newer same-resource/different-resource upload | 2 failures | 2 pass; newer signal remains un-aborted |
+| Active/superseded read cleanup; older read failure versus newer ready data; StrictMode read cleanup; old-route mutation cleanup; logout/unmount; exact 413; neutral 409; duplicate production confirmation | Pass | Pass |
+
+The committed **66-case** suite (32 existing + 34 added) ran against the baseline
+production source in another isolated clone: **24 failed / 42 passed, no unhandled
+errors**. The same test file on the final implementation: **66 passed**. The 24
+failures comprise 7 original invariants, 5 stale hook confirmations, 3 uncertainty
+publication cases, 5 production confirmation events, 2 fallback cases and 2 Cancel
+cases. The 42 passing controls include all 32 original tests. An initial baseline
+harness version awaited a deliberately never-settling erroneous PUT and timed out,
+contaminating later cases; it was corrected to assert the dispatch count before
+awaiting rejection. Those initial 25 failures/3 errors are not regression evidence.
+The final baseline log above is the valid sensitivity result.
+
+### Executed checks and evidence boundaries
+
+Commands from `frontend/` unless stated otherwise; logs retained with the task's
+external evidence bundle. Node 24.21.0 / npm 11.19.0. Existing node_modules were
+copied only after lockfile byte equality; `npm ls --depth=0` passed. No dependency
+installation or manifest/lockfile change.
+
+```text
+npm run test -- src/features/assessment/pages/assignment.test.tsx --reporter=verbose
+# 66 passed, final code including operation-bound Cancel
+npm run test -- src/features/assessment/api/assignmentApi.test.ts src/shared/api/httpClient.test.ts src/routes/index.test.tsx
+# 393 passed / 3 files; API/transport unchanged by subsequent Cancel correction
+npm run test -- src/routes/index.test.tsx
+# 207 passed on final code after Cancel correction (overlaps the prior 393)
+npm run typecheck
+npm run build
+# Pass on final code; existing >500 kB Vite warning remains
+
+# External recovered probe, work/ directory:
+./remediation/frontend/node_modules/.bin/vitest run --config probes/vitest.config.ts probes/lifecycle-required.test.tsx --reporter=verbose
+# 9 passed on final code; 7 failed / 2 controls passed on incoming code
+
+# e2e/, lifecycle-owned disposable fixture, never an external/production environment:
+npm test -- tests/learner-assignment.spec.ts --project=chromium-desktop --workers=1
+```
+
+An initial real smoke on the admission/dialog correction passed **1/1, 0 skipped**,
+run `cm-e2e-1a21e1e83c1-d940ea`, 28.7 seconds. PostgreSQL/MinIO-backed production
+navigation, PDF 201, Cancel without replacement, explicit ZIP replacement 200,
+reloaded current file, exact binary download, Instructor grading, graded/closed
+exclusion, reload, other-learner denial and left-course 403 passed. All seven owned
+resources, preview process and temporary build were verified absent. A final-code
+smoke after SA-R1 is recorded in the publication anchor below.
+
+The final self-audit inspected every authority write, reservation/sequence update,
+settlement guard, publication acknowledgement and confirmation transition. It
+covered before-render read initiation, success and failure, mutation-to-GET
+handoff (synchronous, with authority still uploading until checking is installed),
+GET settlement before presentation, stale cleanup and withdrawn confirmation.
+No related actionable defect remains in author verification. Unknown outcomes
+still require reloading and a deliberate action; a successful GET is not a barrier
+for an earlier server transaction whose response was lost. The frontend token is
+not a backend CAS condition. No unsupported guarantee against another session's
+replacement, automatic retry, flushSync, arbitrary waiting, persistent File, API
+extension or permanent lockout was introduced.
+
+Only `useAssignment.ts`, `AssignmentDetailPage.tsx`, `assignment.test.tsx`,
+`docs/testing.md` and `docs/setup.md` change relative to the reviewed baseline.
+The other 12 previously reviewed changed files remain byte-identical, including
+shared transport, Assignment client/decoder, bounded FE10 summary client/types/S10,
+S10/S13 routes/navigation, real E2E and structure authority. Protected-file transport,
+Markdown, theme and SA-01 Download placement remain intact. FE14/FE16/FE17 source,
+backend/OpenAPI/storage policy, dependencies and CI/protections are unchanged.
+
+Full backend, unrelated feature suites, all browser projects and the seven-width /
+three-theme matrix were omitted because those source/presentation areas are
+unchanged and the focused real production journey covers the affected seam.
+Previous independent protected-byte/Unicode, shared-consumer and theme evidence
+remains **previous evidence**, not new execution. Screen readers, native zoom,
+physical devices and complete QA08/CT19 remain unqualified. Hosted CI is not waited
+on or polled. FE08 Related Lesson remains upstream-blocked; FE10 retains its full
+attempt integration and three-file consolidation handoff. Independent narrow
+rereview, eligible CODEOWNER approval, required protected CI, QA and protected
+integration remain separate; no merge, release or deployment was performed.
+
+Final-code real smoke: **1 passed / 0 skipped**, 26.6 seconds, run
+`cm-e2e-1a21e204563-d1bbfe`. The same production journey above passed after SA-R1;
+all seven owned resources were verified absent, the preview exited and the temporary
+build was removed. No browser-specific risk justified repeating the other projects.
+
+### Remediation revision and narrow-review handoff
+
+Implementation revision: **`78e2697e1432260281a332e69ee04ee633b06bcc`**. Its production
+and test files are byte-identical to the working tree used by the final 66-case
+assignment run, 207-route run and typecheck. The recovered 9-case probe, build and
+final real smoke used the same production files; one additional duplicate-confirm
+control was appended afterwards and passed with the final 66-case suite/typecheck.
+This publication anchor changes documentation only; it is not another test run.
+
+Final author verdict: **FE11_TARGETED_REMEDIATION_COMPLETE_AUTHOR_VERIFIED**.
+FE11-IR-01 and FE11-IR-02: **FIXED_AUTHOR_VERIFIED**. No independent `VERIFIED_FIXED`
+claim is made. FE11-owned code completeness is restored under author verification;
+whole-Issue/upstream delivery and the previous independent REQUEST_CHANGES still
+require their separate gates. Recommended next step: **Final Narrow Delta-focused
+Independent Review — FE11-IR-01 & FE11-IR-02, Synchronous Mutation Admission,
+Replacement Confirmation Integrity and Contract-Compliant Error Recovery
+Preservation**, including SA-R1's operation-bound Cancel regressions.
