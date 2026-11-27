@@ -715,6 +715,15 @@ public class AttemptService {
         }
     }
 
+    /**
+     * Assessment-internal companion preserving ADR007 §16 ({@code AttemptService} as the sole caller
+     * of {@code SkillGraphService.requireAssessmentSkillsInCourse}) inside active execution scope.
+     */
+    void requireExecutionSkillsInCourse(UUID courseId, Set<UUID> skillIds) {
+        requireExecutionScope(courseId);
+        skillGraph.requireAssessmentSkillsInCourse(courseId, skillIds);
+    }
+
     private AttemptResult gradeAndFinalize(UUID courseId,
                                            Quiz quiz,
                                            Attempt attempt,

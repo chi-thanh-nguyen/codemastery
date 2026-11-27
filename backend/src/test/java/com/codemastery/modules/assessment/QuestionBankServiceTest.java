@@ -32,19 +32,37 @@ import com.codemastery.common.exception.GlobalExceptionHandler;
 import com.codemastery.common.exception.ResourceNotFoundException;
 import com.codemastery.modules.assessment.api.controller.QuestionBankController;
 import com.codemastery.modules.assessment.api.dto.QuestionRequest;
+import com.codemastery.modules.assessment.application.service.AttemptService;
 import com.codemastery.modules.assessment.application.service.QuestionBankService;
+import com.codemastery.modules.assessment.application.service.QuestionBankService.CoverageSnapshot;
 import com.codemastery.modules.assessment.application.service.QuestionBankService.QuestionInput;
 import com.codemastery.modules.assessment.application.service.QuestionBankService.QuestionView;
+import com.codemastery.modules.assessment.application.service.QuizGradingService;
+import com.codemastery.modules.assessment.domain.model.Attempt;
+import com.codemastery.modules.assessment.domain.model.AttemptAnswer;
 import com.codemastery.modules.assessment.domain.model.Question;
+import com.codemastery.modules.assessment.domain.model.Quiz;
 import com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService;
+import com.codemastery.modules.assessment.domain.repository.AttemptRepository;
 import com.codemastery.modules.assessment.domain.repository.QuestionRepository;
+import com.codemastery.modules.assessment.domain.repository.QuizRepository;
+import com.codemastery.modules.assessment.domain.repository.QuizRepository.Member;
+import com.codemastery.modules.auth.application.service.UserAccountService;
+import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
 import com.codemastery.modules.course.application.service.CourseAccessService;
 import com.codemastery.modules.course.application.service.CourseManagementService;
 import java.lang.reflect.Method;
+import java.lang.reflect.RecordComponent;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -56,6 +74,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.AccessDeniedException;
@@ -761,6 +780,212 @@ class QuestionBankServiceTest {
                     .andReturn().getResponse().getContentAsString();
             assertFalse(body.contains("CT40"));
             assertNotEquals(-1, body.indexOf("An unexpected error occurred."));
+        }
+    }
+
+    @Nested
+    class As18CoverageLookup {
+
+        @Test
+        void coverageSnapshotIsNestedDeeplyImmutableAndEnforcesInvariantsWithoutAnswerKeys() {
+            assertEquals(List.of("UUID courseId", "Map questionCounts"),
+                    Arrays.stream(CoverageSnapshot.class.getRecordComponents())
+                            .map(c -> c.getType().getSimpleName() + " " + c.getName())
+                            .toList());
+
+            Map<UUID, Long> mutable = new HashMap<>();
+            mutable.put(skillId, 2L);
+            mutable.put(otherSkillId, 0L);
+            CoverageSnapshot snapshot = new CoverageSnapshot(courseId, mutable);
+            mutable.put(foreignSkillId, 9L);
+
+            assertEquals(courseId, snapshot.courseId());
+            assertEquals(Map.of(skillId, 2L, otherSkillId, 0L), snapshot.questionCounts());
+            assertThrows(UnsupportedOperationException.class, () -> snapshot.questionCounts().put(foreignSkillId, 1L));
+
+            assertThrows(NullPointerException.class, () -> new CoverageSnapshot(null, Map.of()));
+            assertThrows(NullPointerException.class, () -> new CoverageSnapshot(courseId, null));
+            Map<UUID, Long> nullKey = new HashMap<>();
+            nullKey.put(null, 1L);
+            assertThrows(NullPointerException.class, () -> new CoverageSnapshot(courseId, nullKey));
+            Map<UUID, Long> nullVal = new HashMap<>();
+            nullVal.put(skillId, null);
+            assertThrows(NullPointerException.class, () -> new CoverageSnapshot(courseId, nullVal));
+            assertThrows(IllegalArgumentException.class, () -> new CoverageSnapshot(courseId, Map.of(skillId, -1L)));
+        }
+
+        @Test
+        void readCoverageEnforcesOwnershipSnapshotScopeExactZeroCountsAndIntegrity() throws Exception {
+            Method readCoverage = QuestionBankService.class.getMethod("readCoverage", UUID.class, Set.class);
+            Transactional tx = readCoverage.getAnnotation(Transactional.class);
+            assertNotNull(tx);
+            assertTrue(tx.readOnly());
+            assertEquals(Isolation.REPEATABLE_READ, tx.isolation());
+
+            QuestionBankService production = new QuestionBankService(questions, access, guard, skillGraph);
+            assertThrows(IllegalArgumentException.class, () -> production.readCoverage(null, Set.of(skillId)));
+            verifyNoInteractions(access, skillGraph, questions);
+
+            doThrow(new AccessDeniedException("Denied")).when(access).requireCourseOwnership(courseId);
+            assertThrows(AccessDeniedException.class, () -> production.readCoverage(courseId, null));
+            assertThrows(AccessDeniedException.class, () -> production.readCoverage(courseId, Set.of(skillId)));
+            verifyNoInteractions(skillGraph, questions);
+
+            org.mockito.Mockito.reset(access);
+            Set<UUID> withNull = new java.util.HashSet<>();
+            withNull.add(skillId);
+            withNull.add(null);
+            assertThrows(IllegalArgumentException.class, () -> production.readCoverage(courseId, null));
+            assertThrows(IllegalArgumentException.class, () -> production.readCoverage(courseId, withNull));
+            verifyNoInteractions(skillGraph, questions);
+
+            CoverageSnapshot empty = production.readCoverage(courseId, Set.of());
+            assertEquals(courseId, empty.courseId());
+            assertEquals(Map.of(), empty.questionCounts());
+            verifyNoInteractions(skillGraph, questions);
+
+            when(skillGraph.readSkillIds(courseId)).thenReturn(List.of(skillId, otherSkillId));
+            assertThrows(ResourceNotFoundException.class,
+                    () -> production.readCoverage(courseId, Set.of(skillId, foreignSkillId)));
+            verifyNoInteractions(questions);
+
+            Question q1 = new Question(UUID.randomUUID(), skillId, "P1", "single_choice", "easy",
+                    new String[] {"A", "B"}, new Boolean[] {true, false});
+            Question q2 = new Question(UUID.randomUUID(), skillId, "P2", "multiple_choice", "medium",
+                    new String[] {"A", "B", "C"}, new Boolean[] {true, false, true});
+            Question q3 = new Question(UUID.randomUUID(), skillId, "P3", "true_false", "hard",
+                    new String[] {"True", "False"}, new Boolean[] {false, true});
+            when(questions.findAllInSkills(Set.of(skillId, otherSkillId))).thenReturn(List.of(q1, q2, q3));
+
+            CoverageSnapshot counts = production.readCoverage(courseId, Set.of(skillId, otherSkillId));
+            assertEquals(Map.of(skillId, 3L, otherSkillId, 0L), counts.questionCounts());
+
+            // Corrupt stored definition, unexpected skill, or duplicate question ID must fail closed.
+            Question blankPrompt = new Question(UUID.randomUUID(), skillId, "   ", "single_choice", "easy",
+                    new String[] {"A", "B"}, new Boolean[] {true, false});
+            when(questions.findAllInSkills(Set.of(skillId))).thenReturn(List.of(blankPrompt));
+            assertThrows(IllegalStateException.class, () -> production.readCoverage(courseId, Set.of(skillId)));
+
+            Question unexpectedSkill = new Question(UUID.randomUUID(), foreignSkillId, "P4", "single_choice", "easy",
+                    new String[] {"A", "B"}, new Boolean[] {true, false});
+            when(questions.findAllInSkills(Set.of(skillId))).thenReturn(List.of(unexpectedSkill));
+            assertThrows(IllegalStateException.class, () -> production.readCoverage(courseId, Set.of(skillId)));
+
+            when(questions.findAllInSkills(Set.of(skillId))).thenReturn(List.of(q1, q1));
+            assertThrows(IllegalStateException.class, () -> production.readCoverage(courseId, Set.of(skillId)));
+        }
+
+        @Test
+        void readCoverageForExecutionEnforcesExecutionScopeAndActorlessCt40Boundary() throws Exception {
+            Method execMethod = QuestionBankService.class.getMethod("readCoverageForExecution", UUID.class, Set.class);
+            assertNull(execMethod.getAnnotation(Transactional.class),
+                    "readCoverageForExecution must join AttemptService's READ_COMMITTED callback without overriding tx metadata");
+
+            AttemptRepository attempts = mock(AttemptRepository.class);
+            QuizRepository quizzes = mock(QuizRepository.class);
+            UserAccountService identities = mock(UserAccountService.class);
+            AttemptService attemptService = new AttemptService(
+                    attempts, quizzes, new QuizGradingService(), access, identities, guard, skillGraph,
+                    Clock.fixed(Instant.parse("2026-11-26T10:00:00Z"), ZoneOffset.UTC),
+                    event -> {});
+            QuestionBankService executionBank = new QuestionBankService(
+                    questions, access, guard, skillGraph, attemptService);
+
+            // Outside execution scope: fail before touching access, skillGraph, or questions.
+            assertThrows(IllegalStateException.class,
+                    () -> executionBank.readCoverageForExecution(courseId, Set.of(skillId)));
+            verifyNoInteractions(access, skillGraph, questions);
+
+            // Inside active execution scope triggered via AttemptService.submit:
+            UUID learnerId = UUID.randomUUID();
+            UUID quizId = UUID.randomUUID();
+            UUID attemptId = UUID.randomUUID();
+            Question quizQ = new Question(questionId, skillId, "Q1", "single_choice", "easy",
+                    new String[] {"A", "B"}, new Boolean[] {true, false});
+            Instant start = Instant.parse("2026-11-26T09:55:00Z");
+            Instant expires = Instant.parse("2026-11-26T10:05:00Z");
+            Quiz publishedQuiz = new Quiz(quizId, courseId, "Practice", "practice", 600, "published");
+            Attempt activeAttempt = new Attempt(attemptId, learnerId, quizId, 1, start, expires, null, null);
+            AttemptAnswer captured = new AttemptAnswer(UUID.randomUUID(), attemptId, questionId, 1,
+                    new Boolean[] {false, false}, null);
+
+            var txManager = new org.springframework.transaction.support.AbstractPlatformTransactionManager() {
+                @Override protected Object doGetTransaction() { return new Object(); }
+                @Override protected void doBegin(Object transaction, org.springframework.transaction.TransactionDefinition definition) {}
+                @Override protected void doCommit(org.springframework.transaction.support.DefaultTransactionStatus status) {}
+                @Override protected void doRollback(org.springframework.transaction.support.DefaultTransactionStatus status) {}
+            };
+            var writeTx = new org.springframework.transaction.support.TransactionTemplate(txManager);
+            writeTx.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+
+            when(identities.requireCurrentIdentity())
+                    .thenReturn(new CurrentIdentity(learnerId, UserAccountService.IdentityRole.LEARNER));
+            when(guard.withLearnerAssessmentWrite(eq(courseId), any()))
+                    .thenAnswer(inv -> writeTx.execute(status -> inv.<Supplier<?>>getArgument(1).get()));
+            when(quizzes.findInCourseForUpdate(quizId, courseId)).thenReturn(Optional.of(publishedQuiz));
+            when(quizzes.findMembers(List.of(quizId))).thenReturn(Map.of(quizId, List.of(new Member(1, quizQ))));
+            when(attempts.findInQuizForUpdate(attemptId, quizId)).thenReturn(Optional.of(activeAttempt));
+            AttemptAnswer graded = new AttemptAnswer(captured.id(), attemptId, questionId, 1,
+                    new Boolean[] {true, false}, true);
+            when(attempts.findAnswersInPositionOrderForUpdate(attemptId))
+                    .thenReturn(List.of(captured), List.of(graded));
+            when(attempts.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(questions.findAllInSkills(Set.of(skillId, otherSkillId))).thenReturn(List.of(quizQ));
+            doThrow(new IllegalStateException("foreign skill"))
+                    .when(skillGraph).requireAssessmentSkillsInCourse(courseId, Set.of(skillId, foreignSkillId));
+
+            List<CoverageSnapshot> observed = new ArrayList<>();
+            AttemptService scopedService = new AttemptService(
+                    attempts, quizzes, new QuizGradingService(), access, identities, guard, skillGraph,
+                    Clock.fixed(Instant.parse("2026-11-26T10:00:00Z"), ZoneOffset.UTC),
+                    event -> {
+                        // Wrong Course scope must fail before queries
+                        assertThrows(IllegalStateException.class,
+                                () -> executionBank.readCoverageForExecution(UUID.randomUUID(), Set.of(skillId)));
+                        // Null identifiers inside scope -> IllegalArgumentException
+                        assertThrows(IllegalArgumentException.class,
+                                () -> executionBank.readCoverageForExecution(courseId, null));
+                        // Foreign skill -> IllegalStateException
+                        assertThrows(IllegalStateException.class,
+                                () -> executionBank.readCoverageForExecution(courseId, Set.of(skillId, foreignSkillId)));
+                        // Empty skill set inside execution scope -> empty snapshot without querying questions
+                        assertEquals(Map.of(), executionBank.readCoverageForExecution(courseId, Set.of()).questionCounts());
+                        // Valid requested skills -> exact counts including 0L
+                        observed.add(executionBank.readCoverageForExecution(courseId, Set.of(skillId, otherSkillId)));
+                    });
+
+            scopedService.submit(courseId, quizId, attemptId,
+                    new AttemptService.AnswersInput(List.of(new AttemptService.AnswerInput(questionId, List.of(true, false)))));
+
+            assertEquals(1, observed.size());
+            assertEquals(Map.of(skillId, 1L, otherSkillId, 0L), observed.getFirst().questionCounts());
+            // Execution path is actorless: must never require Instructor ownership!
+            verify(access, never()).requireCourseOwnership(any());
+            // Marker unbound after submit returns: calling readCoverageForExecution must fail closed again.
+            assertThrows(IllegalStateException.class,
+                    () -> executionBank.readCoverageForExecution(courseId, Set.of(skillId)));
+        }
+
+        @Test
+        void coverageBoundariesAreNotExposedViaAssessmentApiOrUnapprovedCallers() throws Exception {
+            var root = java.nio.file.Path.of("src", "main", "java");
+            Set<String> allowedExecutionCallers = Set.of("MasteryUpdateService.java", "AdaptiveDecisionService.java");
+            try (var files = java.nio.file.Files.walk(root)) {
+                for (var file : files.filter(path -> path.toString().endsWith(".java")).toList()) {
+                    String normalized = file.toString().replace('\\', '/');
+                    String code = java.nio.file.Files.readString(file);
+                    if (normalized.contains("/modules/assessment/api/")) {
+                        assertFalse(code.contains("CoverageSnapshot"), file + ": API boundary must not expose CoverageSnapshot");
+                        assertFalse(code.contains("readCoverage"), file + ": API boundary must not call readCoverage");
+                        assertFalse(code.contains("readCoverageForExecution"),
+                                file + ": API boundary must not call readCoverageForExecution");
+                    }
+                    if (code.contains(".readCoverageForExecution(")) {
+                        assertTrue(allowedExecutionCallers.contains(file.getFileName().toString()),
+                                file + ": unapproved caller of readCoverageForExecution");
+                    }
+                }
+            }
         }
     }
 }

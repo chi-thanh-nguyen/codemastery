@@ -12,13 +12,17 @@ import com.codemastery.modules.course.application.service.CourseManagementServic
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
@@ -70,10 +74,43 @@ public class QuestionBankService {
         }
     }
 
+    /**
+     * Deeply immutable per-skill question count snapshot returned by CT40.coverage (ADR005 §3.3)
+     * and execution-only coverage lookups (ADR011 §§4, 12); contains no answer keys.
+     */
+    public record CoverageSnapshot(UUID courseId, Map<UUID, Long> questionCounts) {
+        public CoverageSnapshot {
+            Objects.requireNonNull(courseId, "courseId");
+            Objects.requireNonNull(questionCounts, "questionCounts");
+            Map<UUID, Long> normalized = new HashMap<>(questionCounts.size());
+            for (var entry : questionCounts.entrySet()) {
+                UUID skill = Objects.requireNonNull(entry.getKey(), "skillId");
+                Long count = Objects.requireNonNull(entry.getValue(), "questionCount");
+                if (count < 0) {
+                    throw new IllegalArgumentException("questionCount must be non-negative");
+                }
+                normalized.put(skill, count);
+            }
+            questionCounts = Map.copyOf(normalized);
+        }
+    }
+
     private final QuestionRepository questions;
     private final CourseAccessService courseAccess;
     private final CourseManagementService courseConfiguration;
     private final SkillGraphService skillGraph;
+    private final AttemptService attemptService;
+
+    @Autowired
+    public QuestionBankService(QuestionRepository questions, CourseAccessService courseAccess,
+                               CourseManagementService courseConfiguration, SkillGraphService skillGraph,
+                               AttemptService attemptService) {
+        this.questions = Objects.requireNonNull(questions, "questions");
+        this.courseAccess = Objects.requireNonNull(courseAccess, "courseAccess");
+        this.courseConfiguration = Objects.requireNonNull(courseConfiguration, "courseConfiguration");
+        this.skillGraph = Objects.requireNonNull(skillGraph, "skillGraph");
+        this.attemptService = Objects.requireNonNull(attemptService, "attemptService");
+    }
 
     public QuestionBankService(QuestionRepository questions, CourseAccessService courseAccess,
                                CourseManagementService courseConfiguration, SkillGraphService skillGraph) {
@@ -81,6 +118,7 @@ public class QuestionBankService {
         this.courseAccess = Objects.requireNonNull(courseAccess, "courseAccess");
         this.courseConfiguration = Objects.requireNonNull(courseConfiguration, "courseConfiguration");
         this.skillGraph = Objects.requireNonNull(skillGraph, "skillGraph");
+        this.attemptService = null;
     }
 
     public QuestionView create(UUID courseId, QuestionInput input) {
@@ -150,6 +188,71 @@ public class QuestionBankService {
         List<QuestionView> content = (long) page * size >= total ? List.of()
                 : questions.findPageInSkills(skillIds, page, size).stream().map(this::toView).toList();
         return new PageResponse<>(content, page, size, total);
+    }
+
+    /**
+     * CT40.coverage (ADR005 §3.3): owner-scoped distinct valid-question count per requested Course
+     * skill. Joins the Course configuration guard's transaction when called inside it, or runs in a
+     * coherent REPEATABLE READ read-only snapshot otherwise.
+     */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public CoverageSnapshot readCoverage(UUID courseId, Set<UUID> skillIds) {
+        requireId(courseId);
+        courseAccess.requireCourseOwnership(courseId);
+        Set<UUID> requestedSkills = requireNonNullSkillIds(skillIds);
+        if (requestedSkills.isEmpty()) {
+            return new CoverageSnapshot(courseId, Map.of());
+        }
+        Set<UUID> ownedSkills = new HashSet<>(courseSkillIds(courseId));
+        if (!ownedSkills.containsAll(requestedSkills)) {
+            throw unavailable();
+        }
+        return buildCoverageSnapshot(courseId, requestedSkills);
+    }
+
+    /**
+     * ADR011 §§4, 12: actorless execution-only companion of {@link #readCoverage(UUID, Set)},
+     * restricted to Adaptive's in-transaction submission listener inside {@code AttemptService}'s
+     * bound Course execution scope.
+     */
+    public CoverageSnapshot readCoverageForExecution(UUID courseId, Set<UUID> skillIds) {
+        AttemptService.requireExecutionScope(courseId);
+        Set<UUID> requestedSkills = requireNonNullSkillIds(skillIds);
+        if (attemptService == null) {
+            throw new IllegalStateException("Execution skill verification requires AttemptService");
+        }
+        attemptService.requireExecutionSkillsInCourse(courseId, requestedSkills);
+        if (requestedSkills.isEmpty()) {
+            return new CoverageSnapshot(courseId, Map.of());
+        }
+        return buildCoverageSnapshot(courseId, requestedSkills);
+    }
+
+    private CoverageSnapshot buildCoverageSnapshot(UUID courseId, Set<UUID> requestedSkills) {
+        Map<UUID, Long> counts = new LinkedHashMap<>(requestedSkills.size());
+        for (UUID skillId : requestedSkills) {
+            counts.put(skillId, 0L);
+        }
+        List<Question> rows = questions.findAllInSkills(requestedSkills);
+        if (rows == null) {
+            throw new IllegalStateException("Invalid question coverage query result");
+        }
+        Set<UUID> seenQuestionIds = new HashSet<>(rows.size());
+        for (Question question : rows) {
+            QuestionView valid = toView(question);
+            if (!requestedSkills.contains(valid.skillId()) || !seenQuestionIds.add(valid.id())) {
+                throw new IllegalStateException("Stored question coverage projection is inconsistent");
+            }
+            counts.merge(valid.skillId(), 1L, Long::sum);
+        }
+        return new CoverageSnapshot(courseId, counts);
+    }
+
+    private static Set<UUID> requireNonNullSkillIds(Set<UUID> skillIds) {
+        if (skillIds == null || skillIds.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("Skill identifiers must not be null");
+        }
+        return Set.copyOf(skillIds);
     }
 
     /**

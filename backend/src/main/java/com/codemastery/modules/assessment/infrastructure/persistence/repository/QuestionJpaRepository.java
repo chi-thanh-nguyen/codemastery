@@ -27,6 +27,9 @@ public interface QuestionJpaRepository extends JpaRepository<QuestionEntity, UUI
     @Query("SELECT COUNT(q) FROM QuestionEntity q WHERE q.skill_id IN :skillIds")
     long countInSkills(@Param("skillIds") Collection<UUID> skillIds);
 
+    @Query("SELECT q FROM QuestionEntity q WHERE q.skill_id IN :skillIds ORDER BY q.id ASC")
+    List<QuestionEntity> findAllInSkills(@Param("skillIds") Collection<UUID> skillIds);
+
     /** PostgreSQL uuid order equals the lowercase canonical text order; never sort UUIDs in Java. */
     @Query("SELECT q FROM QuestionEntity q WHERE q.skill_id IN :skillIds ORDER BY q.id ASC")
     List<QuestionEntity> findPageInSkills(@Param("skillIds") Collection<UUID> skillIds, Pageable pageable);
