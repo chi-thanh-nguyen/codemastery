@@ -13056,3 +13056,161 @@ separate. Review should concentrate on the operation-specific status set, strict
 runtime decoding, mutation/reconciliation/session ordering, S10 shared ownership
 and retained upstream destination gates. No self-approval, merge, release or
 application deployment is authorized or performed.
+
+## FE11 targeted IR-01/IR-02 remediation — 28 November 2026
+
+Authority: the Project Leader's explicit “Targeted Remediation — FE11-IR-01 &
+FE11-IR-02” task, including implementation, regression tests, author self-audit,
+documentation, commit and ordinary fast-forward publication to PR #305. Refs #196;
+the existing bounded FE10 #195 handoff is retained. Codex performed this work.
+
+### Baseline and independent history
+
+Incoming/reviewed HEAD: `75b6db7f6c2ed21182806c2f859264e581088908`; live main and
+merge-base: `99abc4072b9893971d7cf15fe3174b25b3da63b9`, six ahead/zero behind.
+A fresh isolated clone preserved existing checkouts. No incoming delta or main
+integration was necessary. Both findings remained reproducible. The independent
+**REQUEST_CHANGES** verdict on that revision remains historical evidence; the
+27 November author code-complete claim above was superseded by that review.
+Author remediation does not independently close it.
+
+The complete prior independent report was recovered from its Codex chat. The
+reviewer's `fe11-review-evidence.zip` and `review-integrity.json` were accessible;
+original `probes/lifecycle-required.test.tsx`, observational sources and logs were
+inspected. The unmodified desired-invariant source (only import paths adapted to
+the isolated clone) reproduced **7 failures / 2 passing controls** before changes,
+and passed **9/9** afterwards. These are recovered probes, not reconstructed cases.
+The observational suite asserts obsolete admission as its expected result; it was
+inspected, not misreported as a post-fix success suite.
+
+### Corrections and author dispositions
+
+- **FE11-IR-01 — FIXED_AUTHOR_VERIFIED.** The old render-written `snapshot` could
+  remain eligible after GET settlement released the read reservation. Every hook
+  transition now synchronously publishes one authoritative State object before
+  calling `setState`. Read initiation installs loading/checking; accepted success
+  installs current data; failure clears data and installs error before release.
+  Controller/sequence/resource/session checks still reject obsolete settlements.
+  Rendering never writes authority. A layout-effect acknowledgement records only
+  a matching committed publication; invocation additionally requires the callback's
+  State object to match that publication. Thus even fast PUT/GET settlement cannot
+  admit an action before the reloaded file and uncertainty notice are presented.
+- The production file-change handler uses the same invocation guard. Replacement
+  selection captures filename and the exact opaque submitted-time string; dialog
+  copy uses that captured evidence. Current eligibility and matching evidence gate
+  the dialog, and refresh/closure/grading/error withdraws it. Old confirmation
+  callbacks fail at the hook; repeated confirmation cannot obtain another mutation
+  reservation. No `Date` conversion is applied to the token.
+- **FE11-IR-02 — FIXED_AUTHOR_VERIFIED.** Remove feature 400/415 explanations and
+  consume the shared safe `ApiError.message`: 400 without admitted fields is
+  `Please check the supplied information.`; 415 is
+  `The request could not be completed.`. Preserve exact 413 copy and 409 wording
+  derived from reloaded graded/open state, including neutral eligible-state
+  conflict recovery. No shared transport/error allowlist was changed.
+- **Adjacent author finding SA-R1 — FIXED_AUTHOR_VERIFIED.** A captured Cancel
+  callback read the current mutation ref and could abort a later upload, including
+  after resource replacement in a reused hook. Two deterministic tests reproduced
+  it before correction. Cancel now checks current identity and the exact controller
+  captured for its rendered operation. This is bounded to the same hook.
+
+### Deterministic regression and transition matrix
+
+All committed cases live in the existing `assignment.test.tsx`. Deferred promises,
+React `act` scopes and the existing deadline scheduler preserve settlement before
+commit; no arbitrary delay, early forced render or weakened dispatch assertion is
+used. The production deadline cases drain the original probe's eight promise
+microtasks while the old file input/confirmation button is still displayed.
+
+| Ordering / protected invariant | Incoming execution | Remediated execution |
+| --- | --- | --- |
+| Reviewer refresh success closed / failure / newly existing submission, old callback before commit | 3 failures: actual PUT dispatched | 3 pass: zero PUT; deliberate successful read recovers legitimate submission |
+| Reviewer first PUT + reconciliation complete, old null-token callback before commit | Failure: second unconfirmed PUT | Pass: exactly one PUT; new confirmed replacement still works |
+| Reviewer production deadline GET then file-change before closed/replacement/failure commits | 3 failures: actual PUT dispatched | 3 pass: zero PUT and no replacement dialog from obsolete selection |
+| Reviewer controls: committed closure; pending server work after cancelled response | Both pass | Both pass; cancellation still does not promise rollback or cause replay |
+| Stale hook confirmation after closed/graded/error/changed/same read evidence | 5 failures | 5 pass; new callback required even if token unchanged; adjacent microseconds remain distinct |
+| Uncertain network/unusable-success/cancelled settlement then GET before presentation | 3 failures | 3 pass: no second PUT until committed evidence and deliberate action |
+| Obsolete production confirmation event after closed/graded/changed/error/same read | 5 failures | 5 pass: zero PUT; no silent filename substitution |
+| Shared safe 400/415 fallback | 2 failures | 2 pass |
+| Obsolete Cancel against newer same-resource/different-resource upload | 2 failures | 2 pass; newer signal remains un-aborted |
+| Active/superseded read cleanup; older read failure versus newer ready data; StrictMode read cleanup; old-route mutation cleanup; logout/unmount; exact 413; neutral 409; duplicate production confirmation | Pass | Pass |
+
+The committed **66-case** suite (32 existing + 34 added) ran against the baseline
+production source in another isolated clone: **24 failed / 42 passed, no unhandled
+errors**. The same test file on the final implementation: **66 passed**. The 24
+failures comprise 7 original invariants, 5 stale hook confirmations, 3 uncertainty
+publication cases, 5 production confirmation events, 2 fallback cases and 2 Cancel
+cases. The 42 passing controls include all 32 original tests. An initial baseline
+harness version awaited a deliberately never-settling erroneous PUT and timed out,
+contaminating later cases; it was corrected to assert the dispatch count before
+awaiting rejection. Those initial 25 failures/3 errors are not regression evidence.
+The final baseline log above is the valid sensitivity result.
+
+### Executed checks and evidence boundaries
+
+Commands from `frontend/` unless stated otherwise; logs retained with the task's
+external evidence bundle. Node 24.21.0 / npm 11.19.0. Existing node_modules were
+copied only after lockfile byte equality; `npm ls --depth=0` passed. No dependency
+installation or manifest/lockfile change.
+
+```text
+npm run test -- src/features/assessment/pages/assignment.test.tsx --reporter=verbose
+# 66 passed, final code including operation-bound Cancel
+npm run test -- src/features/assessment/api/assignmentApi.test.ts src/shared/api/httpClient.test.ts src/routes/index.test.tsx
+# 393 passed / 3 files; API/transport unchanged by subsequent Cancel correction
+npm run test -- src/routes/index.test.tsx
+# 207 passed on final code after Cancel correction (overlaps the prior 393)
+npm run typecheck
+npm run build
+# Pass on final code; existing >500 kB Vite warning remains
+
+# External recovered probe, work/ directory:
+./remediation/frontend/node_modules/.bin/vitest run --config probes/vitest.config.ts probes/lifecycle-required.test.tsx --reporter=verbose
+# 9 passed on final code; 7 failed / 2 controls passed on incoming code
+
+# e2e/, lifecycle-owned disposable fixture, never an external/production environment:
+npm test -- tests/learner-assignment.spec.ts --project=chromium-desktop --workers=1
+```
+
+An initial real smoke on the admission/dialog correction passed **1/1, 0 skipped**,
+run `cm-e2e-1a21e1e83c1-d940ea`, 28.7 seconds. PostgreSQL/MinIO-backed production
+navigation, PDF 201, Cancel without replacement, explicit ZIP replacement 200,
+reloaded current file, exact binary download, Instructor grading, graded/closed
+exclusion, reload, other-learner denial and left-course 403 passed. All seven owned
+resources, preview process and temporary build were verified absent. A final-code
+smoke after SA-R1 is recorded in the publication anchor below.
+
+The final self-audit inspected every authority write, reservation/sequence update,
+settlement guard, publication acknowledgement and confirmation transition. It
+covered before-render read initiation, success and failure, mutation-to-GET
+handoff (synchronous, with authority still uploading until checking is installed),
+GET settlement before presentation, stale cleanup and withdrawn confirmation.
+No related actionable defect remains in author verification. Unknown outcomes
+still require reloading and a deliberate action; a successful GET is not a barrier
+for an earlier server transaction whose response was lost. The frontend token is
+not a backend CAS condition. No unsupported guarantee against another session's
+replacement, automatic retry, flushSync, arbitrary waiting, persistent File, API
+extension or permanent lockout was introduced.
+
+Only `useAssignment.ts`, `AssignmentDetailPage.tsx`, `assignment.test.tsx`,
+`docs/testing.md` and `docs/setup.md` change relative to the reviewed baseline.
+The other 12 previously reviewed changed files remain byte-identical, including
+shared transport, Assignment client/decoder, bounded FE10 summary client/types/S10,
+S10/S13 routes/navigation, real E2E and structure authority. Protected-file transport,
+Markdown, theme and SA-01 Download placement remain intact. FE14/FE16/FE17 source,
+backend/OpenAPI/storage policy, dependencies and CI/protections are unchanged.
+
+Full backend, unrelated feature suites, all browser projects and the seven-width /
+three-theme matrix were omitted because those source/presentation areas are
+unchanged and the focused real production journey covers the affected seam.
+Previous independent protected-byte/Unicode, shared-consumer and theme evidence
+remains **previous evidence**, not new execution. Screen readers, native zoom,
+physical devices and complete QA08/CT19 remain unqualified. Hosted CI is not waited
+on or polled. FE08 Related Lesson remains upstream-blocked; FE10 retains its full
+attempt integration and three-file consolidation handoff. Independent narrow
+rereview, eligible CODEOWNER approval, required protected CI, QA and protected
+integration remain separate; no merge, release or deployment was performed.
+
+Final-code real smoke: **1 passed / 0 skipped**, 26.6 seconds, run
+`cm-e2e-1a21e204563-d1bbfe`. The same production journey above passed after SA-R1;
+all seven owned resources were verified absent, the preview exited and the temporary
+build was removed. No browser-specific risk justified repeating the other projects.

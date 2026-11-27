@@ -3365,3 +3365,34 @@ verification and author audit; the separately authenticated publishing account i
 or imply the contributor personally performed Codex's work. Other contributors'
 historical commits, AI disclosure, signatures and independent gates are preserved;
 no global identity, forged signature, credentials or co-author is introduced.
+
+### FE11 targeted remediation follow-up — 28 November 2026
+
+The Project Leader explicitly authorized targeted remediation of independent
+FE11-IR-01 (P2) and FE11-IR-02 (P3), regressions, documentation, author self-audit,
+commit and direct ordinary push to existing PR #305. Incoming reviewed HEAD was
+`75b6db7f6c2ed21182806c2f859264e581088908`; main/merge-base remained `99abc407`.
+The independent **REQUEST_CHANGES** history qualifies the earlier lifecycle and
+code-complete claims above: those claims did not establish safety across GET
+settlement before React commits. The earlier custom 400/415 copy also diverged
+from ADR010 §13's shared fallback, despite the preceding general-feedback wording.
+
+The corrected hook synchronously installs authority before releasing reservations;
+React only acknowledges matching committed presentation. File selection and
+submission callbacks must refer to that evidence. The dialog retains the exact
+reviewed filename/submitted-time string, withdraws obsolete confirmation, and the
+hook rejects stale/null replacement tokens. Cancel is bound to its rendered
+operation controller. Shared safe `ApiError.message` supplies 400/415; exact
+409/413 and unknown-outcome reconciliation remain. No contract, FE11-D1/FE11-D2,
+shared transport, storage or dependency decision changes. No setup input changes.
+
+Both findings are **FIXED_AUTHOR_VERIFIED**, subject to subsequent independent
+closure; the seven original failing invariants now pass. The detailed regression
+sensitivity, final tested source, real disposable smoke, preservation and remaining
+gates are in [the remediation record](testing.md#fe11-targeted-ir-01ir-02-remediation--28-november-2026).
+FE11-owned implementation completeness is restored by author verification only.
+FE08's Related Lesson and FE10's complete attempt/integration handoffs remain;
+whole-Issue acceptance, CODEOWNER/QA, hosted checks and protected integration are
+separate. The existing consent-based metadata arrangement above remains applicable:
+Codex performed the corrections and checks, Git author/committer fields retain the
+original contributor, and authenticated publication uses `chi-thanh-nguyen`.

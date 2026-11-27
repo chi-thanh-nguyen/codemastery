@@ -85,7 +85,7 @@ export function LiveAssignmentDetailPage() {
 function AssignmentSessionPage({ courseId, assignmentId }: { courseId?: string; assignmentId?: string }) {
     const auth = useAuth(), navigate = useNavigate();
     const state = useAssignment(courseId, assignmentId), assignment = state.assignment;
-    const [pending, setPending] = useState<{ file: File; submittedAt: string } | null>(null);
+    const [pending, setPending] = useState<{ file: File; submittedAt: string; originalFilename: string } | null>(null);
     const [selectionError, setSelectionError] = useState(''), [now, setNow] = useState(Date.now);
     useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 30000); return () => clearInterval(timer); }, []);
     // Browser time schedules one fresh authoritative read; it never decides open/closed.
@@ -96,7 +96,7 @@ function AssignmentSessionPage({ courseId, assignmentId }: { courseId?: string; 
         const timer = setTimeout(() => { setPending(null); void state.refresh(); }, delay);
         return () => clearTimeout(timer);
     }, [assignment?.deadlineAt, assignment?.open]);
-    useEffect(() => { if (!state.canSubmit || pending && pending.submittedAt !== assignment?.submission?.submittedAt) setPending(null); }, [state.canSubmit, assignment?.submission?.submittedAt]);
+    useEffect(() => { if (!state.canSubmit || pending && (pending.submittedAt !== assignment?.submission?.submittedAt || pending.originalFilename !== assignment?.submission?.originalFilename)) setPending(null); }, [state.canSubmit, assignment?.submission?.submittedAt, assignment?.submission?.originalFilename]);
     const backPath = `/courses/${encodeURIComponent(courseId ?? '')}/assessments`;
     const back = { label: 'Assessments', href: backPath, onClick: () => navigate(backPath) };
     const heading = <PageHeader title="Assignment" back={back} />;
@@ -110,10 +110,10 @@ function AssignmentSessionPage({ courseId, assignmentId }: { courseId?: string; 
     const upload: UploadState = state.phase === 'uploading' ? { kind: 'uploading', fileName: state.fileName }
         : selectionError ? { kind: 'rejected', message: selectionError } : { kind: 'idle' };
     const select = (file: File) => {
-        if (!state.canSubmit) return;
+        if (!state.isSelectionCurrent()) return;
         setSelectionError('');
         if (!/\.(pdf|zip)$/i.test(file.name) || !file.size) { setSelectionError('Choose a non-empty PDF or ZIP file.'); return; }
-        if (sub) setPending({ file, submittedAt: sub.submittedAt });
+        if (sub) setPending({ file, submittedAt: sub.submittedAt, originalFilename: sub.originalFilename });
         else void state.submitFile(file, null).catch(() => {});
     };
     return <>
@@ -129,8 +129,8 @@ function AssignmentSessionPage({ courseId, assignmentId }: { courseId?: string; 
                 {state.phase === 'uploading' && <Button onClick={state.cancelUpload}>Cancel upload</Button>}
                 <Button disabled={state.phase === 'uploading' || state.phase === 'checking'} onClick={() => { setPending(null); void state.refresh(); }}>Refresh assignment</Button>
             </Box>} />
-        <ConfirmDialog open={!!pending} title="Replace file?" isDestructive confirmLabel="Replace file"
-            message={`Your current file "${sub?.originalFilename ?? ''}", submitted ${sub ? assignmentTime(sub.submittedAt) : ''}, will be replaced.`}
+        <ConfirmDialog open={!!pending && state.canSubmit && pending.submittedAt === sub?.submittedAt && pending.originalFilename === sub?.originalFilename} title="Replace file?" isDestructive confirmLabel="Replace file"
+            message={`Your current file "${pending?.originalFilename ?? ''}", submitted ${pending ? assignmentTime(pending.submittedAt) : ''}, will be replaced.`}
             busy={!state.canSubmit} onCancel={() => setPending(null)} onConfirm={() => { const selected = pending; setPending(null); if (selected && state.canSubmit) void state.submitFile(selected.file, selected.submittedAt).catch(() => {}); }} />
     </>;
 }

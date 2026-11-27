@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router';
@@ -85,3 +85,190 @@ it.each([['none',false,'Closed'],['submitted',false,'Submitted'],['graded',false
 
 it('keeps the current file action before grade content',async()=>{vi.mocked(api.readLearnerAssignment).mockResolvedValue({...detail,submission:{...sub,graded:true,gradePercentage:85.25,feedback:'Long feedback '.repeat(100),gradedAt:sub.submittedAt}});await mount();const submission=document.querySelector('[aria-labelledby="assignment-submission"]')!,grade=document.querySelector('[aria-labelledby="assignment-grade"]')!;expect(submission.compareDocumentPosition(grade)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();});
 it('post-success read displays concurrent replacement/grading instead of the upload response',async()=>{vi.mocked(api.readLearnerAssignment).mockResolvedValueOnce({...detail}).mockResolvedValue({...detail,submission:{...sub,originalFilename:'concurrent.zip',graded:true,gradePercentage:42,feedback:'Latest',gradedAt:sub.submittedAt}});await mount();await choose();expect(text()).toContain('concurrent.zip');expect(text()).toContain('42 / 100');expect(document.querySelector('input[type="file"]')).toBeNull();});
+
+// FE11-IR-01: faithful adaptation of the independent lifecycle-required suite.
+// Keep the callback inside the same act scope as settlement: act must not commit first.
+it.each(['closed','failure','replacement'] as const)('IR01 reviewer pre-commit refresh blocks obsolete callback: %s',async kind=>{
+    await mount(undefined,true);const old=hook;
+    if(kind==='failure')vi.mocked(api.readLearnerAssignment).mockRejectedValueOnce(new ApiError('http','Read failed',503));
+    else vi.mocked(api.readLearnerAssignment).mockResolvedValueOnce(kind==='closed'?{...detail,open:false}:{...detail,submission:sub});
+    vi.mocked(api.submitAssignmentFile).mockImplementation(()=>new Promise(()=>{}));
+    await act(async()=>{
+        await old.refresh();
+        expect(host.textContent).toContain('ready:'); // presentation still contains the old evidence
+        const attempt=old.submitFile(new File(['%PDF-x'],'x.pdf'),null);void attempt.catch(()=>{});
+        await Promise.resolve();expect(api.submitAssignmentFile).not.toHaveBeenCalled();
+        await expect(attempt).rejects.toMatchObject({kind:'cancelled'});
+    });
+    vi.mocked(api.readLearnerAssignment).mockResolvedValue({...detail});await act(async()=>hook.refresh());
+    vi.mocked(api.submitAssignmentFile).mockResolvedValue(sub);
+    const file=new File(['%PDF-recovered'],'recovered.pdf');await act(async()=>hook.submitFile(file,null));
+    expect(api.submitAssignmentFile).toHaveBeenCalledExactlyOnceWith(c,a,file,expect.anything());
+});
+it('IR01 reviewer control: committed closed read rejects the same callback',async()=>{
+    await mount(undefined,true);const old=hook;vi.mocked(api.readLearnerAssignment).mockResolvedValueOnce({...detail,open:false});
+    await act(async()=>old.refresh());await expect(old.submitFile(new File(['x'],'x.pdf'),null)).rejects.toMatchObject({kind:'cancelled'});
+    expect(api.submitAssignmentFile).not.toHaveBeenCalled();
+});
+it('IR01 reviewer fast PUT and reconciliation cannot admit another unconfirmed PUT before commit',async()=>{
+    await mount(undefined,true);const old=hook,file=new File(['%PDF-first'],'first.pdf');
+    vi.mocked(api.readLearnerAssignment).mockResolvedValue({...detail,submission:sub});
+    await act(async()=>{
+        await old.submitFile(file,null);
+        await expect(old.submitFile(new File(['%PDF-second'],'second.pdf'),null)).rejects.toMatchObject({kind:'cancelled'});
+        expect(api.submitAssignmentFile).toHaveBeenCalledExactlyOnceWith(c,a,file,expect.anything());
+    });
+    await expect(hook.submitFile(file,null)).rejects.toMatchObject({kind:'cancelled'});
+    await act(async()=>hook.submitFile(file,sub.submittedAt));expect(api.submitAssignmentFile).toHaveBeenCalledTimes(2);
+});
+it('IR01 reviewer control: cancelled response may leave server work pending without automatic replay',async()=>{
+    let serverPending=false;
+    vi.mocked(api.submitAssignmentFile).mockImplementation((_c,_a,_f,options)=>{
+        serverPending=true;
+        return new Promise((_yes,no)=>options?.signal?.addEventListener('abort',()=>no(new ApiError('cancelled','cancelled'))));
+    });
+    await mount(undefined,true);await act(async()=>{void hook.submitFile(new File(['x'],'x.pdf'),null);});
+    await act(async()=>hook.cancelUpload());expect(serverPending).toBe(true);expect(hook.canSubmit).toBe(true);
+    expect(hook.notice).toContain('outcome is unknown');expect(api.submitAssignmentFile).toHaveBeenCalledOnce();
+});
+it.each(['closed','replacement','failure'] as const)('IR01 reviewer production deadline/file-change blocks before %s commits',async kind=>{
+    await mount(undefined,true); // original reviewer harness's initial read
+    vi.useFakeTimers();vi.setSystemTime(new Date('2026-11-28T00:00:00Z'));
+    const soon={...detail,deadlineAt:'2026-11-28T00:00:01Z'};
+    vi.mocked(api.readLearnerAssignment).mockResolvedValueOnce(soon);
+    if(kind==='failure')vi.mocked(api.readLearnerAssignment).mockRejectedValueOnce(new ApiError('http','Read failed',503));
+    else vi.mocked(api.readLearnerAssignment).mockResolvedValueOnce(kind==='closed'?{...soon,open:false}:{...soon,submission:sub});
+    await mount();vi.mocked(api.submitAssignmentFile).mockImplementation(()=>new Promise(()=>{}));
+    await act(async()=>{
+        vi.advanceTimersByTime(1000);
+        for(let i=0;i<8;i++)await Promise.resolve();
+        expect(api.readLearnerAssignment).toHaveBeenCalledTimes(3);
+        const input=host.querySelector('input[type=file]') as HTMLInputElement;
+        expect(input.disabled).toBe(false); // intentionally do not commit refreshed presentation
+        Object.defineProperty(input,'files',{value:[new File(['%PDF-x'],'x.pdf')],configurable:true});
+        input.dispatchEvent(new Event('change',{bubbles:true}));
+        expect(api.submitAssignmentFile).not.toHaveBeenCalled();expect(document.querySelector('[role=dialog]')).toBeNull();
+    });
+    expect(text()).toContain(kind==='closed'?'Submissions are closed.':kind==='replacement'?'original.pdf':"Couldn't load assignment");
+});
+
+it.each(['closed','graded','failure','changed','same'] as const)('IR01 stale confirmation cannot revive after authoritative %s settlement',async kind=>{
+    vi.mocked(api.readLearnerAssignment).mockResolvedValue({...detail,submission:sub});await mount(undefined,true);const old=hook;
+    if(kind==='failure')vi.mocked(api.readLearnerAssignment).mockRejectedValueOnce(new ApiError('http','Read failed',503));
+    else vi.mocked(api.readLearnerAssignment).mockResolvedValueOnce({...detail,open:kind!=='closed',submission:kind==='graded'?{...sub,graded:true,gradePercentage:5,feedback:'Result',gradedAt:sub.submittedAt}:kind==='changed'?{...sub,submittedAt:'2026-11-20T09:00:00.123457Z',originalFilename:'new.zip'}:sub});
+    await act(async()=>{
+        await old.refresh();await expect(old.submitFile(new File(['x'],'x.pdf'),sub.submittedAt)).rejects.toMatchObject({kind:'cancelled'});
+        expect(api.submitAssignmentFile).not.toHaveBeenCalled();
+    });
+    if(kind==='changed')await expect(hook.submitFile(new File(['x'],'x.pdf'),sub.submittedAt)).rejects.toMatchObject({kind:'cancelled'});
+    if(kind==='same'){
+        // A callback from withdrawn evidence remains obsolete even when the token stayed the same.
+        await expect(old.submitFile(new File(['x'],'x.pdf'),sub.submittedAt)).rejects.toMatchObject({kind:'cancelled'});
+        await act(async()=>hook.submitFile(new File(['x'],'x.pdf'),sub.submittedAt));expect(api.submitAssignmentFile).toHaveBeenCalledOnce();
+    }
+});
+it('IR01 active reads invalidate callbacks synchronously; obsolete cleanup cannot release the newer read',async()=>{
+    await mount(undefined,true);const old=hook,first=deferred<api.B5LearnerAssignment>(),second=deferred<api.B5LearnerAssignment>();
+    vi.mocked(api.readLearnerAssignment).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    await act(async()=>{
+        const p1=old.refresh(),p2=old.refresh();
+        await expect(old.submitFile(new File(['x'],'x.pdf'),null)).rejects.toMatchObject({kind:'cancelled'});
+        first.resolve({...detail});await p1;
+        await expect(old.submitFile(new File(['x'],'x.pdf'),null)).rejects.toMatchObject({kind:'cancelled'});
+        expect(api.submitAssignmentFile).not.toHaveBeenCalled();second.resolve({...detail});await p2;
+    });
+    await act(async()=>hook.submitFile(new File(['x'],'x.pdf'),null));expect(api.submitAssignmentFile).toHaveBeenCalledOnce();
+});
+it('IR01 older read failure cannot revoke newer ready evidence or its microsecond token',async()=>{
+    await mount(undefined,true);const old=deferred<api.B5LearnerAssignment>();
+    vi.mocked(api.readLearnerAssignment).mockReturnValueOnce(old.promise).mockResolvedValueOnce({...detail,submission:sub});
+    let first!:Promise<void>;await act(async()=>{first=hook.refresh();await hook.refresh();});
+    await act(async()=>{old.reject(new ApiError('http','Obsolete',503));await first;});
+    expect(hook.canSubmit).toBe(true);await act(async()=>hook.submitFile(new File(['x'],'x.pdf'),sub.submittedAt));expect(api.submitAssignmentFile).toHaveBeenCalledOnce();
+});
+it.each(['network','unknown-outcome','cancelled'] as const)('IR01 %s reconciliation requires presentation before deliberate upload',async kind=>{
+    await mount(undefined,true);const old=hook;vi.mocked(api.submitAssignmentFile).mockRejectedValueOnce(new ApiError(kind,'safe'));
+    await act(async()=>{
+        await old.submitFile(new File(['x'],'x.pdf'),null);
+        await expect(old.submitFile(new File(['y'],'y.pdf'),null)).rejects.toMatchObject({kind:'cancelled'});
+        expect(api.submitAssignmentFile).toHaveBeenCalledOnce();
+    });
+    expect(hook.notice).toContain('outcome is unknown');vi.mocked(api.submitAssignmentFile).mockResolvedValue(sub);
+    await act(async()=>hook.submitFile(new File(['y'],'y.pdf'),null));expect(api.submitAssignmentFile).toHaveBeenCalledTimes(2);
+});
+it.each([[400,'Please check the supplied information.'],[415,'The request could not be completed.'],[413,'The file is larger than the allowed size.']] as const)('IR02 shared safe %s fallback survives reconciliation',async(status,message)=>{
+    vi.mocked(api.submitAssignmentFile).mockRejectedValue(new ApiError('http',status===413?'safe too large':message,status));
+    await mount();await choose();expect(text()).toContain(message);expect(text()).not.toMatch(/format was rejected|file was rejected/);
+    expect(api.submitAssignmentFile).toHaveBeenCalledOnce();expect(api.readLearnerAssignment).toHaveBeenCalledTimes(2);
+});
+it('409 with reloaded eligible state uses neutral recovery instead of guessing deadline or grading',async()=>{
+    vi.mocked(api.submitAssignmentFile).mockRejectedValue(new ApiError('http','safe conflict',409));await mount();await choose();
+    expect(text()).toContain('The assignment changed. Review its current state before choosing a file again.');
+    expect(text()).not.toContain('The deadline has passed.');expect(api.submitAssignmentFile).toHaveBeenCalledOnce();
+});
+it.each(['closed','graded','changed','failure','same'] as const)('IR01 obsolete production confirmation event after %s read cannot dispatch',async kind=>{
+    vi.useFakeTimers();vi.setSystemTime(new Date('2026-11-28T00:00:00Z'));
+    const soon={...detail,deadlineAt:'2026-11-28T00:00:01Z',submission:sub};
+    vi.mocked(api.readLearnerAssignment).mockResolvedValueOnce(soon);await mount();await choose();
+    const confirm=document.querySelector('[role=dialog] button:last-child') as HTMLButtonElement;
+    expect(text()).toContain(`Your current file "${sub.originalFilename}"`);
+    if(kind==='failure')vi.mocked(api.readLearnerAssignment).mockRejectedValueOnce(new ApiError('http','Read failed',503));
+    else vi.mocked(api.readLearnerAssignment).mockResolvedValueOnce({...soon,open:kind!=='closed',submission:kind==='graded'?{...sub,graded:true,gradePercentage:10,feedback:'Result',gradedAt:sub.submittedAt}:kind==='changed'?{...sub,originalFilename:'new.zip',submittedAt:'2026-11-20T09:00:00.123457Z'}:sub});
+    await act(async()=>{
+        vi.advanceTimersByTime(1000);for(let i=0;i<8;i++)await Promise.resolve();
+        // The old dialog is still displayed; its event must not confirm new or withdrawn evidence.
+        expect(confirm.disabled).toBe(false);confirm.click();expect(api.submitAssignmentFile).not.toHaveBeenCalled();
+    });
+    if(kind==='changed')expect(text()).not.toContain('Your current file "new.zip"');
+});
+it('IR01 StrictMode cancelled read and its cleanup cannot release the reinitialized read',async()=>{
+    const first=deferred<api.B5LearnerAssignment>(),second=deferred<api.B5LearnerAssignment>();
+    vi.mocked(api.readLearnerAssignment).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    await act(async()=>root.render(<StrictMode><AuthContext.Provider value={auth}><Hook/></AuthContext.Provider></StrictMode>));
+    expect(api.readLearnerAssignment).toHaveBeenCalledTimes(2);expect(vi.mocked(api.readLearnerAssignment).mock.calls[0][2]?.signal?.aborted).toBe(true);
+    await act(async()=>first.resolve({...detail}));
+    await expect(hook.submitFile(new File(['x'],'x.pdf'),null)).rejects.toMatchObject({kind:'cancelled'});
+    expect(hook.phase).toBe('loading');await act(async()=>second.resolve({...detail}));
+    expect(hook.canSubmit).toBe(true);await act(async()=>hook.submitFile(new File(['x'],'x.pdf'),null));expect(api.submitAssignmentFile).toHaveBeenCalledOnce();
+});
+it('IR01 old-route mutation settlement cannot release the new route mutation reservation',async()=>{
+    const first=deferred<api.B5LearnerSubmission>(),second=deferred<api.B5LearnerSubmission>();
+    await mount(undefined,true);const old=hook;
+    vi.mocked(api.submitAssignmentFile).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    let p1!:Promise<void>,p2!:Promise<void>;
+    await act(async()=>{p1=hook.submitFile(new File(['x'],'old.pdf'),null);});
+    vi.mocked(api.readLearnerAssignment).mockResolvedValue({...detail,id:b});await mount(undefined,true,b);
+    await act(async()=>{p2=hook.submitFile(new File(['y'],'new.pdf'),null);});
+    await act(async()=>{first.resolve(sub);await p1;});
+    expect(hook.phase).toBe('uploading');
+    await expect(old.submitFile(new File(['x'],'old.pdf'),null)).rejects.toMatchObject({kind:'cancelled'});
+    await expect(hook.submitFile(new File(['z'],'extra.pdf'),null)).rejects.toMatchObject({kind:'cancelled'});
+    expect(api.submitAssignmentFile).toHaveBeenCalledTimes(2);expect(api.readLearnerAssignment).toHaveBeenCalledTimes(2);
+    await act(async()=>{second.resolve(sub);await p2;});expect(hook.canSubmit).toBe(true);expect(api.readLearnerAssignment).toHaveBeenCalledTimes(3);
+});
+it('IR01 logout and unmount revoke captured callbacks',async()=>{
+    await mount(undefined,true);const old=hook;generation=2;auth={...auth,generation:2,isAuthenticated:false,user:null};await mount(undefined,true);
+    await expect(old.submitFile(new File(['x'],'x.pdf'),null)).rejects.toMatchObject({kind:'cancelled'});
+    const loggedOut=hook;await act(async()=>root.unmount());root=createRoot(host);
+    await expect(loggedOut.submitFile(new File(['x'],'x.pdf'),null)).rejects.toMatchObject({kind:'cancelled'});expect(api.submitAssignmentFile).not.toHaveBeenCalled();
+});
+it.each([a,b])('IR01 obsolete Cancel callback cannot abort a newer upload on resource %s',async id=>{
+    const first=deferred<api.B5LearnerSubmission>(),second=deferred<api.B5LearnerSubmission>();
+    vi.mocked(api.submitAssignmentFile).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);await mount(undefined,true);
+    let p1!:Promise<void>,p2!:Promise<void>;await act(async()=>{p1=hook.submitFile(new File(['x'],'first.pdf'),null);});
+    const obsoleteCancel=hook.cancelUpload;
+    await act(async()=>{first.resolve(sub);await p1;});
+    vi.mocked(api.readLearnerAssignment).mockResolvedValue({...detail,id});await mount(undefined,true,id);
+    await act(async()=>{p2=hook.submitFile(new File(['y'],'second.pdf'),null);});
+    obsoleteCancel();expect(vi.mocked(api.submitAssignmentFile).mock.calls[1][3]?.signal?.aborted).toBe(false);
+    await act(async()=>{second.resolve(sub);await p2;});
+});
+it('IR01 repeated production confirmation events reserve exactly one upload',async()=>{
+    const upload=deferred<api.B5LearnerSubmission>();vi.mocked(api.submitAssignmentFile).mockReturnValueOnce(upload.promise);
+    vi.mocked(api.readLearnerAssignment).mockResolvedValue({...detail,submission:sub});await mount();await choose();
+    await act(async()=>{
+        const confirm=document.querySelector('[role=dialog] button:last-child') as HTMLButtonElement;
+        confirm.click();confirm.click();expect(api.submitAssignmentFile).toHaveBeenCalledOnce();
+    });
+    await act(async()=>upload.resolve(sub));expect(api.readLearnerAssignment).toHaveBeenCalledTimes(2);
+});
