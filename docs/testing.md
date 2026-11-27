@@ -10807,3 +10807,24 @@ Eligible independent CODEOWNER approval, final-HEAD required CI/scanning and
 authorized protected squash integration remain gates. No GitHub approval, merge,
 Issue closure, Project update, grant expansion, release or deployment is performed.
 Downstream owner Enrollment admission and complete adaptive acceptance stay open.
+
+## IN06.report content report intake (#181) â€” 27 November 2026
+
+IN06 (`Refs #181`) checkpoint `IN06.report` implements CT30 report intake
+([ADR012 Â§6.3, Â§6.5](decisions/012-batch-07-contract-approvals.md)): `POST /api/lessons/{lessonId}/reports`
+and `POST /api/lessons/{lessonId}/discussion/{postId}/reports`, through `ContentReportController`,
+`ContentReportService`, `InteractionRequests`, `InteractionResponses` and the `SecurityConfig` rule. This record
+lists the suites added and what they do and do not cover. It claims no execution result; the pull request
+records the executed `./mvnw verify`.
+
+| Suite | Kind | Covers |
+|---|---|---|
+| `modules/interaction/application/service/ContentReportServiceTest` | Unit (Mockito, fixed `Clock`) | Lesson and post targets, open status, verbatim reason, microsecond `createdAt`, concealment of missing, hidden, other-Lesson and hidden-question replies, CT03 admission before any lookup or body read, body rules after admission, blank-reason rejection |
+| `modules/interaction/InteractionRequestsTest` | Unit | Strict path UUID text; the closed one-property report body returned verbatim |
+| `integration/InteractionReportIntakeIntegrationTest` | PostgreSQL Testcontainer, MockMvc | 401 for anonymous callers, 403 for an Administrator, concealed 404 for non-members, other Instructors and hidden Lessons, 201 receipt with `Cache-Control: no-store`, the stored Lesson and post report rows, owner preview of a hidden Lesson, duplicates, concealed posts writing nothing, 400 for malformed paths before admission and for invalid bodies after admission, 415 for a non-JSON media type |
+
+Not covered by these suites: Q&A posting, replies and reading, reply notifications, moderation resolution and the
+moderation queue (the other `IN06` checkpoints), the Â§19.2 runtime-privilege matrix for these tables, and
+`InteractionAdminIntegrationTest`. A request body that is not parseable JSON, or is absent, is rejected as 400 by
+the framework before CT03 admission runs; bodies that parse are checked after admission. The placement of these
+suites is for review.

@@ -7365,7 +7365,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Same admission as the discussion list. Reports the Lesson itself; status open; duplicates are allowed and resolved together by moderation. CT30-REPORTS-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Same admission as the discussion list. Reports the Lesson itself; status open; duplicates are allowed and resolved together by moderation. CT30-REPORTS-2026-11-15-r1. Implemented under IN06 (#181), checkpoint IN06.report, in the Interaction module; independent review, CI and protected integration remain gated. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7384,7 +7384,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Created; specification only, NOT IMPLEMENTED.",
+            "description": "Created.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7417,7 +7417,6 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -7437,7 +7436,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Same admission as the discussion list; the post must be a visible post of this Lesson, else 404. Status open; duplicates are allowed. CT30-REPORTS-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Same admission as the discussion list; the post must be a visible post of this Lesson, else 404. Status open; duplicates are allowed. CT30-REPORTS-2026-11-15-r1. Implemented under IN06 (#181), checkpoint IN06.report, in the Interaction module; independent review, CI and protected integration remain gated. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7465,7 +7464,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Created; specification only, NOT IMPLEMENTED.",
+            "description": "Created.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7498,7 +7497,6 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
         "requestBody": {
           "required": true,
