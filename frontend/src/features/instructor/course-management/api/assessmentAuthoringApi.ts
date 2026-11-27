@@ -87,7 +87,8 @@ function rfc3339Valid(value: unknown): value is string {
     const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
     const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     if (month < 1 || month > 12 || day < 1 || day > days[month - 1] || hour > 23 || minute > 59 || second > 59) return false;
-    return !Number.isNaN(Date.parse(value.toUpperCase()));
+    const instant = new Date(value.toUpperCase());
+    return !Number.isNaN(instant.getTime()) && instant.getUTCFullYear() >= 0 && instant.getUTCFullYear() <= 9999;
 }
 
 function exact(value: unknown, keys: readonly string[]): Record<string, unknown> {

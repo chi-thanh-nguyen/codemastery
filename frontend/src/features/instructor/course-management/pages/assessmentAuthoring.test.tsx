@@ -22,7 +22,7 @@ import type { SkillSource } from '../components/QuestionForm';
 import { AppRouter } from '../../../../routes';
 import { addCoursePrerequisite, createCourseSkill, getOwnedSkillGraph, mapCourseLessonSkill, removeCoursePrerequisite, unmapCourseLessonSkill, updateCourseSkill } from '../../skill-graph-editor/api/skillGraphApi';
 import type { OwnedSkillGraph } from '../../skill-graph-editor/api/skillGraphApi';
-import { instantMicros, localInputToRfc3339, sameAssignment, sameInstant, toLocalDateTimeInput } from './AssignmentEditorPage';
+import { instantMicros, localInputToRfc3339, resolveDeadlineIso, sameAssignment, sameInstant, toLocalDateTimeInput } from './AssignmentEditorPage';
 
 import type { SharedCourseContextState } from '../hooks/useCourseEditor';
 let sharedProbe: SharedCourseContextState;
@@ -159,6 +159,121 @@ async function choose(label: string, option: string, scope: ParentNode = documen
 const text = () => document.body.textContent ?? '';
 
 describe('FE16 complete Assignment authoring', () => {
+    it('rejects a DST gap and preserves exact unchanged instants on either side of a DST fold', () => {
+        const previous = process.env.TZ;
+        try {
+            process.env.TZ = 'America/New_York';
+            expect(localInputToRfc3339('2026-03-08T02:30')).toBeNull();
+            expect(localInputToRfc3339('2026-11-01T01:30')).toBe('2026-11-01T05:30:00.000Z');
+            for (const iso of ['2026-11-01T05:30:00.123456Z', '2026-11-01T06:30:00.987654Z']) {
+                const input = toLocalDateTimeInput(iso);
+                expect(input).toBe('2026-11-01T01:30');
+                expect(resolveDeadlineIso(input, { input, iso })).toBe(iso);
+            }
+        } finally {
+            if (previous === undefined) delete process.env.TZ;
+            else process.env.TZ = previous;
+        }
+    });
+
+    it.each([403, 404])('protects a retained read-only creation draft on departure after %s', async status => {
+        vi.mocked(createAssignment).mockRejectedValue(http(status));
+        await mount(`/teach/courses/${courseId}/assignments/new`);
+        await type('Assignment title', 'Keep creation'); await type('Instructions', '# Retain'); await type('Deadline', '2027-01-02T12:30');
+        await click('Create assignment');
+        const unload = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(unload);
+        expect(unload.defaultPrevented).toBe(true);
+        await click('Back to catalogue');
+        expect(confirmDialog('Leave without saving?')).toBeTruthy();
+        await click('Stay', confirmDialog('Leave without saving?'));
+        expect(field('Instructions').value).toBe('# Retain');
+        expect(location).toContain('/assignments/new');
+        await click('Back to catalogue'); await click('Leave', confirmDialog('Leave without saving?'));
+        expect(location).toBe('/courses'); expect(createAssignment).toHaveBeenCalledTimes(1);
+    });
+
+    it('locks pending recovery, then lets a newer deliberate save replace the old unconfirmed result', async () => {
+        let resolve!: (body: B5OwnedAssignment) => void;
+        const pending = new Promise<B5OwnedAssignment>(done => { resolve = done; });
+        vi.mocked(readOwnedAssignment).mockResolvedValueOnce(assignment()).mockReturnValueOnce(pending);
+        vi.mocked(replaceAssignment).mockRejectedValueOnce(http(503)).mockImplementationOnce(async (_c, _a, write) => assignment(write));
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Assignment title', 'Unknown earlier write'); await click('Save changes');
+        expect(field('Assignment title').disabled).toBe(true);
+        await click('Save changes'); expect(replaceAssignment).toHaveBeenCalledTimes(1);
+        await act(async () => resolve(assignment()));
+        expect(text()).toContain('Current version: Loops Lab');
+        await type('Assignment title', 'New deliberate write'); await click('Save changes');
+        expect(text()).not.toContain("We couldn't confirm whether your changes were saved.");
+        expect(field('Assignment title').value).toBe('New deliberate write');
+        expect(replaceAssignment).toHaveBeenCalledTimes(2); expect(readOwnedAssignment).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps unknown Hide drafts and their exact deadline through repeated failed recovery reads', async () => {
+        vi.mocked(readOwnedAssignment).mockResolvedValueOnce(assignment({ publicationStatus: 'published' }))
+            .mockRejectedValueOnce(http(503)).mockRejectedValueOnce(new ApiError('network', 'Unavailable'))
+            .mockResolvedValueOnce(assignment({ deadlineAt: '2026-12-02T13:00:00.987654Z' }));
+        vi.mocked(setAssignmentPublication).mockRejectedValue(http(503));
+        vi.mocked(replaceAssignment).mockImplementation(async (_c, _a, write) => assignment(write));
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Assignment title', 'Retained across recovery');
+        await click('Hide assignment'); await click('Hide assignment', confirmDialog('Hide assignment?'));
+        await click('Try again'); expect(text()).not.toContain("This assignment isn't available.");
+        await click('Try again'); expect(text()).toContain('Assignment hidden.');
+        await click('Save changes');
+        expect(vi.mocked(replaceAssignment).mock.calls[0][2].deadlineAt).toBe('2026-12-01T12:00:00.123456Z');
+        expect(setAssignmentPublication).toHaveBeenCalledTimes(1); expect(readOwnedAssignment).toHaveBeenCalledTimes(4);
+    });
+
+    it('cannot settle a departed recovery into another Assignment editor', async () => {
+        let resolve!: (body: B5OwnedAssignment) => void;
+        const pending = new Promise<B5OwnedAssignment>(done => { resolve = done; });
+        vi.mocked(readOwnedAssignment).mockResolvedValueOnce(assignment()).mockReturnValueOnce(pending)
+            .mockResolvedValueOnce(assignment({ id: loops.id, title: 'Current resource' }));
+        vi.mocked(replaceAssignment).mockRejectedValue(http(503));
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Assignment title', 'Departed write'); await click('Save changes');
+        const options = vi.mocked(readOwnedAssignment).mock.calls[1][2]!;
+        await act(async () => root.unmount()); root = createRoot(host);
+        await mount(`/teach/courses/${courseId}/assignments/${loops.id}`);
+        expect(options.signal?.aborted).toBe(true); expect(options.isCurrent?.()).toBe(false);
+        await act(async () => resolve(assignment({ title: 'Departed write' })));
+        expect(field('Assignment title').value).toBe('Current resource');
+        expect(text()).not.toContain('Saved');
+    });
+
+    it.each([false, true])('advances a confirmed recovery deadline baseline before a later explicit date edit (newer draft: %s)', async newer => {
+        const original = assignment();
+        const oldInput = toLocalDateTimeInput(original.deadlineAt);
+        const nextInput = '2027-01-02T12:30';
+        const saved = assignment({ title: 'Earlier write', deadlineAt: localInputToRfc3339(nextInput)! });
+        vi.mocked(readOwnedAssignment).mockResolvedValueOnce(original)
+            .mockRejectedValueOnce(new ApiError('network', 'Unavailable')).mockResolvedValueOnce(saved);
+        vi.mocked(replaceAssignment).mockRejectedValueOnce(http(503))
+            .mockImplementationOnce(async (_c, _a, write) => assignment(write));
+        await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);
+        await type('Assignment title', 'Earlier write'); await type('Deadline', nextInput); await click('Save changes');
+        if (newer) await type('Instructions', 'Newer unsent instructions');
+        await click('Try again');
+        expect(field('Deadline').value).toBe(nextInput);
+        if (newer) expect(field('Instructions').value).toBe('Newer unsent instructions');
+        await type('Deadline', oldInput); await click('Save changes');
+        expect(vi.mocked(replaceAssignment).mock.calls[1][2].deadlineAt).toBe(localInputToRfc3339(oldInput));
+        expect(vi.mocked(replaceAssignment).mock.calls[1][2].deadlineAt).not.toBe(original.deadlineAt);
+        expect(replaceAssignment).toHaveBeenCalledTimes(2);
+    });
+
+    it('retains a creation draft read-only after a definitive Course 404 with no related lesson', async () => {
+        vi.mocked(createAssignment).mockRejectedValue(http(404));
+        await mount(`/teach/courses/${courseId}/assignments/new`);
+        await type('Assignment title', 'Keep creation'); await type('Instructions', '# Retain'); await type('Deadline', '2027-01-02T12:30');
+        await click('Create assignment');
+        expect(field('Instructions').value).toBe('# Retain');
+        expect(field('Instructions').disabled).toBe(true);
+        expect(text()).toContain("This course isn't available.");
+        expect(createAssignment).toHaveBeenCalledTimes(1);
+    });
+
     it('uses arrow focus and explicit activation for Instructions/Preview without changing the draft', async () => {
         vi.mocked(readOwnedAssignment).mockResolvedValue(assignment());
         await mount(`/teach/courses/${courseId}/assignments/${assignmentId}`);

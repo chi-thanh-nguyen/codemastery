@@ -1,5 +1,84 @@
 # Development Setup
 
+## FE16 post-squash integration and recovery decisions — 27 November 2026
+
+Refs #201, existing PR #270. The Project Leader explicitly authorizes full FE16
+completion, isolated post-squash reconstruction, task-local decisions, bounded
+upstream work, author self-audit, direct remediation and publication. This record
+supersedes only the **current stack instructions** of `FE16-STACK-2026-11-27-r1`;
+its original record below is preserved as historical evidence. N7 and DRAFT r1
+remain effective within their original scope. Historical verification below was
+not executed on this revision.
+
+### `FE16-POST-SQUASH-2026-11-27-r1`
+
+- Live main is `e2106f68c612468f1d6e4eb5f86c086256010bc7`, the FE17 #288
+  squash merge. Its tree and independently accepted FE17 HEAD
+  `b69e4acd4713ce1750b941002d1607e2f4a92acd` both equal
+  `27ca5f24e9f94ddcd123a8b19a84a83ad4d114cd`.
+- Transplant only `ca55b231` and `28ad6ffa` from `11ba8e49..28ad6ffa` onto
+  that main, without replaying FE17 or FE13. The two documentation conflicts
+  retain **both complete records**. The initial effective delta remains seven
+  files, +673/-18. Range-diff changes only document insertion context; all five
+  non-document files exactly match the original FE16 HEAD before remediation.
+- Preserve original HEAD with
+  `refs/heads/backup/fe16-post-squash-20261127-pre-restack`. Original patches,
+  metadata, histories and a verified complete Git bundle live outside tracked
+  files. Existing FE13/FE16/FE17 reconstruction backups remain. PR #271 is still
+  `c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2`; no other open PR consumes the
+  #270 branch. Do not modify that PR, FE13, #288 or main.
+- PR #270 now targets main directly. The deleted FE17 branch and “merge #288
+  first” instructions below describe the earlier stacked revision only.
+  Alternatives rejected: merging obsolete ancestry, replaying FE17, or discarding
+  one side of the documentation conflicts. They would obscure ownership or lose
+  accepted behavior/provenance. Publication uses the refreshed original remote
+  SHA in an explicit force-with-lease, never unconditional force.
+- No missing upstream slice was found: AS09/CO06/FE14/FE15/FE08/FE03/FE32/FE34/FE17
+  supply the exact consumed capabilities. New functional scope is **0% per
+  upstream Issue**, including tests/supporting work; no upstream implementation,
+  backend, contract, route, dependency or migration change is needed.
+- Verification: ancestry/range-diff, complete history bundle, unchanged accepted
+  grading blobs and shared dependencies, focused consumers and both real REST
+  grading handoffs. Independent FE17 evidence remains applicable to unchanged
+  behavior; this task does not independently re-accept it.
+
+### `FE16-RECOVERY-BASELINE-2026-11-27-r1`
+
+- A current GET confirming an earlier full replacement advances the persisted
+  deadline baseline, as an acknowledged PUT does. An unchanged sent draft adopts
+  the confirmed body; newer unsent edits remain dirty and verbatim. A subsequent
+  explicit return to an older displayed date must not resurrect the old date's
+  microseconds. An unconfirmed differing GET or publication reconciliation still
+  retains the draft's original exact baseline. This refines the implementation
+  of DRAFT r1 without changing full replacement or last-save-wins semantics.
+- A creation 404 with no related Lesson is a definitive unavailable Course,
+  rather than an unknown Assignment creation. Retain the draft read-only and
+  offer catalogue navigation. A Lesson-related 404 retains the existing bounded
+  Course refresh/field recovery; failed GETs never establish deletion.
+- Read-only retained drafts still use the existing dirty-navigation and native
+  unload protection. Catalogue departure asks Stay/Leave; session-generation
+  replacement still discards private resource state. No new persistence,
+  synchronization restriction or automatic mutation replay is introduced.
+- Validate the UTC instant range after applying RFC 3339 offsets when decoding
+  Assignment deadlines, matching OpenAPI and the actual backend parser.
+- Authority: the Leader's explicit task-local technical delegation. Alternatives
+  (keeping a stale baseline, treating definitive 404 as retryable creation,
+  silently losing refused drafts, admitting an out-of-contract UTC year) contradict
+  existing S19/ADR010/CT16 requirements. Scope is FE16 only; no amendment of
+  canonical contracts, no wider FE15/S20 N7 resolution, no owner confirmation or
+  security/operational waiver. Negative controls and focused regressions verify
+  each correction; see the current testing record.
+
+OpenAI Codex performed implementation and author self-audit. Verified Git metadata
+uses `Le Phan Quoc Thang <thangle12012006@gmail.com>` for Author and Committer;
+GitHub associates this with `heizseung`. Authenticated publication is by
+`chi-thanh-nguyen`. Metadata is not proof of personal implementation, signature
+or review. Graphify was used only for navigation of its stale graph; source was
+verified directly. Impeccable context/audit guidance and its mechanical detector
+were used; Playwright supplies controlled and real REST/browser evidence. No AI
+service is introduced into the product. Independent review, CI, QA, protected
+integration, release and deployment remain separate.
+
 ## FE16 completion and FE13 consolidation decisions — 27 November 2026
 
 Refs #201, PR #270; explicit Project Leader instruction “Consolidate FE13 PRs,

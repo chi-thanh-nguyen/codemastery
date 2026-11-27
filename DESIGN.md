@@ -2646,6 +2646,18 @@ DTO, HTTP contract, security policy, quiz/question or S20 behavior. Decision,
 alternatives, authority and verification are recorded in `docs/setup.md` and
 `docs/testing.md`. Historical N7 observations remain historical evidence.
 
+**FE16 post-squash implementation handoff — 27 November 2026.** PR #270 is
+reconstructed directly on main `e2106f68` after FE17 #288's squash merge;
+`FE16-STACK-2026-11-27-r1` is historical. Assignment management/editor production
+routes consume decoded REST data, including CT37 Instructions/Preview and both
+accepted grading handoffs. Confirmed replacement recovery advances its deadline
+baseline without declaring newer drafts saved; definitive Course refusal keeps
+creation read-only, and retained drafts keep navigation protection. N7's safe
+FE16 fallback and G7's recorded Leader-mediated confirmation remain unchanged.
+These are implementation handoffs and author verification in the open PR,
+not independent whole-screen acceptance or a change of contracts/design scope.
+See the current setup/testing records for evidence and separate gates.
+
 ### S20 Skill graph editor
 
 **Contract:** Approved (CT05 representation/mutation/mapping/bindings, CT06.enablement r2 with N1 and R1, CT18 B1 errors r3). **Delivery:** Preview only. **Fidelity:** S (Canvas). **Data:** `getOwnedSkillGraph`, `getOwnedCourse` (lesson inventory, through the S18 course context), `createCourseSkill`, `updateCourseSkill`, `deleteCourseSkill`, `addCoursePrerequisite`, `removeCoursePrerequisite`, `mapCourseLessonSkill`, `unmapCourseLessonSkill`, `getCourseAdaptiveSettings`, `replaceCourseAdaptiveSettings`.

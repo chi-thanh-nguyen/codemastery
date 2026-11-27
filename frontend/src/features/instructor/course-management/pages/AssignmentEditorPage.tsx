@@ -145,7 +145,7 @@ const ASSIGNMENT_FIELD_MAP = {
 
 type AssignmentAlert =
     | { type: 'error'; message: string }
-    | { type: 'not-found' | 'unknown-create' | 'no-access' }
+    | { type: 'not-found' | 'course-not-found' | 'unknown-create' | 'no-access' }
     | { type: 'unknown'; current: B5OwnedAssignment | null; retry: () => void };
 
 const messageOf = (error: unknown) => error instanceof ApiError ? error.message : 'Something went wrong on our side. Try again in a moment.';
@@ -259,14 +259,14 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     }, [draft.lessonId, course, knownLessons]);
 
     useEffect(() => {
-        if (!dirty || noAccess) return;
+        if (!dirty) return;
         const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
         window.addEventListener('beforeunload', warn);
         return () => window.removeEventListener('beforeunload', warn);
-    }, [dirty, noAccess]);
+    }, [dirty]);
 
     const go = (to: string) => {
-        if (dirtyRef.current && !noAccess) {
+        if (dirtyRef.current) {
             setLeaveTo({ go: () => navigate(to) });
             setConfirm('leave');
         } else {
@@ -275,7 +275,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     };
     // Shell navigation (Teaching, Catalogue, the home link, Profile) asks through the same confirmation (S19).
     useNavigationGuard((proceed) => {
-        if (!dirtyRef.current || noAccess) return false;
+        if (!dirtyRef.current) return false;
         setLeaveTo({ go: proceed });
         setConfirm('leave');
         return true;
@@ -288,7 +288,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
         setNotice(null);
     };
 
-    const recheck = useCallback(async (confirmed: (current: B5OwnedAssignment) => boolean, onConfirmed: () => void) => {
+    const recheck = useCallback(async (confirmed: (current: B5OwnedAssignment) => boolean, onConfirmed: (current: B5OwnedAssignment) => void) => {
         if (!assignment) return;
         const retry = () => void recheck(confirmed, onConfirmed);
         try {
@@ -296,7 +296,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
             applyLoaded(current, !dirtyRef.current);
             if (confirmed(current)) {
                 setAlert(null);
-                onConfirmed();
+                onConfirmed(current);
             } else {
                 setAlert({ type: 'unknown', current, retry });
             }
@@ -310,7 +310,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     }, [assignment, read, applyLoaded]);
 
     async function create() {
-        if (noAccess) return;
+        if (noAccess || gone) return;
         const next = validateAssignment(draft, baselineDeadline);
         showErrors(next);
         if (Object.keys(next).length) return;
@@ -329,15 +329,16 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
             }
             if (status === 404 && draft.lessonId) {
                 course?.reload();
-                setErrors({ lessonId: 'The selected lesson is no longer available in this course.' });
+                showErrors({ lessonId: 'The selected lesson is no longer available in this course.' });
                 return;
             }
+            if (status === 404) { setNoAccess(true); setAlert({ type: 'course-not-found' }); return; }
             setAlert(outcomeUnknown(error) ? { type: 'unknown-create' } : { type: 'error', message: messageOf(error) });
         }
     }
 
     async function save() {
-        if (!assignment || noAccess) return;
+        if (!assignment || noAccess || gone) return;
         const next = validateAssignment(draft, baselineDeadline);
         showErrors(next);
         if (Object.keys(next).length) return;
@@ -363,7 +364,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
                     try {
                         const current = await read(assignment.id);
                         applyLoaded(current, false);
-                        setErrors({ lessonId: 'The selected lesson is no longer available in this course.' });
+                        showErrors({ lessonId: 'The selected lesson is no longer available in this course.' });
                         return;
                     } catch (readError) {
                         if (isCancelled(readError)) return;
@@ -380,12 +381,15 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
             }
             if (outcomeUnknown(error)) {
                 setAlert({ type: 'unknown', current: null, retry: () => undefined });
-                await recheck((current) => sameAssignment(sent, sentBaseline, current), () => {
+                await recheck((current) => sameAssignment(sent, sentBaseline, current), (current) => {
                     // A deliberate later GET can confirm the earlier write after the user has edited again.
                     // It must not mark those newer, unsent edits as saved or disable their Save action.
                     const unchanged = JSON.stringify(draftRef.current) === JSON.stringify(sent)
                         && JSON.stringify(deadlineRef.current) === JSON.stringify(sentBaseline);
-                    if (unchanged) setDirty(false);
+                    // Confirmation advances the persisted baseline just like a successful PUT.
+                    // Otherwise returning to an older displayed date could restore its stale microseconds.
+                    if (unchanged) applyLoaded(current, true);
+                    else setBaselineDeadline({ input: toLocalDateTimeInput(current.deadlineAt), iso: current.deadlineAt });
                     setNotice(unchanged ? 'Saved' : 'Earlier changes were saved. Your current edits are not saved.');
                 });
                 return;
@@ -396,7 +400,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
 
     async function publication(targetStatus: AssignmentPublicationStatus) {
         setConfirm(null);
-        if (!assignment || noAccess) return;
+        if (!assignment || noAccess || gone) return;
         setAlert(null); setNotice(null);
         try {
             const updated = await editor.setPublication(assignment.id, targetStatus);
@@ -460,12 +464,16 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
     const alertView = (() => {
         if (!alert) return null;
         switch (alert.type) {
+            case 'course-not-found':
+                return <Alert severity="warning" action={<Button size="small" variant="text" onClick={() => go('/courses')}>Back to catalogue</Button>}>
+                    This course isn&apos;t available. Your edits are still here.
+                </Alert>;
             case 'not-found':
                 return <Alert severity="warning" action={<Button size="small" variant="text" onClick={() => go(listPath)}>Back to assignments</Button>}>
                     This assignment isn&apos;t available.
                 </Alert>;
             case 'no-access':
-                return <Alert severity="error" action={<Button component={Link} to="/courses" size="small" variant="text">Back to catalogue</Button>}>
+                return <Alert severity="error" action={<Button size="small" variant="text" onClick={() => go('/courses')}>Back to catalogue</Button>}>
                     You don&apos;t have access to this course. Only the course&apos;s instructor can manage its assessments.
                 </Alert>;
             case 'unknown-create':
@@ -484,7 +492,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
         }
     })();
 
-    const status = editor.busy ? 'Saving…' : notice ?? (dirty && !noAccess ? 'Unsaved changes' : null);
+    const status = editor.busy ? 'Saving…' : notice ?? (dirty ? 'Unsaved changes' : null);
 
     return <Box sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 3, maxWidth: 860 }}>
         <PageHeader

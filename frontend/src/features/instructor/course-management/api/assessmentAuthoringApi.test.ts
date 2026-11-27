@@ -181,6 +181,8 @@ describe('CT10.rest owner assignment bindings', () => {
     it.each([
         ['gradedCount exceeding submissionCount', { ...assignment, submissionCount: 1, gradedCount: 2 }],
         ['sub-microsecond deadlineAt', { ...assignment, deadlineAt: '2026-12-01T12:00:00.1234567Z' }],
+        ['deadline before UTC year 0000', { ...assignment, deadlineAt: '0000-01-01T00:00:00+01:00' }],
+        ['deadline after UTC year 9999', { ...assignment, deadlineAt: '9999-12-31T23:59:59-01:00' }],
         ['another course', { ...assignment, courseId: skillId }],
         ['extra property', { ...assignment, open: true }],
     ])('rejects %s', async (_, bad) => {

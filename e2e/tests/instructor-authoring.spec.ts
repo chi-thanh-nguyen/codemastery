@@ -140,6 +140,52 @@ test('FE16 complete authoring, safe Preview, exact deadlines and grading handoff
     await page.getByRole('link', { name: 'Open grading', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/teach/grading\\?courseId=${course.id}&assignmentId=${assignment.id}$`));
     await expect(page.getByText('No submissions yet', { exact: true })).toBeVisible();
+
+    // Short-height, long-content geometry must prove the single sticky action is actually usable.
+    const longTitle = 'Long assignment instructions and evaluation requirements '.repeat(12);
+    const longMarkdown = markdown + '\n\n' + 'Detailed instructions with realistic paragraphs.\n\n'.repeat(45);
+    expect((await request.put(api(`${assignments}/${assignment.id}`), { headers,
+        data: { title: longTitle, instructions: longMarkdown, deadlineAt: precise, lessonId: null } })).status()).toBe(200);
+    await page.goto(editorUrl);
+    await expect(page.getByRole('textbox', { name: 'Assignment title' })).toHaveValue(longTitle.trim());
+    const geometry: unknown[] = [];
+    const saveGeometry = async (state: string) => {
+        const save = page.getByRole('button', { name: 'Save changes', exact: true });
+        await expect(save).toHaveCount(1);
+        const observation = await save.evaluate(button => {
+            const r = button.getBoundingClientRect();
+            const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+            return { x: r.x, y: r.y, width: r.width, height: r.height, viewport: { width: innerWidth, height: innerHeight },
+                visible: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth,
+                // MUI's disabled button has pointer-events:none; its containing action region receives the hit.
+                unobscured: hit === button || button.contains(hit) || ((button as HTMLButtonElement).disabled && !!button.parentElement?.contains(hit)) };
+        });
+        geometry.push({ state, ...observation });
+        expect(observation.visible).toBe(true); expect(observation.unobscured).toBe(true);
+    };
+    await page.getByRole('textbox', { name: 'Instructions', exact: true }).fill(longMarkdown + '\nUnsaved draft.');
+    for (const preference of ['Light', 'Dark', 'System']) {
+        await page.setViewportSize({ width: 1440, height: 720 });
+        await page.getByRole('button', { name: /^Theme:/ }).click();
+        await page.getByRole('menuitemradio', { name: new RegExp(`^${preference}`) }).click(); await page.keyboard.press('Escape');
+        for (const width of [360, 768, 1024, 1280, 1440]) {
+            await page.setViewportSize({ width, height: width < 1024 ? 600 : 720 });
+            await expectResponsiveHeaderMode(page, width);
+            await page.evaluate(() => scrollTo(0, 0)); await saveGeometry(`${preference}-initial`);
+            await page.getByRole('button', { name: 'Preview', exact: true }).click();
+            await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight / 2));
+            await saveGeometry(`${preference}-long-preview`); await expectNoPageOverflow(page);
+            await page.getByRole('button', { name: 'Instructions', exact: true }).click();
+        }
+    }
+    await page.setViewportSize({ width: 360, height: 600 });
+    await page.getByRole('textbox', { name: 'Instructions', exact: true }).fill('   ');
+    await page.getByRole('button', { name: 'Preview', exact: true }).click();
+    await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: 'Instructions', exact: true })).toBeFocused();
+    await expect(page.getByText('Check the highlighted fields. Your edits are still here.', { exact: true })).toBeVisible();
+    await saveGeometry('invalid-instructions');
+    await testInfo.attach('fe16-short-height-action-geometry', { body: JSON.stringify(geometry), contentType: 'application/json' });
 });
 
 async function expectResponsiveHeaderMode(page: Page, width: number) {
