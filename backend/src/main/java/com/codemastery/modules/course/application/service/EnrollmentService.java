@@ -14,8 +14,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -104,6 +106,95 @@ public class EnrollmentService {
         return enrollments.enrollmentMetrics(courseId).map(row -> metrics(row, enrollments.joinedLearnerIds(List.of(courseId))));
     }
 
+    /**
+     * ADR011 §14 (CT33.insights): ACTIVE/COMPLETED learners of an owning Instructor's Course,
+     * ordered by learner UUID ascending, with CT22 progress and display names from
+     * {@code UserAccountService.learnerDisplayNames}. Joins the caller's read-only REPEATABLE READ snapshot.
+     */
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public PageResponse<CourseLearner> listJoinedLearners(UUID courseId, int page, int size) {
+        requireId(courseId);
+        PageResponse.validateRequest(page, size);
+        requireReadSnapshot();
+        access.requireCourseOwnership(courseId);
+
+        long total = enrollments.countJoinedLearners(courseId);
+        if (total < 0) {
+            throw new IllegalStateException("Joined learner count cannot be negative");
+        }
+        if ((long) page * size >= total) {
+            return new PageResponse<>(List.of(), page, size, total);
+        }
+
+        var rows = enrollments.findJoinedLearners(courseId, page, size);
+        if (rows == null || rows.size() > size || rows.size() > total) {
+            throw new IllegalStateException("Invalid joined learner page result");
+        }
+
+        Set<UUID> learnerIds = rows.stream()
+                .map(EnrollmentRepository.JoinedLearnerRow::learnerId)
+                .collect(Collectors.toUnmodifiableSet());
+        Map<UUID, String> names = learnerIds.isEmpty() ? Map.of() : identities.learnerDisplayNames(learnerIds);
+        if (names == null) {
+            throw new IllegalStateException("Invalid learner display names provider result");
+        }
+
+        List<CourseLearner> content = rows.stream()
+                .map(row -> toCourseLearner(row, names.get(row.learnerId())))
+                .toList();
+        return new PageResponse<>(content, page, size, total);
+    }
+
+    /**
+     * ADR011 §14 (CT33.insights): one ACTIVE/COMPLETED learner of an owning Instructor's Course;
+     * LEFT, absent or foreign learners are concealed as 404. Joins the caller's read-only REPEATABLE READ snapshot.
+     */
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public CourseLearner readJoinedLearner(UUID courseId, UUID learnerId) {
+        requireId(courseId);
+        requireId(learnerId);
+        requireReadSnapshot();
+        access.requireCourseOwnership(courseId);
+
+        var row = enrollments.findJoinedLearner(courseId, learnerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Resource not available"));
+        Map<UUID, String> names = identities.learnerDisplayNames(Set.of(learnerId));
+        if (names == null) {
+            throw new IllegalStateException("Invalid learner display names provider result");
+        }
+        return toCourseLearner(row, names.get(learnerId));
+    }
+
+    private static CourseLearner toCourseLearner(EnrollmentRepository.JoinedLearnerRow row, String displayName) {
+        if (row.status() != EnrollmentStatus.ACTIVE && row.status() != EnrollmentStatus.COMPLETED) {
+            throw new IllegalStateException("Joined learner read returned non-joined membership");
+        }
+        var calc = LessonProgressService.Calculation.of(row.completedLessons(), row.totalLessons());
+        return new CourseLearner(
+                row.learnerId(),
+                displayName,
+                row.status().getStatus(),
+                row.enrollmentId(),
+                Math.toIntExact(calc.completed()),
+                Math.toIntExact(calc.total()),
+                calc.percentage());
+    }
+
+    private static void requireReadSnapshot() {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isCurrentTransactionReadOnly()
+                || !Objects.equals(TransactionSynchronizationManager.getCurrentTransactionIsolationLevel(),
+                        Isolation.REPEATABLE_READ.value())) {
+            throw new IllegalStateException("Course learner reads require a read-only REPEATABLE READ transaction");
+        }
+    }
+
+    private static void requireId(UUID id) {
+        if (id == null) {
+            throw new IllegalArgumentException("Identifier must not be null");
+        }
+    }
+
     private static CourseEnrollmentMetrics metrics(EnrollmentRepository.EnrollmentMetricsRow row, Map<UUID, Set<UUID>> joined) {
         var learners = joined.getOrDefault(row.courseId(), Set.of());
         if (learners.size() != row.activeEnrollments() + row.completedEnrollments() || row.completedLearners() > learners.size()) {
@@ -128,5 +219,13 @@ public class EnrollmentService {
             long activeEnrollments, long completedEnrollments, long leftEnrollments,
             long completedLearners, Set<UUID> joinedLearnerIds) {
         public CourseEnrollmentMetrics { joinedLearnerIds = Set.copyOf(joinedLearnerIds); }
+    }
+    public record CourseLearner(UUID learnerId, String displayName, String membershipStatus,
+            UUID enrollmentId, int completedLessons, int totalLessons, int progressPercentage) {
+        public CourseLearner {
+            Objects.requireNonNull(learnerId, "learnerId");
+            Objects.requireNonNull(membershipStatus, "membershipStatus");
+            Objects.requireNonNull(enrollmentId, "enrollmentId");
+        }
     }
 }

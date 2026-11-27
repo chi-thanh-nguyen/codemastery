@@ -86,4 +86,34 @@ public interface EnrollmentRepository {
             boolean completed, boolean masterySkipped) {}
     record ProgressSummary(UUID courseId, String title, long totalLessons, long completedLessons, UUID nextLessonId) {}
     record VisitPosition(UUID courseId, UUID lessonId, Instant lastVisitedAt) {}
+
+    // CT33.rest & CT33.insights (ADR011 §§14, 15): read-only set-based Course queries.
+
+    /** Total ACTIVE Enrollments of published Courses for one Learner (same population as activeProgress). */
+    long countActiveAdaptiveEnrollments(UUID userId);
+
+    /** One page of ACTIVE Enrollments of published Courses, ordered by title COLLATE "C" ASC, course id ASC. */
+    List<AdaptiveEnrollmentRow> findActiveAdaptiveEnrollments(UUID userId, int page, int size);
+
+    /**
+     * Published Lessons in canonical (Chapter.position, Lesson.position) order with titles and progress flags,
+     * grouped by enrollmentId in one query.
+     */
+    java.util.Map<UUID, List<LessonDetailPlacement>> publishedLessonDetailsByEnrollment(
+            java.util.Collection<UUID> enrollmentIds);
+
+    /** Total ACTIVE or COMPLETED Enrollments in a Course. */
+    long countJoinedLearners(UUID courseId);
+
+    /** One page of ACTIVE/COMPLETED learners of a Course with CT22 progress counts, ordered by user_id ASC. */
+    List<JoinedLearnerRow> findJoinedLearners(UUID courseId, int page, int size);
+
+    /** One ACTIVE/COMPLETED learner of a Course with CT22 progress counts; empty for LEFT, absent or foreign. */
+    Optional<JoinedLearnerRow> findJoinedLearner(UUID courseId, UUID learnerId);
+
+    record AdaptiveEnrollmentRow(UUID courseId, String courseTitle, UUID enrollmentId, boolean adaptiveEnabled) {}
+    record LessonDetailPlacement(UUID lessonId, String lessonTitle, UUID chapterId, int chapterPosition,
+            int lessonPosition, boolean completed, boolean masterySkipped) {}
+    record JoinedLearnerRow(UUID learnerId, EnrollmentStatus status, UUID enrollmentId,
+            long completedLessons, long totalLessons) {}
 }

@@ -198,6 +198,132 @@ public class EnrollmentRepositoryImpl implements EnrollmentRepository {
                 (rs, row) -> new VisitPosition(rs.getObject("course_id", UUID.class), rs.getObject("resume_lesson_id", UUID.class),
                         rs.getObject("last_visited_at", java.time.OffsetDateTime.class).toInstant()), userId).stream().findFirst();
     }
+
+    // CT33.rest & CT33.insights (ADR011 §§14, 15)
+
+    @Override
+    public long countActiveAdaptiveEnrollments(UUID userId) {
+        Long total = jdbc.queryForObject(
+                "SELECT count(*) FROM public.enrollments e JOIN public.courses c ON c.id = e.course_id "
+                        + "WHERE e.user_id = ? AND e.status = 'active' AND c.publication_status = 'published'",
+                Long.class, userId);
+        return total == null ? 0L : total;
+    }
+
+    @Override
+    public List<AdaptiveEnrollmentRow> findActiveAdaptiveEnrollments(UUID userId, int page, int size) {
+        long offset = (long) page * size;
+        return jdbc.query(
+                "SELECT c.id AS course_id, c.title AS course_title, e.id AS enrollment_id, c.adaptive_enabled "
+                        + "FROM public.enrollments e JOIN public.courses c ON c.id = e.course_id "
+                        + "WHERE e.user_id = ? AND e.status = 'active' AND c.publication_status = 'published' "
+                        + "ORDER BY c.title COLLATE \"C\" ASC, c.id ASC LIMIT ? OFFSET ?",
+                (rs, row) -> new AdaptiveEnrollmentRow(
+                        rs.getObject("course_id", UUID.class),
+                        rs.getString("course_title"),
+                        rs.getObject("enrollment_id", UUID.class),
+                        rs.getBoolean("adaptive_enabled")),
+                userId, size, offset);
+    }
+
+    @Override
+    public java.util.Map<UUID, List<LessonDetailPlacement>> publishedLessonDetailsByEnrollment(
+            java.util.Collection<UUID> enrollmentIds) {
+        if (enrollmentIds.isEmpty()) {
+            return java.util.Map.of();
+        }
+        var ids = List.copyOf(new java.util.LinkedHashSet<>(enrollmentIds));
+        var grouped = new java.util.HashMap<UUID, java.util.ArrayList<LessonDetailPlacement>>();
+        jdbc.query(
+                "SELECT e.id AS enrollment_id, l.id AS lesson_id, l.title AS lesson_title, "
+                        + "l.chapter_id, ch.position AS chapter_position, l.position AS lesson_position, "
+                        + "COALESCE(p.completed, false) AS completed, COALESCE(p.mastery_skipped, false) AS skipped "
+                        + "FROM public.enrollments e "
+                        + "JOIN public.chapters ch ON ch.course_id = e.course_id "
+                        + "JOIN public.lessons l ON l.chapter_id = ch.id AND l.publication_status = 'published' "
+                        + "LEFT JOIN public.lesson_progress p ON p.lesson_id = l.id AND p.enrollment_id = e.id "
+                        + "WHERE e.id IN (" + String.join(",", java.util.Collections.nCopies(ids.size(), "?")) + ") "
+                        + "ORDER BY e.id ASC, ch.position ASC, l.position ASC",
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> grouped
+                        .computeIfAbsent(rs.getObject("enrollment_id", UUID.class), ignored -> new java.util.ArrayList<>())
+                        .add(new LessonDetailPlacement(
+                                rs.getObject("lesson_id", UUID.class),
+                                rs.getString("lesson_title"),
+                                rs.getObject("chapter_id", UUID.class),
+                                rs.getInt("chapter_position"),
+                                rs.getInt("lesson_position"),
+                                rs.getBoolean("completed"),
+                                rs.getBoolean("skipped"))),
+                ids.toArray());
+        var result = new java.util.HashMap<UUID, List<LessonDetailPlacement>>();
+        grouped.forEach((enrollmentId, lessons) -> result.put(enrollmentId, List.copyOf(lessons)));
+        return java.util.Map.copyOf(result);
+    }
+
+    @Override
+    public long countJoinedLearners(UUID courseId) {
+        Long total = jdbc.queryForObject(
+                "SELECT count(*) FROM public.enrollments e "
+                        + "WHERE e.course_id = ? AND e.status IN ('active', 'completed')",
+                Long.class, courseId);
+        return total == null ? 0L : total;
+    }
+
+    @Override
+    public List<JoinedLearnerRow> findJoinedLearners(UUID courseId, int page, int size) {
+        long offset = (long) page * size;
+        return jdbc.query(
+                "WITH required AS (SELECT l.id FROM public.lessons l "
+                        + "JOIN public.chapters ch ON ch.id = l.chapter_id "
+                        + "WHERE ch.course_id = ? AND l.publication_status = 'published'), "
+                        + "required_total AS (SELECT count(*) AS total FROM required), "
+                        + "page_enrollments AS (SELECT e.id, e.user_id, e.status FROM public.enrollments e "
+                        + "WHERE e.course_id = ? AND e.status IN ('active', 'completed') "
+                        + "ORDER BY e.user_id ASC LIMIT ? OFFSET ?) "
+                        + "SELECT pe.user_id, pe.status, pe.id AS enrollment_id, "
+                        + "(SELECT total FROM required_total) AS total_lessons, "
+                        + "count(p.lesson_id) FILTER (WHERE p.completed) AS completed_lessons, "
+                        + "COALESCE(bool_or(p.mastery_skipped AND NOT p.completed), false) AS invalid_skip "
+                        + "FROM page_enrollments pe "
+                        + "LEFT JOIN public.lesson_progress p ON p.enrollment_id = pe.id "
+                        + "AND p.lesson_id IN (SELECT id FROM required) "
+                        + "GROUP BY pe.id, pe.user_id, pe.status ORDER BY pe.user_id ASC",
+                EnrollmentRepositoryImpl::joinedLearnerRow,
+                courseId, courseId, size, offset);
+    }
+
+    @Override
+    public Optional<JoinedLearnerRow> findJoinedLearner(UUID courseId, UUID learnerId) {
+        return jdbc.query(
+                "WITH required AS (SELECT l.id FROM public.lessons l "
+                        + "JOIN public.chapters ch ON ch.id = l.chapter_id "
+                        + "WHERE ch.course_id = ? AND l.publication_status = 'published'), "
+                        + "required_total AS (SELECT count(*) AS total FROM required) "
+                        + "SELECT e.user_id, e.status, e.id AS enrollment_id, "
+                        + "(SELECT total FROM required_total) AS total_lessons, "
+                        + "count(p.lesson_id) FILTER (WHERE p.completed) AS completed_lessons, "
+                        + "COALESCE(bool_or(p.mastery_skipped AND NOT p.completed), false) AS invalid_skip "
+                        + "FROM public.enrollments e "
+                        + "LEFT JOIN public.lesson_progress p ON p.enrollment_id = e.id "
+                        + "AND p.lesson_id IN (SELECT id FROM required) "
+                        + "WHERE e.course_id = ? AND e.user_id = ? AND e.status IN ('active', 'completed') "
+                        + "GROUP BY e.id, e.user_id, e.status",
+                EnrollmentRepositoryImpl::joinedLearnerRow,
+                courseId, courseId, learnerId).stream().findFirst();
+    }
+
+    private static JoinedLearnerRow joinedLearnerRow(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
+        if (rs.getBoolean("invalid_skip")) {
+            throw new IllegalStateException("Skipped Lesson must be completed");
+        }
+        return new JoinedLearnerRow(
+                rs.getObject("user_id", UUID.class),
+                status(rs.getString("status")),
+                rs.getObject("enrollment_id", UUID.class),
+                rs.getLong("completed_lessons"),
+                rs.getLong("total_lessons"));
+    }
+
     private static EnrollmentStatus status(String value) {
         return switch (value) {
             case "active" -> EnrollmentStatus.ACTIVE;

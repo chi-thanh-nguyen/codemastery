@@ -1,5 +1,6 @@
 package com.codemastery.modules.course.application.service;
 
+import com.codemastery.common.api.PageResponse;
 import com.codemastery.common.exception.ResourceNotFoundException;
 import com.codemastery.modules.auth.application.service.UserAccountService;
 import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
@@ -8,6 +9,7 @@ import com.codemastery.modules.course.domain.model.Enrollment;
 import com.codemastery.modules.course.domain.model.Course;
 import com.codemastery.modules.course.domain.model.EnrollmentStatus;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository;
+import com.codemastery.modules.course.domain.repository.EnrollmentRepository.LessonDetailPlacement;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository.LessonFlags;
 import com.codemastery.modules.course.domain.repository.EnrollmentRepository.LessonPlacement;
 import com.codemastery.modules.course.domain.repository.CourseRepository;
@@ -21,6 +23,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -122,6 +125,89 @@ public class LessonProgressService {
         var actor = learner();
         var enrollment = joined(enrollments.find(actor.userId(), courseId).orElse(null));
         return executionState(courseId, actor.userId(), enrollment);
+    }
+
+    /**
+     * ADR011 §13 (CT33.map): owning Instructor read of one joined learner's Course state,
+     * joining the caller's read-only REPEATABLE READ snapshot. LEFT, absent or foreign learners
+     * are concealed as 404.
+     */
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public LearnerCourseState readOwnedLearnerState(UUID courseId, UUID learnerId) {
+        requireId(courseId);
+        requireId(learnerId);
+        requireReadSnapshot();
+        access.requireCourseOwnership(courseId);
+        var enrollment = enrollments.find(learnerId, courseId).orElse(null);
+        if (enrollment == null || enrollment.status() == EnrollmentStatus.LEFT) {
+            throw unavailable();
+        }
+        return executionState(courseId, learnerId, enrollment);
+    }
+
+    /**
+     * ADR011 §15 (CT33.rest): ACTIVE published-Course memberships for the current Learner in the
+     * same population, order and paging as {@link #myCourseProgress}, with published Lesson states
+     * and titles for `/api/me/recommendations`. Joins the caller's read-only REPEATABLE READ snapshot.
+     */
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public PageResponse<LearnerCourseRef> listMyAdaptiveEnrollments(int page, int size) {
+        PageResponse.validateRequest(page, size);
+        requireReadSnapshot();
+        var actor = learner();
+        long total = enrollments.countActiveAdaptiveEnrollments(actor.userId());
+        if (total < 0) {
+            throw new IllegalStateException("Active enrollment count cannot be negative");
+        }
+        if ((long) page * size >= total) {
+            return new PageResponse<>(List.of(), page, size, total);
+        }
+
+        var rows = enrollments.findActiveAdaptiveEnrollments(actor.userId(), page, size);
+        if (rows == null || rows.size() > size || rows.size() > total) {
+            throw new IllegalStateException("Invalid active adaptive enrollment page result");
+        }
+
+        var enrollmentIds = rows.stream().map(EnrollmentRepository.AdaptiveEnrollmentRow::enrollmentId).toList();
+        var lessonsByEnrollment = enrollments.publishedLessonDetailsByEnrollment(enrollmentIds);
+        if (lessonsByEnrollment == null) {
+            throw new IllegalStateException("Invalid published lesson details result");
+        }
+
+        List<LearnerCourseRef> content = rows.stream().map(row -> {
+            var details = lessonsByEnrollment.getOrDefault(row.enrollmentId(), List.of());
+            List<LessonState> lessonStates = new java.util.ArrayList<>(details.size());
+            Map<UUID, String> lessonTitles = new LinkedHashMap<>(details.size());
+            for (LessonDetailPlacement detail : details) {
+                if (detail.masterySkipped() && !detail.completed()) {
+                    throw new IllegalStateException("Skipped Lesson must be completed");
+                }
+                if (detail.lessonId() == null || detail.lessonTitle() == null) {
+                    throw new IllegalStateException("Stored Lesson violates V002");
+                }
+                lessonStates.add(new LessonState(
+                        detail.lessonId(), detail.chapterId(), detail.chapterPosition(),
+                        detail.lessonPosition(), detail.completed(), detail.masterySkipped()));
+                if (lessonTitles.putIfAbsent(detail.lessonId(), detail.lessonTitle()) != null) {
+                    throw new IllegalStateException("Duplicate Lesson in Course snapshot");
+                }
+            }
+            return new LearnerCourseRef(
+                    row.courseId(), row.courseTitle(), row.enrollmentId(),
+                    row.adaptiveEnabled(), lessonStates, lessonTitles);
+        }).toList();
+
+        return new PageResponse<>(content, page, size, total);
+    }
+
+    private static void requireReadSnapshot() {
+        // Joining an existing transaction does not apply an annotation's isolation/readOnly settings.
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isCurrentTransactionReadOnly()
+                || !Objects.equals(TransactionSynchronizationManager.getCurrentTransactionIsolationLevel(),
+                        Isolation.REPEATABLE_READ.value())) {
+            throw new IllegalStateException("Course learner reads require a read-only REPEATABLE READ transaction");
+        }
     }
 
     /** ADR011 §3: actorless execution read, only under this Course's held write root. */
@@ -282,4 +368,14 @@ public class LessonProgressService {
     }
     public record LessonState(UUID lessonId, UUID chapterId, int chapterPosition,
             int lessonPosition, boolean completed, boolean masterySkipped) {}
+    public record LearnerCourseRef(UUID courseId, String courseTitle, UUID enrollmentId,
+            boolean adaptiveEnabled, List<LessonState> lessons, Map<UUID, String> lessonTitles) {
+        public LearnerCourseRef {
+            Objects.requireNonNull(courseId, "courseId");
+            Objects.requireNonNull(courseTitle, "courseTitle");
+            Objects.requireNonNull(enrollmentId, "enrollmentId");
+            lessons = List.copyOf(Objects.requireNonNull(lessons, "lessons"));
+            lessonTitles = Map.copyOf(Objects.requireNonNull(lessonTitles, "lessonTitles"));
+        }
+    }
 }
