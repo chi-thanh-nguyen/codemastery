@@ -11589,3 +11589,361 @@ Eligible independent CODEOWNER approval, final-HEAD required CI/scanning and
 authorized protected squash integration remain gates. No GitHub approval, merge,
 Issue closure, Project update, grant expansion, release or deployment is performed.
 Downstream owner Enrollment admission and complete adaptive acceptance stay open.
+
+## AS12 completion and producer self-audit — 27 November 2026
+
+**Authority and disposition.** The Project Leader's explicit AS12 completion task
+permits implementation/remediation, focused supporting tests/documentation, eligible
+bounded upstream work, necessary delegated technical decisions, new commits and
+normal push to existing PR #302, and a body-only PR update. This record describes
+OpenAI Codex-assisted implementation and author-side self-audit, not independent
+acceptance. No merge, Issue/Project mutation, workflow dispatch, release or deployment
+is authorized by this record.
+
+**Baseline and provenance.** PR #302 is open on
+`feature/as12-quiz-submitted-event`, original author `minhtan29042006`.
+Initial HEAD: `550ff24972cb16be5f2387d71452b7f50fa494be`; merge-base:
+`daddc507f1bb109f66c988537c00cab7bc08f256`. Refreshed main:
+`e2106f68c612468f1d6e4eb5f86c086256010bc7`; its one additional commit is the
+unrelated FE17 #288 delivery. No main integration is necessary for these backend
+changes; strict up-to-date merge remains a separate gate. An isolated clone
+preserves all existing worktrees and user changes. Original commits `0963e93` and
+`550ff249` are preserved; the new delivery SHA is recorded by Git and the PR to
+avoid a self-referential SHA here.
+
+**Effective authority.** ADR001 module boundaries and CT01/CT03 remain binding.
+ADR007 §§3–12 supplies `CT03-ASSESSMENT-GUARD-2026-11-09-r1`, CT04 start/submission/
+expiry/results, CT23 frozen definitions/membership and
+`CT08-EVIDENCE-2026-11-09-r1`; §16 preserves the AS08 ancestry assertion.
+ADR011 §§3–5/12/16 supplies `CT22-ATOMIC-2026-11-12-r1`,
+`CT08-EXECUTION-2026-11-12-r1`, `CT08-FAILURE-2026-11-12-r1` and
+`CT08-VERIFICATION-PLAN-2026-11-12-r1`, with its §§19–21 corrections.
+These records identify the Leader delegation and retain owner/QA/risk gates.
+ADR012 §§8/9.3/21 distinguishes mandatory in-transaction Adaptive handling from
+best-effort after-commit Interaction handling; its approved two-member subscriber
+set supersedes the earlier one-member total, preserving exactly one in-transaction
+consumer. ADR005 §6.1's latest-evidence tuple and immutable history remain unchanged.
+ADR013 §19's Leader-selected E02 uses fixed practice Quizzes; dynamic capture is
+not adopted. Historical pending wording in Issue #161/ADR007 does not override
+these later scoped decisions. Existing CT14 placement, CT18 errors, CT38 scheduler
+inputs, CT39's local Clock seam and CT40 ancestry are reused. No contract amendment
+or new delegated technical decision is required.
+
+### Initial and final AS12 checkpoint matrix
+
+| Checkpoint / Issue #161 criterion | Binding requirement | Initial implementation/test evidence at 550ff249 | Initial | Remediation and final evidence | Final |
+|---|---|---|---|---|---|
+| AS12.artifact | ADR007 §12 exact immutable 10-field record and 4-field AnswerEvidence | QuizSubmittedEvent constructor; QuizSubmittedEventContract schema/invariant tests | COMPLETE | Preserved byte-for-byte: null rejection, defensive copy, exact V004 literals, nonempty unique strictly ordered evidence, gaps and inclusive time bounds | COMPLETE |
+| AS12.publish | ADR011 §4 persisted rows, synchronous guarded transaction | gradeAndFinalize publishes after flushing; manual/expiry tests; evidence uses in-memory gradedAnswers and legacy no-op constructors remain | PARTIAL | Refreshed persisted answers validated after both flushes, real publisher mandatory, same common path; PostgreSQL transaction/lock/rollback/retry/concurrency checks | COMPLETE |
+| AC1 approved identities and tested skills only | ADR007 §12 full frozen membership and persisted grading | Exact payload and frozen Quiz/Question ancestry checks; persisted-row construction gap | PARTIAL | Event/result use validated refreshed rows; six corrupt-readback cases and PostgreSQL stale-context case fail closed | COMPLETE |
+| AC2 one event per successful terminal transition at approved point | ADR011 §§4–5 | Guard/locks/marker and duplicate recheck exist; no-op construction permits omission | PARTIAL | All constructors require publisher; real manual/expiry duplicates and both controlled race winners commit one event | COMPLETE |
+| AC3 no Assessment consumer | ADR001; ADR011 §4; ADR012 §8 | Event production only; caller/API allowlist tests | COMPLETE | Retained; no Adaptive/Interaction consumer, new REST route, entity/key/mask/score payload or direct Adaptive orchestration call | COMPLETE |
+| AC4 publication and non-publication tests | Issue #161; ADR011 §16 producer obligations | Unit tests and one PostgreSQL test exist, but rollback checks omit saved masks/retry and listener is never removed | PARTIAL | Scoped listener removal; real flush/marker/root/transaction checks; no event on non-submission/persistence/incomplete evidence; rollback, latest committed masks, scheduler retry and deterministic writers | COMPLETE |
+
+Estimated AS12-owned code completeness: **about 90% initially, 100% finally**.
+This is a behavior-based engineering estimate, not a LOC/test-count calculation
+or a percentage of US-06/system acceptance. The original event schema, grading,
+admission, frozen capture, common finalizer, transaction scope, lock order and
+idempotency were already correct and are preserved. No required AS12-owned
+implementation behavior remains missing after remediation.
+
+### Confirmed findings and remediation
+
+| ID / severity | Initial location and mechanism | Impact / remediation | Regression evidence and final state |
+|---|---|---|---|
+| AS12-R01 / P2 | AttemptService.java:813–815 builds event answers from gradedAnswers; updateAnswers flushes but returns void | Cannot establish ADR011 §4 persisted-row evidence or detect inconsistent stored grading. Reuse existing findAnswersInPositionOrderForUpdate after both flushes; its refresh bypasses stale managed entities. Revalidate frozen membership, masks, score and nonnull correctness, then use those rows for event and result | Six unit fault variants fail on original code, pass on fixed code. Real PostgreSQL mutation distinguishes refresh from an ordinary entity query; incomplete DB correctness rolls back without publication. FIXED_AUTHOR_VERIFIED |
+| AS12-R02 / P3 | AttemptService.java:156–175 legacy public constructors silently install no-op publisher | Mandatory event can be suppressed on explicit construction; existing Spring @Autowired path itself was correct. Remove only no-op overloads, retain UTC/Clock publisher-aware constructors, update every test caller with explicit mock or actual context publisher | Compilation checks every caller; real Spring producer wiring and fixed-clock PostgreSQL paths publish. FIXED_AUTHOR_VERIFIED |
+| AS12-R03 / P3 | AssessmentPersistenceIntegrationTest.java:2226–2248,2292–2294 registers listener but only disables it; original rollback checks omit masks/retry | Retains listener/captured fixture in cached context and leaves producer failure/concurrency obligations insufficiently proved. Use AutoCloseable probe, unconditional remove and membership readback; deterministic clocks/latches/actual pg lock waits; independent physical reads and completion outcomes | Scoped probe verifies READ COMMITTED, same thread, held root via NOWAIT/55P03, execution seam and uncommitted visibility; committed reads prove rollback/retry and both race winners. FIXED_AUTHOR_VERIFIED |
+| AS12-R04 / P3 | Initial effective diff has no docs/testing.md AS12 record; PR describes retained no-op constructors and missing Docker only | Missing directly affected verification/limitation synchronization. Append this dated record, preserve historical records and update the existing PR body accurately | Diff/content checks, exact PR body readback; no old result reassigned to new code. FIXED_AUTHOR_VERIFIED |
+
+**Rejected or bounded hypotheses.** The payload needs no extra event ID/score/key,
+positions must not be renumbered, expiry uses its logical timestamp, and failed
+transactions may invoke an event again on legitimate retry. No durable crash-proof
+exactly-once delivery, ledger, outbox, async/new producer transaction or after-commit
+producer is approved. Production Spring injection was not previously missing;
+the defect was the additional silent constructors. A successful constructor alone
+never proves database completeness. No assignment grading, start/save/read/history
+publication or new public event exposure is introduced. Existing SkillGraph ancestry
+imports are the approved exception, not a forbidden consumer coupling.
+
+### Upstream adjudication and decision scope
+
+| Owner | Consumed capability / current finding | Action |
+|---|---|---|
+| AS08 #159, merged PR #296 / 114aeec3 | Authoritative captured lifecycle, repository flush/refresh, locks, execution-only/latest/owner reads and real expiry scheduler | Sufficient for AS12; reuse existing repository methods without upstream source changes |
+| AS04 #32 | Complete exact-mask grading, per-item correctness and equal-weight two-decimal score | Sufficient; real grader and its 12 unit cases retained |
+| AS05 #156 | Valid frozen used Question definitions and skill association | Sufficient; authoring/use checks retained |
+| AS06 #157 | Frozen used Quiz kind/time/membership, legitimate legacy position gaps | Sufficient; start and frozen-membership integration tests retained |
+| CO14 #177 and AD07 #165 | Course guarded READ COMMITTED unit and course-scoped Skill ancestry assertion | Sufficient; physical lock and execution-boundary regressions retained |
+| AS18 #164 | readCoverage / CoverageSnapshot / readCoverageForExecution still absent | Substantial separate conditional readiness capability for AD08/AD13, not a dependency of AS12 event construction/publication. No implementation or 100%-upstream claim; defer outside the bounded threshold |
+
+**New upstream implementation: none (0% per upstream Issue).** All production
+remediation is AS12-owned orchestration. No new decision under the delegated
+technical authority is necessary: refresh-capable readback and mandatory injection
+are ordinary implementation choices under existing contracts. A plain entity query
+can return stale managed state; a new DTO query/repository abstraction or persistence
+redesign is unnecessary because the approved refresh-capable method already exists.
+Reacquisition refreshes the same already-held answer rows, preserves root → Quiz →
+Attempt → answers ordering and introduces no new lock class or cross-module seam.
+
+### Executed verification and exact attribution
+
+Environment: macOS arm64, Temurin Java 25.0.4.1, Maven Wrapper 3.9.16,
+Docker Desktop server 29.8.1, Testcontainers' shared disposable hardened PostgreSQL
+**17.11**, actual Flyway migrations and Spring runtime. Initial sandbox denied
+GitHub/Docker access; authorized elevated calls provided both. No H2/mock substitute
+or persistent test-container reuse was used.
+
+Commands actually executed from `backend/`:
+
+```bash
+# Original 550ff249: PASS, 68 unit cases, zero failures/errors/skips.
+./mvnw -B test -Dtest=AttemptServiceTest
+# New regression on original production: expected RED, six assertion failures.
+./mvnw -B test '-Dtest=AttemptServiceTest$TimedAttempts$QuizSubmittedEventContract#persistedAnswerReadbackMustBeCompleteAndConsistentBeforePublication'
+# First corrected-code unit run: 74 cases, one test-double failure (no physical rollback).
+# Explicitly restore the last committed double capture before testing expiry failure.
+./mvnw -B test -Dtest=AttemptServiceTest
+# First integrated run: 86 unit PASS; 75 ITs, one test-clock error.
+# Fix active read to use the same local 2030 fixture Clock, retaining production checks.
+./mvnw -B verify -Dtest=AttemptServiceTest,QuizGradingServiceTest -Dit.test=AssessmentPersistenceIntegrationTest
+# Controlled mutant: use ordinary entity query rather than refresh-capable readback.
+# Expected RED: 3 real-PostgreSQL cases, 1 assertion failure, zero errors/skips.
+./mvnw -B verify '-Dtest=AttemptServiceTest#noSuchTest' -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#persistenceOrIncompleteRefreshedGradingFailsClosedWithoutPublication'
+# Restore refresh, retain the clock fix, add real Spring constructor/publisher coverage.
+# FINAL PASS: 86 unit + 76 PostgreSQL IT cases, zero failures/errors/skips.
+./mvnw -B verify -Dtest=AttemptServiceTest,QuizGradingServiceTest -Dit.test=AssessmentPersistenceIntegrationTest
+```
+
+The final run compiled all **244 production and 63 test sources**, packaged the
+backend and completed Surefire, Failsafe and JaCoCo. Counts come from current XML;
+68 baseline/6 red/74 intermediate/75 intermediate/3 mutant cases are **not** added
+to final passing counts. Expected fault-injection scheduler logs do not represent
+unhandled final test errors. No production/test source changed after final PASS.
+
+Final verified source Git blob IDs (based on initial HEAD 550ff249):
+
+| Source | Git blob |
+|---|---|
+| QuizSubmittedEvent.java (preserved) | `a654a6f14c590d785e9f7f4a83992f4870e0c0cd` |
+| AttemptService.java | `35ebb207fa70c45e381b2c899c11f3a9dcc28f64` |
+| AttemptServiceTest.java | `1534eeee9b29fe517ebe649811406d0b59b6fda5` |
+| AssessmentPersistenceIntegrationTest.java | `a5b14f5544107123d232bfd511f797c7aa5fcf11` |
+
+All four blobs are included unchanged in the delivery commit, whose Git/PR SHA
+identifies the final tree. Only this English documentation record and PR prose
+were finalized after test execution. `git diff --check`, focused path/history/blob
+checks and preservation of the prior testing record passed.
+
+**Existing hosted CI snapshot:** all 16 inspected check runs at **550ff249** were
+completed/success, including Backend, Frontend, E2E, CodeQL and the VM checks.
+These are earlier-revision checks, not verification of this remediation. Original
+author Windows evidence in the PR (68 unit cases and a Docker-unavailable IT attempt)
+remains historical; actual current PostgreSQL execution is the final local run above.
+No hosted workflow was dispatched, rerun, polled or awaited.
+
+**Intentionally omitted:** unrelated backend suites, frontend builds/tests, browser/
+E2E, VM/runtime/release/deployment qualification and whole-system adaptive QA.
+The change is backend producer orchestration using unchanged existing reads/grants;
+its full impacted Assessment persistence suite and grading tests already cover the
+required source, DI, authorization, execution-scope, SQL, rollback and lock behavior.
+No privilege/schema/operational behavior changes justify repeating those separate
+qualification suites. AD13/CT28/QA04 production integration remains unverified.
+
+### Final self-audit, preservation and remaining gates
+
+The post-implementation audit re-inspected the **whole effective PR**, including the
+original event, all publication paths and tests, not only the remediation delta.
+The audit covered CT08 schema, evidence authority/ancestry, common manual/expiry
+semantics, persistence/flush/root/marker lifetime, isolation and synchronous failure,
+duplicate/race outcomes, DI, strict admission/error precedence, security/caller
+allowlists, test lifecycle/cleanup, and documentation/attribution. All confirmed
+in-scope findings above are resolved; this is author-side verification only.
+
+AS08 grading/math, client validation/error precedence, owner/self/execution-only
+read audiences and AS16 owner projections remain unchanged. No migration, schema,
+public API/OpenAPI/frontend type, security configuration, dependency, scheduler
+configuration, threshold, policy or unrelated implementation changes. Original
+reference artifacts remain immutable. Existing shared test context/container and
+AttemptWorkers cleanup/commit-admission rules are preserved. The graph lookup was
+navigation only, verified against current source; no generated graph is committed.
+
+The task expressly records mutual Leader/original-contributor consent for new
+AS12 commit author and committer metadata copied exactly from the original commits.
+Original name/email are read from Git, not guessed from a login. New messages and
+this record disclose OpenAI Codex-assisted implementation/self-audit; metadata does
+not claim the original contributor personally performed the remediation or review,
+and establishes no legal identity or cryptographic verification. No account switch,
+credential impersonation, fabricated co-author or global Git identity change occurs.
+Authenticated push identity must be checked as `chi-thanh-nguyen` immediately before
+normal push; final Git/PR SHA, body and state are read back after delivery.
+
+AS12-owned code and producer-side verification are separate from **AD13 orchestration,
+CT28 after-commit notifications, AS18 conditional coverage, QA04 full result/mastery/
+progress/recommendation atomicity, the actual approved two-subscriber set, independent
+acceptance/CODEOWNER review, final-head required CI, up-to-date protected merge,
+release and deployment**. Adaptive and Interaction listener files remain empty in this
+checkout. Test probes are not fabricated production subscribers. Existing CI at
+550ff249 is historical evidence only; no hosted workflow is dispatched or awaited.
+The next appropriate step is focused independent review of the complete PR and the
+producer regressions, followed by separately authorized downstream integration/QA.
+
+
+## AS12 independent producer review and integration preservation — 27 November 2026
+
+### Phase A — frozen incoming revision and authority
+
+OpenAI Codex performed this fresh independent review under the Project Leader's
+explicit "AS12 — Focused Full-scope Independent Review, Direct Findings Remediation
+and Main Integration Preservation" instruction. The instruction authorizes review,
+confirmed in-scope remediation, focused verification, normal commit/push and an
+existing-PR body update; it authorizes no approval, merge, Issue/Project change,
+contract amendment, release or deployment. Earlier author-side conclusions were
+hypotheses, not independent proof. The previous section remains historical
+implementation/self-audit evidence with its original attribution and results.
+
+**Frozen reviewed/tested HEAD:** `b71af2d935016611f7322f82cac64b80885f6c12`.
+**Refreshed remote main and merge base:**
+`e2106f68c612468f1d6e4eb5f86c086256010bc7`.
+A clean isolated clone preserved existing user worktrees. Root local `CLAUDE.md`,
+tracked `AGENTS.md`, `CONTRIBUTING.md` and applicable CODEOWNERS were inspected;
+there is no tracked CLAUDE.md or nested instruction in the affected subtrees.
+The existing graph was a navigation aid only; current source and effective
+contracts were inspected directly rather than treating its older main snapshot
+as AS12 evidence.
+
+The complete effective diff is five files, +928/-15, over four commits.
+The review covered both checkpoints, all four Issue #161 criteria, original
+implementation, subsequent remediation, integration merge and necessary unchanged
+supporting persistence, guards, grading, ancestry, execution scope and scheduler.
+
+**Contract authority reconciliation.** ADR001 owns module boundaries; ADR007
+sections 3-12 record the explicit Batch 3 delegation, CT03 assessment guards,
+CT04/CT23 frozen lifecycle and `CT08-EVIDENCE-2026-11-09-r1`; section 16 records
+`AS08-ANCESTRY-2026-11-26-r1`. ADR011 sections 1/3-5/12/16 and corrections 19-21
+record the Batch 6 delegation, `CT22-ATOMIC-2026-11-12-r1`,
+`CT08-EXECUTION-2026-11-12-r1`, `CT08-FAILURE-2026-11-12-r1` and
+`CT08-VERIFICATION-PLAN-2026-11-12-r1`. These scoped decisions are integrated in
+this tree; historical pending wording in Issue #161 and ADR007 is not current
+execution authority. ADR012 sections 8/9.3/21 preserve exactly one in-transaction
+Adaptive subscriber and authorize Interaction only after commit. ADR013 section 19
+records the Leader's E02 choice of fixed per-difficulty Quizzes and rejects dynamic
+capture. ADR005 section 6.1's latest-evidence tuple and immutable history remain
+binding. CT01 trusted self, CT14 existing test placement, CT18 safe errors, CT38
+explicit expiry inputs, CT39 local Clock and CT40 Course ancestry are preserved.
+No new decision, contract requirement or amendment was needed.
+
+| Checkpoint / criterion | Contract and implementation evidence at frozen HEAD | Independent verification | Disposition |
+|---|---|---|---|
+| AS12.artifact | ADR007 section 12; QuizSubmittedEvent.java:16-79, exactly ten top-level and four nested components | QuizSubmittedEventContract reflection, null/shape/time/kind/order/immutability checks | COMPLETE; APPROVE_AFTER_GATES |
+| AS12.publish | ADR011 sections 4-5; AttemptService.java:494-525,628-665,718-820 | Real Spring publisher, manual/expiry, flush/transaction/lock/execution reads, failure/retry/races | COMPLETE; APPROVE_AFTER_GATES |
+| AC1 approved identities and tested skills only | Frozen Quiz/Question ancestry; requireCapturedAnswers:938-970; refreshed rows:795-819 | Six corrupt-readback unit variants and PostgreSQL stale-context corruption case | SATISFIED |
+| AC2 once at approved terminal point | Common finalization; Course-root serialized submitted-state recheck | Duplicate manual, repeated expiry, duplicate writers and both manual/expiry winners; completion status assertions | SATISFIED within committed-transition boundary |
+| AC3 no consumer in Assessment | Event and producer diff; approved SkillGraph assertion remains metadata validation | Source/caller/API boundary inspection and executed allowlist tests | SATISFIED |
+| AC4 positive/negative publication tests | Unit and real PostgreSQL producer probes in existing suites | Start/save/read/history remain silent; grading/persistence/corrupt evidence fail closed; listener failure rolls back | SATISFIED |
+
+### Independent finding adjudication before remediation
+
+| Finding | Incoming disposition | Independently established evidence / required correction |
+|---|---|---|
+| AS12-R01 / P2 persisted evidence | VERIFIED_FIXED | AttemptService.java:780-820 flushes answers and terminal fields, then validates refreshed persisted answers. AttemptRepositoryImpl.java refreshes locked answer entities. Complete membership, ownership, positions/gaps, masks, exact correctness and score are checked. The six unit corruptions and real PostgreSQL JDBC corruption case pass without publication. |
+| AS12-R02 / P3 publisher wiring | VERIFIED_FIXED | AttemptService.java:143-173 exposes only publisher-required UTC/Clock constructors. Real Spring-managed producer and explicit Clock paths publish through the context. The original Spring-managed path was already wired; only old silent overloads were defective. |
+| AS12-R03 / P3 isolation/runtime evidence | VERIFIED_FIXED | AssessmentPersistenceIntegrationTest.java:2216-2469 uses AutoCloseable listener removal, independent physical visibility/NOWAIT SQLSTATE 55P03, execution-only reads, transaction completions, committed masks, retry and controlled terminal races. Existing bounded AttemptWorkers joins workers before listener/fixture teardown and records physical completion. |
+| AS12-R04 / P3 documentation synchronization | PARTIALLY_FIXED | The historical AS12 record and hashes are accurate, but the incoming PR's current-status paragraph still says merge-base daddc507 and FE17 not integrated, and describes 540db491 as current delivery. This contradicts verified b71af2d ancestry and can misdirect review/merge assessment. Update current integration/review/test status while retaining historical evidence. |
+
+**New confirmed AS12-IR findings: none.** No production or test correction was
+justified. In particular, no new terminal-row query is required: the actual
+repository updates the already locked Attempt, flushes, and returns its mapped
+fields; persisted answer validation binds those fields to the same Attempt and
+score. Re-reading/refreshing answers reuses existing locks and adds one ordered
+query plus entity refreshes, without a new lock class or unrelated query redesign.
+No supported runtime path was found that produces a self-consistent but incorrect
+event under the approved persistence/locking contract.
+
+**Phase A verdict:** `REQUEST_CHANGES` for delivery documentation only (R04).
+The independently reviewed **producer code/tests** at `b71af2d` satisfy
+`APPROVE_AFTER_GATES`. This phase completed before any Phase B modification.
+Constructor shape alone, mock interactions and annotation presence were not used
+as proof of PostgreSQL runtime semantics.
+
+### Independently executed verification
+
+From `backend/` at the frozen incoming revision, before documentation changes:
+
+```bash
+./mvnw -B verify -Dtest=AttemptServiceTest,QuizGradingServiceTest -Dit.test=AssessmentPersistenceIntegrationTest
+```
+
+**PASS: 86 unit cases (74 AttemptServiceTest + 12 QuizGradingServiceTest), 76 real
+PostgreSQL integration cases, zero failures/errors/skips.** Surefire/Failsafe XML
+and exit status 0 confirm BUILD SUCCESS; 244 production and 63 test sources compiled,
+packaging and JaCoCo completed. Run finished 27 November 2026 at 15:42:45 ICT.
+Environment: macOS arm64, Temurin 25.0.4.1, Maven Wrapper 3.9.16, Docker Desktop
+29.8.1, existing shared disposable hardened PostgreSQL 17.11 with actual Flyway
+migrations, no persistent container reuse. Sandbox network/Docker restrictions
+were resolved by authorized elevated execution. Expected injected scheduler
+failure logs are not failed tests.
+
+The real probe proves same-thread read-write READ COMMITTED execution, authoritative
+execution-only evidence visibility while the marker is bound, uncommitted terminal
+state invisible through another physical connection, and the held Course root
+through NOWAIT/55P03. Real committed reads prove listener-failure rollback of
+terminal fields, grading and POST masks to the last committed saved masks. Scheduler
+passes retry after failure without losing another candidate; the other-tab case
+grades latest committed N. Latches and observed PostgreSQL lock waits prove
+concurrent duplicate/manual-first/expiry-first writers produce one committed
+transition. Failed publication invocations are counted separately from commits.
+The Clock fixtures test after-lock expiry boundaries; the actual Spring UTC
+constructor is exercised separately. Resources/listeners are scoped and cleaned.
+
+Historical 540db491 passes and mutation runs are retained with their original
+author-side attribution. Their four source blobs match the independently tested
+incoming revision exactly, but the prior mutation runs were **not rerun** or
+relabeled independent. The new execution supplies current producer evidence.
+Unrelated backend suites, frontend/browser/E2E, VM/security qualification, release,
+deployment and QA04 whole-flow suites were omitted: their sources/configuration
+are unchanged and the full impacted Assessment persistence/grading suites passed.
+No deployed subscriber or production-latency qualification is claimed.
+
+### Integration preservation and Phase B delivery
+
+The merge commit's parents are exactly `540db4915ab3b9180608324f041c74b9c4d8e8dc`
+and `e2106f68c612468f1d6e4eb5f86c086256010bc7`. Original commits `0963e93`,
+`550ff249`, `540db491` and user merge `b71af2d` remain ancestors. All four Java
+blobs equal the prior table byte-for-byte. All **19 paths** in main's FE17 delta
+from `daddc507` are preserved; for every non-documentation path the integrated blob
+matches main. The incoming `docs/testing.md` equals the **entire exact main blob
+plus the exact historical AS12 suffix from 540db491**: no loss, duplication or
+reordering. No FE17/frontend/E2E/setup path enters the effective AS12 diff.
+Incoming main is an ancestor, four ahead/zero behind. No repeated main merge is made.
+
+**Phase B is documentation only:** append this independent record and synchronize
+the existing PR body's current baseline, independent verdict, verification and
+remaining gates. Preserve its original template, historical results and original
+contributor/author-side attribution. New review-record work uses the authenticated
+Leader account's own Git identity with truthful `AI-Assisted-By: OpenAI Codex`;
+the earlier original-contributor metadata waiver is not extended. Git metadata and
+GitHub login establish attribution context, not legal identity or a signature claim.
+The final delivery SHA and normal-push/body readback are recorded in PR #302;
+all production/test blobs remain unchanged from the independently reviewed revision.
+Documentation checks and blob/history preservation are sufficient after this edit;
+no behavior test rerun is needed. R04 closes only with the corresponding PR body
+synchronization/readback. No reviewer-authored implementation is self-approved.
+
+**Final technical disposition: APPROVE_AFTER_GATES for unchanged AS12 producer
+code/tests.** No further full-scope or remediation-code independent review is
+needed for this documentation-only delta; eligible CODEOWNER review still applies.
+The incoming CI snapshot had 16 runs: 14 completed successfully, with E2E and VM
+MinIO initializer qualification in progress. It is evidence for b71af2d only.
+No GitHub reviews or review threads existed; reviewDecision was REVIEW_REQUIRED.
+No hosted CI was dispatched, rerun, polled or awaited; final-head checks are separate.
+
+AS12 producer completion and this technical review do not establish AD13 execution,
+CT28 consumption, AS18 conditional coverage, QA04 result/mastery/progress/
+recommendation atomicity, or the actual approved two-member production subscriber
+set (both listener files remain empty here). CODEOWNER approval, required final-head
+CI/scanning, up-to-date protected squash integration, release and deployment remain
+separate gates. No Issue closure, Project synchronization, formal GitHub approval,
+protection change, merge or deployment is performed. Next: eligible CODEOWNER review
+and protected gates for this unchanged producer, with downstream implementation/QA
+handled in its own authorized scope.
