@@ -12014,7 +12014,7 @@
             "type": "string",
             "minLength": 1,
             "pattern": "\\S",
-            "description": "Stored verbatim; plain text."
+            "description": "Stored verbatim; plain text. NUL and unpaired UTF-16 surrogate escapes cannot be stored verbatim and receive a 400 field error after admission. No new text-length limit is imposed."
           },
           "parentPostId": {
             "type": [
@@ -12103,7 +12103,7 @@
             "type": "string",
             "minLength": 1,
             "pattern": "\\S",
-            "description": "Stored verbatim; plain text."
+            "description": "Stored verbatim; plain text. NUL and unpaired UTF-16 surrogate escapes cannot be stored verbatim and receive a 400 field error after admission. No new text-length limit is imposed."
           }
         },
         "required": [

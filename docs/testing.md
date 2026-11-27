@@ -11659,3 +11659,268 @@ first new real-backend reply probe used a Learner fixture intentionally left by 
 earlier membership test and correctly got 404; using the existing active fixture
 made the complete consumer/upgrade run pass. These were tooling/fixture corrections,
 not production-policy changes. No hosted workflow was dispatched or awaited.
+
+
+## IN06 independent incoming review and direct remediation — 27 November 2026
+
+### A. Executive verdict and provenance
+
+**Incoming independent verdict: REQUEST_CHANGES** at
+`3ab9ee28cc267169f80f2f34e49041c4e102554c`. All five retained checkpoints have
+executable implementations; three confirmed defects prevent accepting the incoming
+Q&A/report/REST boundaries. No missing necessary upstream implementation was found.
+The approved CT40 notification-context addition is bounded and sufficient for IN06.
+
+OpenAI Codex performed this fresh review and subsequent remediation under the
+Project Leader's explicit focused full-scope review/remediation instruction. Phase A
+left tracked production, tests and documentation unchanged. Reproductions ran in a
+separate disposable checkout of the incoming production revision. Findings were
+recorded before Phase B edits (local Phase-A record SHA-256
+`8b4aa1742a2ba09c64d647850f0cbdb669e8e73af975f984f8961beea929f99d`). Later probes
+of unchanged incoming production strengthened concurrency evidence. Phase C is
+verification of this session's own remediation, **not independent acceptance**.
+
+The actual isolated checkout has no tracked root `CLAUDE.md`; `AGENTS.md`,
+`CONTRIBUTING.md`, scoped instruction discovery and CODEOWNERS were the authoritative
+fallback. The local primary checkout's `CLAUDE.md` was also read. No nested
+instruction or relevant graph was present in the reviewed checkout; the graphify
+skill was consulted, but no graph was built or treated as current evidence.
+
+### B. Verified Git baseline
+
+- Incoming HEAD: `3ab9ee28cc267169f80f2f34e49041c4e102554c`.
+- Remote main and merge-base: `fe3160d535b33652587e14e2fc55ca267f6a5222`.
+- Incoming comparison: eight commits ahead, zero behind; 32 changed files.
+- Main integration `3aab3f90`, concurrent merge `fe7e24ee` and preservation merge
+  `339fcf84` remain ancestors. No additional main integration was needed.
+- The incoming branch and main were fetched again before delivery. The final
+  immutable delivery commit and remote readback are recorded in PR #303. Tests
+  below identify incoming production versus the remediation candidate; this
+  evidence section does not claim its own commit SHA was already tested.
+
+### C. Independent checkpoint assessment
+
+| Checkpoint | Effective oracle and implementation examined | Independent incoming evidence and disposition |
+|---|---|---|
+| IN06.repo | ADR012 §§6, 11, 19.2; both repository interfaces/JPA adapters, root/reply queries, targeted saves, row refresh and ordered locks | Real PostgreSQL repository suite (14 cases), restricted-role JPA consumer and matrix/containment checks pass. Repository query conceals malformed descendants; intake did not consistently reuse that visibility boundary (IR-01). |
+| IN06.qa | CT30.access/posts/notify, CT03 U04, CT01 summaries, CT11.create; DiscussionService/controller/DTOs | Admission, root paging, PostgreSQL UUID ties, author batching/current roles, plain text, atomic notification and both parent-lock orders examined. IR-02 blocks incoming verbatim text acceptance; IR-01 affects malformed parent concealment. |
+| IN06.report | CT30.reports and V006 exclusive target/status constraints; ContentReportService/controller | Trusted reporter, duplicates, exclusive targets, receipts, microsecond timestamps and ordinary hidden/cross-Lesson cases pass. IR-01 and IR-02 require correction. |
+| IN06.resolve | CT32.queue/hide, CT31 caller transaction; all four Interaction methods | Target isolation, ordered content/report locks, terminal revalidation, stale entity refresh, rollback and restricted writes pass. Additional probes observe actual PostgreSQL lock waits. IN21 public orchestration/audit remains downstream. |
+| IN06.rest | CT30.rest, ADR012 §12, CT18 and four OpenAPI bindings | Strict closed shapes, invalid UTF-8, duplicate/trailing JSON, competing errors and no-store examined through the real filter chain. IR-02/03 require correction. Seven frontend contract property sets match OpenAPI and current FE13 #271 at `c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2`. |
+
+### D. Incoming findings
+
+All references in this subsection are to incoming `3ab9ee28`; severity is P2.
+
+**IN06-IR-01 — report intake admits malformed hidden ancestry.**
+`ContentReportService.java:89–91` checks only whether the immediate parent is visible
+and in the Lesson; it does not require a root question. V006 permits deeper chains
+and multi-row cycles. A synthetic post below `REPLY_UNDER_HIDDEN` receives 201 and
+a persisted report even though Q&A's query correctly excludes it. This violates
+CT30's visible-target/depth boundary (§§6.1–6.3), discloses existence and admits an
+invisible report target. The adjacent check in `DiscussionService.java:90–93` also
+returns a body-field 400 for malformed deeper ancestry instead of concealment.
+The normal supported reply-to-reply case remains a 400.
+
+**IN06-IR-02 — escaped lone surrogates silently lose verbatim content.**
+`DiscussionService.java:96–100` and `ContentReportService.java:199–204` only check
+non-whitespace text. Strict UTF-8 wire decoding in `InteractionRequests.java:19–28`
+does not reject JSON-escaped unpaired UTF-16 surrogates. A real POST with
+`{"content":"x\ud800"}` returns 201; an independent committed JDBC read finds
+second code unit 63 (`?`), versus incoming 55296. The PostgreSQL driver replaced
+unencodable text, violating CT30 verbatim storage. The same unchecked String path
+applies to report reasons. This is actual data corruption, not a stylistic Unicode
+policy. NUL also cannot be stored by PostgreSQL and is covered by the corrected
+field validation; valid surrogate pairs and combining text must remain verbatim.
+
+**IN06-IR-03 — whole-body allocation precedes syntax and parser constraints.**
+`InteractionRequests.java:19–26` reads all bytes, decodes another whole-body buffer
+and only then invokes Jackson. A synthetic stream invalid at its first byte, with
+1 MiB of remaining padding, is consumed completely (1,048,577 read attempts) before
+400. The supported direct backend binding has no configured JSON body cap; multipart
+upload limits do not bound this servlet JSON read. Jackson constraints therefore
+cannot protect the preceding allocations. An admitted actor can impose avoidable
+memory/resource pressure. No production OOM was induced, and this is not a claim
+that every deployed ingress accepts arbitrarily large bodies. The finding rests
+on reproduced eager consumption plus the actual supported direct-backend path,
+not merely the presence of `readAllBytes()`.
+
+Rejected hypotheses: no lost main SecurityConfig protections remain; CT40's
+unlocked multi-statement Course/Lesson publication snapshots are permitted by
+ADR012 §§3.1/4.1 and do not require a root lock; IN21 REST/audit is not missing
+IN06-owned code; timestamp/clock or genuine database-integrity failures retain
+§12's safe 500/rollback behavior. No unrelated Auth defect is remediated here.
+
+### E. Direct remediation
+
+- IR-01: require the immediate ancestor to be a visible same-Lesson **root** in
+  report visibility and supplied-reply ancestry. This bounds inspection at depth
+  one and conceals deeper/cyclic persisted state without traversing arbitrary
+  chains or changing valid reply-to-reply errors. PostgreSQL regressions cover
+  hidden ancestry, a synthetic cycle, 404-before-body precedence and zero reports.
+- IR-02: `InteractionRequests.isRepresentableText` rejects NUL and unpaired UTF-16
+  surrogates; both services apply it at the existing content/reason field stage,
+  after actor/Lesson/parent admission. Regressions assert safe field 400/no-store,
+  no post/report/notification writes, unchanged 403/404 precedence and actual
+  committed verbatim supplementary/combining text. The two OpenAPI request-field
+  descriptions explain the representation rule; property sets/types are unchanged.
+- IR-03: strict UTF-8 `InputStreamReader` feeds Jackson directly, preserving
+  duplicate/trailing-token rejection and existing parser constraints while removing
+  whole-wire-body buffering. A synthetic stream asserts early syntax rejection;
+  another case accepts 1.1 million text characters and rejects malformed UTF-8
+  after a buffer boundary. No arbitrary product text-length limit was added.
+
+Supporting verification changes replace three scheduling-timeout assumptions with
+PID publication and `pg_blocking_pids()` observation, retain both parent-lock race
+orders, force two distinct-report hides to contend, and add dismissal-first
+terminal revalidation and CT40 caller-snapshot coverage. These passed as incoming
+production probes before being retained. No stronger production serialization,
+new transaction propagation or Course-root lock is introduced.
+
+### F. Transaction, concurrency and security assessment
+
+The real PostgreSQL tests establish that reply and derived-ID notification rows
+are invisible to an independent connection before commit, roll back together, and
+a notification insert trigger failure rolls back the reply. Recipient, exact
+message, self-reply exclusion and publication skips use the existing IN07 service.
+The committed-read evidence is not a mock-only atomicity claim.
+
+Parent SHARE versus moderation UPDATE is observed in both race orders. Competing
+hides wait on content first; report rows lock by PostgreSQL UUID order. Both
+dismissal/hide orders and preloaded stale report revalidation are exercised, with
+terminal 409 and rollback instead of reopening. Mutations join the caller's
+transaction and reject absent/read-only/explicit non-READ-COMMITTED callers.
+IN21 must still hide Lessons under the Course root and append the required audit
+rows in its transaction; the Interaction handoff does not claim those end-to-end
+Admin guarantees.
+
+CT40 returns only requested/scoped titles and V002 publication literals, handles
+missing resources and the 100-ID cap, has no public Course REST binding and uses
+the approved caller set. A real REPEATABLE READ caller probe proves participation
+in its snapshot. Outside an active transaction its methods run read-only READ
+COMMITTED; the contract permits distinct unlocked statement snapshots and a hide
+after admission. It does not promise publication remains unchanged until commit.
+
+CT17-P6 r17 changes only SELECT/INSERT and UPDATE(is_hidden) on discussion_posts,
+and SELECT/INSERT and UPDATE(status,resolved_at) on content_reports. Restricted
+JPA execution, row locks, immutable-column/DELETE/TRUNCATE rejection, cumulative
+27-relation matrix equivalence, upgrades and idempotency are tested. No applied
+migration, shared/staging/production grant or operational provisioning was changed.
+
+### G. Executed verification and limits
+
+Commands below ran from `backend/` unless marked repository root. Scratch probes
+use the same incoming production files with only isolated test additions.
+
+```sh
+# Incoming 3ab9ee28: PASS 114 unit + 71 integration; zero failures/errors/skips.
+./mvnw -q -Dtest='InteractionRequestsTest,ContentReportServiceTest,DiscussionServiceTest,CourseServiceTest,NotificationServiceTest' -Dit.test='InteractionReportIntakeIntegrationTest,InteractionRepositoryIntegrationTest,InteractionAdminIntegrationTest,SharedRestInfrastructureIntegrationTest' verify
+
+# Incoming scratch: expected failures for eager consumption and two HTTP defects.
+./mvnw -q -Dtest='InteractionRequestsTest#independentProbeRejectsInvalidPrefixWithoutBufferingTheWholeBody' -Dit.test='InteractionReportIntakeIntegrationTest#independentProbe*' -Dmaven.test.failure.ignore=true verify
+# Three decisive incoming probes: Unicode committed-storage assertion FAILS;
+# dismissal-first database lock wait and CT40 caller-snapshot probes PASS.
+./mvnw -q clean -Dtest='InteractionRequestsTest#parseIdAcceptsCanonicalUuidTextInAnyCase' -Dit.test='InteractionReportIntakeIntegrationTest#independentProbeChecksActualStoredUnicode+independentProbeDismissFirstRevalidatesSelectedReportAfterLockWait+independentProbeContextParticipatesInCallerSnapshot' -Dmaven.test.failure.ignore=true verify
+# Incoming scratch: PASS 1 unit + 3 PID/lock-observed integration cases.
+./mvnw -q -Dtest='InteractionRequestsTest#parseIdAcceptsCanonicalUuidTextInAnyCase' -Dit.test='InteractionReportIntakeIntegrationTest#concurrentHideSerializesReplyAndDismissalWithoutDeadlock+replyShareLockCommitsBeforeAWaitingHideAndBothRowsRemainAtomic+simultaneousHidesOnDifferentReportsOfOneTargetResolveOnce' verify
+
+# Remediation candidate: PASS 17 unit + 32 PostgreSQL integration;
+# zero failures/errors/skips, including final retained lock/context probes.
+./mvnw -q -Dtest='InteractionRequestsTest,ContentReportServiceTest,DiscussionServiceTest' -Dit.test=InteractionReportIntakeIntegrationTest verify
+
+# Repository root: PASS matrix synchronization and PostgreSQL containment/upgrade.
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+# Final production build with task-local BUILDX_CONFIG: PASS.
+# Image sha256:7fb9222317af2ab34598523846d59a3da2128115929b3bb1e0bb76283b1f4720
+BUILDX_CONFIG=<task-scratch>/buildx docker build --iidfile <task-scratch>/backend.iid -t codemastery-in06-review:pr303 backend
+# PASS: 205 real-backend consumer/upgrade assertions; zero permission-denied/42501 entries.
+BACKEND_IMAGE=sha256:7fb9222317af2ab34598523846d59a3da2128115929b3bb1e0bb76283b1f4720 BACKEND_PORT=18087 bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
+```
+
+Expected-failure probe invocations use `maven.test.failure.ignore=true` to collect
+all evidence; their process success is **not** a passing-test claim. An intermediate
+scratch-only run was invalidated by overlapping Maven rebuild/test activity in
+that scratch checkout (missing compiled class); it was excluded and replaced by
+the clean, serialized decisive run above. An initial remediation run passed
+17 unit/30 integration cases before the final retained concurrency/context changes.
+Do not aggregate stale Surefire XML from later selections into new execution totals.
+
+**SMTP differential.** The following identical selection was run separately on
+unmodified main `fe3160d5` and incoming `3ab9ee28`:
+
+```sh
+./mvnw -q '-Dtest=InteractionAdminIntegrationTest,AuthServiceTest$SmtpSubmissionPolicy#nonListeningLoopbackEndpointFailsWithoutDisclosingCredentials' test
+./mvnw -q '-Dtest=AuthServiceTest$SmtpSubmissionPolicy#nonListeningLoopbackEndpointFailsWithoutDisclosingCredentials' test
+```
+
+On **both** revisions: the first command runs 10 tests, with nine audit integration
+cases passing and one SMTP assertion failing at `AuthServiceTest.java:988`; the
+second command passes the one SMTP case in a fresh JVM. Spring configuration sets
+`com.codemastery` to INFO, but MailLogCapture only raises the root logger; its
+DEBUG application-log-control probe remains disabled after Spring initialization.
+Surefire's explicit `-Dtest` selection includes integration classes despite the
+normal package exclusion, exposing this existing lifecycle dependency. Auth SMTP
+production/tests, logging configuration and Maven selection configuration are
+byte-identical between main and incoming. This supports **baseline/order-sensitive
+capture failure for the reproduced case**, not a security-disclosure finding or a
+green full-suite claim. The other 60 author-reported failures were not individually
+replayed/adjudicated; an identical frame alone does not clear them. No SMTP control
+or assertion was weakened.
+
+The earlier 192/210 and 15/27 results remain historical author-side evidence in
+the preceding section, not this review's test totals. Hosted incoming checks were
+read independently: Backend, Frontend, CodeQL, SonarCloud and the runtime privilege
+job passed; open CodeQL alerts for the PR ref were empty. Other jobs were still
+running at the initial snapshot. Final-head hosted gates are refreshed in PR #303
+and are not inferred from incoming success; no hosted job is dispatched or awaited.
+Sonar's successful check is not an independent issue-by-issue Sonar audit.
+
+The entire backend suite, all 61 SMTP cases, frontend builds/browser/E2E and deployed
+acceptance were skipped proportionately: focused changed-path tests and real
+PostgreSQL/runtime evidence cover the backend delta; frontend types are unchanged
+and independently compared with OpenAPI/FE13; unchanged shared error behavior has
+21 incoming integration tests. No UI or IN21 end-to-end acceptance is claimed.
+
+### H. Main and integration preservation
+
+The complete 32-file PR diff, original report-intake history, preserved main merges
+and remediation delta were inspected. Against current main, SecurityConfig differs
+only by the four CT30 binding lines (GET and three POST operations). Notification,
+timed-attempt, Assignment, material/upload/form protections, default-deny, cache
+writer, session/token rules and exposed Content-Disposition remain.
+BusinessRuleException's legacy constructors/public details are retained; only the
+code-owned optional validation-field projection is added, with fixed safe messages.
+Shared exception files and notification response DTOs are unchanged by this
+remediation. Other OpenAPI declarations, migrations, dependencies and historical
+contributions remain intact. The two additional schema descriptions change no
+request/response property, enum, required/nullable field or timestamp representation.
+
+### I. Git delivery and attribution
+
+The existing branch/PR #303 is retained. New task commit author and committer use
+the original exact `tihh647-ui <tihh647@gmail.com>` metadata verified from
+`79fb206bf900702538ba566799cd0638422d4b82`, under the Leader's explicit task-specific
+arrangement. Codex performed the review/remediation; metadata does not establish
+that the contributor personally performed or approved this work. The authenticated
+GitHub API login is `chi-thanh-nguyen`; neither metadata nor login proves legal
+identity. Command-scoped metadata is used; no global identity setting or signature
+is fabricated. PR #303 records the final commit, normal push/readback and concise
+review summary while preserving prior implementation evidence and attribution.
+
+### J. Remaining gates and recommendation
+
+All three findings are fixed in the remediation candidate and focused checks pass.
+This is **REMEDIATED / AUTHOR_VERIFIED**, not APPROVE_AFTER_GATES for newly written
+production/tests. A subsequent **narrow independent review** should cover the three
+changed Interaction production files, their five behavioral areas (ancestry,
+Unicode/NUL, streaming, error precedence, retained test synchronization), two test
+files and two OpenAPI field descriptions. Another full-scope review is not required
+by the evidence unless that review identifies a new cross-cutting issue.
+
+No known remaining IN06-owned implementation gap or necessary upstream code blocker
+was found. IN21 Admin orchestration/audit and FE13 consumer/browser acceptance remain
+separate downstream work. Eligible independent CODEOWNER approval, required final-head
+CI/scanning, resolved threads, an up-to-date branch and protected integration remain
+mandatory. No GitHub approval, merge, Issue closure, Project-field mutation, release,
+deployment or operational grant is performed by this review.

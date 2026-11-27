@@ -17,18 +17,30 @@ public final class InteractionRequests {
             .enable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
 
     public static Map<String, Object> readBody(jakarta.servlet.http.HttpServletRequest request) {
-        try {
-            byte[] bytes = request.getInputStream().readAllBytes();
-            String text = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+        try (var reader = new java.io.InputStreamReader(request.getInputStream(),
+                java.nio.charset.StandardCharsets.UTF_8.newDecoder()
                     .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
-                    .decode(java.nio.ByteBuffer.wrap(bytes)).toString();
-            var node = JSON.readTree(text);
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT))) {
+            // Apply parser constraints while reading, without first retaining the entire wire body.
+            var node = JSON.readTree(reader);
             if (node == null || !node.isObject()) throw invalid();
             return JSON.convertValue(node, new tools.jackson.core.type.TypeReference<Map<String, Object>>() {});
         } catch (java.io.IOException | tools.jackson.core.JacksonException ex) {
             throw invalid();
         }
+    }
+
+    /** Unicode scalar text that PostgreSQL UTF-8 can store verbatim; no content-length policy. */
+    public static boolean isRepresentableText(String text) {
+        if (text == null) return false;
+        for (int i = 0; i < text.length(); i++) {
+            char value = text.charAt(i);
+            if (value == 0) return false;
+            if (Character.isHighSurrogate(value)) {
+                if (++i == text.length() || !Character.isLowSurrogate(text.charAt(i))) return false;
+            } else if (Character.isLowSurrogate(value)) return false;
+        }
+        return true;
     }
 
     public static void requireJson(String contentType) throws org.springframework.web.HttpMediaTypeNotSupportedException {

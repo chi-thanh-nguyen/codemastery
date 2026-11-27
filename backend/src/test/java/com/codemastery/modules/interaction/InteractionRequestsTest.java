@@ -62,4 +62,33 @@ class InteractionRequestsTest {
             assertEquals(HttpStatus.BAD_REQUEST, thrown.getStatus());
         }
     }
+    @Test
+    void invalidPrefixIsRejectedBeforeTheRemainingBodyIsBuffered() {
+        var consumed = new java.util.concurrent.atomic.AtomicInteger();
+        var request = new org.springframework.mock.web.MockHttpServletRequest() {
+            @Override public jakarta.servlet.ServletInputStream getInputStream() {
+                return new jakarta.servlet.ServletInputStream() {
+                    @Override public int read() { int n = consumed.getAndIncrement(); return n == 0 ? '!' : n < 1048576 ? ' ' : -1; }
+                    @Override public boolean isFinished() { return consumed.get() >= 1048576; }
+                    @Override public boolean isReady() { return true; }
+                    @Override public void setReadListener(jakarta.servlet.ReadListener listener) { }
+                };
+            }
+        };
+        assertThrows(BusinessRuleException.class, () -> InteractionRequests.readBody(request));
+        org.junit.jupiter.api.Assertions.assertTrue(consumed.get() < 65536, "bytes consumed=" + consumed.get());
+    }
+
+    @Test
+    void streamingDecodeRetainsStrictUtf8AndDoesNotAddATextLengthLimit() {
+        String text = "  e\u0301 \ud83d\ude80 " + "x".repeat(1_100_000);
+        var request = new org.springframework.mock.web.MockHttpServletRequest();
+        request.setContent(("{\"reason\":\"" + text + "\"}").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertEquals(text, InteractionRequests.readBody(request).get("reason"));
+        byte[] malformedTail = ("{\"reason\":\"x\"}" + " ".repeat(9000)).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        malformedTail[malformedTail.length - 1] = (byte) 0xc3;
+        request.setContent(malformedTail);
+        assertThrows(BusinessRuleException.class, () -> InteractionRequests.readBody(request));
+    }
+
 }

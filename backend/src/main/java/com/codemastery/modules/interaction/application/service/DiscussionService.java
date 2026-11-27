@@ -88,13 +88,15 @@ public class DiscussionService {
             if (parent.getParentPostId() != null) {
                 // Hidden ancestors remain concealed even when the supplied parent is itself a reply.
                 var question = posts.findById(parent.getParentPostId());
-                if (question.isEmpty() || question.get().isHidden() || !lessonId.equals(question.get().getLessonId()))
+                if (question.isEmpty() || question.get().isHidden() || !lessonId.equals(question.get().getLessonId())
+                        || question.get().getParentPostId() != null)
                     throw new ResourceNotFoundException("Resource not available");
                 throw BusinessRuleException.invalidField("parentPostId");
             }
         }
         if (!write.validShape()) throw new BusinessRuleException("Invalid discussion request body");
-        if (write.content() == null || write.content().codePoints().allMatch(DiscussionService::whitespace))
+        if (!com.codemastery.modules.interaction.api.dto.InteractionRequests.isRepresentableText(write.content())
+                || write.content().codePoints().allMatch(DiscussionService::whitespace))
             throw BusinessRuleException.invalidField("content");
         var post = posts.save(new DiscussionPost(UUID.randomUUID(), lessonId, actor, write.parentPostId(),
                 write.content(), clock.instant().truncatedTo(ChronoUnit.MICROS), false));

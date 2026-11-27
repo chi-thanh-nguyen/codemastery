@@ -87,7 +87,8 @@ public class ContentReportService {
             return true;
         }
         return posts.findById(post.getParentPostId())
-                .filter(parent -> lessonId.equals(parent.getLessonId()) && !parent.isHidden())
+                .filter(parent -> lessonId.equals(parent.getLessonId()) && !parent.isHidden()
+                        && parent.getParentPostId() == null)
                 .isPresent();
     }
 
@@ -196,7 +197,8 @@ public class ContentReportService {
 
     /** The reason is required and must contain a non-whitespace character; it is stored verbatim. */
     private static String requireReason(String reason) {
-        if (reason == null || reason.codePoints().allMatch(ContentReportService::isWhitespace)) {
+        if (!com.codemastery.modules.interaction.api.dto.InteractionRequests.isRepresentableText(reason)
+                || reason.codePoints().allMatch(ContentReportService::isWhitespace)) {
             throw BusinessRuleException.invalidField("reason");
         }
         return reason;

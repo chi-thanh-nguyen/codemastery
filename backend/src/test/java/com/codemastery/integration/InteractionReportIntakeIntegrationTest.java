@@ -544,6 +544,8 @@ class InteractionReportIntakeIntegrationTest extends AbstractIntegrationTest {
     void concurrentHideSerializesReplyAndDismissalWithoutDeadlock() throws Exception {
         UUID report = report(QUESTION);
         var pool = java.util.concurrent.Executors.newFixedThreadPool(3);
+        var replyPid = new java.util.concurrent.ArrayBlockingQueue<Integer>(1);
+        var dismissPid = new java.util.concurrent.ArrayBlockingQueue<Integer>(1);
         var hidden = new java.util.concurrent.CountDownLatch(1);
         var commit = new java.util.concurrent.CountDownLatch(1);
         try {
@@ -559,14 +561,14 @@ class InteractionReportIntakeIntegrationTest extends AbstractIntegrationTest {
             org.junit.jupiter.api.Assertions.assertTrue(hidden.await(10, java.util.concurrent.TimeUnit.SECONDS));
             var reply = pool.submit(() -> {
                 signIn(INSTRUCTOR, com.codemastery.modules.auth.domain.model.Role.INSTRUCTOR);
-                return discussions.create(LESSON, () -> new com.codemastery.modules.interaction.api.dto.InteractionRequests.DiscussionPostWrite("racing reply", QUESTION));
+                return observedTransaction(replyPid, () -> discussions.create(LESSON, () -> new com.codemastery.modules.interaction.api.dto.InteractionRequests.DiscussionPostWrite("racing reply", QUESTION)));
             });
             var dismiss = pool.submit(() -> {
                 signIn(ADMIN, com.codemastery.modules.auth.domain.model.Role.ADMIN);
-                return tx().execute(status -> reports.dismissReport(report));
+                return observedTransaction(dismissPid, () -> reports.dismissReport(report));
             });
-            org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.TimeoutException.class, () -> reply.get(200, java.util.concurrent.TimeUnit.MILLISECONDS));
-            org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.TimeoutException.class, () -> dismiss.get(200, java.util.concurrent.TimeUnit.MILLISECONDS));
+            awaitDatabaseLock(requirePid(replyPid), reply);
+            awaitDatabaseLock(requirePid(dismissPid), dismiss);
             commit.countDown(); hide.get(10, java.util.concurrent.TimeUnit.SECONDS);
             var replyFailure = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class, () -> reply.get(10, java.util.concurrent.TimeUnit.SECONDS));
             org.junit.jupiter.api.Assertions.assertInstanceOf(com.codemastery.common.exception.ResourceNotFoundException.class, replyFailure.getCause());
@@ -579,6 +581,7 @@ class InteractionReportIntakeIntegrationTest extends AbstractIntegrationTest {
     void replyShareLockCommitsBeforeAWaitingHideAndBothRowsRemainAtomic() throws Exception {
         UUID report = report(QUESTION);
         var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        var hidePid = new java.util.concurrent.ArrayBlockingQueue<Integer>(1);
         var inserted = new java.util.concurrent.CountDownLatch(1);
         var commit = new java.util.concurrent.CountDownLatch(1);
         try {
@@ -595,9 +598,9 @@ class InteractionReportIntakeIntegrationTest extends AbstractIntegrationTest {
             org.junit.jupiter.api.Assertions.assertTrue(inserted.await(10, java.util.concurrent.TimeUnit.SECONDS));
             var hide = pool.submit(() -> {
                 signIn(ADMIN, com.codemastery.modules.auth.domain.model.Role.ADMIN);
-                return tx().execute(status -> reports.hidePostForReport(report));
+                return observedTransaction(hidePid, () -> reports.hidePostForReport(report));
             });
-            org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.TimeoutException.class, () -> hide.get(200, java.util.concurrent.TimeUnit.MILLISECONDS));
+            awaitDatabaseLock(requirePid(hidePid), hide);
             commit.countDown(); var row = reply.get(10, java.util.concurrent.TimeUnit.SECONDS); hide.get(10, java.util.concurrent.TimeUnit.SECONDS);
             org.junit.jupiter.api.Assertions.assertTrue(posts.findById(row.id()).isPresent());
             assertEquals(1, committedCount("notifications"));
@@ -623,21 +626,32 @@ class InteractionReportIntakeIntegrationTest extends AbstractIntegrationTest {
     void simultaneousHidesOnDifferentReportsOfOneTargetResolveOnce() throws Exception {
         UUID first = report(QUESTION), second = report(QUESTION);
         var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
-        var start = new java.util.concurrent.CountDownLatch(1);
+        var locked = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var secondPid = new java.util.concurrent.ArrayBlockingQueue<Integer>(1);
         try {
-            var jobs = new java.util.ArrayList<java.util.concurrent.Future<Integer>>();
-            for (UUID id : List.of(first, second)) jobs.add(pool.submit(() -> {
+            var winner = pool.submit(() -> {
                 signIn(ADMIN, com.codemastery.modules.auth.domain.model.Role.ADMIN);
-                start.await();
-                try { return tx().execute(status -> reports.hidePostForReport(id)).resolvedReportIds().size(); }
-                catch (com.codemastery.common.exception.BusinessRuleException conflict) {
-                    assertEquals(org.springframework.http.HttpStatus.CONFLICT, conflict.getStatus()); return 0;
-                }
-            }));
-            start.countDown();
-            assertEquals(2, jobs.get(0).get(10, java.util.concurrent.TimeUnit.SECONDS) + jobs.get(1).get(10, java.util.concurrent.TimeUnit.SECONDS));
+                return tx().execute(status -> {
+                    var result = reports.hidePostForReport(first); locked.countDown();
+                    try { if (!release.await(10, java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("barrier timeout"); }
+                    catch (InterruptedException ex) { throw new IllegalStateException(ex); }
+                    return result;
+                });
+            });
+            org.junit.jupiter.api.Assertions.assertTrue(locked.await(10, java.util.concurrent.TimeUnit.SECONDS));
+            var loser = pool.submit(() -> {
+                signIn(ADMIN, com.codemastery.modules.auth.domain.model.Role.ADMIN);
+                return observedTransaction(secondPid, () -> reports.hidePostForReport(second));
+            });
+            awaitDatabaseLock(requirePid(secondPid), loser);
+            release.countDown();
+            assertEquals(2, winner.get(10, java.util.concurrent.TimeUnit.SECONDS).resolvedReportIds().size());
+            var failure = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> loser.get(10, java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(org.springframework.http.HttpStatus.CONFLICT, ((com.codemastery.common.exception.BusinessRuleException) failure.getCause()).getStatus());
             assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM public.content_reports WHERE status='resolved'", Integer.class));
-        } finally { start.countDown(); pool.shutdownNow(); }
+        } finally { release.countDown(); pool.shutdownNow(); }
     }
 
     @Test
@@ -661,4 +675,135 @@ class InteractionReportIntakeIntegrationTest extends AbstractIntegrationTest {
         jdbc.update("UPDATE public.users SET account_status='locked' WHERE id=?", LEARNER);
         mvc.perform(json(discussionPath(LESSON), "{", LEARNER)).andExpect(status().isUnauthorized());
     }
+    @Test
+    void malformedPersistedAncestryIsConcealedBeforeBodyRules() throws Exception {
+        UUID malformed = id("malformed-depth");
+        insertPost(malformed, LESSON, REPLY_UNDER_HIDDEN, false);
+        // V006 permits deeper chains and cycles; neither belongs to the CT30 visible read model.
+        for (String body : List.of(REASON, "{"))
+            mvc.perform(json(postPath(LESSON, malformed), body, LEARNER)).andExpect(status().isNotFound());
+        mvc.perform(json(discussionPath(LESSON), "{\"parentPostId\":\"" + malformed + "\",\"content\":1}", LEARNER))
+                .andExpect(status().isNotFound());
+        jdbc.update("UPDATE public.discussion_posts SET parent_post_id=? WHERE id=?", malformed, REPLY_UNDER_HIDDEN);
+        mvc.perform(json(postPath(LESSON, malformed), REASON, LEARNER)).andExpect(status().isNotFound());
+        assertEquals(0, reportRows());
+        // Break the synthetic cycle so ordinary fixture cleanup can remove its rows.
+        jdbc.update("UPDATE public.discussion_posts SET parent_post_id=? WHERE id=?", HIDDEN_QUESTION, REPLY_UNDER_HIDDEN);
+    }
+
+    @Test
+    void unrepresentableTextIsAFieldErrorAfterAdmissionAndWritesNothing() throws Exception {
+        int initial = committedCount("discussion_posts");
+        for (String escaped : List.of("\\ud800", "\\udc00", "\\ud800x", "x\\udc00", "\\u0000")) {
+            String content = "{\"content\":\"text" + escaped + "\"}";
+            mvc.perform(json(discussionPath(LESSON), content, LEARNER)).andExpect(status().isBadRequest())
+                    .andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.errors[0].field").value("content"));
+            String reason = "{\"reason\":\"text" + escaped + "\"}";
+            for (String path : List.of(lessonPath(LESSON), postPath(LESSON, QUESTION)))
+                mvc.perform(json(path, reason, LEARNER)).andExpect(status().isBadRequest())
+                        .andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(jsonPath("$.errors[0].field").value("reason"));
+            mvc.perform(json(discussionPath(LESSON), content, ADMIN)).andExpect(status().isForbidden());
+            mvc.perform(json(discussionPath(LESSON), content, OUTSIDER)).andExpect(status().isNotFound());
+            mvc.perform(json(discussionPath(LESSON), "{\"content\":\"" + escaped + "\",\"parentPostId\":\"" + HIDDEN_QUESTION + "\"}", LEARNER))
+                    .andExpect(status().isNotFound());
+        }
+        assertEquals(initial, committedCount("discussion_posts"));
+        assertEquals(0, reportRows());
+        assertEquals(0, committedCount("notifications"));
+    }
+
+    @Test
+    void supplementaryUnicodeAndCombiningCharactersRemainVerbatimInPostAndReason() throws Exception {
+        String text = "  e\u0301 \ud83d\ude80\nLine  ";
+        var json = new tools.jackson.databind.json.JsonMapper();
+        var response = mvc.perform(json(discussionPath(LESSON), json.writeValueAsString(Map.of("content", text)), LEARNER))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.content").value(text)).andReturn();
+        UUID post = UUID.fromString(json.readTree(response.getResponse().getContentAsString()).get("id").asString());
+        assertEquals(text, jdbc.queryForObject("SELECT content FROM public.discussion_posts WHERE id=?", String.class, post));
+        response = mvc.perform(json(lessonPath(LESSON), json.writeValueAsString(Map.of("reason", text)), LEARNER))
+                .andExpect(status().isCreated()).andReturn();
+        UUID report = UUID.fromString(json.readTree(response.getResponse().getContentAsString()).get("id").asString());
+        assertEquals(text, jdbc.queryForObject("SELECT reason FROM public.content_reports WHERE id=?", String.class, report));
+    }
+
+    private void awaitDatabaseLock(int pid, java.util.concurrent.Future<?> task) throws Exception {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (Boolean.TRUE.equals(jdbc.queryForObject("SELECT cardinality(pg_blocking_pids(?)) > 0", Boolean.class, pid))) return;
+            org.junit.jupiter.api.Assertions.assertFalse(task.isDone(), "waiter completed without the required database lock wait");
+            Thread.sleep(10);
+        }
+        org.junit.jupiter.api.Assertions.fail("No PostgreSQL lock wait observed for pid=" + pid);
+    }
+
+    @Test
+    void dismissFirstRevalidatesSelectedReportAfterLockWait() throws Exception {
+        UUID selected = report(QUESTION), other = report(QUESTION);
+        var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        var locked = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var waiterPid = new java.util.concurrent.ArrayBlockingQueue<Integer>(1);
+        try {
+            var dismiss = pool.submit(() -> {
+                signIn(ADMIN, com.codemastery.modules.auth.domain.model.Role.ADMIN);
+                return tx().execute(status -> {
+                    var result = reports.dismissReport(selected); locked.countDown();
+                    try { if (!release.await(10, java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("barrier timeout"); }
+                    catch (InterruptedException ex) { throw new IllegalStateException(ex); }
+                    return result;
+                });
+            });
+            org.junit.jupiter.api.Assertions.assertTrue(locked.await(10, java.util.concurrent.TimeUnit.SECONDS));
+            var hide = pool.submit(() -> {
+                signIn(ADMIN, com.codemastery.modules.auth.domain.model.Role.ADMIN);
+                return tx().execute(status -> {
+                    waiterPid.add(jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                    return reports.hidePostForReport(selected);
+                });
+            });
+            Integer pid = waiterPid.poll(10, java.util.concurrent.TimeUnit.SECONDS);
+            org.junit.jupiter.api.Assertions.assertNotNull(pid);
+            awaitDatabaseLock(pid, hide);
+            release.countDown(); dismiss.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            var failure = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> hide.get(10, java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(org.springframework.http.HttpStatus.CONFLICT, ((com.codemastery.common.exception.BusinessRuleException) failure.getCause()).getStatus());
+            assertEquals("dismissed", reportRepository.findById(selected).orElseThrow().getStatus().getCode());
+            assertEquals("open", reportRepository.findById(other).orElseThrow().getStatus().getCode());
+            org.junit.jupiter.api.Assertions.assertFalse(posts.findById(QUESTION).orElseThrow().isHidden());
+        } finally { release.countDown(); pool.shutdownNow(); }
+    }
+
+    @Test
+    void contextParticipatesInCallerSnapshot() {
+        var repeatable = tx(); repeatable.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        repeatable.executeWithoutResult(status -> {
+            assertEquals("published", catalogue.readLessonContext(LESSON).orElseThrow().coursePublicationStatus());
+            var independent = tx(); independent.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            independent.executeWithoutResult(inner -> {
+                jdbc.update("UPDATE public.courses SET publication_status='hidden' WHERE id=?", COURSE);
+                jdbc.update("UPDATE public.lessons SET publication_status='hidden' WHERE id=?", LESSON);
+            });
+            var context = catalogue.readLessonContext(LESSON).orElseThrow();
+            assertEquals("published", context.coursePublicationStatus());
+            assertEquals("published", context.lessonPublicationStatus());
+        });
+        assertEquals("hidden", catalogue.readLessonContext(LESSON).orElseThrow().coursePublicationStatus());
+    }
+
+    private int requirePid(java.util.concurrent.ArrayBlockingQueue<Integer> pids) throws Exception {
+        Integer pid = pids.poll(10, java.util.concurrent.TimeUnit.SECONDS);
+        org.junit.jupiter.api.Assertions.assertNotNull(pid, "worker did not start its transaction");
+        return pid;
+    }
+
+    private <T> T observedTransaction(java.util.concurrent.ArrayBlockingQueue<Integer> pids, java.util.function.Supplier<T> action) {
+        return tx().execute(status -> {
+            pids.add(jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
+            return action.get();
+        });
+    }
+
 }
