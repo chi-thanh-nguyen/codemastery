@@ -32,6 +32,9 @@ const detail = { ...course, prerequisiteDescription: null, syllabus: [] };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 function Probe() { auth = useAuth(); navigate = useNavigate(); return null; }
 beforeEach(() => {
+    // The lazy landing illustration may mount during any direct-entry test, independently of import timing.
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+    vi.stubGlobal('DOMMatrixReadOnly', class { m22 = 1; });
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T10:00:00Z')); vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080');
     fetcher = vi.fn((url: string, _init?: RequestInit) => {
         const pathname = new URL(url).pathname;

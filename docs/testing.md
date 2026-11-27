@@ -1,5 +1,732 @@
 # Testing
 
+## FE16-R-B01 causal refusal recovery — 27 November 2026
+
+Refs #201, PR #270. Reviewed baseline `d4867a38c82b9d4f071ee78e5cb90db29261181f`,
+tree `08b99e15c2dede59b9eb60f9672efbb3430bbc30`; main/merge-base
+`fe3160d535b33652587e14e2fc55ca267f6a5222`. All six published commits remain ancestors.
+Authority: the Project Leader's explicit R-B01 implementation, focused testing,
+verification-record update and direct incremental publication instruction.
+OpenAI Codex implemented and author-verified this correction. Git attribution to
+heizseung does not establish personal implementation, signing or independent review.
+The complete latest independent report and its original causal/26-case probes
+were recovered and read; none is claimed unavailable or independently superseded.
+
+### Negative control and correction
+
+Before production edits the **unmodified original causal probe** ran on the exact
+reviewed source: **2 PASS / 1 FAIL / 0 SKIP**. Actual UI Settings Save (PUT pending)
+→ Assessments → Leave → Assignments → New assignment → related-Lesson Create404
+→ Course403 → Lessons Try again (A pending). The late Settings PUT resolves outside
+act, schedules floor 4 through acknowledgeSettings/revalidateCourse, then a queued
+microtask resolves A while GET count=3 and A.isCurrent()=true. A is accepted with
+successfulRead=3, refusal disappears; B starts at 4 and fails503. Read-only=false,
+assignmentWritesBlocked=false, explicit Create produces **POST 2, expected 1**.
+The paired A-after-B-initiation and coalesced scheduling controls passed.
+
+The same unmodified probe after correction: **3 PASS / 0 FAIL / 0 SKIP**. In the
+pre-initiation render success=3/floor=4 now retains refusal403 and the write barrier;
+after B503 read-only=true and actual POST count remains **1**. The production delta
+adds only scheduled-floor eligibility to the existing denial-clear predicate.
+Identity, decoded-success, error/loading and owner-read currentness remain in force.
+No added GET, retry, mutation replay or parallel state owner is introduced.
+
+Nine durable regressions live in the existing assessmentAuthoring suite. They
+preserve the actual late Settings UI path and outside-act network settlement,
+assert accepted A **before** B initiation (a changed scheduling order cannot pass),
+and cover 403/404, B pending/network/protocol/503 versus eligible B success, actual
+Create/Save/Publish/Hide request counts, open confirmation handlers, grading
+availability, retained drafts, Stay/unload and repeated/coalesced scheduling.
+Eligible success4 clears refusal and Settings reconciliation, permits explicit
+Create, and sends nothing automatically. Coalesced reload/revalidate/reload all
+return floor3 and issue one GET; explicit success4 recovers without a permanent lock.
+Before the production fix these durable cases gave **7 FAIL / 2 PASS** at the
+in-gap refusal oracle. The original POST-count failing assertion is retained in
+external evidence. Existing regressions cover ordinary recovery, initial transient
+failures, direct-write refusal, missing/present Lesson, obsolete success,
+same-owner child remount/draft disposal, Course/session replacement and sign-out.
+
+### Executed verification and applicability
+
+Node 24.21.0, Vitest 5.0.5. Locked dependencies reused in an isolated clone after
+package-lock equality; no package/configuration changes. Commands from repository root:
+
+```sh
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx -t 'FE16-R-B01|FE16-R-A01|FE16-IR Course refusal|grading handoff' --maxWorkers=1 --testTimeout=15000
+# 45 PASS / 0 FAIL / 144 deliberately unselected; includes all nine new cases.
+
+npm --prefix frontend test -- src/features/instructor/course-management/pages/fe16CausalIndependent.probe.test.tsx src/features/instructor/course-management/pages/fe16DeltaIndependent.probe.test.tsx --maxWorkers=1 --testTimeout=15000 --reporter=verbose
+# 29 PASS / 0 FAIL / 0 SKIP: original causal3 plus unmodified prior26.
+# Temporary probe files were moved outside the checkout before publication.
+
+npm --prefix frontend test -- src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/routes/index.test.tsx -t 'owner list reads|U2:|D1-R1|D1-R2|FE14-IR-01|owner read|Course.*read|Settings|D1|N3|N4|N5|N6|grading|Assignment|assignment' --maxWorkers=1 --testTimeout=15000
+# 45 PASS / 0 FAIL / 231 deliberately unselected; files disjoint from above.
+
+npm --prefix frontend run build
+# Typecheck and production build PASS; existing chunk-size advisory only.
+```
+
+These final selections total 119 executed cases across disjoint files. Repeated
+runs/filters are not added. The source bytes are bound to the final commit in the
+external delivery manifest; documentation-only updates do not alter tested source.
+Early author test runs exposed incomplete fixtures for the successful Create's
+follow-up read (and an expected second 404 legitimately scheduling GET5); the final
+fixture returns an acknowledged creation and its route read, keeping the exact
+four-GET oracle. Typecheck required a typed test-only React act-environment flag.
+Neither correction changes production scheduling or weakens a refusal assertion.
+
+FE14/FE15 shared acknowledgment, mutation obligations, floors and owner-read source
+remain byte-identical. Both S19 Grade/Open grading handoffs pass in the selected
+committed tests. FE17 production and FE13 are untouched; AS12/backend remains equal
+to integrated main. Deadline API/parser, exact intent/editor/native fallback,
+formatter, E2E source, contracts, routes and browser matrix are byte-identical to
+reviewed HEAD. IR-01/IR-03/R-A02/R-A03 independent dispositions remain applicable.
+Historical independently inspected run [45998514619, job 140503896015](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45998514619/job/140503896015),
+at merge `8120bea9fd8209f35c7c6c4a801c5a921f63fc0e`, tree identical to reviewed
+HEAD: **149 PASS / 0 FAIL / 11 SKIP**, exact boundary scenario passed on Chromium
+desktop/mobile, Firefox desktop and WebKit desktop/mobile, no affected skip.
+This is reused historical evidence, not fresh execution on this incremental commit.
+
+The bounded self-audit traces every Course scheduler (reload, revalidate, Settings
+acknowledgment and shared mutation recovery). Scheduled floor closes the barrier
+synchronously; accepted older A cannot clear refusal, B transient cannot remove
+it, and eligible current B clears it. Coalescing never advances an unreachable
+floor; identity replacement discards refusal under existing owner lifetime rules.
+Default fsck encounters the inherited optional commit-graph cache inconsistency;
+full object fsck with core.commitGraph=false passes and reachable objects are present.
+No source/history cache repair or other session resource change was performed.
+
+Author outcome: **FIXED_AUTHOR_VERIFIED**. No remaining R-B01 defect was reproduced.
+Latest independent REQUEST_CHANGES, R-A01/IR-02 partial acceptance and AC1/4/6 /
+FE16.author dispositions are not independently updated here. Existing formal AC10
+AT/device/zoom/contrast qualification remains. Independent closure, exact-head
+hosted CI, CODEOWNER/QA, protected integration, release and deployment remain separate.
+No new browser/REST stack, five-project matrix, full 460-case selection, unrelated
+frontend/backend/FE17/AS12 suites, CI dispatch/wait, merge or Project/Issue write:
+the unchanged paths have applicable prior evidence; the new causal path is covered
+directly. All historical records below remain unchanged.
+
+## FE16-R-A01 / R-A02 / R-A03 targeted remediation — 27 November 2026
+
+Refs #201, PR #270. Reviewed/published baseline:
+`d8b021ba55738335a43f1bd2d5f0958ef8da2996` (tree
+`3cd876dd3988b056d1cc4f92e1713aa530ab72b7`); refreshed main and merge-base:
+`fe3160d535b33652587e14e2fc55ca267f6a5222`. The existing five commits include
+AS12. This is incremental author remediation, not a new independent acceptance.
+OpenAI Codex implemented and author-verified the change under the Leader's
+explicit instruction. All earlier FE16/FE17/AS12 records below remain historical.
+
+### Negative evidence and corrected invariants
+
+The complete final narrow independent report/archive and prior author remediation
+archive were accessible and inspected. Before production edits, its unmodified
+26-case component probe was run on exact baseline: **15 PASS / 11 FAIL / 0 SKIP**.
+Failures were six 403/404 × network/protocol/503 Create retries, three equivalent
+Save/Publish/Hide boundaries and two year-zero current-version presentations.
+After the production correction the same unmodified probe passed **26/26**.
+The probes use actual AppRouter → CourseEditorShell → useSharedCourseState →
+useOwnerRead → CourseAssignmentEditor → AssignmentEditor, with controlled feature
+responses and the real Lessons Try again control. They are not REST acceptance.
+
+Hosted run [45978295528, job 140435509480](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45978295528/job/140435509480)
+was inspected directly: **147 PASS / 2 FAIL / 11 SKIP** at baseline. Both
+`FE16-IR boundary deadlines retain exact UTC instants and allow deliberate native replacement`
+failures are WebKit desktop/mobile, missing the exact
+`9999-12-31T23:59:59.999999Z` fallback. The prior independent real WebKit and native
+engine evidence identifies whole-string fractional rounding into UTC year 10000.
+This is historical real-browser negative evidence, not a fresh local browser run.
+
+- R-A01: refusal lives in the existing Course/session owner, survives pending and
+  transient retries and same-owner editor remount, and clears only on a later
+  current decoded GET. A synchronous scheduling barrier guards stale callbacks
+  and open publication confirmations. Six original Create cases retain **one**
+  POST after the attempted retry; the three original existing-editor cases send
+  **zero** refused PUTs. Current success permits only a deliberate next write.
+  Additional cases cover repeated refusal, initial transient controls, obsolete
+  same-Course/Course/session success, direct-write refusal, sign-out, read-only
+  drafts, grading availability, Stay/Leave and unload protection.
+- R-A02: numeric calendar validation, fraction-free UTC seconds, offset arithmetic
+  and separate microseconds admit exact UTC 0000–9999 without native fractional
+  parsing. Tests exercise lower/upper controls, leap/early years, offset crossings,
+  invalid calendars/times/offsets/ranges, 1..6-digit response grammar and trailing
+  line-break rejection. Backend request parsing may admit zero digits below the
+  microsecond; strict frontend response admission still rejects those spellings.
+  Every owner response boundary preserves the original string and PUT payload.
+  A Date negative control throws if complete microsecond text reaches Date in
+  decoding, native-input or display paths. FE17 tests use the actual shared
+  HTTP/decoder for both current-page and bounded direct-read selector cases,
+  preserving Course/Assignment identity, pagination and no unintended grade write.
+- R-A03: authoritative current-version year 0000 and equivalent-offset forms use
+  unambiguous exact UTC. Local year-zero/negative/10000 crossings are covered;
+  positive year 0001 and ordinary localized/relative display remain distinct.
+  A different retained draft stays unsaved and sends its original exact deadline
+  on the next explicit Save. Shared Assignments-list rows remain usable with
+  grading identities. Native replacement assertions remain unchanged.
+
+The original IR-01 draft/persisted/sent state model is preserved. Existing tests
+cover `.123456Z` versus `.123999Z`, both New York fold occurrences, newer unsent
+edits, later deliberate changes, no obsolete precision, differing/failed recovery
+and dirty Publish/Hide. This rerun does not create a new independent IR-01 closure.
+
+### Executed author verification
+
+Node 24.21.0; locked packages and pinned Playwright 1.63.0 were reused only after
+lockfile equality. No dependency was changed. Commands below ran from repository
+root on the remediation working tree; published source/tree hashes are recorded
+in the external delivery manifest.
+
+```sh
+# Before/after: the same temporary independent probe, removed before commit.
+npm --prefix frontend test -- src/features/instructor/course-management/pages/fe16DeltaIndependent.probe.test.tsx --maxWorkers=1
+# Before 15 PASS / 11 FAIL; after 26 PASS / 0 FAIL; 0 SKIP in each.
+
+npm --prefix frontend test -- \
+  src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx \
+  src/features/instructor/course-management/api/assessmentAuthoringApi.test.ts \
+  src/features/instructor/grading/pages/grading.test.tsx \
+  --maxWorkers=1 --testTimeout=15000
+# 326 PASS / 0 FAIL / 0 SKIP, three affected suites; 69 new tests.
+
+npm --prefix frontend test -- \
+  src/features/instructor/course-management/hooks/assessmentHooks.test.tsx \
+  src/features/instructor/course-management/pages/fe14Authoring.test.tsx \
+  src/routes/index.test.tsx \
+  -t 'owner|Course|course|Settings|refresh|Assignment|assignment|grading|Instructor|session|FE16|N[1-6]|D1' --maxWorkers=2
+# 134 PASS / 0 FAIL / 142 deliberately unselected, three other suites.
+
+npm --prefix frontend run build
+# PASS: TypeScript and production build; existing >500 kB chunk advisory only.
+```
+
+The 326 and 134 selections use disjoint files. Filtered debugging selections and
+26 independent probes overlap their requirements and are not added to those
+counts. The prior 468/559/759 selections were not mechanically repeated. The
+unchanged production grading/route/backend/E2E blobs, FE13 remote head and
+historical documentation preservation are checked separately before publication.
+Impeccable context/harden guidance and the once-run detector (`[]`) were used;
+Graphify's old graph supplied no useful current relationships, so source was
+inspected directly. Neither tool is acceptance or browser evidence.
+
+Initial new-test failures exposed fixture assumptions: a failed Course shell has
+no New assignment button, upper UTC can require a local-year fallback, and grading
+query order is not identity. The tests now assert actual navigation, exact fallback
+and parsed query identities. The first actual-decoder FE17 fixture omitted the
+required public API origin; it now supplies/restores a test-only origin. One broad
+run used Vitest's default 5-second component timeout while other selections ran,
+timed out in an unchanged repeated-Settings-navigation case, and produced cascading
+act failures. That case and all new lifecycle cases passed in isolation; the final
+serial affected-suite run uses the same 15-second component timeout as the previous
+author evidence. No product assertion or E2E timeout was weakened.
+
+### Real-browser / REST execution limitation
+
+The unchanged boundary scenario and all five hosted projects remain intact. The
+requested local WebKit desktop/mobile invocation was attempted with external URL,
+image and account overrides unset. First, sandbox write denial stopped the runner
+before admission. After narrowly granting its required registry permission, run
+`cm-e2e-1a21cebc34c-b180fe` was admitted but setup failed before tests: Docker
+Buildx could not write its activity file. The narrow Buildx permission was then
+granted. However sandbox also denies `kern.boottime`; the unmodified lifecycle
+requires a non-null boot identity and correctly refuses to recover its inventory.
+`npm --prefix e2e run stack:down` was attempted and remains incomplete for that
+reason. Do not erase the record or bypass the guard. Exact run-label inspection
+finds zero containers, images, volumes or networks; its temporary build directory
+and incomplete inventory are preserved, not falsely reported as cleaned.
+
+Direct pinned WebKit, Chromium and Firefox launches were also attempted; all
+aborted in this sandbox. Chromium explicitly reports Mach bootstrap permission
+denied; WebKit/Firefox abort before a page opens. Thus **no new local real-browser
+or REST E2E test completed**: WebKit desktop, WebKit mobile, Chromium desktop and
+Firefox remain **UNVERIFIED**. Source-level rounding dependence is removed and
+controlled tests pass, but the same hosted failure is not claimed eliminated by
+fresh engine execution. The unchanged real REST test must still verify creation,
+read, exact fallback, PUT, reload, publication and replacement in a permissive
+approved disposable environment. Local success is never substituted for hosted CI.
+
+Author dispositions: **R-A01 FIXED_AUTHOR_VERIFIED; R-A02 FIXED_VERIFICATION_LIMITED;
+R-A03 FIXED_AUTHOR_VERIFIED**. Overall
+**FE16_TARGETED_REMEDIATION_COMPLETE_VERIFICATION_LIMITED**. Independent
+VERIFIED_FIXED, formal AT/device/zoom QA, exact-head required CI and protected
+integration remain separate. No backend/AS12 full suite, unrelated learner,
+release/infrastructure qualification, broad screenshot matrix, manual CI dispatch,
+merge, self-approval, Issue closure, Project state change, release, deployment or
+hosted-CI waiting.
+
+## FE16-IR-01/02/03 targeted remediation — 27 November 2026
+
+**FE16_TARGETED_REMEDIATION_COMPLETE_AUTHOR_VERIFIED.** Refs #201, PR #270.
+OpenAI Codex implemented and performed the bounded author self-audit under the
+Project Leader's explicit instruction. Each finding is **FIXED_AUTHOR_VERIFIED**;
+independent `VERIFIED_FIXED` remains reserved for the next reviewer. The earlier
+full-scope author assertions below are historical; the supplied independent
+review subsequently found two P2 and one P3 at `bd742f4` and requested changes.
+
+### Baseline and negative controls
+
+Reviewed HEAD `bd742f4c2774105675234ed2bbe250e3fd87fe26`; refreshed main and
+merge-base `e2106f68c612468f1d6e4eb5f86c086256010bc7`; PR open on main.
+The supplied complete report/archive, probes and all ten prior dispositions were
+inspected. Its eight independent probes were run on the unchanged reviewed source:
+**6 FAIL / 2 PASS / 0 SKIP**, reproducing all three findings. UTC lost `.123456`;
+New York's second fold occurrence changed from `06:30:00.123456Z` to
+`05:30:00.000Z`; both definitive Course refusals admitted a second POST; native
+year-zero deadlines rendered blank. Paired pre-confirmation payload controls
+passed. Original failure logs/probe source are retained outside tracked files.
+
+### Corrections and affected preservation
+
+| Finding | Root cause and bounded correction | Positive evidence |
+| --- | --- | --- |
+| IR-01 P2 | A mutable persisted baseline also interpreted the retained native draft. Keep draft-owned exact intent separate from persisted Assignment and immutable sent binding; capture deliberate edits against current persisted state | 14 new payload/recovery cases: original/changed/sent deadline, both fold occurrences, sub-millisecond differences, differing and failed GET. Existing PS-A01 cases prove later deliberate return does not resurrect old microseconds |
+| IR-02 P2 | FE16 discarded error classification at CourseLessonSource and blamed a selected Lesson before Course read settlement. Add optional error/loading visibility from the existing shared owner read; current 403/404 and pending reads guard actual mutation handlers and controls | 11 new actual AppRouter/shared-context cases: 403/404 read-only/POST count 1, successful missing/present Lesson, network/protocol/503 correction, pending repeated clicks/no replay, obsolete Course/session/sign-out response, Stay/Leave and unload |
+| IR-03 P3 | UTC representability exceeds positive four-digit local/native support. Exact labeled UTC fallback retains the draft binding; deliberate replacement focuses the native control and validates normally | 9 new component cases for year 0000/microseconds, lower/upper timezone crossings, years 0001/0050/9999, unrelated edits/Hide and empty/invalid replacement; two additional dirty Publish/Hide recovery and explicit Save cases |
+
+**36 new regressions** in the existing authoring suite. The six earlier A01–A06
+and PS-A01–A04 affected cases remain covered by the passing complete authoring
+suite: exact dirty-Hide payload, no false deletion/Saved, Preview validation/focus,
+calendar/DST-gap checks, unchanged no-Lesson refusal and departure protection.
+No automatic mutation replay, synchronization validator, private persistence,
+backend/public contract, shared decoder, dependency or route activation change.
+
+N7 keeps local validation/safe form-level fallback. FE14/shared-context and FE15
+consumers run in the focused selection; Course read bounds remain enforced.
+Accepted FE17 HEAD `b69e4acd` and main `e2106f68` share tree
+`27ca5f24e9f94ddcd123a8b19a84a83ad4d114cd`. Grading files, shared decoder,
+HTTP/operation hooks, production route registration and accepted browser harness
+remain unchanged. IR-01/02/03/R-A01 grading invariants retain the prior independent
+evidence; both S19 handoff scenarios were rerun. FE13 #271 remains exactly
+`c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2`; #288 remains merged and untouched.
+
+### Actual focused execution
+
+Run in the isolated remediation checkout based on `bd742f4`; the final delivery
+commit and published HEAD are identified in PR #270 rather than self-referentially
+embedded here. Existing lockfiles matched the prior review checkout before APFS
+copy of locked dependencies; no installation/manifest change. All test-local TZ
+changes restore the original environment in finally blocks.
+
+```sh
+npm --prefix frontend test -- src/features/instructor/course-management/pages/fe16Independent.probe.test.tsx --maxWorkers=1
+# Reviewed source: 6 FAIL / 2 PASS. Temporary probe moved outside source afterwards.
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/features/instructor/course-management/api/assessmentAuthoringApi.test.ts src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/routes/index.test.tsx --maxWorkers=2 --testTimeout=15000
+# 466 PASS / 0 FAIL / 0 SKIP, 5 files, including 34 newly added tests.
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx -t 'FE16-IR keeps a boundary' --maxWorkers=1
+# Two subsequently added recovery cases: 2 PASS / 146 intentionally unselected.
+# 468 distinct focused tests have applicable passing evidence, not a fresh 468-test run.
+npm --prefix frontend run build
+# Final source/test tree: typecheck and production build PASS; existing >500kB advisory.
+npm --prefix frontend run test:browser -- --fe17 --case S19 --engine chromium --out ../evidence/handoff
+# 2 PASS / 0 FAIL; 2 unrelated scenarios not exercised. CONTROLLED HTTP, not REST persistence.
+E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts --grep FE16-IR --project=chromium-desktop --workers=1
+# 1 PASS / 0 FAIL / 0 SKIP. Real disposable frontend/backend/PostgreSQL/MinIO; no HTTP interception.
+git diff --check
+git fsck --full --no-dangling
+```
+
+Real browser test runs three independent timezone contexts (UTC, America/New_York,
+Pacific/Kiritimati), actual year-zero/early-year/upper-boundary persistence, exact
+outgoing PUT, reload, Publish/dirty Hide, labeled fallback and focused empty/valid
+replacement including nonzero seconds. It rejects real out-of-UTC-range and
+sub-microsecond writes with 400. Six geometry observations at 360x600/1440x720,
+System light/dark, assert no overflow, accessible fallback and >=44px replacement
+action, and enabled Save center hit. Browser engine: Chromium 153.0.8010.12.
+Run `cm-e2e-1a21c548088-a81b4e` verified all seven owned Docker resources absent,
+plus preview/build/runner/finalizer cleanup. The first two runs also cleaned up.
+Separate isolated Playwright CLI Chrome native DOM evidence confirms year zero
+and negative local year sanitize blank, while 0001 and positive 10000 are accepted.
+
+Preserved harness failures: initial new component assertions assumed jsdom's
+seconds serialization omitted `.000`, and attempted to invoke a disabled MUI
+wrapper without its event. Fixtures were corrected to compare incidental native
+serialization and exercise actual pending-click/POST behavior; product was not
+changed for those assumptions. First E2E measured before the responsive header
+commit; use the existing header-mode wait and retain strict geometry. Second
+E2E used a label selector inconsistent with the actual accessible native textbox;
+use its role/name. Final real run passes; no product assertion was weakened.
+Impeccable context/hardening guidance and detector were used (detector `[]`);
+Graphify navigation was stale and source-verified, not correctness evidence.
+The local clone inherited a stale commit-graph cache: object-only full fsck passed;
+a reachable commit-graph rebuild restored ordinary full fsck, without changing
+objects, refs, source history or the original repository.
+
+### Bounded author self-audit and remaining gates
+
+Challenged draft reinterpretation, stale-precision resurrection, same-display
+instants, immutable recovery snapshots, pending/unknown/definitive Course reads,
+wrong-resource/session settlement, mutation eligibility, fallback blanks/range,
+validation/focus/navigation and shared consumers. No confirmed remediation defect
+remains. Existing historical 559/759-test, REST and broad geometry evidence was
+inspected/reused only for unchanged behavior, never counted as fresh execution.
+Omitted as disproportionate: full backend/frontend/history selections, complete
+FE14/15/17 browser matrices, unrelated learners, infrastructure/release tests and
+hosted-CI waiting. New native-boundary verification uses Chromium; WebKit/Firefox,
+human AT, physical devices and formal zoom/conformance acceptance were not rerun.
+Formal independent narrow review, CODEOWNER/QA, exact-head hosted gates, protected
+integration, release and deployment remain separate; no merge, self-approval,
+Issue/Project write, CI dispatch, release or deployment is performed.
+
+## FE16 post-squash completion and full-scope author verification — 27 November 2026
+
+**Disposition: FE16_IMPLEMENTATION_COMPLETE_RESTACKED_AUTHOR_VERIFIED.** Refs #201,
+PR #270. Explicit Leader authorization covers implementation completion, isolated
+restack, task-local decisions, direct remediation and publication. OpenAI Codex
+performed this implementation-author audit; it is not independent review or QA.
+The earlier stacked FE16 and FE17 records below retain their original revisions,
+counts and limitations. None is represented as a fresh execution here.
+
+### Baseline, recoverability and preserved scope
+
+Refreshed main `e2106f68c612468f1d6e4eb5f86c086256010bc7` and independently
+accepted FE17 `b69e4acd4713ce1750b941002d1607e2f4a92acd` have identical tree
+`27ca5f24e9f94ddcd123a8b19a84a83ad4d114cd`. Original FE16 remote HEAD is
+`28ad6ffa321c4772f93d7e594a15a497dd47d21d`; original effective FE16 range is
+`11ba8e49..28ad6ffa`. The obsolete displayed main comparison was not used to
+choose ownership. Its two commits transplant as `1f47061` and `b0ee5c4`.
+Initial effective delta is exactly seven files, +673/-18; range-diff changes only
+document insertion context and every non-document blob initially equals original
+FE16. Setup/testing conflicts preserve both complete FE16 and FE17 records.
+
+A new backup `refs/heads/backup/fe16-post-squash-20261127-pre-restack`, existing
+reconstruction backups, original metadata/history/binary patch and a verified
+complete Git bundle preserve recovery. FE13 #271 remains at
+`c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2`. No open PR consumes #270's branch.
+No FE13 source or #271/#288 metadata, main, contract, dependency, backend or
+migration is modified. Publication/final SHA are recorded in PR #270 to avoid a
+self-referential commit hash. The final effective scope is nine files.
+
+### Upstream assessment on integrated main
+
+| Owning Issue | Consumed implemented slice | New cumulative functional scope |
+|---|---|---|
+| AS09 #160 | Strict owner Assignment list/read/create/replace/publication and counts; ownership/row locks and safe errors | 0% |
+| CO06 #172 | Decoded owned Course/Chapter/Lesson tree in canonical order, hidden rows included | 0% |
+| FE14 #199 | Production Course shell, shared context, retained data and refresh/refusal lifecycle | 0% |
+| FE15 #200 | Shared Assessments route, view URL replacement, pagination and Assignments host; G7 confirmation in live #201 | 0% |
+| FE08 #193 | Existing approved CT37 AST renderer and dependency decision | 0% |
+| FE03 #56 | Shared authenticated HTTP/runtime decoding, safe errors, session generation and cancellation | 0% |
+| FE32 #224 | Instructor route registration, destination activation and workspace navigation | 0% |
+| FE34 #255 | Shared semantic Light/Dark/System foundation; no local theme state | 0% |
+| FE17 #202 | Accepted grading destinations, exact query names/identities and both S19 handoffs | 0% |
+
+These are consumed capabilities, not whole-Issue completion claims. No missing
+upstream implementation or approximately-20% authorization decision is needed.
+
+### Live #201 acceptance inventory and FE16.author
+
+The complete live Issue has **13 acceptance criteria**. Checkboxes are not used
+as implementation proof. All 13 are implemented/reachable in production bindings
+of this PR; independent acceptance remains separate.
+
+| AC | Current criterion | Implementation and evidence | Limit |
+|---|---|---|---|
+| 1 | Owner create/edit/publish with deadline | Strict CT10 client, Assignment editor, real 201/PUT/publication/hide/reload | Owner QA separate |
+| 2 | English; desktop/mobile responsive | English UI; five widths in two engines, long content and short-height Save geometry | No physical-device acceptance |
+| 3 | Approved REST through shared client | Operation URLs/statuses/identities and runtime decoders; client/HTTP tests, real REST | Guards do not replace server ownership |
+| 4 | Loading/empty/error conventions | Shared views, initial/refused/recovery cases, controlled failures and real empty/list | No production failure injection |
+| 5 | Ordered Assignments/S19 columns/counts/actions; G7 | API-order/pagination, canonical Lesson labels, literal new, count/activation gated Grade; final list and handoff evidence | G7's recorded confirmation retained, not re-invented |
+| 6 | Canonical grouped Lessons, hidden/unavailable/failed states | Owned tree/select, bounded reread, draft/lessonId retention; focused cases | No lesson deletion feature assumed |
+| 7 | URL replacement, full replacement/last-save-wins, unknown outcomes | Real new/reload; deferred recovery, retry, later draft and baseline regressions | No automatic replay; unknown creation needs deliberate list review |
+| 8 | No Assignment deletion | No UI/client deletion operation | Unchanged ADR010 exclusion |
+| 9 | Native deadline and explicit timezone | Native input/helper, past/microsecond real REST; normalization, early-year, UTC bounds and DST gap/fold tests | DST fold edits use native earlier-offset interpretation; unchanged instants remain exact |
+| 10 | Current DESIGN and prescribed responsive/keyboard behavior | Actual production editor/list in Light/Dark/System at 360/768/1024/1280/1440; validation, keyboard/Space, focus return; 62 action measurements | No human AT, physical devices or formal zoom QA |
+| 11 | Markdown Instructions/Preview | Shared renderer, unsaved draft, literal HTML, safe links, tables/code and no external image requests; component and real browser | Existing CT37 feature set only |
+| 12 | Semantic roles and shared theme | No local colours/state; real three-preference and live OS-change checks; detector [] | Formal contrast/AT conformance separate |
+| 13 | Decoded production reuse, preview isolation, activated routes | Registered Instructor guards, production REST, no fixture data imports; route tests and real direct/reload entry | No unsupported route activated |
+
+**Implementation completion: 13/13; FE16.author implemented and author verified.**
+This does not tick Issue criteria, close it, set Done or establish protected merge.
+
+### Distinct full-scope self-audit and direct remediation
+
+After the initial verification, the author audit reinspected all criteria and
+production journey, inherited list/API/hook/context/route/renderer boundaries,
+ADR010/CT21/CT16/CT18, N7, cancellation/identity, publication, exact deadlines,
+unknown outcomes, lesson recovery, navigation, rendered geometry and Git scope.
+Additional deferred tests challenge pending recovery locks, repeated failed Hide
+reads, departure into another Assignment, and a newer deliberate save after an
+unconfirmed read; these neither replay mutations nor add a synchronization rule.
+
+| Finding | Severity / requirement | Reproduced root cause | Correction and negative sensitivity |
+|---|---|---|---|
+| FE16-PS-A01 | P2; AC7/9, draft/deadline integrity | Confirmed recovery left the old persisted deadline baseline. After saving a different date, returning explicitly to the old displayed date resurrected its stale microseconds | Adopt confirmed body for unchanged draft, or advance the persisted baseline while retaining newer dirty edits. Two old-production assertions fail with `.123456Z` instead of newly selected `.000Z`; both pass corrected |
+| FE16-PS-A02 | P2; AC1/4/7 refusal | Create 404 without a Lesson only showed a generic error and stayed writable although the Course is definitively unavailable | Keep creation draft read-only, safe Course-unavailable notice and catalogue departure; old-production lock assertion fails, corrected passes |
+| FE16-PS-A03 | P3; AC3/9 strict decoding | Decoder checked the written year but not the UTC year after an offset | Enforce UTC 0000–9999; two out-of-range response negative controls resolve incorrectly before fix and reject after it. No backend contract expansion |
+| FE16-PS-A04 | P2; AC4/7, S19 navigation | noAccess disabled dirty navigation/unload protection; catalogue link bypassed the guard, silently discarding retained drafts | Retain existing Stay/Leave and unload protection after refusal; two 403/404 controls fail before fix and pass after. Fields/mutations stay locked; no persistent private draft |
+
+These are author corrections, not independent closure. All seven negative
+assertions failed on the relevant pre-fix production states. No confirmed
+remediable in-scope finding or contract/decision blocker remains after correction.
+No speculative concern, unrelated cleanup or optional enhancement is reported as
+a defect. Genuine limitations are stated below rather than deferred remediation.
+
+The **six previous findings** were explicitly reopened as audit questions and
+reinspected, not inferred closed from test names:
+
+| Previous finding | Final author disposition and evidence |
+|---|---|
+| A01 dirty deadline after Hide | Retained exact baseline on publication and unknown Hide recovery; direct and repeated-failure regressions pass |
+| A02 failed GET after Lesson refusal | Only definitive 404 establishes missing Assignment; network/5xx keeps draft; regression passes |
+| A03 old save marks newer draft Saved | Sent/current draft comparison retains newer dirty edits; stronger confirmed-baseline tests and deliberate-next-save case pass |
+| A04 invalid Instructions hidden by Preview | Reveal editor, summary, linked field error and first-invalid focus; component and short real viewport pass |
+| A05 inaccessible save below long content | One sticky semantic save region; both engines/three preferences/five widths/600–720px heights and long Preview; 62 visible/unobscured 48px action observations |
+| A06 native calendar/year normalization | Calendar roundtrip rejects invalid date/DST gap; early year padding, exact server precision and DST-fold baseline preservation pass |
+
+### Accepted FE17 preservation
+
+The final independent review report at accepted `b69e4acd` was read, including
+FE17-R-A01's exact repeated-reload readiness correction and negative control.
+All FE17 grading source/test blobs, accepted browser harness, shared HTTP,
+useAssessmentEditor, route registration and FE14/15 production consumers are
+unchanged from main unless explicitly listed as FE16 remediation above.
+FE17-IR-01 keeps reviewed evidence separate from authoritative/read/download
+state and enforces it at PUT; IR-02 keeps selected summaries beyond page windows;
+IR-03 keeps one native form-associated grading action; R-A01 increments each read
+identity. These accepted behaviors are not modified or independently reopened.
+The current 98 grading tests pass in the focused selection. Controlled browser
+S19 Grade/Open grading and IR02 handoff pass twice per engine (4 total); real
+protected download/409/grade/regrade pass once per engine. RT02's binary
+version-token limitation remains. Current final route/editor tests cover dirty
+handoff, identity, activation and role guards. No prior accepted FE17-owned
+implementation evidence is invalidated.
+
+### Actual verification, failures and limits
+
+Environment: macOS, Node 24.21.0, npm 11.19.0, Chromium 153.0.8010.12, WebKit 26.6.
+Existing locked dependency installations were cloned locally after exact lockfile
+comparison; no manifest, lock or package change. Commands ran in this isolated
+worktree; external logs/backup are excluded from tracked files.
+
+```sh
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/features/instructor/course-management/api/assessmentAuthoringApi.test.ts src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/grading src/shared/components/MarkdownRenderer.test.tsx src/shared/api/httpClient.test.ts src/routes/index.test.tsx src/app/preview/PreviewApp.test.tsx --maxWorkers=2 --testTimeout=15000
+# 753/753 PASS, 10 suites, after the first three corrections.
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/routes/index.test.tsx src/app/preview/PreviewApp.test.tsx --maxWorkers=2 --testTimeout=15000
+# Final affected rerun: 357/357 PASS, 3 suites (112 authoring, 201 routes, 44 preview).
+# The other 402 tests retain applicable passing evidence from this session;
+# 759 distinct selected tests have passing evidence. Not a new 10-suite rerun.
+npm --prefix frontend run build
+# Includes npm run typecheck: PASS at final production/test source.
+E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts instructor-grading.spec.ts --grep 'FE16 complete|FE17 protected' --project=chromium-desktop --project=webkit-desktop --workers=1
+# 4/4 PASS: real disposable backend/PostgreSQL/MinIO, no HTTP interception.
+E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts --grep 'FE16 complete' --project=chromium-desktop --project=webkit-desktop --workers=1
+# Final stronger FE16 case: 2/2 PASS, 0 skips; 62 short-height geometry observations.
+npm --prefix frontend run test:browser -- --fe17 --case S19 --engine chromium,webkit --out ../evidence/handoff-browser
+# Controlled HTTP only: 2/2 scenarios each engine. Output moved outside source.
+# Impeccable context and detect --json AssignmentEditorPage.tsx: detector [].
+git range-diff 11ba8e49..28ad6ffa origin/main..b0ee5c4
+git diff --check
+git bundle verify <external-evidence>/fe16-pre-restack.bundle
+```
+
+The final FE16 E2E run `cm-e2e-1a21c1bc64c-64efa8` verified all seven owned Docker
+resources, preview/build and runner absent after teardown. The initial combined
+run also cleaned up all seven resources. Long editor/list screenshot matrices
+cover 30 states per surface, plus 320px list reflow. Stronger final geometry adds
+600px heights at 360/768 and 720px at 1024/1280/1440 with long title/instructions,
+initial and scrolled Preview states, then invalid Instructions focus at 360×600.
+
+Failures are preserved: five initial pre-fix regressions failed; two later
+read-only-navigation regressions failed before correction. The first stronger
+geometry run failed only its disabled-button hit oracle in both engines: MUI uses
+pointer-events:none for disabled controls. Correct the oracle to admit the
+containing action region only for disabled buttons, and also exercise enabled
+unsaved actions; no enabled action assertion or product behavior was weakened.
+The next real run passes. Vite's existing >500kB advisory and jsdom document
+navigation notices remain. Initial sandbox networking/Docker access failed;
+authorized network/socket calls succeeded. No product failure is hidden.
+
+Unchanged backend suites, unrelated FE17/browser/E2E scenarios, infrastructure,
+security/release qualification and hosted-CI waiting were omitted by risk-based
+authority. The old 717-test evidence is historical, not this run's count. Human
+screen-reader, physical-device, Firefox and formal 200% zoom QA were not executed;
+component refusal/busy evidence and controlled fault tests are not production
+failure injection or a conformance claim. Protected integration, independent
+CODEOWNER review, formal QA, exact-head hosted CI, release and deployment remain
+separate. No self-approval, merge, Issue/Project write or deployment occurs here.
+
+## FE16 complete authoring and FE13 preservation — 27 November 2026
+
+**Authority and provenance.** Refs #201, #198; PR #270 is repurposed for FE16
+under the Project Leader's explicit consolidation, implementation, scoped
+technical-decision, author self-audit and publication instruction. OpenAI Codex
+authored these changes and performed this self-audit. It is not independent QA,
+CODEOWNER review, acceptance, merge readiness, release or deployment evidence.
+
+**Exact integration baseline:** FE17 #288 HEAD
+`11ba8e49be6af16f5114d264e8bb1cc16b8bdbd1`, which contains main
+`13d9ca7e58ead77ecc66efc8408199059d57588a`. FE16 #270 targets
+`feature/learning-progress-ui`; #288 must integrate first, with a subsequent
+FE16-only restack/retarget if squash merging. Refreshed main AS16 #301 changes
+no consumed Assignment-authoring/frontend contract. No FE17 or FE13 production
+file, route, dependency manifest, backend code or public API is modified here.
+The final commit is identified by Git and the PR; this record describes its
+working tree without a self-referential commit hash.
+
+### FE13 lossless preservation
+
+Original #270 `1e0953023c70982859087a4490d714dac8b6a4be` is an ancestor of
+retained #271 `c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2` (ahead 1, behind 0).
+Both have merge-base `e9d6da15b3fe4d581765d1c733abb70698dac779` with refreshed
+main. The API blob is `cdc63a3970bcef8df384cd06f54bdf3404a3a87c` and the hook
+blob `7e321c86c64b659d2da986bd3a5f039e67e1af13` at both HEADs. The types delta
+only adds the optional `mine` property; #271's additional UI commit is retained.
+No cherry-pick, duplicate merge, FE13 remediation or independent FE13 audit is
+performed. PR #271's description consolidates API/types/hooks/UI and uses
+`Refs #198`, preserving dated historical evidence without claiming completion.
+
+Durable refs `refs/heads/backup/fe16-20261127-pr270-original`,
+`refs/heads/backup/fe16-20261127-pr271-original` and
+`refs/heads/backup/fe16-20261127-pr288-original` resolve to those original HEADs.
+A complete-history bundle passed `git bundle verify`; original PR JSON,
+authorship/commit lists and binary effective patches are retained outside Git.
+The nine-open-PR inventory found only #271 consuming old #270 and #288 consuming
+its own HEAD, besides each branch itself. Remote heads/consumers and backup refs
+are checked again before explicit-SHA force-with-lease publication of #270.
+
+### Consumed upstream inventory
+
+Incomplete whole Issues do not block available consumed slices. Every row below
+has actual production code on the verified baseline. **Required upstream
+functional additions: none; cumulative relative scope 0% for each Issue.**
+No approximately-20% exception is needed and no upstream completion is claimed.
+
+| Upstream | Available consumed capability and inspected evidence | Verification / remaining boundary |
+|---|---|---|
+| AS09 #160 | `AssignmentController`, `AssignmentRequests`, `AssignmentService`, `AssignmentRepositoryImpl`: owner list/read/create/replace/publication; coherent counts; backend ownership and C-collation title/UUID order | Real owner REST and browser save/publication; no AS09 reimplementation |
+| CO06 #172 | `instructorCourseApi.getOwnedCourse`, backend owner-course read: canonical Chapters/Lessons, including hidden Lessons | Strict client, course-context and stale-tree regressions; actual Course read |
+| FE14 #199 | `CourseEditorShell`, `useSharedCourseState`, `CourseRefreshAlert`: shared owned Course, generation isolation and refresh retention | FE14 and assessment hook/component regressions; no new shell behavior |
+| FE15 #200 | `AssessmentsPage`/`AssignmentsView` in `QuestionBankPage.tsx`: query selection, paging, columns, API order, resource actions | G7 is Leader-reported owner confirmation in live #201 (25 November); component and real list evidence |
+| FE08 #193 | Shared `MarkdownRenderer`, approved dependency selection in setup, CT37 link policy and CodeBlock | Renderer security suite plus actual Instructions Preview; broader FE08 unclaimed |
+| FE03 #56 | Shared `httpClient`, `AuthProvider`, route guards: authenticated transport, no replay, generation/cancellation isolation | Transport/hook/route tests; actual cookie restore and deep-link reload. Test-only route fixture supplies browser APIs for lazy landing illustration |
+| FE32 #224 | `WORKSPACE_ROUTES`, Dashboard Instructor navigation/guard | Route tests, real grading destination; unauthorized roles in FE17 harness |
+| FE34 #255 | Root theme preference, semantic roles and Theme control | Real Light/Dark/System geometry; live System OS switch; no local theme state |
+| FE17 #202 | `gradingPath`, registered grading pages, `useSubmissions`, `gradingApi`, existing Grade/Open grading handoffs | G4's existing delegated selection of both query names is preserved; real FE17 regression and controlled handoff tests |
+
+### Explicit completion denominator
+
+Live Issue #201 contains **13 acceptance criteria**, plus the `FE16.author`
+checkpoint. Final production implementation is **13/13**, checkpoint implemented.
+Author verification covers each row below; independent acceptance is **not
+established for any row by this session**. The denominator is Issue criteria,
+not LOC, test count or entire-upstream completion. Human assistive-technology,
+physical-device, full WCAG and release QA remain separate.
+
+| # | Current criterion | Final implementation and author evidence |
+|---|---|---|
+| 1 | Owned-course Assignment create/edit/publish/deadline | Existing approved owner client/editor completed; real REST create/full replace/publish/hide |
+| 2 | English and desktop/mobile responsiveness | English labels/statuses, semantic sticky save; two-engine geometry and screenshots |
+| 3 | Approved REST via CT16; backend authorization | Unchanged strict clients/transport/backend ownership; client/route tests and real requests |
+| 4 | Loading/empty/error presentation | Shared status views, safe form fallback, field summary/focus, draft-visible refusals; components/empty real list |
+| 5 | Assignments columns/order/actions, Grade gating, G7 | Existing AssignmentsView and FE17 handoff preserved; component list, controlled Grade identity/count conditions, real list |
+| 6 | Canonical grouped optional Lesson, hidden/stale/failure rules | Existing course-tree selector; new missing-tree single-read and load-failure preservation regressions |
+| 7 | Creation URL replacement, full replace/last-save-wins, unknown recovery/no replay | Real creation/reload; exact microsecond save; unknown create/save and later reconciliation regressions |
+| 8 | No Assignment deletion | No operation/control added; source inventory and production journey |
+| 9 | Native date-time, timezone, no picker dependency | Existing native input; unchanged precise server deadline, padded years, invalid-calendar refusal, past real deadline |
+| 10 | Current DESIGN shared/S19 screen and QA rules | Preview, form recovery, sticky action, dialog focus/keyboard; prescribed-width/theme evidence below. No human conformance claim |
+| 11 | Markdown Instructions and CT37 Preview | Shared renderer; CommonMark/table/code, literal HTML, safe links, no image loads/scripts; exact draft retained across modes |
+| 12 | Semantic Light/Dark/System | Consumes FE34 and shared roles; five widths in each preference, live OS change |
+| 13 | Preview isolation and production activation | Real registered authoring routes consume decoded REST; existing separate fixture preview and route/preview regression suites |
+
+### Separate implementation-author self-audit and remediation
+
+After initial implementation and the passing 712-test consumer selection, one
+full-scope author audit inspected the 13 criteria, checkpoint, effective
+ADR010/CT21/CT37/CT16/CT18/ADR014 slices, upstream producers/callers, strict
+decoding, route/session generations, single-flight/cancellation, refused/unknown
+mutations, exact deadlines, Markdown, drafts, responsive/theme/keyboard states,
+preview isolation, documentation, FE13 preservation and stacked Git attribution.
+Confirmed issues below were corrected within FE16; test-harness issues are
+classified separately. No confirmed remediable in-scope production defect remains
+after the regression checks. This statement is author verification only.
+
+| ID | Severity / trigger | Root cause and correction | Verification |
+|---|---|---|---|
+| FE16-A01 | P2: dirty Assignment, Hide returns a concurrently changed deadline | `applyLoaded(false)` replaced the retained draft's exact precision baseline; now only an overwritten draft receives a new baseline | Hide/concurrent-deadline regression asserts original `.123456Z` PUT |
+| FE16-A02 | P2: save with changed Lesson gets 404, then owner GET fails | Failed refresh was treated as missing Assignment; now retain editable draft and report the refusal/failed refresh | 404→network regression, no fabricated unavailable state |
+| FE16-A03 | P2: unknown save, failed reread, newer edit, later retry confirms old write | Old confirmation cleared dirty state for the newer draft; compare sent/current snapshot and keep newer edits explicitly unsaved | Exact interleaving component regression; one mutation only |
+| FE16-A04 | P2: invalid Instructions while Preview is selected | Field could remain hidden and submit lacked summary/focus; reveal Instructions, show summary and focus first invalid field | Blank Preview submit asserts focus and aria-invalid/description |
+| FE16-A05 | P3: long form on a short viewport | Save action only after long content; reuse Lesson editor semantic sticky save pattern | Real responsive screenshots and keyboard controls |
+| FE16-A06 | P3: four-digit early year or normalized invalid native date | Local helper omitted year padding and accepted Date normalization; pad year, reject normalized calendar/UTC-range overflow, retain untouched exact server instant | Helper regression and real past/microsecond journey |
+
+A final keyboard probe initially assumed arrow navigation automatically selected
+the new mode. Inspection and browser evidence showed MUI already implements
+roving focus with explicit Space activation; that assumption was a test defect,
+not a confirmed production finding. A trial extra handler conflicted with MUI
+and was removed before publication. Final component and real-browser checks
+exercise Arrow focus followed by explicit activation and retained draft bytes.
+
+N7 is a **resolved FE16 contract/presentation mismatch**, not an unimplemented
+server-error API. Actual backend 400 evidence has safe detail and no field errors;
+the transport intentionally replaces diagnostics. `FE16-N7-2026-11-27-r1`
+selects local field validation plus the safe F14 form-level fallback and keeps
+drafts. Its authority, alternatives, security compatibility and exclusions are
+in setup; the narrowly scoped S19 clarification changes neither CT18 nor any
+broader FE15/S20 disposition.
+
+### Executed verification and limitations
+
+Commands run in this isolated worktree based on the exact FE17 HEAD above:
+
+```bash
+npm --prefix frontend ci --ignore-scripts
+npm --prefix e2e ci --ignore-scripts
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/features/instructor/course-management/api/assessmentAuthoringApi.test.ts src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/grading src/shared/components/MarkdownRenderer.test.tsx src/shared/api/httpClient.test.ts src/routes/index.test.tsx src/app/preview/PreviewApp.test.tsx --maxWorkers=2 --testTimeout=15000
+npm --prefix frontend test -- src/routes/index.test.tsx src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx --maxWorkers=1 --testTimeout=15000
+npm --prefix frontend run test:browser -- --fe17 --engine chromium,webkit --playwright <this-worktree>/e2e/node_modules/@playwright/test --out <external-evidence>/fe17-browser
+E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts instructor-grading.spec.ts --grep 'FE16 complete|FE17 protected' --project=chromium-desktop --project=webkit-desktop --workers=1
+E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts --grep 'FE16 complete' --project=chromium-desktop --project=webkit-desktop --workers=1
+git diff --check
+git bundle verify <external-evidence>/original-heads.bundle
+```
+
+- Locked installs passed without manifest changes. Typecheck and production
+  build passed after correcting a test element's `HTMLButtonElement` annotation.
+  Vite's existing >500 kB advisory remains; no performance claim is invented.
+- Initial consumer selection: **712/712, 10 files**. After four further FE16
+  regressions, the selection was **715 passed/1 failed of 716**: unrelated lazy
+  landing illustration timing exposed missing `ResizeObserver` in root route
+  fixtures. Supply the same browser API doubles already used by the landing
+  test at suite setup; no route or product behavior/assertion is weakened.
+  Before the additional keyboard regression, the affected-suite rerun passed
+  **303/303, 2 files** (201 route + 102 authoring). The final rerun passed
+  **304/304** (201 route + 103 authoring).
+  The other **413** unchanged consumer tests passed in the preceding selection.
+  Thus all **717 distinct selected tests** have passing final applicable
+  evidence; the rerun is not falsely described as a new 10-suite execution.
+- Controlled browser harness: **24/24 Chromium 153.0.8010.12 and 24/24 WebKit
+  26.6**, no failed scenario. `page.route` doubles cover Grade/Open grading
+  identity/count/route checks, roles, unknown outcomes and grading lifecycle;
+  they do not establish real backend integration. Two explicit unexercised
+  categories per engine: real backend/storage, and VoiceOver/NVDA/physical devices.
+- Real REST/browser FE17 regression: **2/2**, Chromium/WebKit, no interceptions.
+  Real FE16 final journey: **2/2**, same engines, no interceptions: empty/list,
+  `/new`/201 URL replacement, exact instructions, safe Preview, reload/session
+  restore, past and microsecond deadlines, PUT, publish/hide, dirty grading
+  guard and actual destination. Actual invalid Assignment REST returns 400
+  `The request is invalid.` with no field errors. Synthetic credentials are
+  generated by the disposable fixture and are never committed.
+- FE16 editor: **5 widths × 3 preferences × 2 engines = 30 screenshot states**,
+  Preview and Instructions geometry, table/code/link safety, keyboard Space,
+  confirmation focus, live System preference change. List: the same 30 geometry
+  states plus 320 px. A stronger geometry probe initially flagged intentionally
+  scrollable segmented navigation; it now proves each control can be revealed
+  inside its permitted scroll surface, while retaining failure for hidden
+  clipping. Snapshot scroll-to-top prevents sticky headers obscuring titles.
+- Initial E2E failures were test setup defects: sending `displayName` to the
+  closed login DTO and using an exact native date-time label locator. Correct
+  request shape/native-input targeting; keep all feature assertions. All
+  disposable runs verified their owned resources absent after teardown.
+- No backend source changed, so unrelated backend suites, infrastructure/release
+  qualification, unrelated E2E, redundant full frontend reruns and hosted-CI
+  waiting were omitted under the explicit focused-verification authority.
+  Human screen-reader, physical-device and formal 200% browser-zoom conformance
+  were not executed; responsive widths do not substitute for those checks.
+
+Independent CODEOWNER review/QA, exact-head hosted CI, protected integration,
+release and deployment gates remain. No Issue is closed, no Project item is
+marked Done, no approval or merge is issued, and no deployment is performed.
+
 ## FE17 targeted independent-finding remediation and author delta verification — 27 November 2026
 
 **Disposition: REMEDIATION_COMPLETE_AUTHOR_VERIFIED.** Explicit Project Leader

@@ -1,6 +1,192 @@
 import { randomUUID } from 'node:crypto';
+import { request as playwrightRequest } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { expect, expectNoPageOverflow, signIn, target, test } from '../fixtures/auth-fixture';
+
+/** Real REST, PostgreSQL and production UI; no intercepted responses or persisted credentials. */
+test('FE16 complete authoring, safe Preview, exact deadlines and grading handoffs', async ({ page, request }, testInfo) => {
+    test.skip(!target.fixture, 'Mutates only this run’s disposable environment.');
+    test.setTimeout(180_000); page.setDefaultTimeout(15_000);
+    const api = (path: string) => new URL('/api' + path, target.api).href;
+    const isolated = await playwrightRequest.newContext();
+    let token: string;
+    try {
+        const login = await isolated.post(api('/auth/login'), { data: { email: target.instructor!.email, password: target.instructor!.password } });
+        expect(login.status()).toBe(200); token = (await login.json()).accessToken;
+    } finally { await isolated.dispose(); }
+    const headers = { Authorization: `Bearer ${token}` };
+    const courseResponse = await request.post(api('/instructor/courses'), { headers, data: { title: `FE16 ${randomUUID()}`, description: 'Disposable Assignment authoring.', prerequisiteDescription: null } });
+    expect(courseResponse.status()).toBe(201); const course = await courseResponse.json();
+    const assignments = `/courses/${course.id}/owned-assignments`;
+    const invalid = await request.post(api(`/courses/${course.id}/assignments`), { headers, data: { title: 'Invalid', instructions: '', deadlineAt: 'invalid', lessonId: null } });
+    expect(invalid.status()).toBe(400);
+    const problem = await invalid.json();
+    expect(problem.detail).toBe('The request is invalid.'); expect(problem.errors ?? []).toEqual([]);
+    await testInfo.attach('actual-assignment-400', { body: JSON.stringify(problem), contentType: 'application/json' });
+
+    await signIn(page, target.instructor!, 'teach');
+    const listUrl = `/teach/courses/${course.id}/assessments?view=assignments`;
+    await page.goto(listUrl);
+    await expect(page.getByText('No assignments yet', { exact: true })).toBeVisible();
+    await page.getByRole('link', { name: 'New assignment', exact: true }).click();
+    await expect(page).toHaveURL(/\/assignments\/new$/);
+    const title = `Assignment ${randomUUID()}`;
+    const markdown = '# Assignment preview\n\n**Read carefully**\n\n| A | B |\n| - | - |\n| 1 | 2 |\n\n```js\nconst answer = 42;\n```\n\n<script>window.fe16Executed = true</script>\n\n![Remote](https://example.test/fe16.png)\n\n[Unsafe](javascript:evil)';
+    await page.getByRole('textbox', { name: 'Assignment title' }).fill(title);
+    await page.getByRole('textbox', { name: 'Instructions', exact: true }).fill(markdown);
+    await page.locator('input[type="datetime-local"]').fill('2020-01-02T12:30');
+    const external: string[] = [];
+    page.on('request', r => { if (new URL(r.url()).hostname === 'example.test') external.push(r.url()); });
+    await page.getByRole('button', { name: 'Preview', exact: true }).focus(); await page.keyboard.press('Space');
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.getByRole('button', { name: 'Instructions', exact: true })).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(page.getByRole('textbox', { name: 'Instructions', exact: true })).toHaveValue(markdown);
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByRole('button', { name: 'Preview', exact: true })).toBeFocused();
+    await page.keyboard.press('Space');
+    const preview = page.getByRole('region', { name: 'Instructions preview' });
+    await expect(preview.getByRole('heading', { name: 'Assignment preview' })).toBeVisible();
+    await expect(preview.getByRole('table')).toBeVisible();
+    await expect(preview.locator('pre')).toContainText('const answer = 42;');
+    await expect(preview.locator('script,img,a[href^="javascript:"]')).toHaveCount(0);
+    expect(await page.evaluate(() => (window as Window & { fe16Executed?: boolean }).fe16Executed)).toBeUndefined(); expect(external).toEqual([]);
+    const createResponse = page.waitForResponse(r => r.request().method() === 'POST' && new URL(r.url()).pathname === `/api/courses/${course.id}/assignments`);
+    await page.getByRole('button', { name: 'Create assignment', exact: true }).click();
+    const created = await createResponse; expect(created.status()).toBe(201); const assignment = await created.json();
+    await expect(page).toHaveURL(new RegExp(`/assignments/${assignment.id}$`));
+    await expect(page.getByText('Assignment created. It stays hidden until you publish it.', { exact: true })).toBeVisible();
+    const editorUrl = new URL(page.url()).pathname;
+    const checkControls = async () => {
+        const clipped = await page.locator('main input:not([type="hidden"]), main textarea, main button, main [role="combobox"]').evaluateAll(elements => elements.filter(el => {
+            let box = el.getBoundingClientRect(); const style = getComputedStyle(el);
+            if (box.width <= 2 || box.height <= 2 || style.visibility === 'hidden') return false;
+            // DESIGN intentionally scrolls segmented navigation on narrow screens. Prove each
+            // control can be revealed inside that scroll surface; hidden clipping gets no exemption.
+            if (box.left < -1 || box.right > innerWidth + 1) {
+                let parent = el.parentElement;
+                while (parent && !['auto', 'scroll'].includes(getComputedStyle(parent).overflowX)) parent = parent.parentElement;
+                if (parent && parent.scrollWidth > parent.clientWidth) {
+                    el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); box = el.getBoundingClientRect();
+                }
+            }
+            return box.left < -1 || box.right > innerWidth + 1;
+        }).map(el => ({ label: el.getAttribute('aria-label') ?? el.textContent, left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right })));
+        expect(clipped, 'Controls must fit the viewport even when a parent clips overflow').toEqual([]);
+    };
+    await page.reload();
+    await expect(page.getByRole('textbox', { name: 'Instructions', exact: true })).toHaveValue(markdown);
+    const precise = '2020-01-02T12:30:00.123456Z';
+    expect((await request.put(api(`${assignments}/${assignment.id}`), { headers, data: { title, instructions: markdown, deadlineAt: precise, lessonId: null } })).status()).toBe(200);
+    await page.reload();
+    await expect(page.getByRole('textbox', { name: 'Assignment title' })).toHaveValue(title);
+    await page.getByRole('textbox', { name: 'Assignment title' }).fill(title + ' edited');
+    await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+    const current = await (await request.get(api(`${assignments}/${assignment.id}`), { headers })).json();
+    expect(current.deadlineAt).toBe(precise); expect(current.instructions).toBe(markdown);
+    await page.getByRole('button', { name: 'Publish assignment', exact: true }).click();
+    await expect(page.getByRole('dialog')).toContainText('Learners in this course');
+    await page.getByRole('dialog').getByRole('button', { name: 'Publish assignment', exact: true }).click();
+    await expect(page.getByText('Assignment published.', { exact: true })).toBeVisible();
+    await page.getByRole('textbox', { name: 'Instructions', exact: true }).fill(markdown + '\nUnsaved.');
+    await page.getByRole('link', { name: 'Open grading', exact: true }).click();
+    await expect(page.getByRole('dialog')).toContainText('Leave without saving?');
+    await expect(page.getByRole('button', { name: 'Stay', exact: true })).toBeFocused();
+    await page.getByRole('button', { name: 'Stay', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: 'Instructions', exact: true })).toHaveValue(markdown + '\nUnsaved.');
+    await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+
+    // Every prescribed width in all three preferences, actual production editor and list.
+    for (const preference of ['light', 'dark', 'system']) {
+        await page.setViewportSize({ width: 1440, height: 960 });
+        await page.getByRole('button', { name: /^Theme:/ }).click();
+        await page.getByRole('menuitemradio', { name: new RegExp(`^${preference[0].toUpperCase()}${preference.slice(1)}`) }).click();
+        await page.keyboard.press('Escape');
+        await page.emulateMedia({ colorScheme: 'dark' });
+        await expect(page.locator('html')).toHaveAttribute('data-color-scheme', preference === 'light' ? 'light' : 'dark');
+        for (const width of [360, 768, 1024, 1280, 1440]) {
+            await page.setViewportSize({ width, height: 960 }); await expectResponsiveHeaderMode(page, width);
+            await page.getByRole('button', { name: 'Preview', exact: true }).click();
+            await expectNoPageOverflow(page); await checkControls(); await page.evaluate(() => scrollTo(0, 0));
+            await page.screenshot({ path: testInfo.outputPath(`fe16-${preference}-${width}.png`), fullPage: true });
+            await page.getByRole('button', { name: 'Instructions', exact: true }).click();
+            await expectNoPageOverflow(page); await checkControls();
+        }
+        if (preference === 'system') {
+            await page.emulateMedia({ colorScheme: 'light' });
+            await expect(page.locator('html')).toHaveAttribute('data-color-scheme', 'light');
+        }
+    }
+    await page.getByRole('button', { name: 'Hide assignment', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Hide assignment', exact: true }).click();
+    await expect(page.getByText('Assignment hidden.', { exact: true })).toBeVisible();
+    await page.getByRole('link', { name: 'Back to assignments', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/assessments\\?view=assignments$`));
+    await expect(page.getByRole('link', { name: `Open assignment: ${title} edited`, exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: `Grade: ${title} edited`, exact: true })).toHaveCount(0);
+    for (const preference of ['Light', 'Dark', 'System']) {
+        await page.setViewportSize({ width: 1440, height: 960 });
+        await page.getByRole('button', { name: /^Theme:/ }).click();
+        await page.getByRole('menuitemradio', { name: new RegExp(`^${preference}`) }).click(); await page.keyboard.press('Escape');
+        for (const width of [360, 768, 1024, 1280, 1440]) {
+            await page.setViewportSize({ width, height: 960 }); await expectResponsiveHeaderMode(page, width); await expectNoPageOverflow(page); await checkControls();
+        }
+    }
+    await page.setViewportSize({ width: 320, height: 844 }); await expectResponsiveHeaderMode(page, 320); await expectNoPageOverflow(page); await checkControls();
+    await page.goto(editorUrl);
+    await expect(page.getByRole('link', { name: 'Open grading', exact: true })).toHaveAttribute('href', `/teach/grading?courseId=${course.id}&assignmentId=${assignment.id}`);
+    await page.getByRole('link', { name: 'Open grading', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/teach/grading\\?courseId=${course.id}&assignmentId=${assignment.id}$`));
+    await expect(page.getByText('No submissions yet', { exact: true })).toBeVisible();
+
+    // Short-height, long-content geometry must prove the single sticky action is actually usable.
+    const longTitle = 'Long assignment instructions and evaluation requirements '.repeat(12);
+    const longMarkdown = markdown + '\n\n' + 'Detailed instructions with realistic paragraphs.\n\n'.repeat(45);
+    expect((await request.put(api(`${assignments}/${assignment.id}`), { headers,
+        data: { title: longTitle, instructions: longMarkdown, deadlineAt: precise, lessonId: null } })).status()).toBe(200);
+    await page.goto(editorUrl);
+    await expect(page.getByRole('textbox', { name: 'Assignment title' })).toHaveValue(longTitle.trim());
+    const geometry: unknown[] = [];
+    const saveGeometry = async (state: string) => {
+        const save = page.getByRole('button', { name: 'Save changes', exact: true });
+        await expect(save).toHaveCount(1);
+        const observation = await save.evaluate(button => {
+            const r = button.getBoundingClientRect();
+            const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+            return { x: r.x, y: r.y, width: r.width, height: r.height, viewport: { width: innerWidth, height: innerHeight },
+                visible: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth,
+                // MUI's disabled button has pointer-events:none; its containing action region receives the hit.
+                unobscured: hit === button || button.contains(hit) || ((button as HTMLButtonElement).disabled && !!button.parentElement?.contains(hit)) };
+        });
+        geometry.push({ state, ...observation });
+        expect(observation.visible).toBe(true); expect(observation.unobscured).toBe(true);
+    };
+    await page.getByRole('textbox', { name: 'Instructions', exact: true }).fill(longMarkdown + '\nUnsaved draft.');
+    for (const preference of ['Light', 'Dark', 'System']) {
+        await page.setViewportSize({ width: 1440, height: 720 });
+        await page.getByRole('button', { name: /^Theme:/ }).click();
+        await page.getByRole('menuitemradio', { name: new RegExp(`^${preference}`) }).click(); await page.keyboard.press('Escape');
+        for (const width of [360, 768, 1024, 1280, 1440]) {
+            await page.setViewportSize({ width, height: width < 1024 ? 600 : 720 });
+            await expectResponsiveHeaderMode(page, width);
+            await page.evaluate(() => scrollTo(0, 0)); await saveGeometry(`${preference}-initial`);
+            await page.getByRole('button', { name: 'Preview', exact: true }).click();
+            await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight / 2));
+            await saveGeometry(`${preference}-long-preview`); await expectNoPageOverflow(page);
+            await page.getByRole('button', { name: 'Instructions', exact: true }).click();
+        }
+    }
+    await page.setViewportSize({ width: 360, height: 600 });
+    await page.getByRole('textbox', { name: 'Instructions', exact: true }).fill('   ');
+    await page.getByRole('button', { name: 'Preview', exact: true }).click();
+    await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: 'Instructions', exact: true })).toBeFocused();
+    await expect(page.getByText('Check the highlighted fields. Your edits are still here.', { exact: true })).toBeVisible();
+    await saveGeometry('invalid-instructions');
+    await testInfo.attach('fe16-short-height-action-geometry', { body: JSON.stringify(geometry), contentType: 'application/json' });
+});
 
 async function expectResponsiveHeaderMode(page: Page, width: number) {
     const header = page.getByRole('banner');
@@ -11,6 +197,91 @@ async function expectResponsiveHeaderMode(page: Page, width: number) {
     if (width >= 900) await expect(theme).toBeVisible();
     else await expect(theme).toHaveCount(0);
 }
+/** Native control boundaries against real REST persistence; no HTTP interception. */
+test('FE16-IR boundary deadlines retain exact UTC instants and allow deliberate native replacement', async ({ browser, request }, testInfo) => {
+    test.skip(!target.fixture, 'Mutates only this run’s disposable environment.');
+    test.setTimeout(120_000);
+    const api = (path: string) => new URL('/api' + path, target.api).href;
+    const isolated = await playwrightRequest.newContext();
+    let token: string;
+    try {
+        const login = await isolated.post(api('/auth/login'), { data: { email: target.instructor!.email, password: target.instructor!.password } });
+        expect(login.status()).toBe(200); token = (await login.json()).accessToken;
+    } finally { await isolated.dispose(); }
+    const headers = { Authorization: `Bearer ${token}` };
+    const courseResponse = await request.post(api('/instructor/courses'), { headers, data: { title: `FE16-IR ${randomUUID()}`, description: 'Disposable boundary verification.', prerequisiteDescription: null } });
+    expect(courseResponse.status()).toBe(201); const course = await courseResponse.json();
+    const creation = `/courses/${course.id}/assignments`;
+    for (const deadlineAt of ['0000-01-01T00:00:00+00:01', '9999-12-31T23:59:59-00:01', '2026-01-01T00:00:00.1234567Z']) {
+        const refused = await request.post(api(creation), { headers, data: { title: 'Invalid UTC range or precision', instructions: 'Not stored.', deadlineAt, lessonId: null } });
+        expect(refused.status()).toBe(400);
+    }
+    const observations: unknown[] = [];
+    for (const [timezoneId, deadlineAt] of [
+        ['UTC', '0000-01-01T00:00:00.123456Z'],
+        ['America/New_York', '0001-01-01T00:00:00.123456Z'],
+        ['Pacific/Kiritimati', '9999-12-31T23:59:59.999999Z'],
+    ]) {
+        const context = await browser.newContext({ baseURL: target.base, timezoneId, locale: 'en-US', viewport: { width: 1440, height: 720 } });
+        const page = await context.newPage(); page.setDefaultTimeout(15_000);
+        try {
+            const seed = await request.post(api(creation), { headers, data: { title: `Boundary ${timezoneId}`, instructions: '# Original instructions', deadlineAt, lessonId: null } });
+            expect(seed.status()).toBe(201); const assignment = await seed.json(); expect(assignment.deadlineAt).toBe(deadlineAt);
+            const resource = `/courses/${course.id}/owned-assignments/${assignment.id}`;
+            const read = async () => { const response = await request.get(api(resource), { headers }); expect(response.status()).toBe(200); return response.json(); };
+            await signIn(page, target.instructor!, 'teach');
+            await page.goto(`/teach/courses/${course.id}/assignments/${assignment.id}`);
+            const fallback = page.getByRole('group', { name: 'Existing deadline (UTC)', exact: true });
+            await expect(fallback).toContainText(deadlineAt); await expect(fallback.locator('time')).toHaveAttribute('datetime', deadlineAt);
+            await expect(page.locator('input[type="datetime-local"]')).toHaveCount(0);
+            const native = await page.evaluate(() => ['0000-01-01T00:00', '0001-01-01T00:00', '10000-01-01T13:59:59'].map(value => {
+                const field = document.createElement('input'); field.type = 'datetime-local'; field.value = value; return { value, actual: field.value };
+            }));
+            expect(native[0].actual).toBe(''); expect(native[1].actual).toBe('0001-01-01T00:00');
+            await page.getByRole('textbox', { name: 'Assignment title' }).fill(`Edited ${timezoneId}`);
+            await page.getByRole('textbox', { name: 'Instructions', exact: true }).fill('# Unrelated edits');
+            const put = page.waitForRequest(req => req.method() === 'PUT' && new URL(req.url()).pathname === '/api' + resource);
+            await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+            expect((await put).postDataJSON().deadlineAt).toBe(deadlineAt);
+            await expect(page.getByText('Saved', { exact: true })).toBeVisible(); expect((await read()).deadlineAt).toBe(deadlineAt);
+            await page.reload(); await expect(fallback).toContainText(deadlineAt);
+            await page.getByRole('button', { name: 'Publish assignment', exact: true }).click();
+            await page.getByRole('dialog').getByRole('button', { name: 'Publish assignment', exact: true }).click();
+            await expect(page.getByText('Assignment published.', { exact: true })).toBeVisible(); await expect(fallback).toContainText(deadlineAt);
+            await page.getByRole('textbox', { name: 'Assignment title' }).fill(`Dirty hide ${timezoneId}`);
+            await page.getByRole('button', { name: 'Hide assignment', exact: true }).click();
+            await page.getByRole('dialog').getByRole('button', { name: 'Hide assignment', exact: true }).click();
+            await expect(page.getByText('Assignment hidden.', { exact: true })).toBeVisible(); await expect(fallback).toContainText(deadlineAt);
+            for (const [width, scheme] of [[1440, 'light'], [360, 'dark']] as const) {
+                await page.emulateMedia({ colorScheme: scheme }); await page.setViewportSize({ width, height: width === 360 ? 600 : 720 });
+                await expectResponsiveHeaderMode(page, width);
+                await expect.poll(() => page.evaluate(() => [...document.querySelectorAll('main *')].filter(element => { const box = element.getBoundingClientRect(); return box.right > innerWidth + 1; }).map(element => ({ tag: element.tagName, text: element.textContent?.slice(0, 80), right: element.getBoundingClientRect().right })))).toEqual([]);
+                await expectNoPageOverflow(page);
+                await page.getByRole('button', { name: 'Replace deadline', exact: true }).scrollIntoViewIfNeeded();
+                const bounds = await page.getByRole('button', { name: 'Replace deadline', exact: true }).boundingBox();
+                expect(bounds!.height).toBeGreaterThanOrEqual(44); expect(bounds!.width).toBeLessThanOrEqual(width);
+                const save = page.getByRole('button', { name: 'Save changes', exact: true }); await save.scrollIntoViewIfNeeded();
+                expect(await save.evaluate(element => { const box = element.getBoundingClientRect(); const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2); return hit === element || !!hit && element.contains(hit); })).toBe(true);
+                observations.push({ timezoneId, deadlineAt, width, scheme, native, bounds });
+            }
+            await page.screenshot({ path: testInfo.outputPath(`fe16-ir-${timezoneId.replaceAll('/', '-')}.png`), fullPage: true });
+            await page.getByRole('button', { name: 'Replace deadline', exact: true }).click();
+            const input = page.getByRole('textbox', { name: 'Deadline', exact: true }); await expect(input).toHaveValue(''); await expect(input).toBeFocused();
+            await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+            await expect(input).toHaveAttribute('aria-invalid', 'true'); await expect(input).toBeFocused();
+            await expect(page.getByText('Choose a valid deadline date and time.', { exact: true })).toBeVisible(); expect((await read()).deadlineAt).toBe(deadlineAt);
+            const local = '2028-06-01T08:09:10';
+            await input.fill(local);
+            const expected = await page.evaluate(value => new Date(value).toISOString(), local);
+            await page.getByRole('button', { name: 'Save changes', exact: true }).click();
+            await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+            expect(new Date((await read()).deadlineAt).toISOString()).toBe(expected);
+            await expect(fallback).toHaveCount(0); await page.reload(); await expect(input).not.toHaveValue('');
+        } finally { await context.close(); }
+    }
+    await testInfo.attach('boundary-native-and-geometry', { body: JSON.stringify(observations), contentType: 'application/json' });
+});
+
 
 test('FE14 real Course, Lesson, mappings and three material types', async ({ page }, testInfo) => {
     test.skip(!target.fixture, 'Mutates only this run’s disposable environment.');
