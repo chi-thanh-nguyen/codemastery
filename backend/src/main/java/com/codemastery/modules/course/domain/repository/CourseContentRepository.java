@@ -48,6 +48,9 @@ public interface CourseContentRepository {
     /** The material only when it belongs to the lesson. */
     Optional<LearningMaterial> findMaterial(UUID lessonId, UUID materialId);
 
+    /** CT40 notification context: actorless ancestry only, empty when the Lesson is absent. */
+    Optional<UUID> findLessonCourseId(UUID lessonId);
+
     // CO03.content writes.
 
     /**

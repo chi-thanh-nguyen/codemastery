@@ -97,7 +97,7 @@ r10_part = record.split("### CT17-P6-PRIVILEGES-2026-11-24-r10", 1)[1].split("\n
 r11_part = record.split("### CT17-P6-PRIVILEGES-2026-11-24-r11", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
 r12_part = record.split("### CT17-P6-PRIVILEGES-2026-11-25-r12", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
 for revision in ("CT17-P6-PRIVILEGES-2026-11-25-r13", "CT17-P6-PRIVILEGES-2026-11-26-r14",
-                 "CT17-P6-PRIVILEGES-2026-11-26-r15", "CT17-P6-PRIVILEGES-2026-11-27-r16"):
+                 "CT17-P6-PRIVILEGES-2026-11-26-r15", "CT17-P6-PRIVILEGES-2026-11-27-r16", "CT17-P6-PRIVILEGES-2026-11-27-r17"):
     assert len(re.findall(r"^### " + re.escape(revision) + r" —", record, re.M)) == 1, f"missing or duplicate revision: {revision}"
 revision_numbers = re.findall(r"^### CT17-P6-PRIVILEGES-\d{4}-\d{2}-\d{2}-r(\d+) —", record, re.M)
 assert len(revision_numbers) == len(set(revision_numbers)), "CT17 matrix revision numbers must be unique across dates"
@@ -183,11 +183,15 @@ r16_part = record.split("### CT17-P6-PRIVILEGES-2026-11-27-r16", 1)[1].split("\n
 r16 = documented_rows(r16_part)
 assert r16 == {"submissions": normalize({"SELECT", "INSERT"}, {f"UPDATE:{c}" for c in
     ("object_key", "original_filename", "submitted_at", "grade_percentage", "feedback", "graded_at")})}, "CT17 r16 must match the AS09 ceiling"
-documented = {**r1, **r2, **r3, **r4, **r5, **r6, **r7, **r8, **r10, **r11, **r12, **r13, **r14, **r15, **r16}
+r17_part = record.split("### CT17-P6-PRIVILEGES-2026-11-27-r17", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
+r17 = documented_rows(r17_part)
+assert r17 == {"discussion_posts": normalize({"SELECT", "INSERT"}, {"UPDATE:is_hidden"}),
+               "content_reports": normalize({"SELECT", "INSERT"}, {"UPDATE:status", "UPDATE:resolved_at"})}, "CT17 r17 must equal the IN06 ceiling rows"
+documented = {**r1, **r2, **r3, **r4, **r5, **r6, **r7, **r8, **r10, **r11, **r12, **r13, **r14, **r15, **r16, **r17}
 if executable != documented:
     for rel in sorted(set(executable) | set(documented)):
         if executable.get(rel) != documented.get(rel):
             print(f"mismatch for {rel}: script={executable.get(rel)} record={documented.get(rel)}", file=sys.stderr)
-    sys.exit("RUNTIME_PRIVILEGE_MATRIX differs from CT17-P6-PRIVILEGES r1 plus the r2, r3, r4, r5, r6, r7, r8, r10, r11, r12, r13, r14, r15 and r16 rows")
-print(f"MATRIX_CONTRACT_SYNC_PASS: {len(executable)} relations match r1 ({len(r1)} rows, history intact) plus approved r2 ({len(r2)} rows), r3 ({len(r3)} rows) and ceiling-bounded r4 ({len(r4)} rows) r5 ({len(r5)} rows), r6 ({len(r6)} rows), r7 ({len(r7)} rows), r8 ({len(r8)} rows), r10 ({len(r10)} rows), r11 ({len(r11)} rows) r12 ({len(r12)} rows) r13 ({len(r13)} row) and r14 ({len(r14)} row), r15 ({len(r15)} rows) and r16 ({len(r16)} row)")
+    sys.exit("RUNTIME_PRIVILEGE_MATRIX differs from CT17-P6-PRIVILEGES r1 plus the r2, r3, r4, r5, r6, r7, r8, r10, r11, r12, r13, r14, r15, r16 and r17 rows")
+print(f"MATRIX_CONTRACT_SYNC_PASS: {len(executable)} relations match r1 ({len(r1)} rows, history intact) plus approved r2 ({len(r2)} rows), r3 ({len(r3)} rows) and ceiling-bounded r4 ({len(r4)} rows) r5 ({len(r5)} rows), r6 ({len(r6)} rows), r7 ({len(r7)} rows), r8 ({len(r8)} rows), r10 ({len(r10)} rows), r11 ({len(r11)} rows) r12 ({len(r12)} rows) r13 ({len(r13)} row) and r14 ({len(r14)} row), r15 ({len(r15)} rows) r16 ({len(r16)} row) and r17 ({len(r17)} rows)")
 PY
