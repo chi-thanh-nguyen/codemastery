@@ -918,6 +918,8 @@ pass "an unreachable server fails after the readiness deadline"
 # ------------------------------------------------------------------ Compose
 
 section "VM Compose contract and failure propagation"
+# Qualify this generated fixture, never inherited CT38 inputs from the caller.
+unset APP_QUIZ_AUTO_SUBMIT_ENABLED APP_QUIZ_AUTO_SUBMIT_DELAY_MS APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE
 cat > "${WORK}/compose.env" <<EOF
 POSTGRES_DB=codemastery
 POSTGRES_USER=bootstrap
@@ -930,6 +932,9 @@ CORS_ALLOWED_ORIGINS=https://minio-init.codemastery.test
 SPRING_FLYWAY_URL=jdbc:postgresql://postgres:5432/codemastery
 SPRING_FLYWAY_USER=migrator
 SPRING_FLYWAY_PASSWORD=unused-in-this-test
+APP_QUIZ_AUTO_SUBMIT_ENABLED=false
+APP_QUIZ_AUTO_SUBMIT_DELAY_MS=1000
+APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE=2
 EOF
 # Compose's env file is not shell-quoted; pass credentials through the environment.
 export MINIO_ROOT_USER="${ROOT_USER}" MINIO_ROOT_PASSWORD="${ROOT_PASS}"
@@ -971,6 +976,34 @@ project="cm-${RUN_ID}-compose"
 PROJECTS+=("${project}")
 local_compose=(docker compose -p "${project}" --env-file "${WORK}/compose.env" -f "${BASE_COMPOSE}" -f "${WORK}/local-ports.yml")
 vm_compose=(docker compose -p "${project}" --env-file "${WORK}/compose.env" -f "${BASE_COMPOSE}" -f "${VM_COMPOSE}" -f "${WORK}/release-images.yml")
+
+# Assert the actual generated file and each effective backend, including the
+# placeholder. Compose checks required interpolation; AppConfig/preflight own
+# boolean/integer semantics. These explicit disabled values are test-only.
+check_quiz_env() {  # compose-command...
+  "$@" config --format json > "${WORK}/quiz-model.json" \
+    || die "Compose rendering failed for the generated MinIO fixture."
+  python3 - "${WORK}/compose.env" "${WORK}/quiz-model.json" <<'PYQUIZ'
+import json, pathlib, sys
+expected = {"APP_QUIZ_AUTO_SUBMIT_ENABLED": "false",
+            "APP_QUIZ_AUTO_SUBMIT_DELAY_MS": "1000",
+            "APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE": "2"}
+lines = pathlib.Path(sys.argv[1]).read_text().splitlines()
+for key, value in expected.items():
+    definitions = [line for line in lines if line.split("=", 1)[0] == key]
+    assert definitions == [key + "=" + value], (key, definitions)
+services = json.loads(pathlib.Path(sys.argv[2]).read_text())["services"]
+for key, value in expected.items():
+    assert services["backend"]["environment"].get(key) == value, key
+for service in ("minio", "minio-init"):
+    assert not expected.keys() & services[service].get("environment", {}).keys(), service
+PYQUIZ
+}
+check_quiz_env docker compose -p "${project}" --env-file "${WORK}/compose.env" -f "${BASE_COMPOSE}"
+check_quiz_env "${local_compose[@]}"
+check_quiz_env docker compose -p "${project}" --env-file "${WORK}/compose.env" -f "${BASE_COMPOSE}" -f "${VM_COMPOSE}"
+check_quiz_env "${vm_compose[@]}"
+pass "generated MinIO fixture supplies unique explicit CT38 test values to every backend model without adding them to MinIO environments"
 
 "${vm_compose[@]}" config --format json | python3 -c '
 import json, sys
@@ -1083,6 +1116,7 @@ YAML
   local -a cmd=(docker compose -p "${project}" --env-file "${WORK}/compose.env"
     -f "${BASE_COMPOSE}" -f "${WORK}/boundary-${name}.yml")
   "${cmd[@]}" config --quiet
+  check_quiz_env "${cmd[@]}"
   "${cmd[@]}" up -d --no-build --pull never minio-init >"${WORK}/boundary-up.log" 2>&1 \
     || die "local boundary ${name}: could not start fixture"
   cid="$("${cmd[@]}" ps -a -q minio-init)"

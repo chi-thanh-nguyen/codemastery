@@ -1,5 +1,24 @@
 # Development Setup
 
+## AS09 assignment/submission consumer — 27 November 2026
+
+PR #297 completes backend Assignment authoring/learner reads, PDF/ZIP submission
+and replacement, owner listing/protected downloads, grade/regrade and CT27 event
+production. Files use the integrated SH05 adapter; storage remains private. The
+Course→Auth learner-name lookup admits the Course owner and includes retained LEFT
+enrollments. Only an admitted learner's own submission/grade is returned to them.
+
+Existing storage settings and `MAX_UPLOAD_SIZE` apply unchanged. Lazy multipart,
+CORS `Content-Disposition`, open-in-view=false and local UTC clocks are reused.
+Replacement is allowed only before the exclusive deadline and before grading;
+grades echo the exact `submittedAt` string, including microseconds. No key is a
+public identifier. Database runtime consumers require the dated CT17-P6 r15 matrix
+in [deployment](deployment.md#ct17-p6-privileges-2026-11-27-r16--as09-submissions-within-adr012-192-27-november-2026).
+Applying grants on a real host, operator upload/ingress/tmpfs configuration and
+hostile-download risk acceptance remain separate gates. See the dated
+[author verification](testing.md#as09-full-scope-author-verification--27-november-2026).
+Notification consumers and frontend screens remain separate implementation Issues.
+
 ## CO09 protected material consumer — 25 November 2026
 
 PR #291 implements text/canonical external-video authoring and protected PDF material
@@ -255,7 +274,7 @@ The approved Option A contract uses these names:
 | Backend object storage | `STORAGE_ENDPOINT`, `STORAGE_REGION`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`, `STORAGE_PATH_STYLE_ACCESS` | Referenced by backend storage configuration. |
 | Backend security/CORS | `JWT_SECRET`, `JWT_EXPIRATION`, `CORS_ALLOWED_ORIGINS` | Required/validated by backend security configuration. |
 | Password recovery (optional) | `SMTP_HOST`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `PASSWORD_RESET_EMAIL_FROM`, `PASSWORD_RESET_FRONTEND_ORIGIN`, `PASSWORD_RESET_TOKEN_TTL` | Read by the backend for AU07 delivery. If any value is missing, a placeholder or invalid, recovery stays inactive and the rest of the backend starts normally. SMTP uses port 587 with required STARTTLS; TTL defaults to and must equal `PT30M`. SMTP authentication is mandatory: a server that does not offer AUTH after STARTTLS receives no message. AUTH mechanisms are fixed to `LOGIN PLAIN` over verified TLS; SASL is disabled. NTLM, DIGEST-MD5, XOAUTH2 and unknown-only offers fail closed. Angus SMTP/wire/socket and authentication-helper JUL diagnostics are source-filtered JVM-wide; Session debug is disabled with a discarded output stream. Synthetic DEBUG/TRACE coverage includes actual Spring Boot startup, encoded authentication material and a test-only NTLM override; see the SMTP coverage in `docs/testing.md`. Recovery failures retain only aggregate metrics. Local Compose and the VM release do not pass these values. No real credentials are supplied. Names and validation: `CT38-PASSWORD-RESET-2026-11-13-r1` ([ADR006 §10.5.1](decisions/006-batch-02-contract-approvals.md#1051-ct38-password-reset-2026-11-13-r1--ct38featurepassword-reset)). |
-| Backend runtime/operations | `SERVER_PORT`, `MAX_UPLOAD_SIZE`, `LOG_LEVEL_ROOT`, `LOG_LEVEL_APP`, `SCHEDULING_ENABLED`, `ATTEMPT_AUTO_SUBMIT_DELAY`, `DEADLINE_REMINDER_DELAY`, `DEADLINE_REMINDER_LEAD_TIME` | Referenced by backend runtime configuration. |
+| Backend runtime/operations | `SERVER_PORT`, `MAX_UPLOAD_SIZE`, `LOG_LEVEL_ROOT`, `LOG_LEVEL_APP`, `SCHEDULING_ENABLED`, `APP_QUIZ_AUTO_SUBMIT_ENABLED`, `APP_QUIZ_AUTO_SUBMIT_DELAY_MS`, `APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE`, `DEADLINE_REMINDER_DELAY`, `DEADLINE_REMINDER_LEAD_TIME` | Referenced by backend runtime configuration. |
 | Spring profile selection | `SPRING_PROFILES_ACTIVE` | Supported through Spring profile selection, rather than a `${...}` placeholder in `application.yml`. |
 | Frontend | `VITE_API_BASE_URL` | Public build-time API address read by the shared HTTP client; Compose passes a build ARG defaulting to http://localhost:8080. Required for any API request. |
 | VM deployment only | `SPRING_FLYWAY_URL`, `SPRING_FLYWAY_USER`, `SPRING_FLYWAY_PASSWORD` | Separate Flyway migrator identity required by `deploy.sh` and the VM override. Local Compose ignores them; see [deployment.md](deployment.md#current-status-and-reproduction-summary). |
@@ -2118,16 +2137,31 @@ migration, public exposure or bypass of independent review. Provider delivery,
 load/abuse qualification and security review remain outstanding.
 
 
-## Batch 3 expiry configuration specification — not implemented
+## AS08 expiry configuration — 26 November 2026
 
 [ADR007 §3.2](decisions/007-batch-03-contract-approvals.md#32-ct38featurequiz-expiry)
-records **CT38-QUIZ-EXPIRY-2026-11-09-r1**: explicit backend
-APP_QUIZ_AUTO_SUBMIT_ENABLED, APP_QUIZ_AUTO_SUBMIT_DELAY_MS and
-APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE, their property bindings, validation, consumer
-locations and disabled-mode limits. No runtime configuration/default or .env.example
-change is made here. Future implementation must bind/validate these required inputs
-and synchronize the placeholder template. Deployment tuning and actual timely
-finalization remain unverified; existing Auth/reset/storage configuration is unchanged.
+is implemented by AppConfig, application.yml and AttemptAutoSubmitScheduler in
+PR #296. Supply all three inputs for backend host or Compose startup, even when disabled:
+
+| Input | Required value |
+|---|---|
+| `APP_QUIZ_AUTO_SUBMIT_ENABLED` | explicit `true` or `false` |
+| `APP_QUIZ_AUTO_SUBMIT_DELAY_MS` | integer 1..2147483647 milliseconds |
+| `APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE` | integer 1..2147483647 |
+
+Missing, placeholder, malformed or out-of-range values fail startup. There are no
+production defaults; `.env.example` contains placeholders only. AppConfig activates
+Spring scheduling when the feature is enabled. Fixed-delay passes do not overlap
+in one process; PostgreSQL Course-root locking serializes multiple workers.
+Discovery is keyset-paged and each candidate has its own write transaction.
+Disabled suppresses scheduling and never permits late saves or submissions.
+`SCHEDULING_ENABLED` does not replace this feature input. The obsolete
+`ATTEMPT_AUTO_SUBMIT_DELAY` / `codemastery.assessment.auto-submit.fixed-delay`
+binding is removed. Shared tests explicitly disable the feature; focused tests
+activate it with synthetic values. A deployed timed-attempt capability requires
+an enabled, qualified scheduler, operator-selected tuning and finite database
+statement/transaction budgets. No deployment values or operational acceptance
+are selected here. AS12/AD13 integrated submission remains blocked separately.
 
 ## Batch 4 runner and time-input decisions — 9 November 2026
 
@@ -2499,3 +2533,252 @@ directory restored under the runner's temporary directory. It is build tooling
 only. Local Docker builds need no such input; a cold build still downloads the
 POM's dependencies from Maven Central. See the
 [cache trust boundary and availability limits](deployment.md#shared-ci-reliability-remediation--26-november-2026).
+
+
+## FE14 implementation and bounded Markdown decision — 26 November 2026
+
+Authority: the Project Leader's explicit “Complete FE14 Implementation, Bounded Upstream
+Completion, PR #279 Replacement and Full-Scope Self-Audit” task. This record uses the
+Section 6 delegated technical authority for implementation details, dependencies and focused
+supporting/test files. It changes no REST contract, architecture, canonical design, owner review,
+protected integration or operational exposure decision. Refs #199; bounded renderer only: #193.
+
+### Implementation decisions and limits
+
+- Preserve the merged PR #273 Teaching/Course/Settings/graph foundation, including D1/D1-R1/D1-R2.
+  The Lesson editor consumes the shell's `getOwnedCourse` tree, never a duplicate Lesson read.
+  Activate only `TEACH_LESSON`; FE13 Q&A and FE19 learner-insight routes stay unregistered.
+- Whole-Lesson replacement uses `updateCourseLesson`; title/content drafts remain local.
+  Confirmed responses acknowledge saves; a shared provider revalidation floor prevents another
+  structure/Lesson mutation from using an older tree, even across a child remount. Settings'
+  separate metadata acknowledgment and causal sequence are retained. Shared graph refresh remains
+  single-flight, session-bound and explicitly retried after failure; mapping chips wait for it.
+- Materials are independent commands using all eight CO09 operations in OpenAPI. Render their
+  authoritative returned order. Do not synthesize filenames/timestamps/keys/URLs or counts.
+  PDF fields retain the actual File. Multipart boundaries and binary decoding stay in the existing
+  HTTP client. Cancellation, network/500 and unusable upload responses require resource re-read
+  before another manual attempt; no mutation replay. Downloads use a transient object URL and the
+  transport-validated server filename, followed by revocation. The owner DTO has no original
+  filename/upload time: only the selected local filename is shown before upload, never invented
+  server metadata.
+- CT37 video admission compares a standard URL parse and the entire canonical privacy-enhanced
+  embed serialization, including its ASCII identifier. Editing a video makes no provider request.
+  This authoring surface displays the validated address; no third-party playback acceptance or
+  media-rights assertion is made.
+- Leave confirmation covers editor Back and shell navigation; `beforeunload` warns on reload.
+  The declarative router's existing native Back/Forward limitation (DESIGN A15) is unchanged.
+
+### Bounded FE08 renderer adjudication
+
+`MarkdownRenderer.tsx` was empty on main `cc6cb54`; PR #286 at `532039a` has an unmerged
+regex-based renderer. Its source does not provide a CommonMark syntax tree and its link admission
+uses prefixes, so it is not a complete CT37 renderer baseline. No PR #286 code or commits are reused.
+
+The full FE08 functional inventory below estimates complexity in relative implementation work
+units; each row includes its focused testing. These are planning estimates, not LOC, file counts
+or a claim that FE08 is complete.
+
+| FE08 work group | Units |
+| --- | ---: |
+| Canonical outline/Path and order | 5 |
+| Progress read and display | 4 |
+| Resume/Continue/Start selection and fallback | 4 |
+| Explicit completion and authoritative reconciliation | 4 |
+| Silent post-render visit recording | 2 |
+| Lesson data/routes/access/session isolation | 6 |
+| Non-Markdown Lesson material integration: PDF and activated video | 6 |
+| Shared Markdown parser/rendering/security regressions (this slice) | 7 |
+| My courses aggregate progress read/join | 3 |
+| Responsive Lesson reader/outline/drawer | 4 |
+| Learning navigation and entry points | 3 |
+| Learning-journey recovery/concurrency | 2 |
+| Total | 50 |
+
+The bounded addition is 7/50, approximately 14%, below the task's approximately 20% threshold.
+It completes only the shared CT37 renderer and its tests/dependency support, required by FE14
+Markdown Preview. The other 43 units, including learner progress, resume, completion, learning
+routes, reader/PDF/video integration and adaptive guidance, are excluded. No FE08 completion or
+independent acceptance is asserted. The estimate aggregates the entire renderer addition.
+
+### Parser selection and dependency review
+
+Selected exact production versions (MIT): `mdast-util-from-markdown` 2.1.0,
+`mdast-util-gfm-table` 2.0.1, `micromark-extension-gfm-table` 2.1.2 and
+`micromark-util-decode-string` 2.0.1. The npm registry was queried before installation;
+Node 24.21.0 and Vite 8 consume their ESM modules, and the table adapter supports the parser's
+2.x line. Manifests/lockfile are synchronized. Installation's audit returned zero known
+vulnerabilities; that is a dated registry result, not a security guarantee.
+
+Primary package documentation: [from-markdown](https://github.com/syntax-tree/mdast-util-from-markdown),
+[table adapter](https://github.com/syntax-tree/mdast-util-gfm-table),
+[table tokenizer](https://github.com/micromark/micromark-extension-gfm-table).
+Alternatives: an in-house parser was rejected for CommonMark/security maintenance; full
+`remark-gfm` would enable unapproved extensions; HTML generation plus sanitization retains an
+unnecessary HTML-string path. The chosen AST is rendered through an explicit React node allowlist:
+raw HTML is literal text, images become safe links, headings begin at h2, code uses CodeBlock,
+and tables use MUI's shared table style. URL admission checks character references, iterative
+percent decoding, whitespace/control removal and standard URL parsing. Backslashes are rejected
+before Markdown escape decoding. No HTML/raw plugin, highlighter, HTML injection or automatic
+image request is introduced. Original implementation was AI-assisted with Codex; package
+attributions/licenses are retained in installed packages and the lockfile.
+
+### Upstream availability on the implementation baseline
+
+| Provider | Consumed implementation verified in source | Added functional scope |
+| --- | --- | --- |
+| CO06 #172 | owner Course/Chapter/Lesson operations in CourseManagement/Structure services/controllers | none |
+| CO09 #175 | relational/file material lifecycle, owner tree metadata, protected download and shared HTTP transport | none |
+| SH05 #154 | existing S3 FileStorage adapter, lifecycle/validation and configuration | none |
+| AD07 #165 | owner graph read and 204 map/unmap | none |
+| CO12 #176 | existing Course/Lesson publication event producer integration | none; materials retain their contract's event-silence semantics |
+| FE03 #56 | existing HTTP/auth/session/router foundation | none |
+| FE32 #224 | Teaching navigation/start and shell navigation registry | none |
+| FE18 #203 | shared graph client/context and mapping operations | none; FE14 provider retains refresh barriers for its consumers |
+| FE34 #255 | shared semantic Light/Dark/System theme foundation | none |
+
+Only FE08 adds a missing upstream product capability. The additive cancellation handle in
+`useAssessmentEditor` supports FE14's existing operation runner; it adds no FE15 product journey
+and preserves its current callers. Test-only `E2E_MATERIAL_FILES=1` opts the disposable E2E setup
+into the Compose-pinned MinIO server/initializer, random per-run identities and the existing
+intent/ID/volume cleanup protocol. It publishes no storage port and makes no production-policy,
+release or deployment change. Existing E2E runs leave this opt-in off.
+
+### FE14 targeted independent-review remediation — 26 November 2026
+
+The Leader explicitly authorized additive remediation of PR #279 after independent
+`REQUEST_CHANGES` at `e4d7eb3febfad8f89db1b9091c7931ed3308654a`: FE14-IR-01
+(P1, sent work lost on child unmount), IR-02 (P2, encoded URL semantics) and IR-03
+(P2, nested reference definitions). The original implementation and A1–A4 audit
+above remain historical evidence; they do not close these subsequent findings.
+This is author remediation with Codex assistance, not independent acceptance.
+
+Within CT16.final-state F1, the existing Course composing owner now registers a
+single operation/controller before dispatch. Course and mapping mutation runners
+share its synchronous entry barrier. A child can disappear without aborting that
+owner's sent request; its callbacks are still discarded. Course/session replacement
+or owner teardown aborts and invalidates the old work. Explicit upload cancellation
+and the owner's "Stop waiting" action still signal cancellation, never rollback.
+Known settlement establishes the floor of an authoritative Course/graph GET; an
+older GET cannot answer it. Failed recovery retains the floor and supports explicit
+read retry. Settings acknowledgments are recorded by the surviving owner; drafting
+can continue after acknowledgment, but another dependent write waits for recovery.
+
+Unknown/cancelled transport outcomes retain a visible uncertainty notice even
+after inspection. CT16/CT37 permit resource inspection before a new deliberate
+attempt; that inspection does not prove termination of an unobserved transaction.
+There is no mutation replay, transaction-status endpoint, idempotency key, global
+store/provider, timeout or browser-history blocker. Native Back/Forward retains
+DESIGN A15's limitation. Leaving the whole composing owner still follows CT16
+session/cancellation rules; this correction guarantees child-route survival.
+
+Course metadata/publication, Chapter/Lesson authoring, all eight material operations
+and Lesson–Skill mapping use the applicable owner. S20 mapping shares the same
+lifecycle; other S20 multi-step skill/prerequisite work keeps its existing ownership
+and checks the shared entry barrier. FE15 question/quiz and FE16 assignment writes
+do not replace Course/Lesson/material/mapping state and retain their existing
+operations. Their Course/skill selectors still consume the shared authoritative
+reads. D12-3 ownership, D1/D1-R1/D1-R2 acknowledgment and A3/N1 deliberate graph
+retry remain in place; no unrelated assessment operation was migrated.
+
+Markdown keeps the approved parser stack. Security inspection decodes bounded
+layers and compares admitted reference kind, effective scheme and origin against
+the browser-parsed emitted destination. It emits the original mdast destination,
+preserving encoded path/query/fragment data and CommonMark entity/escape handling.
+Backslashes and malformed source encodings remain rejected. Definitions are
+collected recursively in document order using mdast's normalized identifiers and
+first-definition precedence. Images remain alt-text links; HTML remains literal.
+Executed verification and the CodeQL test-helper correction are appended to
+`docs/testing.md`. No effective contract, OpenAPI, dependency or governance rule
+was changed.
+
+
+## FE14 main integration and storage-gated regressions — 26 November 2026
+
+The Project Leader explicitly authorized integrating current main into the existing
+PR #279 branch and correcting FE14-IR-04, with Codex assistance. Regular merge
+`e54dcf54caf762cf7c3f040912d9f8ad7457f67d` retains original FE14 HEAD `36be38f`
+and FE28 main `23402754743e0d35048e74cbabebfa133e5e6da3`; all earlier FE14
+commits and both features' historical documentation remain intact. FE28's guarded
+Notifications/Workspace owner and FE14's shared Course/Lesson owner coexist.
+
+Both PDF-specific tests in `e2e/tests/instructor-authoring.spec.ts` now require
+`E2E_MATERIAL_FILES=1` before any sign-in, data creation, interception or upload.
+This matches the existing full journey and disposable MinIO/initializer/backend
+endpoint policy. HTTP 201, one-material, failed-recovery/retry and browser-specific
+assertions are unchanged; no fixture, workflow, dependency or production source
+changes are made for IR-04. Removing the two guards exactly restores the prior spec.
+
+Real execution remains blocked on this sandbox: the default lifecycle run failed
+before browser tests because Docker Buildx could not write its activity record.
+The host boot identity is unavailable, so r2 cleanup preserves the incomplete
+inventory and one marked temporary build instead of guessing process ownership.
+No E2E Docker resource was created. Recovery returned 1; the storage-enabled
+invocation then returned 3 without entering Playwright. No image override, external
+target or lifecycle bypass was used. An authorized host operator must reconcile
+that exact inventory under ADR008 before reuse; no forced registry edit is made.
+
+The separate later GitHub job `139995247102` failed resolving the unchanged exact
+PostgreSQL `libxml2=2.13.9-r3` pin. Its continued presence is verified, but this
+sandbox did not reach the PostgreSQL build and does not establish a permanent
+upstream fault. DP01 owns any separately authorized package-availability/security
+qualification. No downgrade, unpinning, repository/digest change or CI bypass.
+See [the execution record](testing.md#fe14-ir-04-storage-capability-gating--26-november-2026)
+for actual results and limits. Independent review, required CI, protected merge
+and release/deployment remain separate; no independent finding is closed here.
+
+## FE14 post-upstream integration and shared fixture supersession — 27 November 2026
+
+The Project Leader explicitly authorized normal integration of current main into
+PR #279, bounded redundancy removal, prospective AS08 checks, documentation and
+push. Original FE14 HEAD `b6763a36fb7ef7562a93bc6a19f2f6726cdf1eac` and all six
+published commits are retained. Main `3f1831198982b712bfdaa91381e447d39978d550`
+contains actual squash integrations #300 `e7fa15386e48686c7d9a6c6ed4e936aed1c9f6df`
+and #295 `3f1831198982b712bfdaa91381e447d39978d550`; neither a synthetic merge ref
+nor the unmerged #300 feature history was imported. Regular merge
+`a07f334ad36c1c64291fd5d1b19c15265ead9458` resolves exactly `docs/setup.md`,
+`docs/testing.md` and `e2e/fixtures/local-stack.ts`.
+
+The fixture is byte-identical to authoritative main (blob
+`22ea227c6563a875964e313a236cfed2815c3312`) and leaves the effective FE14 diff.
+Shared default real storage supersedes the historical FE14 opt-in provisioning,
+duplicate credential/provisioning path, initializer retry/wait and conditional
+backend endpoint. One private, digest-pinned MinIO/initializer pair, distinct
+administrative/application identities, initializer-before-backend ordering,
+`waitForStorageInitializer()`, ownership/fencing/recovery, Maven cache support,
+CT38 fixture values and automatic successful-setup capability export remain.
+Both IR-04 guards and every feature regression/browser restriction are unchanged.
+The old 10 PASS / 10 SKIP expectation is historical, not the current default oracle.
+Documentation reconciliation preserves main's complete content, including FT02's
+current-state amendment, and FE14's complete historical append exactly once.
+
+PR #296 initially remained unmerged at `4fa292386144d6ab5037058b81bef3065e7891af`.
+Before FE14 push it advanced to `25ba001b3cd0b2c1aa2d2cfa2b7c7017ac8e332b`,
+a normal integration of the same main; it remains unmerged. Separate local
+candidates integrate the initial revision with main, then FE14, and recheck a
+clean direct merge with the latest AS08 HEAD. Executable inputs are identical
+between the tested and refreshed combined candidates; only document ordering
+differs. No AS08
+code, speculative resolution or stacked dependency is published to FE14 or #296.
+The shared `quizExpiryFixture` already supplies the same explicit disposable
+`false` / `1000` / `2` values to Compose rendering and backend startup. AS08's
+duplicate direct bindings are unnecessary. Required validation, disabled behavior
+and production policy remain AS08-owned. The candidate's actual backend starts
+with these values; this does not qualify production scheduling or all AS08 flows.
+
+CT19 remains a separate discrepancy: ADR013 §7.3 requires bucket
+`codemastery-e2e` and explicit `MAX_UPLOAD_SIZE=1MB`; integrated shared storage
+uses `codemastery` and omits that explicit limit (application fallback `20MB`).
+No later scoped supersession was found in the current decision records or shared
+CI decisions. FE24/shared-fixture and FE25/CT19 owners must reconcile the learner
+L-N3 fixture before CT19/QA08 acceptance. FE14 small-PDF success does not establish
+that acceptance; this integration changes neither the contract nor shared policy.
+
+All six original raw author/committer pairs already match the exact author of
+first FE14 commit `aba5e9ce879ef272e1ad4f2ded827ed7828ad6b3`:
+`heizseung <thangle12012006@gmail.com>`. No existing-history rewrite is needed.
+New maintenance commits use that identity through process-scoped configuration
+under the explicit consensual PR-specific arrangement; authenticated push account
+is separately verified as `chi-thanh-nguyen`. Codex performed integration,
+verification and author audit. Metadata does not establish human contribution;
+no signature or independent approval is fabricated and global Git settings are
+unchanged. See [execution and remaining limits](testing.md#fe14-post-upstream-integration-verification--27-november-2026).

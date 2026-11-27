@@ -571,3 +571,47 @@ runtime behavior tests. No validator package was installed; no Batch 3 unit,
 PostgreSQL, scheduler, frontend, E2E or atomic event test was run. No independent
 GitHub/CODEOWNER approval or CI success is claimed here. Clock alignment and
 scheduler/transaction timing across real instances remain qualification gates.
+
+## 16. AS08 ancestry assertion companion — 26 November 2026
+
+**AS08-ANCESTRY-2026-11-26-r1; DELEGATED_APPROVED.** The Project Leader's
+“AS08 — Full Implementation Completion, Bounded Upstream Remediation, and Final
+Self-Audit of PR #296” explicitly delegates bounded necessary technical decisions
+and supporting public bindings. Author: Codex, AI-assisted follow-up work under
+that instruction. This companion changes no earlier owner-only method, fixed
+Quiz capture, evidence schema, grading, execution marker or authorization predicate.
+
+Gap established against main `cc6cb54`: ADR005 §3.2's `readSkillIds` and
+`requireSkillInCourse` both require Instructor ownership. Reusing them from
+Learner attempts or actorless expiry fails 403/401, as reproduced by the real
+AS08 PostgreSQL tests. ADR007 §12 and ADR011 §12 still require Course ancestry
+validation, and Assessment cannot query Adaptive persistence.
+
+Add exactly one public assertion to existing `SkillGraphService`:
+
+```java
+public void requireAssessmentSkillsInCourse(UUID courseId, Set<UUID> skillIds);
+```
+
+Only `AttemptService` calls it. It exports no Skill, name, graph, boolean lookup
+or arbitrary learner data. Inputs are immutable IDs from Assessment-owned frozen
+Quiz definitions, never an HTTP selector. The caller has already admitted the
+Course in its read-only REPEATABLE READ snapshot, or runs inside its actual
+Course-root READ COMMITTED write callback. The assertion checks the active
+transaction/isolation/read-only combination before reading its own skill
+repository, and requires every supplied skill to belong to the Course. A foreign
+or inconsistent stored reference is an integrity failure (safe 500). Caller
+allowlist tests enforce the boundary; this method does not export or inspect
+Course's root marker. Course guard and CT03 remain the caller's responsibility.
+
+Alternatives: weakening the existing owner-only projection would change a settled
+boundary; actor impersonation and cross-module SQL violate the architecture;
+skipping ancestry would accept corrupt evidence; a general actorless graph read
+would disclose unnecessary data. This assertion preserves existing interfaces
+and reuses AD07's scoped repository query. Its scope is one metadata check plus
+focused tests, approximately 3–5% of AD07's full graph CRUD, DAG validation,
+mapping, concurrency, persistence, authorization and REST implementation.
+No new module, file, table, column, dependency or production configuration is
+introduced. It authorizes no AS12/AD13 wiring, deployment, review approval,
+operational acceptance or broader read audience. Independent CODEOWNER review
+and protected integration remain required.

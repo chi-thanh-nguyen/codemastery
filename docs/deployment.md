@@ -2228,6 +2228,35 @@ record and its authorization remain intact. This r14 record is based on effectiv
 r13; it changes no privilege beyond the already authorized CO09 material extension.
 The previous independent review is historical evidence, not approval of this merge.
 
+### CT17-P6-PRIVILEGES-2026-11-27-r16 — AS09 submissions (within ADR012 §19.2, 27 November 2026)
+
+The Project Leader's explicit **“AS09 Full-Scope Completion, Bounded Upstream
+Implementation, and Post-Implementation Audit”** task authorizes this consumer,
+its dated matrix extension, deployment-script synchronization and tests. This
+replaces only r12's submission row, within the unchanged ADR012 §19.2 ceiling:
+
+| Relation (schema) | Runtime privileges | Consumer |
+|---|---|---|
+| `submissions` (public) | SELECT, INSERT; UPDATE (object_key, original_filename, submitted_at, grade_percentage, feedback, graded_at) | AS09 learner reads, file replacement, owner listing/download/grading, CT27 producer admission |
+
+Full SELECT is exercised by the Submission entity projection; INSERT stores a
+first submission; the six column UPDATE grants cover replacement and grade writes
+and PostgreSQL row locks. Assignment grants remain r12. Identity updates (`id`,
+`assignment_id`, `user_id`), DELETE, TRUNCATE and DDL remain denied. This changes
+no effective contract ceiling or production privilege. The executable matrix,
+contract/containment tests and real PostgreSQL/MinIO consumer tests ship together.
+Author-side verification, independent CODEOWNER review, CI, protected integration,
+operator provisioning, residual-risk acceptance and deployment are separate gates.
+
+Sequencing provenance: the Project Leader's **“AS09 Safe Main Integration,
+Targeted Remediation and Post-Integration Self-Audit”** task authorizes this
+renumbering because merged AS08 PR #296 already occupies
+`CT17-P6-PRIVILEGES-2026-11-26-r15`. AS08 r15 remains intact; this r16 extension
+builds on it and changes only the Submission row. The AS09 candidate was formerly
+`CT17-P6-PRIVILEGES-2026-11-27-r15` at `b36d9397`; its exact-SHA verification
+records remain historical evidence, not verification of this integrated candidate.
+No privilege authority or approved ceiling is expanded by the renumbering.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -5627,6 +5656,28 @@ The Retry-After description above was corrected in the same follow-up
 (IR293-R2-01). The earlier text described every valid header as governing the
 wait; Resolver 1.9.27 retries immediately for a negative number or past date.
 The Docker retry properties are unchanged.
+
+
+### CT17-P6-PRIVILEGES-2026-11-26-r15 — AS08 timed attempts (26 November 2026)
+
+**DELEGATED_APPROVED within the existing ADR012 §19.2 ceiling.** The Project
+Leader's AS08 completion task explicitly authorizes the necessary runtime bindings
+and bounded technical selection. This revision replaces only the r6/r7 Attempt
+rows below; every other row, inventory and migration is unchanged. It grants
+nothing on a live database and authorizes no deployment or operational risk.
+
+| Relation | Runtime privileges | Implemented consumer |
+|---|---|---|
+| `attempts` (assessment) | SELECT, INSERT; UPDATE (submitted_at, score_percentage) | AS08 scoped reads, numbering, discovery, row locking, capture and terminal transition |
+| `attempt_answers` (assessment) | SELECT, INSERT; UPDATE (selected_options, is_correct) | AS08 captured reads/locks, answer replacement and exact-mask grading |
+
+The adapters use dynamic, mutable-column updates. No DELETE, TRUNCATE, ownership,
+DDL, grant option, attempt identity/timer rewrite or captured answer membership
+rewrite is allowed. SELECT covers the complete scalar projections; PostgreSQL
+row locks use the existing approved mutable-column UPDATE privileges. No migration
+or schema expansion is needed. The executable matrix, containment assertions and
+consumer tests ship together. AS12 publication, AD13 execution and operational
+statement/transaction deadline qualification remain separate gates.
 
 ## Shared CI reliability remediation — 26 November 2026
 

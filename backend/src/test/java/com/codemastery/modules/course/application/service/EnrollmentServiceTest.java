@@ -60,6 +60,28 @@ class EnrollmentServiceTest {
         learner(); when(repository.lockPublishedCourse(course)).thenReturn(true); when(repository.find(actor, course)).thenReturn(Optional.empty());
         assertEquals("none", service.leave(course).status()); verify(repository, never()).insert(any()); verify(repository, never()).updateStatus(any(),any());
     }
+    @ParameterizedTest @EnumSource(EnrollmentStatus.class)
+    void ownerNamesIncludeHistoricalMembershipAndFilterNonmembers(EnrollmentStatus status) {
+        UUID stranger = UUID.randomUUID();
+        when(repository.find(stranger, course)).thenReturn(Optional.empty());
+        when(repository.find(actor, course)).thenReturn(Optional.of(new Enrollment(row, actor, course, status, resume)));
+        when(identities.learnerDisplayNames(java.util.Set.of(actor))).thenReturn(java.util.Map.of(actor, "Stored name"));
+        assertEquals(java.util.Map.of(actor, "Stored name"), service.learnerDisplayNames(course, java.util.Set.of(actor, stranger)));
+        var ordered = inOrder(access, repository, identities);
+        ordered.verify(access).requireCourseOwnership(course);
+        verify(identities).learnerDisplayNames(java.util.Set.of(actor));
+        verify(identities, never()).learnerDisplayNames(java.util.Set.of(stranger));
+    }
+    @Test void namesEnforceOwnershipBeforeLookupAndBoundThePage() {
+        doThrow(new AccessDeniedException("Access denied")).when(access).requireCourseOwnership(course);
+        assertThrows(AccessDeniedException.class, () -> service.learnerDisplayNames(course, java.util.Set.of(actor)));
+        verifyNoInteractions(repository, identities);
+        reset(access);
+        var ids = java.util.stream.IntStream.range(0, 101).mapToObj(i -> UUID.randomUUID()).collect(java.util.stream.Collectors.toSet());
+        assertThrows(IllegalArgumentException.class, () -> service.learnerDisplayNames(course, ids));
+        assertEquals(java.util.Map.of(), service.learnerDisplayNames(course, java.util.Set.of()));
+        verifyNoInteractions(repository, identities);
+    }
     // CO16 / CT13.reads (ADR012 §13): actorless Course-owned enrolment and completion figures.
     private static EnrollmentRepository.EnrollmentMetricsRow metricsRow(UUID id, String title, String visibility, long active, long completed, long left, long done) {
         return new EnrollmentRepository.EnrollmentMetricsRow(id, title, visibility, active, completed, left, done);
