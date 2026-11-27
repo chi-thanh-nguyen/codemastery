@@ -1653,6 +1653,8 @@ class TimedAttempts {
         @Test
         void rejectsMissingReadWriteOrNonRepeatableReadSnapshotsBeforeValidationOrQueries() {
             var learners = java.util.Set.of(UUID.randomUUID());
+            // The snapshot guard precedes input validation: invalid inputs still report the snapshot.
+            assertThrows(IllegalStateException.class, () -> attemptService.readQuizOutcome(null, null));
             assertThrows(IllegalStateException.class, () -> attemptService.readQuizOutcome(COURSE, learners));
 
             enterSnapshot();
