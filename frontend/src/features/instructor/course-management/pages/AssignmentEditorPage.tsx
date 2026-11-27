@@ -1,3 +1,5 @@
+import { gradingPath } from '../../grading/hooks/useSubmissions';
+import { isDestinationLive } from '../../../../routes/routePaths';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, Box, Button, ListSubheader, MenuItem, TextField, Typography } from '@mui/material';
@@ -461,6 +463,7 @@ export function AssignmentEditor({ courseId, assignmentId, courseContext }: Assi
                 <Typography variant="body2" className="cm-tabular" sx={{ color: 'text.secondary' }}>
                     Submitted {assignment.submissionCount} · Graded {assignment.gradedCount}
                 </Typography>
+                {!gone && !noAccess && isDestinationLive('/teach/grading', 'Instructor') && <Button component={Link} to={gradingPath(courseId, assignment.id)} variant="outlined" size="small" onClick={event => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); go(gradingPath(courseId, assignment.id)); } }}>Open grading</Button>}
             </Box>}
             actions={assignment && !gone && !noAccess && (published
                 ? <Button variant="outlined" onClick={() => setConfirm('hide')} disabled={editor.busy} startIcon={<PresentationIcon name="eye-off" />}>Hide assignment</Button>
