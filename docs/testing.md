@@ -13232,3 +13232,92 @@ require their separate gates. Recommended next step: **Final Narrow Delta-focuse
 Independent Review — FE11-IR-01 & FE11-IR-02, Synchronous Mutation Admission,
 Replacement Confirmation Integrity and Contract-Compliant Error Recovery
 Preservation**, including SA-R1's operation-bound Cancel regressions.
+
+## AS17 platform reporting outcome read completion and author self-audit — 28 November 2026
+
+**Authority and provenance.** The Project Leader's explicit “AS17 Full-Scope
+Completion, Bounded Upstream Remediation and Final Technical Self-Audit” instruction
+(28 November 2026) authorizes AS17 implementation and test completion, bounded
+upstream slices, delegated technical decisions, documentation, self-audit and
+commit/push to PR #306. It excludes merge, Issue closure, deployment and independent
+approval. Claude Code (Anthropic) performed the audit, the additional tests and this
+record; this is author-side verification, not independent CODEOWNER review or QA
+acceptance. Follow-up commits carry the verified Git identity of the original
+contributor `minhtan29042006` as author and committer metadata only, under the
+Leader's task-specific arrangement; it is not evidence that the contributor
+personally wrote or approved the additions. The pusher is `chi-thanh-nguyen`.
+
+**Baselines.** Incoming PR HEAD `3bfc55cfe965f242249c7b8e817e34ede31bfda2`; main and
+merge-base `4ae384bd632bf4c6920b049cc155bc4a68576905` (the branch already contained
+main, so no integration merge was needed). The two contributor commits are preserved.
+The delivered SHA is recorded by Git and the PR, not self-referentially here.
+
+**Consumed contracts.** `CT13-METRICS-2026-11-15-r1` (ADR012 §13.1, CP-074) and
+`CT13-READS-2026-11-15-r1` (ADR012 §13.2, CP-089), both DELEGATED_APPROVED and not
+amended by ADR012 §§20–21 or ADR013; F7-11 (§20) is already reflected in the field
+name and hidden-Quiz scope. Latest-attempt tuple: ADR005 §6.1. Runtime role:
+`CT17-P6-PRIVILEGES-2026-11-26-r15` (`attempts` and `quizzes` SELECT already granted).
+No migration, privilege, REST, OpenAPI, frontend or new-file change is needed.
+
+**Upstream and delegated decisions.** AS08 (#159, PR #296) already delivers
+`AttemptService.readQuizOutcome` → `AttemptRepository.readQuizOutcome` →
+`AttemptRepositoryImpl.readQuizOutcome` (one PostgreSQL `row_number()` aggregate
+over Assessment-owned `attempts` and `quizzes`). No upstream slice was missing and no
+technical decision was open, so none was implemented or recorded.
+
+| Requirement (CT13) | Incoming | Final | Implementation | Evidence |
+|---|---|---|---|---|
+| Course scope; caller-supplied population only | COMPLETE (inherited) | COMPLETE | AS08 SQL `q.course_id`, `a.user_id IN (:learners)`; no Course table read | PR test (population subset); new cross-Course test both ways; outsider with only foreign/unsubmitted rows → `(0, null)` |
+| `practice`/`test` only; hidden Courses/Quizzes counted; unsubmitted excluded | COMPLETE (inherited) | COMPLETE | AS08 SQL | inherited tuple test; PR test (hidden Course and hidden `test` Quiz) |
+| One latest submitted attempt per (learner, Quiz) by ADR005 tuple | COMPLETE (inherited) | COMPLETE | `PARTITION BY user_id, quiz_id ORDER BY submitted_at, started_at, quiz text, attempt_number DESC` | inherited equal-time `attempt_number` case; new equal-`submitted_at` `started_at` case that beats a higher number and score; new later-unsubmitted case |
+| Pair count; exact mean HALF_UP to 2 digits; null when no pair | COMPLETE (inherited), midpoint unproven | COMPLETE | `round(avg(numeric), 2)` (half away from zero = HALF_UP for scores ≥ 0) | new `(33.33 + 0.00) / 2 = 16.665 → 16.67`; 0.00 (inherited) and 100.00 (new) bounds; empty population (inherited/PR) |
+| Corrupt projection fails closed; inputs validated and copied | PARTIAL → PR | COMPLETE | PR range/scale checks, `Objects.requireNonNull` before `Set.copyOf` (mirrors `readOwnedLatestSkillEvidence`) | PR unit tests; snapshot guard now proven to precede input validation |
+| Joins only the caller's read-only REPEATABLE READ snapshot | COMPLETE; real-proxy evidence only for “no transaction” | COMPLETE | `@Transactional(MANDATORY, readOnly, REPEATABLE_READ)` + `requireReportingSnapshot` | new real-proxy rejection of read-write RR and read-only READ COMMITTED callers; `transaction_read_only = on`; a concurrent committed pair is invisible inside the snapshot and visible after it |
+| Actorless; three aggregate fields; only `PlatformMetricsService` may call; no `api/` exposure | COMPLETE (inherited allowlist) + PR | COMPLETE | record shape; caller allowlist; `api/` identifier guard | PR unit tests and existing allowlist test |
+| Runtime role compatibility | Not executed for this read | COMPLETE | r15 matrix | existing AS08 restricted-role test now also runs the read under `SET LOCAL ROLE` |
+
+**Findings and remediation (all test-side; no production defect found).**
+AS17-F01 (P2) no oracle separated HALF_UP from HALF_EVEN/truncation (66.67, 50.00,
+25.00 and 0.00 are equal under each) — fixed by the 16.665 case. AS17-F02 (P3) the
+`started_at` tuple key was unexercised with differing scores — fixed. AS17-F03 (P2) a
+later unsubmitted attempt displacing the latest submitted one was untested — fixed.
+AS17-F04 (P2) cross-Course exclusion was untested for this read — fixed. AS17-F05 (P3)
+100.00 upper bound — fixed. AS17-F06 (P2) read-write and non-RR outer transactions
+were rejected only in a unit test with hand-set synchronization flags — fixed with
+real proxies. AS17-F07 (P2) snapshot stability under a concurrent commit — fixed.
+AS17-F08 (P2) the read had not run under the restricted runtime role — fixed. AS17-F09
+(P3) the unit test named “before validation” passed only valid inputs — fixed.
+AS17-F10 (P3, documentation) the PR body called the PR's integration fixture
+“tie-breaking” although its timestamps differ; tie-break evidence is inherited — PR
+body corrected. Observation (not remediated): the population binds one parameter per
+learner, so a single Course above the PostgreSQL bind limit (about 65,000 joined
+learners) would fail closed rather than return a wrong figure; this is far beyond
+project scale and CT13 sets no bound.
+
+**Executed commands (macOS, Docker 29.8.1, Testcontainers PostgreSQL).**
+
+```bash
+cd backend
+# Incoming HEAD 3bfc55c in a detached scratch worktree
+./mvnw -B '-Dtest=AttemptServiceTest' '-Dit.test=AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#ct13QuizOutcomeAggregatesMultiLearnerLatestPairsHalfUpAndIgnoresUnsubmittedAndHiddenCourseFilter+tupleTieBreakersHiddenQuizzesDiagnosticsAndPairAveragesKeepTheirDistinctSemantics+latestEvidenceAndReportingUseAuthoritativeTupleCountsAndLatestPairMean+incompatibleOuterTransactionsAndStartOrSaveDoNotGrantEvidenceExecution+realRuntimeMatrixPermitsOnlyTheImplementedAttemptOperations' verify
+# -> unit 78/0/0/0, PostgreSQL 5/0/0/0, BUILD SUCCESS
+# Final test files, same selectors plus 'as17*'
+# -> unit 78/0/0/0, PostgreSQL 7/0/0/0, BUILD SUCCESS (244 main, 67 test sources compiled)
+# Mutants (scratch worktree only; reverted):
+#   trunc() instead of round() + read-only clause removed from the snapshot guard
+#   -> both as17* tests FAIL (16.66; read-write caller admitted)
+#   started_at removed from the tuple -> as17 tuple test FAILS (50.00)
+```
+
+Counts are run/failures/errors/skipped. Not run, by risk: the full backend unit and
+integration suites, E2E, frontend, VM and release suites; only test files changed
+after the incoming baseline, and the caller-allowlist/`api/` guard ran inside
+`AttemptServiceTest`. Hosted CI was not awaited.
+
+**Self-audit and remaining gates.** A fresh pass over the final SQL, service guard,
+schema constraints (`ck_attempts_submission`, `uq_attempts_user_quiz_number`,
+`numeric(5,2)`), r15 matrix and the final diff found no further actionable AS17
+defect. Verdict: **AS17_CODE_COMPLETE_AUTHOR_VERIFIED** (Assessment producer code and
+tests). Separate and still open: CO16/AD16 producers, IN12 `PlatformMetricsService`
+composition and REST, FE23 UI, QA06 execution of B7-O11 end to end, independent
+CODEOWNER review, required hosted CI, protected squash merge, release and deployment.

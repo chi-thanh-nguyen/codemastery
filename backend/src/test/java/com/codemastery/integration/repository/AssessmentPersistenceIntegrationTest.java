@@ -1883,6 +1883,12 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                 var attempt=tx.execute(status->{jdbc.execute("SET LOCAL ROLE "+role);return at(now).start(courseId,quizId).attempt();});
                 var result=tx.execute(status->{jdbc.execute("SET LOCAL ROLE "+role);return at(now.plusSeconds(1)).submit(courseId,quizId,attempt.attemptId(),answers(true));});
                 assertEquals(new BigDecimal("50.00"),result.scorePercentage());
+                TransactionTemplate report=new TransactionTemplate(transactionManager);report.setReadOnly(true);
+                report.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+                var outcome=report.execute(status->{jdbc.execute("SET LOCAL ROLE "+role);
+                    return live.readQuizOutcome(courseId,Set.of(learner,foreignLearner));}); // AS17 CT13 read under r15
+                assertEquals(new com.codemastery.modules.assessment.application.service.AttemptService.QuizOutcome(
+                        courseId,1L,new BigDecimal("50.00")),outcome);
                 for(String forbidden:List.of("UPDATE public.attempts SET expires_at=expires_at WHERE false",
                         "UPDATE public.attempt_answers SET question_id=question_id WHERE false",
                         "DELETE FROM public.attempts WHERE false", "DELETE FROM public.attempt_answers WHERE false")) {
@@ -2819,6 +2825,134 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                 executor.shutdownNow();
                 assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
             }
+        }
+
+        @Test
+        void ct13QuizOutcomeAggregatesMultiLearnerLatestPairsHalfUpAndIgnoresUnsubmittedAndHiddenCourseFilter() {
+            UUID hiddenTestQuiz = UUID.randomUUID();
+            UUID diagnosticQuiz = UUID.randomUUID();
+            addQuiz(hiddenTestQuiz, "test");
+            addQuiz(diagnosticQuiz, "diagnostic");
+
+            // Learner 1: quizId latest is 50.00 (supersedes older 100.00); hiddenTestQuiz is 100.00; diagnostic 0.00 excluded.
+            terminal(quizId, 1, now, now.plusSeconds(10), true, true);
+            terminal(quizId, 2, now.plusSeconds(20), now.plusSeconds(30), true, false);
+            terminal(hiddenTestQuiz, 1, now, now.plusSeconds(10), true, true);
+            terminal(diagnosticQuiz, 1, now.plusSeconds(40), now.plusSeconds(50), false, false);
+
+            // Second joined learner: 50.00 on quizId, plus an unsubmitted attempt on hiddenTestQuiz (must not count).
+            jdbc.update("INSERT INTO attempts VALUES (?,?,?,?,?,?,?,?)",
+                    UUID.randomUUID(), foreignLearner, quizId, 1,
+                    java.time.OffsetDateTime.ofInstant(now, java.time.ZoneOffset.UTC),
+                    java.time.OffsetDateTime.ofInstant(now.plusSeconds(60), java.time.ZoneOffset.UTC),
+                    java.time.OffsetDateTime.ofInstant(now.plusSeconds(15), java.time.ZoneOffset.UTC),
+                    new BigDecimal("50.00"));
+            jdbc.update("INSERT INTO attempts VALUES (?,?,?,?,?,?,?,?)",
+                    UUID.randomUUID(), foreignLearner, hiddenTestQuiz, 1,
+                    java.time.OffsetDateTime.ofInstant(now, java.time.ZoneOffset.UTC),
+                    java.time.OffsetDateTime.ofInstant(now.plusSeconds(60), java.time.ZoneOffset.UTC),
+                    null, null);
+
+            jdbc.update("UPDATE quizzes SET publication_status='hidden' WHERE id=?", hiddenTestQuiz);
+            jdbc.update("UPDATE courses SET publication_status='hidden' WHERE id=?", courseId);
+
+            // (50.00 + 100.00 + 50.00) / 3 = 66.666... -> HALF_UP 66.67 over hidden Course and hidden test Quiz.
+            var combined = snapshot(() -> live.readQuizOutcome(courseId, Set.of(learner, foreignLearner)));
+            assertEquals(courseId, combined.courseId());
+            assertEquals(3L, combined.scoredLearnerQuizPairs());
+            assertEquals(new BigDecimal("66.67"), combined.averageQuizScore());
+
+            var singleLearner = snapshot(() -> live.readQuizOutcome(courseId, Set.of(foreignLearner)));
+            assertEquals(1L, singleLearner.scoredLearnerQuizPairs());
+            assertEquals(new BigDecimal("50.00"), singleLearner.averageQuizScore());
+
+            var emptyPopulation = snapshot(() -> live.readQuizOutcome(courseId, Set.of()));
+            assertEquals(0L, emptyPopulation.scoredLearnerQuizPairs());
+            assertNull(emptyPopulation.averageQuizScore());
+        }
+
+        /** AS17 fixture: one persisted Attempt row; a null {@code submitted} leaves it unsubmitted. */
+        void persistedAttempt(UUID user, UUID quiz, int number, Instant start, Instant submitted, String score) {
+            jdbc.update("INSERT INTO attempts VALUES (?,?,?,?,?,?,?,?)", UUID.randomUUID(), user, quiz, number,
+                    java.time.OffsetDateTime.ofInstant(start, java.time.ZoneOffset.UTC),
+                    java.time.OffsetDateTime.ofInstant(start.plusSeconds(60), java.time.ZoneOffset.UTC),
+                    submitted == null ? null : java.time.OffsetDateTime.ofInstant(submitted, java.time.ZoneOffset.UTC),
+                    submitted == null ? null : new BigDecimal(score));
+        }
+
+        @Test
+        void as17QuizOutcomeSelectsTheTupleLatestSubmittedPairScopesTheCourseAndRoundsAMidpointHalfUp() {
+            // Equal submitted_at: the later started_at (#1, 33.33) outranks the higher attempt_number
+            // and higher score (#2, 100.00); a later unsubmitted #3 cannot displace it (ADR005 §6.1).
+            persistedAttempt(learner, quizId, 1, now.plusSeconds(10), now.plusSeconds(30), "33.33");
+            persistedAttempt(learner, quizId, 2, now, now.plusSeconds(30), "100.00");
+            persistedAttempt(learner, quizId, 3, now.plusSeconds(40), null, null);
+            persistedAttempt(foreignLearner, quizId, 1, now, now.plusSeconds(20), "0.00");
+
+            UUID outsider = user("learner");
+            UUID otherCourse = UUID.randomUUID();
+            UUID otherQuiz = UUID.randomUUID();
+            jdbc.update("INSERT INTO courses (id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES (?,?,'Other AS17','Fixture','published',false)",
+                    otherCourse, owner);
+            jdbc.update("INSERT INTO quizzes VALUES (?,?,'Other quiz','practice',60,'published')", otherQuiz, otherCourse);
+            try {
+                persistedAttempt(learner, otherQuiz, 1, now, now.plusSeconds(50), "100.00");
+                persistedAttempt(outsider, otherQuiz, 1, now, now.plusSeconds(50), "100.00");
+                persistedAttempt(outsider, quizId, 1, now, null, null);
+
+                // (33.33 + 0.00) / 2 = 16.665 -> HALF_UP 16.67 (HALF_EVEN or truncation would give 16.66;
+                // number-first or highest-score selection 50.00; every submitted attempt 44.44).
+                assertEquals(new com.codemastery.modules.assessment.application.service.AttemptService.QuizOutcome(
+                                courseId, 2L, new BigDecimal("16.67")),
+                        snapshot(() -> live.readQuizOutcome(courseId, Set.of(learner, foreignLearner))));
+                // A populated learner whose only rows are another Course's or unsubmitted has no pair.
+                var noPair = snapshot(() -> live.readQuizOutcome(courseId, Set.of(outsider)));
+                assertEquals(0L, noPair.scoredLearnerQuizPairs());
+                assertNull(noPair.averageQuizScore());
+                // The other Course counts only its own Quiz; 100.00 is a valid upper bound.
+                assertEquals(new com.codemastery.modules.assessment.application.service.AttemptService.QuizOutcome(
+                                otherCourse, 2L, new BigDecimal("100.00")),
+                        snapshot(() -> live.readQuizOutcome(otherCourse, Set.of(learner, outsider, foreignLearner))));
+            } finally {
+                jdbc.update("DELETE FROM attempts WHERE user_id=? OR quiz_id=?", outsider, otherQuiz);
+                jdbc.update("DELETE FROM quizzes WHERE id=?", otherQuiz);
+                jdbc.update("DELETE FROM courses WHERE id=?", otherCourse);
+                jdbc.update("DELETE FROM users WHERE id=?", outsider);
+            }
+        }
+
+        @Test
+        void as17QuizOutcomeOnlyJoinsTheCallersReadOnlyRepeatableReadSnapshotAndKeepsItStable() {
+            persistedAttempt(learner, quizId, 1, now, now.plusSeconds(10), "50.00");
+            Set<UUID> population = Set.of(learner, foreignLearner);
+
+            // Real proxies: MANDATORY joins any outer transaction, so the snapshot guard must reject these.
+            TransactionTemplate readWrite = new TransactionTemplate(transactionManager);
+            readWrite.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+            assertThrows(IllegalStateException.class,
+                    () -> readWrite.execute(status -> live.readQuizOutcome(courseId, population)));
+            TransactionTemplate readCommitted = new TransactionTemplate(transactionManager);
+            readCommitted.setReadOnly(true);
+            readCommitted.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+            assertThrows(IllegalStateException.class,
+                    () -> readCommitted.execute(status -> live.readQuizOutcome(courseId, population)));
+
+            var inSnapshot = snapshot(() -> {
+                assertEquals("on", jdbc.queryForObject("SHOW transaction_read_only", String.class));
+                var first = live.readQuizOutcome(courseId, population);
+                try { // Another connection commits a new pair while the caller's snapshot is open.
+                    java.util.concurrent.CompletableFuture.runAsync(() -> persistedAttempt(
+                            foreignLearner, quizId, 1, now, now.plusSeconds(20), "100.00")).get(10, TimeUnit.SECONDS);
+                } catch (Exception failure) {
+                    throw new IllegalStateException(failure);
+                }
+                assertEquals(first, live.readQuizOutcome(courseId, population));
+                return first;
+            });
+            assertEquals(new com.codemastery.modules.assessment.application.service.AttemptService.QuizOutcome(
+                    courseId, 1L, new BigDecimal("50.00")), inSnapshot);
+            assertEquals(new com.codemastery.modules.assessment.application.service.AttemptService.QuizOutcome(
+                    courseId, 2L, new BigDecimal("75.00")), snapshot(() -> live.readQuizOutcome(courseId, population)));
         }
     }
 

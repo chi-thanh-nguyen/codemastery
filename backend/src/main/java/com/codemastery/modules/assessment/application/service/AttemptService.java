@@ -324,9 +324,14 @@ public class AttemptService {
     public QuizOutcome readQuizOutcome(UUID courseId, Set<UUID> learnerIds) {
         requireReportingSnapshot();
         requireId(courseId);
-        var outcome = attempts.readQuizOutcome(courseId, Set.copyOf(learnerIds));
+        Set<UUID> requestedLearners = Set.copyOf(Objects.requireNonNull(learnerIds, "learnerIds"));
+        var outcome = attempts.readQuizOutcome(courseId, requestedLearners);
         if (outcome == null || outcome.scoredLearnerQuizPairs() < 0
-                || (outcome.scoredLearnerQuizPairs() == 0) != (outcome.averageQuizScore() == null)) {
+                || (outcome.scoredLearnerQuizPairs() == 0) != (outcome.averageQuizScore() == null)
+                || (outcome.averageQuizScore() != null
+                    && (outcome.averageQuizScore().compareTo(ZERO_SCORE) < 0
+                        || outcome.averageQuizScore().compareTo(HUNDRED_SCORE) > 0
+                        || outcome.averageQuizScore().scale() != 2))) {
             throw new IllegalStateException("Invalid Quiz outcome projection");
         }
         return new QuizOutcome(courseId, outcome.scoredLearnerQuizPairs(), outcome.averageQuizScore());
