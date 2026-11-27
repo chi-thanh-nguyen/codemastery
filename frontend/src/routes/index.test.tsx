@@ -828,7 +828,7 @@ describe('FE32 Instructor navigation and parent-aware active section (CT16.route
     it('shows Teaching and Catalogue for Instructors and keeps Teaching active across /teach subroutes', async () => {
         await mount('/courses');
         await login('Teacher', 'Instructor');
-        expect([...host.querySelectorAll('header nav a')].map((link) => link.textContent)).toEqual(['Teaching', 'Catalogue']);
+        expect([...host.querySelectorAll('header nav a')].map((link) => link.textContent)).toEqual(['Teaching', 'Grading', 'Catalogue']);
         await go('/teach');
         expect(host.querySelector('main h1')?.textContent).toBe('Teaching');
         expect(host.querySelector('header nav [aria-current="page"]')?.textContent).toBe('Teaching');
@@ -881,7 +881,7 @@ describe('FE32 complete model and actual route activation', () => {
         expect(items.some(({ href }) => href === '/notifications')).toBe(false);
     });
     it.each([
-        ['Learner', ['Home', 'Catalogue', 'My courses']], ['Instructor', ['Teaching', 'Catalogue']], ['Administrator', ['Catalogue']],
+        ['Learner', ['Home', 'Catalogue', 'My courses']], ['Instructor', ['Teaching', 'Grading', 'Catalogue']], ['Administrator', ['Catalogue']],
     ] as const)('filters %s against the actual delivered route tree', (role, labels) => {
         expect(roleNavigation(role).map(({ label }) => label)).toEqual(labels);
         expect(notificationsAvailable(role)).toBe(role !== 'Administrator');
@@ -926,12 +926,13 @@ describe('FE32 complete model and actual route activation', () => {
     it('never leaks an active item to another role or highlights an inactive feature', () => {
         for (const role of ['Learner', 'Administrator'] as const) expect(currentSection('/teach/courses/one', role)).toBeUndefined();
         expect(currentSection('/courses/one/learn', 'Learner')).toBeUndefined();
-        expect(currentSection('/teach/grading', 'Instructor')).toBeUndefined();
+        expect(currentSection('/teach/grading', 'Instructor')).toBe('/teach/grading');
+        expect(currentSection('/teach/grading/one', 'Instructor')).toBe('/teach/grading');
         expect(currentSection('/admin', 'Administrator')).toBeUndefined();
         expect(currentSection('/courses/one')).toBe('/courses');
         expect(currentSection('/home')).toBeUndefined();
     });
-    it.each(['/admin', '/admin/users', '/admin/courses', '/admin/reports', '/admin/audit', '/teach/grading', '/teach/grading/one', '/teach/learners', '/teach/courses/one/learners'])
+    it.each(['/admin', '/admin/users', '/admin/courses', '/admin/reports', '/admin/audit', '/teach/learners', '/teach/courses/one/learners'])
     ('leaves inactive %s unregistered for anonymous visitors and every authenticated role', async (path) => {
         await mount(path);
         expect(location.pathname).toBe(path); expect(host.querySelector('main h1')?.textContent).toBe('Page not found');
@@ -946,7 +947,7 @@ describe('FE32 complete model and actual route activation', () => {
         expect(host.querySelector('header nav [aria-current]')?.textContent).toBe('Home');
         await login('B', 'Instructor');
         expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
-        expect([...host.querySelectorAll('header nav a')].map((n) => n.textContent)).toEqual(['Teaching', 'Catalogue']);
+        expect([...host.querySelectorAll('header nav a')].map((n) => n.textContent)).toEqual(['Teaching', 'Grading', 'Catalogue']);
         expect(host.querySelector('header nav [aria-current]')).toBeNull();
         await login('C', 'Administrator');
         expect([...host.querySelectorAll('header nav a')].map((n) => n.textContent)).toEqual(['Catalogue']);

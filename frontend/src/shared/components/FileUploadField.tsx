@@ -60,7 +60,7 @@ export function FileUploadField({ label, requirements, state, onSelect, disabled
 
 
 /** CT37.widget: authenticated Blob, server filename, transient object URL; no navigation/token URL. */
-export function FileDownloadButton({ load, disabled }: { load: (signal: AbortSignal) => Promise<BinaryDownload>; disabled?: boolean }) {
+export function FileDownloadButton({ load, disabled, label = 'Download PDF', onDownloaded }: { load: (signal: AbortSignal) => Promise<BinaryDownload>; disabled?: boolean; label?: string; onDownloaded?: () => void }) {
     const work = useRef<AbortController | null>(null);
     const [busy, setBusy] = useState(false), [message, setMessage] = useState('');
     useEffect(() => () => { work.current?.abort(); work.current = null; }, []);
@@ -74,10 +74,10 @@ export function FileDownloadButton({ load, disabled }: { load: (signal: AbortSig
             try {
                 const anchor = document.createElement('a'); anchor.href = url; anchor.download = file.filename;
                 document.body.append(anchor); try { anchor.click(); } finally { anchor.remove(); }
-                setMessage('Download ready.');
+                setMessage('Download ready.'); onDownloaded?.();
             } finally { URL.revokeObjectURL(url); }
         } catch { if (!controller.signal.aborted) setMessage('The download could not be completed. Try again.'); }
         finally { if (work.current === controller) { work.current = null; setBusy(false); } }
     }
-    return <Box><Button variant="outlined" disabled={disabled || busy} onClick={() => void download()}>Download PDF</Button><Typography role="status" variant="caption" sx={{ display: 'block' }}>{message}</Typography></Box>;
+    return <Box><Button variant="outlined" disabled={disabled || busy} onClick={() => void download()}>{label}</Button><Typography role="status" variant="caption" sx={{ display: 'block' }}>{message}</Typography></Box>;
 }
