@@ -11924,3 +11924,200 @@ separate downstream work. Eligible independent CODEOWNER approval, required fina
 CI/scanning, resolved threads, an up-to-date branch and protected integration remain
 mandatory. No GitHub approval, merge, Issue closure, Project-field mutation, release,
 deployment or operational grant is performed by this review.
+
+
+## IN06 final narrow independent review — 27 November 2026
+
+### A. Executive verdict
+
+**APPROVE_AFTER_GATES** for independently reviewed code revision
+`b6887e239c72970a642de7c923fabeb3ec88c700`. IN06-IR-01, IN06-IR-02 and
+IN06-IR-03 are independently **VERIFIED_FIXED**. No new actionable defect was
+established within the remediation delta. Previously supported IN06 behavior is
+preserved; no further production or meaningful test remediation is required.
+The automated technical review–remediation cycle can conclude. Another automated
+technical review is not warranted for this reviewed code revision.
+
+OpenAI Codex performed this final acceptance review under the Project Leader's
+explicit narrow-review instruction. No production, committed test, OpenAPI or
+implementation decision was modified to obtain this verdict. Additional probes
+were compiled outside the delivered source tree against its compiled classes;
+the actual Tomcat servlet/filter/controller/service/JPA/PostgreSQL path was used.
+This review does not assert the original contributor performed or approved it.
+
+The reviewed checkout has no tracked root CLAUDE.md. The primary local checkout's
+CLAUDE.md was read, with the reviewed AGENTS.md, CONTRIBUTING.md and CODEOWNERS as
+the authoritative applicable fallback. No nested instruction or graph was present
+in this isolated checkout. The graphify skill was consulted; source inspection
+was used without building a graph. The unrelated primary checkout was preserved.
+
+### B. Verified Git baseline
+
+- Previous reviewed baseline: `3ab9ee28cc267169f80f2f34e49041c4e102554c`.
+- Incoming and independently tested remediation: `b6887e239c72970a642de7c923fabeb3ec88c700`.
+- Refreshed main and merge-base: `fe3160d535b33652587e14e2fc55ca267f6a5222`.
+- Exactly one remediation commit, seven changed files: three Interaction production
+  files, two test files, docs/api/openapi.yaml and this historical evidence record.
+  No intervening production delta or main advance was present on final pre-delivery
+  fetch. The branch was nine commits ahead, zero behind main. Original contribution
+  and integration/preservation commits remain ancestors; no integration was needed.
+- Any following evidence-only commit is distinct from the reviewed code SHA.
+  Its immutable SHA, normal push, final remote HEAD and PR-body readback are recorded
+  in PR #303; its only changed file must be docs/testing.md.
+
+Effective oracles: ADR012 authority/approval inventory and CT30.access/posts/reports/
+rest (§§6.1–6.5), CT32 (§11), error ordering (§12), CT40 notification context
+(§3.1), notification atomicity (§6.4), and runtime privilege ceiling (§19.2).
+CT03 Lesson admission, CT18 safe errors and unchanged V006 constraints support them.
+Prior records at baseline docs/testing.md:11500 and remediation :11664 were read;
+their historical author-side and independent-incoming evidence remains separately
+attributed. No material delta-related evidence discrepancy was established.
+
+### C. Independent finding closure matrix
+
+| Finding | Original defect and remediation | Independent evidence and preservation | Disposition |
+|---|---|---|---|
+| IN06-IR-01 (P2) | Report intake admitted a descendant whose immediate parent was itself a reply. Both intake visibility and new-parent validation now require a visible same-Lesson root ancestor (ContentReportService:82–92; DiscussionService:84–100). | Committed PostgreSQL/HTTP tests and external Tomcat probes cover visible roots/replies, hidden parents/replies, foreign targets, missing supplied parents, deeper ancestry and a two-row cycle. Valid visible reply as parent retains field parentPostId/400; concealed ancestry retains 404 before other body rules. Baseline deep target receives 201; remediated target receives 404. Rejected operations leave post/report/notification counts unchanged. | VERIFIED_FIXED |
+| IN06-IR-02 (P2) | JSON-escaped lone surrogates were accepted but JDBC stored a replacement. isRepresentableText rejects NUL and unpaired surrogates before persistence, at the existing content/reason stage (InteractionRequests:34–43; DiscussionService:98–100; ContentReportService:199–204). | Actual Tomcat/JPA/PostgreSQL reads verify exact text for new questions, replies, Lesson reports and visible-post reports: supplementary characters, escaped/direct Unicode, NFC and NFD, U+FFFD, whitespace and CR/LF. High/low surrogates, repeated/reversed/interrupted sequences and NUL yield safe field 400/no-store without rejected-value/diagnostic disclosure or writes. Baseline x\ud800 receives 201 and stores second code unit 63; remediation gives 400. | VERIFIED_FIXED |
+| IN06-IR-03 (P2) | readAllBytes buffered the entire wire body before parsing. A strict UTF-8 InputStreamReader now directly feeds Jackson and closes in try-with-resources (InteractionRequests:15–30). | Identical external invalid-prefix stream records 1,048,577 read attempts on baseline versus 8,192 and stream closure on remediation. Seventy-seven decoder/JSON cases over chunk sizes 1,2,3,7,8191,8192,8193 pass, plus an existing nesting-constraint rejection. Malformed UTF-8, including a tail beyond 8192 bytes, duplicate fields, trailing tokens and empty/non-object JSON reject safely. Real Tomcat accepts and PostgreSQL preserves a reason exceeding 1.1 million characters; admission precedence is retained. | VERIFIED_FIXED |
+
+Ancestry checks add a predicate to an existing parent read, not another query,
+recursive traversal or a new lock. V006's FK prevents a persisted missing parent;
+its not-self constraint prevents persisted self-reference. Missing parent IDs and
+multi-row cycles are covered without weakening these constraints. Approved
+statement-snapshot report visibility remains; no additional serialization is required.
+Representability enforces verbatim storage in PostgreSQL UTF-8 and does not impose
+an unauthorized product restriction or normalize/trim valid Unicode.
+
+### D. Regression and test quality
+
+The changed tests were inspected and independently executed. The invalid-prefix
+test fails the original eager implementation; external differential probes also
+reproduce the actual old persistence and visibility failures. Existing integration
+cases retain CT03/CT30 precedence, trusted identities, root-only paging and hidden
+reads, notification recipient/message/derived ID, pre-commit invisibility, rollback
+and synthetic notification-insert failure atomicity.
+
+The PID is published through JdbcTemplate inside the same TransactionTemplate and
+transaction manager as the production proxy call. JpaTransactionManager-bound JDBC
+and JPA therefore use the intended transactional connection. The winner's barrier
+keeps its row locks open until pg_blocking_pids observes a database-blocked waiter;
+both reply/hide orders, competing hides and dismissal-first terminal revalidation
+complete with the required committed result/409. Polling is bounded and is evidence
+of a real lock wait, not a fixed scheduling delay. The helper does not name the
+blocker or lock relation; isolated fixtures, held winner locks and inspected lock
+paths exclude an evidenced competing unrelated wait in these executions. This is
+sufficient regression evidence, not a general-purpose lock-graph assertion.
+
+Wrappers join READ COMMITTED production transactions and preserve MANDATORY
+moderation participation; no service method is replaced or mocked. Barrier release
+and executor interruption run in finally blocks; normal completion joins futures
+before fixture cleanup. The synthetic cycle is removed by restoration and the
+fixture's set-wise descendant deletion. No timeout or cleanup failure occurred.
+The CT40 REPEATABLE READ test observes published context across an independent hide
+and hidden context after caller completion, supporting caller-transaction/snapshot
+participation. No broader CT32/CT40 review was reopened.
+
+Reader delivery eliminates eager whole-wire buffering and applies existing parser
+constraints during consumption. A valid JSON tree and subsequent Map are still
+materialized; this is not constant-memory arbitrary-JSON processing. Servlet or
+proxy draining/buffering and transport/container limits are separate. The real
+backend probe establishes supported synchronous servlet behavior, not every ingress
+or a universal wire-size guarantee. No arbitrary length cap or resource redesign
+was introduced; no stress/OOM test was needed.
+
+### E. Independently executed verification
+
+On exact remediation b6887e239c72970a642de7c923fabeb3ec88c700, from backend/:
+
+```sh
+./mvnw -q -Dtest='InteractionRequestsTest,ContentReportServiceTest,DiscussionServiceTest' -Dit.test=InteractionReportIntakeIntegrationTest verify
+./mvnw -q dependency:build-classpath -Dmdep.outputFile=../../classpath.txt
+```
+
+- PASS: 17 unit tests (6 request, 8 report-service, 3 discussion-service) and
+  32 PostgreSQL integration tests, zero failures/errors/skips, Maven exit 0.
+- External javac probes use target/test-classes, target/classes, the resolved test
+  classpath and the already cached JUnit Platform launcher 6.0.3. No dependency
+  or build configuration changed. IndependentParserProbe passes 77 boundary cases
+  plus nesting-constraint rejection and the measured prefix-consumption assertion.
+- ProbeRunner selects only four external methods: unicodeWritesAndSafeRejections,
+  ancestryConcealmentAndValidReplyParentDistinction, realServletStreamingAndAdmission,
+  differentialStoredSurrogateAndAncestry. PASS 4/4 on embedded Tomcat 11.0.27 and
+  real PostgreSQL 17.11, zero skips/failures. Inherited fixture/test infrastructure
+  is reused; the original 32 tests are not rerun or added to this count.
+- The three changed baseline production files were extracted verbatim with git show
+  3ab9ee28:<path>, javac-compiled outside the checkout and placed first on the probe
+  classpath. Runtime CodeSource confirmed all three loaded from baseline-classes.
+  IndependentParserProbe baseline passes its expected full-consumption oracle;
+  ProbeRunner differentialStoredSurrogateAndAncestry passes 1/1 expected-defect
+  assertions: old 201/corruption and 201/invisible-target behavior reproduced.
+  These expected-defect assertions do not mean the original contract passed.
+- git diff --check passes. Parsed OpenAPI leaf comparison finds exactly the two
+  request-field descriptions changed, with no other schema/API declaration change.
+
+An initial external compilation omitted the launcher-only jar and was corrected
+using its existing cached 6.0.3 artifact. After a session interruption, an external
+HTTP attempt could not access the Docker socket (Operation not permitted); its four
+initialization failures are excluded as application evidence. Network permission
+was restored and the complete four-method retry passed. No application change was
+made in response to these tooling failures. Probe sources, invocation/compilation
+script, logs, selected test XML and baseline metadata are retained in the local
+evidence archive delivered with this review, outside the Git tree.
+
+The preceding 114/71 incoming, 17/32 remediation and 205 runtime assertions remain
+historical evidence from the previous session; only the executions listed above
+are this final review's independent results. The unchanged full backend suite,
+frontend/browser/E2E, runtime-image upgrade/containment campaigns, all 61 SMTP cases
+and unrelated Batch 7 oracles were skipped: exact-blob preservation, focused real
+PostgreSQL tests (including restricted-role JPA) and real servlet probes sufficiently
+cover this delta. No expensive unchanged deployment campaign adds material closure
+evidence. The prior sampled baseline/order-sensitive SMTP capture failure remains
+qualified: the other 60 cases were not individually adjudicated, and no green full
+backend suite or SMTP production/security clearance is claimed.
+
+### F. Scope and preservation
+
+Compared with 3ab9ee28, SecurityConfig, repository adapters, Course notification
+context providers, notification service/persistence, shared exception handling,
+runtime privilege tooling/r17 matrix, Flyway migrations, dependencies and frontend
+are byte-identical. The two OpenAPI descriptions accurately describe representable
+text errors after admission; no length policy or unrelated API leaf changed.
+Against current main, SecurityConfig still adds only the exact four CT30 bindings.
+No main advance invalidated prior evidence. Earlier supported full-scope IN06
+conclusions remain applicable within their recorded limits; five checkpoints and
+IN21/FE13 boundaries are preserved. Historical records are retained unchanged.
+
+### G. New findings
+
+No new actionable finding was established within the reviewed delta. No production
+or meaningful test remediation remains necessary for these three findings.
+
+### H. Delivery and remaining gates
+
+Only this appended docs/testing.md record is delivered. The task-specific metadata
+arrangement is explicitly retained: original author/committer fields were verified
+from 79fb206bf900702538ba566799cd0638422d4b82 as tihh647-ui <tihh647@gmail.com>;
+Codex performed the independent review. Command-scoped Git identity preserves those
+fields without changing global configuration or asserting contributor performance,
+approval, legal identity or a signature. Authenticated CLI and connected GitHub
+profile identify chi-thanh-nguyen. PR #303 records the evidence-only delivery SHA
+and remote/body readback, with production/tests/API byte equality to b6887e23.
+
+Immediately before evidence-only delivery, PR #303 was OPEN, MERGEABLE and BLOCKED
+with REVIEW_REQUIRED; no submitted reviews or review threads existed. Required
+checks on b6887e23, including Backend, Frontend, E2E, all required VM jobs and CodeQL,
+were successful; SonarCloud's check was successful. Open CodeQL alerts queried for
+the PR merge ref were empty. Sonar success is a hosted check, not an independent
+issue-by-issue Sonar audit. Live main-quality-gates and main-merge-authority were
+read. These results do not transfer automatically to a later documentation commit;
+required current-HEAD checks/scanning remain a separate integration gate.
+
+Eligible independent CODEOWNER approval, required final-HEAD CI/scanning, resolved
+threads and protected up-to-date squash integration remain. IN21 Admin orchestration/
+audit and FE13 consumer/browser acceptance remain downstream; operational/release/
+deployment grants remain separate. No workflow was dispatched or awaited, formal
+GitHub approval submitted, Issue closed, Project field changed, merge performed,
+release published, deployment run or operational grant executed. The automated
+technical review cycle is closed for the reviewed code; those gates do not justify
+another precautionary code-review cycle.
