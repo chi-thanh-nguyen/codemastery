@@ -1064,21 +1064,64 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
             jdbc.update("INSERT INTO quiz_questions VALUES (?,?,?,3)", UUID.randomUUID(), id, q2);
         }
 
+        /** AS18-IR-03: every {@link CoverageWorkerRun} of this test, registered once its workers exist. */
+        final List<CoverageWorkerRun> workerRuns = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        /**
+         * AS18-IR-03: the outer teardown obeys the same quiescence gate as {@link CoverageWorkerRun}. It first
+         * settles every registered run (closing one the test never closed). If any run's workers are not
+         * confirmed quiescent, it deletes nothing and records an isolation loss, so later integration tests in
+         * this JVM fail closed. Otherwise it deletes, in one bounded committed transaction, the rows of any run
+         * fixture that was not cleaned and then the primary fixture; a failure rolls that whole transaction back
+         * and also records an isolation loss. Tests without worker runs keep the same deletes, now atomic.
+         */
         @org.junit.jupiter.api.AfterEach
         void deleteAttemptFixtures() {
             org.springframework.security.core.context.SecurityContextHolder.clearContext();
-            jdbc.update("DELETE FROM attempt_answers WHERE attempt_id IN (SELECT a.id FROM attempts a JOIN quizzes q ON q.id=a.quiz_id WHERE q.course_id=?)", courseId);
-            jdbc.update("DELETE FROM attempts WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=?)", courseId);
-            jdbc.update("DELETE FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=?)", courseId);
-            jdbc.update("DELETE FROM quizzes WHERE course_id=?", courseId);
-            jdbc.update("DELETE FROM questions WHERE skill_id=?", skillId);
-            jdbc.update("DELETE FROM skills WHERE id=?", skillId);
-            jdbc.update("DELETE FROM enrollments WHERE course_id=?", courseId);
-            jdbc.update("DELETE FROM courses WHERE id=?", courseId);
-            for (UUID id : List.of(owner,learner,foreignLearner,admin)) {
-                jdbc.update("DELETE FROM refresh_sessions WHERE user_id=?", id);
-                jdbc.update("DELETE FROM users WHERE id=?", id);
+            List<Throwable> failures = new ArrayList<>();
+            boolean quiescent = true;
+            for (var run : workerRuns) quiescent &= run.settleForTeardown(failures);
+            if (!quiescent) {
+                throw isolationLost("AS18 outer fixture cleanup withheld: worker quiescence was not established", failures);
             }
+            try {
+                fixtureTransaction(() -> {
+                    jdbc.update("DELETE FROM attempt_answers WHERE attempt_id IN (SELECT a.id FROM attempts a JOIN quizzes q ON q.id=a.quiz_id WHERE q.course_id=?)", courseId);
+                    jdbc.update("DELETE FROM attempts WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=?)", courseId);
+                    for (var run : workerRuns) {
+                        if (run.lifecycle != WorkerRunLifecycle.CLEANED) run.fixture.deleteOwnedRows();
+                    }
+                    jdbc.update("DELETE FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=?)", courseId);
+                    jdbc.update("DELETE FROM quizzes WHERE course_id=?", courseId);
+                    jdbc.update("DELETE FROM questions WHERE skill_id=?", skillId);
+                    jdbc.update("DELETE FROM skills WHERE id=?", skillId);
+                    jdbc.update("DELETE FROM enrollments WHERE course_id=?", courseId);
+                    jdbc.update("DELETE FROM courses WHERE id=?", courseId);
+                    for (UUID id : List.of(owner,learner,foreignLearner,admin)) {
+                        jdbc.update("DELETE FROM refresh_sessions WHERE user_id=?", id);
+                        jdbc.update("DELETE FROM users WHERE id=?", id);
+                    }
+                });
+            } catch (RuntimeException | Error failure) {
+                List<Throwable> all = new ArrayList<>(List.of(failure));
+                all.addAll(failures);
+                throw isolationLost("Outer fixture cleanup failed and was rolled back", all);
+            }
+            if (!failures.isEmpty()) {
+                // Cleanup was safe and complete; a run the teardown had to close still failed visibly.
+                var failure = new IllegalStateException("AS18 worker run failed when closed by the outer teardown", failures.getFirst());
+                failures.stream().skip(1).forEach(failure::addSuppressed);
+                throw failure;
+            }
+        }
+
+        /** Builds the distinct teardown failure and records it, so the shared database fails closed. */
+        IllegalStateException isolationLost(String message, List<Throwable> failures) {
+            var failure = new IllegalStateException(message + "; later integration tests in this JVM fail closed",
+                    failures.isEmpty() ? null : failures.getFirst());
+            failures.stream().skip(1).forEach(failure::addSuppressed);
+            recordIsolationLoss(failure);
+            return failure;
         }
 
         void as(UUID user, com.codemastery.modules.auth.domain.model.Role role) {
@@ -1119,6 +1162,9 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
         }
 
         enum CommitAdmission { PENDING, CANCELLED, ADMITTED }
+
+        /** AS18-IR-03: a {@link CoverageWorkerRun}'s cleanup outcome; only QUIESCENT and CLEANED permit cleanup. */
+        enum WorkerRunLifecycle { OPEN, CLOSING, QUIESCENT, CLEANED, WITHHELD }
 
         final class WorkerTransaction {
             volatile CommitAdmission admission = CommitAdmission.PENDING;
@@ -2555,10 +2601,11 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
         /**
          * AS18-IR-01: runs fixture setup or cleanup as one bounded physical transaction that commits before
          * any worker needs its rows, so a failed statement rolls back every earlier fixture statement.
+         * AS18-IR-03: the outer {@code deleteAttemptFixtures} teardown uses the same bounds.
          */
         void fixtureTransaction(Runnable work) {
             assertFalse(TransactionSynchronizationManager.isActualTransactionActive(),
-                    "AS18 fixture work must own and commit its physical transaction");
+                    "Fixture setup or cleanup must own and commit its physical transaction");
             TransactionTemplate tx = new TransactionTemplate(transactionManager);
             tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
             tx.setTimeout(10);
@@ -2627,14 +2674,17 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
              * bounded transaction. Call it only after worker quiescence (see {@link CoverageWorkerRun}).
              */
             @Override public void close() {
-                fixtureTransaction(() -> {
-                    jdbc.update("DELETE FROM quiz_questions WHERE quiz_id=?", hiddenQuiz);
-                    jdbc.update("DELETE FROM quizzes WHERE id=?", hiddenQuiz);
-                    jdbc.update("DELETE FROM questions WHERE id IN (?,?,?,?) OR skill_id IN (?,?)",
-                            unusedTrueFalse, hiddenOnlyMultiple, unusedSingle, foreignQuestion, emptySkill, foreignSkill);
-                    jdbc.update("DELETE FROM skills WHERE id IN (?,?)", emptySkill, foreignSkill);
-                    jdbc.update("DELETE FROM courses WHERE id=?", foreignCourse);
-                });
+                fixtureTransaction(this::deleteOwnedRows);
+            }
+
+            /** The FK-safe deletes of {@link #close()}, for a caller that already owns the bounded transaction. */
+            void deleteOwnedRows() {
+                jdbc.update("DELETE FROM quiz_questions WHERE quiz_id=?", hiddenQuiz);
+                jdbc.update("DELETE FROM quizzes WHERE id=?", hiddenQuiz);
+                jdbc.update("DELETE FROM questions WHERE id IN (?,?,?,?) OR skill_id IN (?,?)",
+                        unusedTrueFalse, hiddenOnlyMultiple, unusedSingle, foreignQuestion, emptySkill, foreignSkill);
+                jdbc.update("DELETE FROM skills WHERE id IN (?,?)", emptySkill, foreignSkill);
+                jdbc.update("DELETE FROM courses WHERE id=?", foreignCourse);
             }
         }
 
@@ -2663,6 +2713,8 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
          * completion checks), then deletes fixture rows only once the executor has terminated, every started worker
          * transaction has completed and no tracked backend has an open transaction, lock wait or lock. Ordering
          * resources in try-with-resources is not enough: Java still closes the fixture after a worker cleanup failure.
+         * AS18-IR-03: the run registers with the enclosing test once its workers exist, and records its outcome in
+         * {@link #lifecycle}, which the outer {@code deleteAttemptFixtures} teardown obeys.
          */
         final class CoverageWorkerRun implements AutoCloseable {
             final CoverageFixture fixture;
@@ -2670,6 +2722,9 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
             final Set<Integer> recoveredPids = new java.util.concurrent.CopyOnWriteArraySet<>();
             volatile boolean fixtureCleanupStarted;
             volatile List<Integer> completionsAtGate;
+            volatile WorkerRunLifecycle lifecycle = WorkerRunLifecycle.OPEN;
+            /** AS18-IR-03 regression seam only: makes the real gate report unconfirmed quiescence. */
+            volatile boolean forceUnconfirmedQuiescence;
             private boolean closed, interrupted;
             private IllegalStateException cleanupFailure;
 
@@ -2682,6 +2737,8 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                     throw failure;
                 }
                 workers = created;
+                // Registered before any worker can be submitted, so every later exit reaches the outer gate.
+                workerRuns.add(this);
             }
 
             @Override public synchronized void close() {
@@ -2690,6 +2747,7 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                     return;
                 }
                 closed = true;
+                lifecycle = WorkerRunLifecycle.CLOSING;
                 interrupted = Thread.interrupted();
                 List<Throwable> failures = new ArrayList<>();
                 try {
@@ -2698,9 +2756,14 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                     if (!quiescent(failures)) recover(failures);
                     if (quiescent(failures)) {
                         completionsAtGate = workers.transactions.stream().map(outcome -> outcome.completion).toList();
+                        lifecycle = WorkerRunLifecycle.QUIESCENT;
                         fixtureCleanupStarted = true;
-                        try { fixture.close(); } catch (Throwable failure) { failures.add(failure); }
+                        try {
+                            fixture.close();
+                            lifecycle = WorkerRunLifecycle.CLEANED;
+                        } catch (Throwable failure) { failures.add(failure); }
                     } else {
+                        lifecycle = WorkerRunLifecycle.WITHHELD;
                         failures.add(new IllegalStateException("AS18 fixture cleanup withheld: workers are not quiescent"));
                     }
                     if (!failures.isEmpty()) {
@@ -2713,8 +2776,28 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                 }
             }
 
+            /**
+             * AS18-IR-03: settles this run for the outer teardown and reports whether destructive cleanup is safe.
+             * A run the test never closed is closed here (its failure is new and is reported). A run that did not
+             * reach the gate, or withheld its cleanup, is safe only if the real gate now confirms quiescence;
+             * otherwise its cleanup failure explains the withheld outer cleanup. Bounded: {@link #close()} is.
+             */
+            synchronized boolean settleForTeardown(List<Throwable> failures) {
+                if (lifecycle == WorkerRunLifecycle.OPEN) {
+                    try { close(); } catch (Throwable failure) { failures.add(failure); }
+                }
+                if (lifecycle == WorkerRunLifecycle.QUIESCENT || lifecycle == WorkerRunLifecycle.CLEANED) return true;
+                List<Throwable> recheck = new ArrayList<>();
+                if (quiescent(recheck)) return true;
+                failures.addAll(recheck);
+                if (cleanupFailure == null) failures.add(new IllegalStateException("AS18 worker run " + lifecycle + " is not quiescent"));
+                else if (!failures.contains(cleanupFailure)) failures.add(cleanupFailure);
+                return false;
+            }
+
             /** Gate for destructive cleanup: actual termination and database quiescence, never Future cancellation. */
             boolean quiescent(List<Throwable> failures) {
+                if (forceUnconfirmedQuiescence) return false;
                 if (!workers.executor.isTerminated()) return false;
                 if (workers.transactions.stream().anyMatch(outcome -> outcome.completion == null)) return false;
                 try {
@@ -3070,6 +3153,158 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
             assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM questions WHERE prompt='Runaway AS18'", Integer.class));
             assertPrimaryFixtureIntact();
             assertSubsequentCoverageFixtureAndAuthoringWork();
+        }
+
+        /** Every primary-fixture row, as an independent committed read. */
+        int primaryFixtureRows() throws SQLException {
+            return independentCount("SELECT (SELECT count(*) FROM courses WHERE id=?) + (SELECT count(*) FROM skills WHERE id=?)"
+                    + " + (SELECT count(*) FROM questions WHERE id IN (?,?)) + (SELECT count(*) FROM quizzes WHERE id=?)"
+                    + " + (SELECT count(*) FROM quiz_questions WHERE quiz_id=?) + (SELECT count(*) FROM enrollments WHERE course_id=?)"
+                    + " + (SELECT count(*) FROM users WHERE id IN (?,?,?,?))",
+                    courseId, skillId, q1, q2, quizId, quizId, courseId, owner, learner, foreignLearner, admin);
+        }
+
+        static final int PRIMARY_FIXTURE_ROWS = 1 + 1 + 2 + 1 + 2 + 2 + 4;
+
+        @Test
+        void as18Ir03OuterTeardownWithholdsCleanupAndFailsClosedWhileWorkerQuiescenceIsUnconfirmed() throws Exception {
+            assertNull(isolationLoss());
+            var run = new CoverageWorkerRun(1);
+            asOwner();
+            var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            var recorded = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            try {
+                // Simulated lifecycle state, not a stuck PostgreSQL worker: the real close(), gate and teardown run,
+                // but the gate reports unconfirmed quiescence. The worker itself really commits and terminates.
+                run.forceUnconfirmedQuiescence = true;
+                Throwable primary = assertThrows(org.opentest4j.AssertionFailedError.class, () -> {
+                    try (run) {
+                        awaitWorker(run.workers.submit(authoring(authentication, run.fixture.foreignCourse,
+                                run.fixture.foreignSkill, "Withheld AS18", () -> {})), 10, TimeUnit.SECONDS);
+                        org.junit.jupiter.api.Assertions.fail("Injected AS18-IR-03 primary failure");
+                    }
+                });
+                assertEquals(WorkerRunLifecycle.WITHHELD, run.lifecycle);
+                assertFalse(run.fixtureCleanupStarted);
+                assertEquals(1, primary.getSuppressed().length);
+                var runFailure = primary.getSuppressed()[0];
+                assertEquals("AS18 coverage cleanup failed", runFailure.getMessage());
+                assertTrue(java.util.Arrays.stream(runFailure.getSuppressed()).anyMatch(failure ->
+                        "AS18 fixture cleanup withheld: workers are not quiescent".equals(failure.getMessage())));
+                int fixtureRows = run.fixture.ownedRows();
+                assertTrue(fixtureRows > 0);
+
+                // The real JUnit teardown path, invoked directly: it must not bypass the run's withheld cleanup.
+                try { deleteAttemptFixtures(); } catch (Throwable failure) { recorded.set(failure); }
+                Throwable withheld = recorded.get();
+                org.junit.jupiter.api.Assertions.assertNotNull(withheld, "outer teardown ignored an unconfirmed worker run");
+                assertEquals(IllegalStateException.class, withheld.getClass());
+                assertTrue(withheld.getMessage().startsWith(
+                        "AS18 outer fixture cleanup withheld: worker quiescence was not established"), withheld::getMessage);
+                org.junit.jupiter.api.Assertions.assertSame(runFailure, withheld.getCause());
+                org.junit.jupiter.api.Assertions.assertNotSame(primary, withheld);
+                // The primary stays identifiable and still cannot conceal its own cleanup failure.
+                assertThrows(AssertionError.class,
+                        () -> requireExpectedFailure(org.opentest4j.AssertionFailedError.class, primary));
+                assertEquals("Injected AS18-IR-03 primary failure", primary.getMessage());
+
+                // Fail closed: the shared-database guard every later integration test runs now refuses.
+                org.junit.jupiter.api.Assertions.assertSame(withheld, isolationLoss());
+                var refused = assertThrows(IllegalStateException.class,
+                        AssessmentPersistenceIntegrationTest.this::requireSharedPostgresqlIsolation);
+                org.junit.jupiter.api.Assertions.assertSame(withheld, refused.getCause());
+
+                // Nothing destructive ran: independent committed reads still see every row, the worker's included.
+                assertEquals(PRIMARY_FIXTURE_ROWS, primaryFixtureRows());
+                assertEquals(fixtureRows, run.fixture.ownedRows());
+                assertEquals(1, independentCount("SELECT count(*) FROM questions WHERE prompt='Withheld AS18'"));
+                assertWorkerResourcesReleased(run.workers);
+                assertEquals(CommitAdmission.ADMITTED, run.workers.transactions.getFirst().admission);
+                assertEquals(TransactionSynchronization.STATUS_COMMITTED, run.workers.transactions.getFirst().completion);
+                assertTrue(run.recoveredPids.isEmpty());
+            } finally {
+                // Restore the simulated state; the JUnit teardown then re-checks the real gate and cleans every row.
+                run.forceUnconfirmedQuiescence = false;
+                clearSimulatedIsolationLoss(recorded.get());
+            }
+            assertNull(isolationLoss());
+        }
+
+        @Test
+        void as18Ir03OuterTeardownClosesAnUnclosedWorkerRunAndDeletesOnlyOwnedRowsAfterQuiescence() throws Exception {
+            UUID otherOwner = user("instructor"), otherCourse = UUID.randomUUID(), otherSkill = UUID.randomUUID();
+            fixtureTransaction(() -> {
+                jdbc.update("INSERT INTO courses (id,instructor_id,title,description,publication_status,adaptive_enabled) "
+                        + "VALUES (?,?,'Unrelated AS18','Fixture','published',false)", otherCourse, otherOwner);
+                jdbc.update("INSERT INTO skills (id,course_id,name) VALUES (?,?,'Unrelated')", otherSkill, otherCourse);
+            });
+            try {
+                var run = new CoverageWorkerRun(1);
+                asOwner();
+                var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+                UUID written = awaitWorker(run.workers.submit(authoring(authentication, courseId, skillId, "Settled AS18", () -> {})),
+                        10, TimeUnit.SECONDS);
+                // The test leaves without closing the run; registration still brings it to the outer gate.
+                assertEquals(List.of(run), workerRuns);
+                assertEquals(WorkerRunLifecycle.OPEN, run.lifecycle);
+                assertFalse(run.workers.executor.isShutdown());
+
+                deleteAttemptFixtures();
+
+                assertEquals(WorkerRunLifecycle.CLEANED, run.lifecycle);
+                assertEquals(List.of(TransactionSynchronization.STATUS_COMMITTED), run.completionsAtGate);
+                assertWorkerResourcesReleased(run.workers);
+                assertNull(isolationLoss());
+                // Independent committed reads: every owned row is gone, the worker's committed Question included ...
+                assertEquals(0, run.fixture.ownedRows());
+                assertEquals(0, primaryFixtureRows());
+                assertEquals(0, independentCount("SELECT count(*) FROM questions WHERE id=? OR skill_id=?", written, skillId));
+                // ... and another instructor's Course and Skill are untouched.
+                assertEquals(2, independentCount("SELECT (SELECT count(*) FROM courses WHERE id=?) + (SELECT count(*) FROM skills WHERE id=?)",
+                        otherCourse, otherSkill));
+            } finally {
+                fixtureTransaction(() -> {
+                    jdbc.update("DELETE FROM skills WHERE id=?", otherSkill);
+                    jdbc.update("DELETE FROM courses WHERE id=?", otherCourse);
+                    jdbc.update("DELETE FROM users WHERE id=?", otherOwner);
+                });
+            }
+        }
+
+        @Test
+        void as18Ir03FailedOuterCleanupRollsBackAtomicallyAndFailsLaterIntegrationTestsClosed() throws Exception {
+            assertNull(isolationLoss());
+            assertTrue(workerRuns.isEmpty()); // The ordinary teardown path, without any worker run.
+            // The shape of the reported failed-recovery probe: an unowned Skill still references the primary Course.
+            UUID stray = UUID.randomUUID();
+            jdbc.update("INSERT INTO skills (id,course_id,name) VALUES (?,?,'Unowned AS18')", stray, courseId);
+            var recorded = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            try {
+                try { deleteAttemptFixtures(); } catch (Throwable failure) { recorded.set(failure); }
+                Throwable failure = recorded.get();
+                org.junit.jupiter.api.Assertions.assertNotNull(failure, "a failed outer cleanup must not pass");
+                assertTrue(failure.getMessage().startsWith("Outer fixture cleanup failed and was rolled back"), failure::getMessage);
+                SQLException sql = null;
+                for (Throwable current = failure; current != null; current = current.getCause()) {
+                    if (current instanceof SQLException found) sql = found;
+                }
+                org.junit.jupiter.api.Assertions.assertNotNull(sql, () -> "No SQL cause: " + failure);
+                assertEquals("23503", sql.getSQLState());
+                assertTrue(sql.getMessage().contains("fk_skills_course_id"), sql::getMessage);
+
+                org.junit.jupiter.api.Assertions.assertSame(failure, isolationLoss());
+                var refused = assertThrows(IllegalStateException.class,
+                        AssessmentPersistenceIntegrationTest.this::requireSharedPostgresqlIsolation);
+                org.junit.jupiter.api.Assertions.assertSame(failure, refused.getCause());
+                // Atomic: the deletes before the failing DELETE courses (Quiz, memberships, Questions, Skill,
+                // enrollments) were rolled back with it, so no partially deleted fixture is left behind.
+                assertEquals(PRIMARY_FIXTURE_ROWS, primaryFixtureRows());
+                assertEquals(1, independentCount("SELECT count(*) FROM skills WHERE id=?", stray));
+            } finally {
+                jdbc.update("DELETE FROM skills WHERE id=?", stray);
+                clearSimulatedIsolationLoss(recorded.get());
+            }
+            assertNull(isolationLoss());
         }
 
         <T> T inTransaction(boolean readOnly, int isolation, java.util.function.Supplier<T> action) {

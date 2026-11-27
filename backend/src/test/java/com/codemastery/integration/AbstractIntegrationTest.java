@@ -1,6 +1,7 @@
 package com.codemastery.integration;
 
 import com.codemastery.CodeMasteryApplication;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -11,6 +12,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.nio.file.Path;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Shared Spring Boot and PostgreSQL foundation for concrete integration tests.
@@ -50,5 +52,35 @@ public abstract class AbstractIntegrationTest {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
+    }
+
+    /** First failure after which committed, FK-safe fixture cleanup could not be established in this JVM. */
+    private static final AtomicReference<Throwable> ISOLATION_LOSS = new AtomicReference<>();
+
+    /**
+     * Fail closed for the shared database. A test whose committed cleanup was withheld or rolled back records
+     * that failure here, so every later integration test in this JVM, in any class, fails instead of running
+     * against a database whose isolation is no longer established. Nothing resets the database.
+     */
+    protected static void recordIsolationLoss(Throwable cause) {
+        ISOLATION_LOSS.compareAndSet(null, cause);
+    }
+
+    /** Only for a qualification test that simulated a loss: clears exactly that recorded failure. */
+    protected static boolean clearSimulatedIsolationLoss(Throwable simulated) {
+        return simulated != null && ISOLATION_LOSS.compareAndSet(simulated, null);
+    }
+
+    protected static Throwable isolationLoss() {
+        return ISOLATION_LOSS.get();
+    }
+
+    @BeforeEach
+    protected void requireSharedPostgresqlIsolation() {
+        Throwable loss = ISOLATION_LOSS.get();
+        if (loss != null) {
+            throw new IllegalStateException("Shared PostgreSQL isolation was lost earlier in this JVM; "
+                    + "this integration result is invalid", loss);
+        }
     }
 }
