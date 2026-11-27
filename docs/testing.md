@@ -13539,3 +13539,151 @@ AS18-IR-02 are `FIXED_AUTHOR_VERIFIED`, not independently verified. Still open: 
 narrow independent delta review, Assessment/Adaptive CODEOWNER review, required
 hosted CI and CodeQL, protected squash merge, the AD08/AD13 consumers, QA03/QA04,
 release and deployment.
+
+## AS18 targeted test remediation (AS18-IR-03) and author self-audit — 28 November 2026
+
+Scope: AS18 #164 in PR #307, under the Project Leader's “Targeted Test Remediation —
+AS18-IR-03” instruction. Test-only: `AssessmentPersistenceIntegrationTest.java` and
+the shared `AbstractIntegrationTest.java`. This is an author self-audit with AI
+assistance (Claude Code), not an independent review.
+
+**Review baseline.** Two independent reviews of `0feaddd` disagreed. Codex returned
+`REQUEST_CHANGES`: AS18-IR-01 `VERIFIED_FIXED`, AS18-IR-02 and AS18-R06
+`PARTIALLY_FIXED`, and a new P2, AS18-IR-03. It ran 31 PostgreSQL cases, excluding the
+non-cooperative worker case, and found no production defect. Claude Code returned
+`APPROVE_AFTER_GATES` with IR-01, IR-02 and R06 `VERIFIED_FIXED` (32/0, then 18/0).
+Its failed-recovery probe finished in about 15.4 s, but the outer teardown then
+failed on `fk_skills_course_id`. The Project Leader decided to remediate AS18-IR-03:
+a bounded probe does not prove isolation when cleanup stays incomplete. AS18-IR-01
+stays independently `VERIFIED_FIXED` and AS18-R01 to R05 stay closed. Final closure
+of AS18-IR-02 and AS18-R06 depends on this remediation. No unbounded outer-teardown
+hang was reproduced.
+
+**AS18-IR-03 (P2) root cause.** The AS18-IR-02 gate covered only part of the
+cleanup. `CoverageWorkerRun.close()` withheld its own fixture cleanup when workers
+were not quiescent. JUnit then ran `TimedAttemptRuntime.deleteAttemptFixtures()`,
+which did not know the run's outcome. It deleted the primary Course's attempts,
+quizzes, questions, Skill, enrollments, Course, sessions and users in separate
+autocommit statements. Those deletes could race a live worker or wait on its locks.
+They could also stop at an FK, because the withheld fixture's Skill and hidden Quiz
+belong to the primary Course. The rows deleted before the FK stayed deleted. The
+per-JVM shared database was then partly deleted, and later classes could still use
+it.
+
+**Remediation.**
+
+- Registration: `CoverageWorkerRun` registers with the enclosing test as soon as its
+  workers exist, before any worker can be submitted. It records a `lifecycle`:
+  `OPEN`, `CLOSING`, `QUIESCENT` (gate passed), `CLEANED` (fixture deleted) or
+  `WITHHELD`. Only `QUIESCENT` and `CLEANED` permit cleanup.
+- Gated teardown: `deleteAttemptFixtures()` first settles every registered run. It
+  closes a run the test never closed and reports that failure as new. For a run
+  that withheld its cleanup or never reached the gate, it re-checks the same real
+  gate: executor terminated, every transaction completed, and no tracked backend
+  transaction, lock wait or lock. A cancelled Future never counts. If quiescence
+  is still not confirmed, the teardown deletes nothing and throws a distinct
+  `AS18 outer fixture cleanup withheld` failure caused by the run's own cleanup
+  failure.
+- Bounded and atomic: otherwise the teardown runs one `fixtureTransaction`
+  (10 s, `lock_timeout` 5 s, `statement_timeout` 8 s). In it, the same FK-ordered
+  deletes remove the rows of any run fixture not yet `CLEANED`, then the primary
+  fixture. A failure rolls the whole transaction back, so no partly deleted fixture
+  remains. Tests without worker runs keep the same deletes, now atomic and bounded.
+- Fail closed: both a withheld and a rolled-back outer cleanup record the failure
+  through `AbstractIntegrationTest.recordIsolationLoss`. The container is shared per
+  JVM, so the base class's `@BeforeEach requireSharedPostgresqlIsolation` then fails
+  every later integration test in that JVM, in any class. Each such failure carries
+  the original failure as its cause, so the run cannot pass. Nothing truncates,
+  resets the context or stops the JVM. Only a qualification test that simulated a
+  loss clears it, and only that exact failure (`clearSimulatedIsolationLoss`).
+- Unchanged: `AttemptWorkers`, the AS18-IR-02 gate and recovery, the
+  `STATUS_UNKNOWN` handling and all existing oracles.
+
+**Regression oracles (real PostgreSQL).** Each new case calls the real JUnit methods,
+`deleteAttemptFixtures()` and `requireSharedPostgresqlIsolation()`, directly.
+
+- `as18Ir03OuterTeardownWithholdsCleanupAndFailsClosedWhileWorkerQuiescenceIsUnconfirmed`
+  uses a test-only seam (`forceUnconfirmedQuiescence`) so the real gate reports
+  unconfirmed quiescence. The worker is not actually blocked: it really commits a
+  Question and terminates. The run withholds its cleanup (`WITHHELD`). The outer
+  teardown then deletes nothing: independent reads still see all 13 primary rows,
+  every fixture row and the worker's Question. Its failure is distinct from the
+  primary, is caused by the run's cleanup failure and is recorded as the isolation
+  loss, and the guard refuses with it as cause. The primary
+  (`Injected AS18-IR-03 primary failure`) still cannot conceal its cleanup failure.
+  The seam and the recorded loss are then restored. The JUnit teardown re-checks the
+  real gate and removes every row.
+- `as18Ir03OuterTeardownClosesAnUnclosedWorkerRunAndDeletesOnlyOwnedRowsAfterQuiescence`:
+  a run is left unclosed after a committed same-Course worker write. The teardown
+  closes it (`CLEANED`, `STATUS_COMMITTED` at the gate, resources released). It
+  removes every primary and fixture row and the worker's Question, records no loss,
+  and leaves another instructor's Course and Skill untouched.
+- `as18Ir03FailedOuterCleanupRollsBackAtomicallyAndFailsLaterIntegrationTestsClosed`
+  takes the ordinary path, with no worker run. An unowned Skill in the primary
+  Course makes `DELETE courses` fail (`23503`, `fk_skills_course_id`), the failed
+  probe's shape. All 13 primary rows survive, including those deleted earlier in the
+  same transaction. The failure is recorded and the guard refuses with it as cause.
+
+**Executed commands (macOS, Docker 29.8.1, Testcontainers PostgreSQL, JDK 25.0.4.1;
+`-Djacoco.skip=true`).** Tested working tree: `0feaddd` plus this remediation, the
+tree committed as the remediation commit.
+
+```bash
+cd backend
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true \
+  '-Dit.test=AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#as18*+failureBeforeBlockerCommit*+cleanupFailureCannotQualify*+rollbackAndCloseFailures*+jdbcCompletionWait*'
+# -> 35/0/0/0: 21 as18* (18 existing incl. the non-cooperative worker case, 3 new)
+#    and 14 AS08 AttemptWorkers qualification cases
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true
+# -> 757/0/0/0 across all integration classes (TimedAttemptRuntime 100/0/0/0), BUILD SUCCESS, 3 min 24 s
+# Mutants (temporary, restored byte-identically by checksum), '#as18Ir03*' only:
+#   M3 previous unconditional autocommit teardown -> 3/3 detected; the withheld case
+#      reproduces the reported fk_skills_course_id teardown failure
+#   M4 outer teardown ignores the run outcome -> withheld case fails
+#   M5 no isolation-loss recording -> withheld and rolled-back cases fail
+```
+
+Counts are run/failures/errors/skipped. The production source, unit tests
+(`QuestionBankServiceTest`, `AttemptServiceTest`), migrations, OpenAPI, decisions
+including ADR007 §17, the runtime privilege matrix and all other non-test files are
+byte-identical to `0feaddd`. Not run, by risk: the 191 unit tests, because no
+production or unit-test file changed; the frontend, E2E, VM and release suites;
+hosted CI was not awaited.
+
+**Self-audit.**
+
+1. The outer teardown deletes nothing unless every registered run is confirmed
+   quiescent.
+2. No exit can bypass registration. A run registers before its first submission, and
+   an unclosed run is closed by the teardown.
+3. A cancelled Future never authorizes cleanup.
+4. No cleanup failure is lost. A withheld or rolled-back cleanup throws and is
+   recorded. A run that the teardown closed throws after a safe cleanup.
+5. After a loss, every later integration test in the JVM errors.
+6. Every outer cleanup step is bounded.
+7. Successful and ordinary cleanup pass across the full integration suite.
+8. `AttemptWorkers` and the 14 AS08 cases are unchanged and pass.
+
+Residuals, accepted:
+
+- AS08 cases that use `AttemptWorkers` without a `CoverageWorkerRun` are not
+  quiescence-gated, which is outside AS18-IR-03. Their outer cleanup is now bounded
+  and atomic and fails closed.
+- Teardown failures in other integration classes do not record a loss. Only the
+  guard is shared.
+- The fail-closed guard covers the classes that extend `AbstractIntegrationTest`.
+  `SharedRestInfrastructureIntegrationTest` uses no database.
+
+Provenance: this remediation was made by the Project Leader with AI assistance
+(Claude Code). Under the recorded agreement, it carries the contributor identity
+used by every PR-exclusive commit. Verdict:
+**AS18_IR03_TARGETED_TEST_REMEDIATION_COMPLETE_AUTHOR_VERIFIED**. AS18-IR-03 is
+`FIXED_AUTHOR_VERIFIED`, not independently verified. AS18-IR-02 and AS18-R06 are
+remediated within author verification, and their independent closure is pending.
+Still open:
+
+- a final micro-delta independent review;
+- Assessment/Adaptive CODEOWNER review, plus Leader review of the
+  `AbstractIntegrationTest` change;
+- required hosted CI and CodeQL, and the protected squash merge;
+- AD08/AD13, QA03/QA04, release and deployment.
