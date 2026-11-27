@@ -53,6 +53,14 @@ public class QuestionRepositoryImpl implements QuestionRepository {
     }
 
     @Override
+    public List<Question> findAllInSkills(Collection<UUID> skillIds) {
+        return skillIds.isEmpty() ? List.of()
+                : jpaRepository.findAllInSkills(skillIds).stream()
+                        .map(QuestionRepositoryImpl::toDomain)
+                        .toList();
+    }
+
+    @Override
     public List<Question> findPageInSkills(Collection<UUID> skillIds, int page, int size) {
         if (skillIds.isEmpty()) {
             return List.of();

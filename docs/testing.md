@@ -13321,3 +13321,369 @@ defect. Verdict: **AS17_CODE_COMPLETE_AUTHOR_VERIFIED** (Assessment producer cod
 tests). Separate and still open: CO16/AD16 producers, IN12 `PlatformMetricsService`
 composition and REST, FE23 UI, QA06 execution of B7-O11 end to end, independent
 CODEOWNER review, required hosted CI, protected squash merge, release and deployment.
+
+## AS18 conditional tagged-question coverage completion and author self-audit — 28 November 2026
+
+Scope: AS18 #164 in PR #307, under the Project Leader's “AS18 Full Implementation
+Completion, Bounded Upstream Remediation, and Final Self-Audit of PR #307”
+instruction. Author self-audit with AI assistance (Claude Code), not independent
+CODEOWNER review. Incoming PR HEAD `afc6731` (a concurrent contributor fix `0d23575`
+landed during the work and is kept unchanged); integrated with `main` `6c9c193`.
+Production/test revision for every result below: `e6b2c6a`.
+
+**Effective contracts.** `CT40-COVERAGE-2026-11-08-r1` (ADR005 §3.3),
+`CT40-SKILL-TAG-2026-11-08-r1` (§3.2), ADR005 §5/§13.3 guard semantics, ADR011 §4
+step 6 and §12 execution scope (B6-V09), `AS08-ANCESTRY-2026-11-26-r1` (ADR007 §16)
+and the one bounded new decision **`AS18-EXEC-COVERAGE-2026-11-28-r1`** (ADR007 §17,
+`DELEGATED_APPROVED`): `QuestionBankService.readCoverageForExecution` is the second
+and last direct caller of `SkillGraphService.requireAssessmentSkillsInCourse`, only
+after the execution scope is verified, because Course-wide readiness asks for skills
+no frozen Quiz captured.
+
+**Implemented boundaries** (existing `QuestionBankService`, no REST, no migration):
+
+| Boundary | Behavior |
+|---|---|
+| `CoverageSnapshot(UUID courseId, Map<UUID, Long> questionCounts)` | Nested, deeply immutable, no null key/value, nonnegative counts, no answer keys |
+| `readCoverage(courseId, skillIds)` | Null Course → `IllegalArgumentException`; only an owner REPEATABLE READ snapshot (its own or joined) or the Course-root READ COMMITTED write unit is accepted, else safe 500 before any query; then CT03 ownership, null set/element rejection, empty → empty map, CT40 `readSkillIds` scope with the same safe 404 for foreign/unknown skills, exact requested keys with explicit zeros |
+| `readCoverageForExecution(courseId, skillIds)` | `AttemptService.requireExecutionScope` first (actual read-write READ COMMITTED transaction, Assessment-private marker for this Course on this thread and physical transaction); no actor; empty → empty map without queries; ancestry through the §17 caller, a foreign skill is safe 500 |
+| Population (both) | Every stored Question of each requested skill, all kinds and difficulties, used or unused, hidden or published membership, counted once by ID; a row failing V004/data-model §11, a null provider result, a row of an unrequested skill or a repeated ID is an integrity failure, never a zero |
+| `QuestionRepository.findAllInSkills` | Assessment-private JPQL over its own `questions` table; materializes rows because a count-only query cannot detect malformed definitions |
+
+**Upstream dependencies.** AS01/AS05 question persistence and validation, AD07
+`readSkillIds` and the AS08 ancestry assertion, CO14 `withCourseConfigurationWrite`,
+AS08 execution marker and AS12 synchronous publication were sufficient; no upstream
+code was added. The AD07-owned change is the §17 caller and one Javadoc line in
+`SkillGraphService` (about 1% of AD07's scope).
+
+**Findings and dispositions.** AS18-R01 (P2) confirmed: the incoming PostgreSQL test
+updated a `true_false` row in violation of `ck_questions_true_false` and leaked its
+extra skill (reproduced at `afc6731`: `DataIntegrityViolationException`, suppressed FK
+cleanup failure); fixed by the contributor in `0d23575` and by new cases that corrupt a
+`single_choice` option to blank, which V004 stores and data-model §11 rejects. AS18-R02
+(P2) confirmed: the package-private `AttemptService` bridge satisfied the file
+allowlist without authorizing Course-wide input provenance; replaced by the §17
+decision and a direct call, removing the bridge. AS18-R03 (P2) confirmed: the
+annotation could silently join a read-only READ COMMITTED or read-write REPEATABLE
+READ context and read a mixed view; fixed by the context check (proven with the real
+`JpaTransactionManager`). AS18-R04 (P3) confirmed: the 5-argument constructor plus a
+compatibility constructor left `attemptService` null in reachable code; removed with
+the bridge (no dependency remains, the bean graph is acyclic). AS18-R05 (P3)
+confirmed: the incoming allowlist used string search and bare file names; replaced by
+the existing AST scanner with exact paths (`requireAssessmentSkillsInCourse`,
+`requireExecutionScope`, `readCoverageForExecution`, API-package bans). AS18-R06:
+covered by the PostgreSQL cases below; no privilege change was needed. New nit, not
+changed: the shared assertion's internal message still says “Quiz evidence” for a
+foreign coverage skill (safe 500, never exposed).
+
+**Executed commands (macOS, Docker 29.8.1, Testcontainers PostgreSQL, JDK 25).**
+
+```bash
+cd backend
+# Incoming HEAD afc6731: the incoming AS18 PostgreSQL test
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+  '-Dit.test=AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#as18CoverageReadsEnforceCt40ScopeExecutionMarkerIntegrityAndZeroCountsInPostgresql'
+# -> 1/0/1/0 (ck_questions_true_false), BUILD FAILURE
+# Final revision e6b2c6a
+./mvnw -B verify '-Dtest=QuestionBankServiceTest*,AttemptServiceTest*' '-Dit.test=AssessmentPersistenceIntegrationTest*'
+# -> unit 191/0/0/0 (QuestionBankServiceTest 111 incl. 23 AS18, AttemptServiceTest 80),
+#    PostgreSQL 84/0/0/0 (5 as18* cases), BUILD SUCCESS
+# Pre-merge tree 1f95aaf: AuthorizationIntegrationTest$QuestionBankEndpoints 9/0/0/0
+# Mutants (reverted): context check removed; execution-scope check removed;
+#   stored-row validation removed; ancestry call removed -> each fails the AS18 unit
+#   suite and at least one as18* PostgreSQL case; an extra readCoverageForExecution
+#   caller in SkillGraphService fails the AST allowlist
+```
+
+Counts are run/failures/errors/skipped. PostgreSQL oracles: B1-O05 (reuse counted
+once, unused and hidden-only members count, requested zero-count skill present,
+foreign skill 404, corrupt row fails closed); the AS18 part of B1-O04 (a guarded
+readiness read holds the Course root, a same-Course `create` waits on it — observed in
+`pg_stat_activity` from an independent connection — and lands after commit, while
+another Course's `create` commits meanwhile); B6-V09 (no transaction, owner snapshot,
+plain read-write READ COMMITTED, Course configuration guard and learner write guard
+without the marker, wrong-Course marker, another thread, `REQUIRES_NEW`,
+`NOT_SUPPORTED`, after return, after a listener failure with the Attempt still
+unsubmitted; unit probes inside `start` and answer-save callbacks); positive reads in
+manual submission and actorless `finalizeExpired`; a corrupt stored row makes the
+execution read fail the whole submission; both reads run under a role granted only
+the `infrastructure/vm/deploy.sh` runtime matrix. Not run, by risk: the full backend
+suites, E2E, frontend, VM and release suites; hosted CI was not awaited.
+
+**Self-audit and remaining gates.** A fresh pass over the final diff against `main`
+found no further actionable AS18 defect. Limitation: a read-write READ COMMITTED
+caller cannot prove from Assessment that it holds the Course root, so AD08 must call
+`readCoverage` inside `withCourseConfigurationWrite` for a readiness decision (ADR005
+§5). Verdict: **AS18_CODE_COMPLETE_AUTHOR_VERIFIED** (Assessment provider code and
+tests). Separate and still open: AD08 settings/enablement consumer, AD13 execution
+consumer, QA03/QA04 whole-flow evidence, independent CODEOWNER review, required
+hosted CI, protected squash merge, release and deployment.
+
+## AS18 targeted test remediation (AS18-IR-01, AS18-IR-02) and author self-audit — 28 November 2026
+
+Scope: AS18 #164 in PR #307, under the Project Leader's “Targeted Test Remediation —
+AS18-IR-01 & AS18-IR-02” instruction. Test-only: one file,
+`AssessmentPersistenceIntegrationTest.java`. This is an author self-audit with AI
+assistance (Claude Code), not an independent review. The independent review of
+`c03bf2d` (`6fce59d` after the metadata normalization below) returned
+`REQUEST_CHANGES` for the two P2 findings. Its other dispositions are unchanged and
+remain the reviewer's: AS18-R01 to R05 `VERIFIED_FIXED`, and R06 `PARTIALLY_FIXED`
+because of these two findings.
+
+| Finding | Root cause | Remediation |
+|---|---|---|
+| AS18-IR-01 (P2) | The `CoverageFixture` constructor ran each insert in its own autocommit statement under `NOT_SUPPORTED`. When a statement failed, the earlier rows stayed committed, and try-with-resources never called `close()` on the unconstructed object. The reviewer reproduced this with a `23514` failure on `Hidden only`: an extra Skill and the foreign Course remained, and teardown then failed on `fk_skills_course_id`. | `fixtureTransaction` runs setup in one bounded physical transaction: `READ COMMITTED`, 10 s timeout, `SET LOCAL lock_timeout`/`statement_timeout`. It asserts that it owns that transaction and commits before any worker starts. Cleanup deletes every row the fixture owns, FK-safely, in one bounded transaction, including Questions that workers authored in the fixture's skills. The first AS18 case's extra rows use the same transaction. |
+| AS18-IR-02 (P2) | `as18GuardedReadiness…` closed the fixture before shutting down the executor. A worker that timed out while holding a Course root therefore left `DELETE courses` waiting without a bound, and a later Question insert hit `fk_questions_skill_id`. | The authors now run through the existing `AttemptWorkers`, unchanged, which provides physical transaction ownership, PID tracking, `PENDING`/`CANCELLED`/`ADMITTED` commit admission and bounded termination. `CoverageWorkerRun.close()` calls `AttemptWorkers.close()` first: stop admission, release the blocker, cancel, then wait at most 10 s. Fixture rows are deleted only after the executor has terminated, every started worker transaction has completed, and no tracked backend has an open transaction, a lock wait or a lock. The decision depends on this gate, not on whether close succeeded or a Future was cancelled. If quiescence cannot be established, a bounded recovery terminates only this run's tracked worker backends that still hold a transaction or lock wait, then waits up to 5 s. The recovery is always reported as a failure, and fixture cleanup is withheld if the workers are still not quiescent. |
+
+The shared AS08 `assertWorkerResourcesReleased` helper now excludes its own backend
+(`pid<>pg_backend_pid()`). The connection pool can hand the probe a worker's
+returned connection, and the probe then reported its own statement as a leaked
+transaction. This was observed once during this work. A worker connection that is
+still in use cannot be handed out, so the exclusion does not weaken the check.
+
+**Regression oracles (real PostgreSQL).**
+`as18FailedCoverageFixtureSetupRollsBackEveryFixtureRowAndKeepsTheCourseUsable`
+injects a real `ck_questions_kind` (`23514`) failure inside the setup transaction
+after each of six milestones: extra Skill, foreign Course, foreign Skill, first
+Question, hidden Quiz and first membership. Each case first observes that the
+fixture's rows are visible inside the transaction. It then checks, through
+independent reads, that none survives, that the AS08 Course is intact (exactly one
+owned Course, its Skill, q1/q2 and its Quiz), that a new fixture, an owner coverage
+read and a guarded authoring call succeed, and that the outer teardown passes.
+`as18WorkerFailurePathsAreBoundedAndCleanFixturesOnlyAfterWorkerQuiescence` covers:
+
+- D1: a timeout while a worker holds the foreign Course root (`FOR UPDATE NOWAIT` → `55P03`) and an uncommitted Question.
+- D2: a worker action failure after a write.
+- D3: a main-thread failure while a same-Course worker waits for the root.
+- D4: interruption, with the flag preserved.
+- D6: a blocker rollback fault that the expected primary cannot conceal (`IR296` under `AS18 coverage cleanup failed`).
+
+Each D case requires a bound under 20 s, `CANCELLED`/`STATUS_ROLLED_BACK`, no FK
+failure in the worker, rolled-back completions recorded at the gate, no worker
+Question, no fixture row, released resources (`assertWorkerResourcesReleased`) and
+a later usable Course.
+
+`as18FixtureCleanupWaitsForAnAdmittedWorkerCommitBeforeDeletingFixtureRows` (D5) has
+a worker admitted before cancellation and holds its real commit on an advisory
+lock. While that commit is held, the cancelled Future, the alive closer, the intact
+foreign Course and the absent row prove that cleanup has not started. After
+release, the commit completes (`STATUS_COMMITTED` at the gate) before the committed
+Question is deleted with its fixture Skill.
+
+`as18NonCooperativeWorkerIsTerminatedBeforeFixtureCleanupAndCannotPass` has a worker
+that removes its own timeouts. The test shows that recovery terminates only its
+tracked PID, that the primary carries `AS08 workers exceeded the cleanup deadline`
+plus the recovery failure, and that cleanup runs only afterwards. The success-path
+oracle is unchanged: the same-Course `create` waits on the holder (observed from an
+independent connection), the other Course commits meanwhile, the snapshot is stable
+while the root is held, and coverage is fresh afterwards. Both workers end
+`ADMITTED`/`STATUS_COMMITTED`.
+
+**Executed commands (macOS, Docker 29.8.1, Testcontainers PostgreSQL, JDK 25;
+`-Djacoco.skip=true` for focused runs).** Tested revision: `26389e7`, tree
+`862225a`. Its metadata-normalized successor `5e22a57` has the identical tree,
+so the results apply to it unchanged.
+
+```bash
+cd backend
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true \
+  '-Dit.test=AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#as18*+failureBeforeBlockerCommit*+cleanupFailureCannotQualify*+rollbackAndCloseFailures*+jdbcCompletionWait*'
+# -> 32/0/0/0: 18 as18* (5 existing + 13 new) and 14 AS08 AttemptWorkers qualification cases
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true \
+  '-Dit.test=AssessmentPersistenceIntegrationTest*'
+# -> 97/0/0/0 (84 previous + 13 new), BUILD SUCCESS
+# as18* repeated twice more -> 18/0/0/0 each; runaway case about 10.2 s by design, others under 0.4 s
+# Mutants (temporary, restored byte-identically):
+#   M1 setup without the transaction -> all 6 setup-failure cases fail (1 to 9 leaked rows)
+#   M2 fixture cleanup before worker quiescence (pre-remediation order) -> D1 fails
+#      (5 s lock timeout surfaces as a concealed cleanup failure) and D5 fails
+#      (cleanup never reaches the worker gate); both runs stayed bounded
+```
+
+Counts are run/failures/errors/skipped. The production source, migrations,
+OpenAPI and decisions are byte-identical to `c03bf2d`. This includes
+`QuestionBankService`, `CoverageSnapshot`, ADR007 §17, CT40 semantics, runtime
+privileges, and the AS08, AS12 and AS17 code. Not run, by risk: the 191 unit tests,
+because no production or unit-test file changed; the full backend, frontend, E2E,
+VM and release suites; hosted CI was not awaited. The pre-remediation failures
+were not re-run on `c03bf2d`. M1 and M2 rebuild that behavior under the new
+oracles instead.
+
+**Metadata normalization.** The Project Leader confirmed mutual consent with
+`minhtan29042006`. On that basis, the Git author and committer of every
+PR-exclusive commit now carry that contributor's existing commit identity. Only
+the identity fields, and the parent links that follow from them, changed: trees,
+messages, dates, parent order and the main-side merge parent `6c9c193` are
+preserved. No commit was signed before or after. The two contributor commits are
+byte-identical. Provenance remains as before: `afc6731` and `0d23575` are the
+contributor's own work. The other commits, including this remediation, were made
+by the Project Leader with AI assistance (Claude Code) and carry the contributor
+identity only by this agreement. Pushed by `chi-thanh-nguyen`.
+
+| Before | After | Before | After |
+|---|---|---|---|
+| `afc6731` | `afc6731` | `2888cb2` | `8df2f81` |
+| `0d23575` | `0d23575` | `e6b2c6a` | `4dcb2ae` |
+| `1936891` | `d0461e3` | `c03bf2d` | `6fce59d` |
+| `54c8db2` | `875416a` | `26389e7` | `5e22a57` |
+| `1f95aaf` | `d9ce39a` | | |
+
+**Self-audit and remaining gates.** A fresh pass over the final delta found no
+remaining actionable instance of either finding and no new regression. One
+residual is accepted rather than fixed: a fixture leaks only if the worker pool
+itself cannot be created, or if the D5 or runaway test cannot obtain its holder
+connection. Both are infrastructure failures, and the outer teardown then fails
+visibly on an FK instead of passing. Verdict:
+**AS18_TARGETED_TEST_REMEDIATION_COMPLETE_AUTHOR_VERIFIED**. AS18-IR-01 and
+AS18-IR-02 are `FIXED_AUTHOR_VERIFIED`, not independently verified. Still open: a
+narrow independent delta review, Assessment/Adaptive CODEOWNER review, required
+hosted CI and CodeQL, protected squash merge, the AD08/AD13 consumers, QA03/QA04,
+release and deployment.
+
+## AS18 targeted test remediation (AS18-IR-03) and author self-audit — 28 November 2026
+
+Scope: AS18 #164 in PR #307, under the Project Leader's “Targeted Test Remediation —
+AS18-IR-03” instruction. Test-only: `AssessmentPersistenceIntegrationTest.java` and
+the shared `AbstractIntegrationTest.java`. This is an author self-audit with AI
+assistance (Claude Code), not an independent review.
+
+**Review baseline.** Two independent reviews of `0feaddd` disagreed. Codex returned
+`REQUEST_CHANGES`: AS18-IR-01 `VERIFIED_FIXED`, AS18-IR-02 and AS18-R06
+`PARTIALLY_FIXED`, and a new P2, AS18-IR-03. It ran 31 PostgreSQL cases, excluding the
+non-cooperative worker case, and found no production defect. Claude Code returned
+`APPROVE_AFTER_GATES` with IR-01, IR-02 and R06 `VERIFIED_FIXED` (32/0, then 18/0).
+Its failed-recovery probe finished in about 15.4 s, but the outer teardown then
+failed on `fk_skills_course_id`. The Project Leader decided to remediate AS18-IR-03:
+a bounded probe does not prove isolation when cleanup stays incomplete. AS18-IR-01
+stays independently `VERIFIED_FIXED` and AS18-R01 to R05 stay closed. Final closure
+of AS18-IR-02 and AS18-R06 depends on this remediation. No unbounded outer-teardown
+hang was reproduced.
+
+**AS18-IR-03 (P2) root cause.** The AS18-IR-02 gate covered only part of the
+cleanup. `CoverageWorkerRun.close()` withheld its own fixture cleanup when workers
+were not quiescent. JUnit then ran `TimedAttemptRuntime.deleteAttemptFixtures()`,
+which did not know the run's outcome. It deleted the primary Course's attempts,
+quizzes, questions, Skill, enrollments, Course, sessions and users in separate
+autocommit statements. Those deletes could race a live worker or wait on its locks.
+They could also stop at an FK, because the withheld fixture's Skill and hidden Quiz
+belong to the primary Course. The rows deleted before the FK stayed deleted. The
+per-JVM shared database was then partly deleted, and later classes could still use
+it.
+
+**Remediation.**
+
+- Registration: `CoverageWorkerRun` registers with the enclosing test as soon as its
+  workers exist, before any worker can be submitted. It records a `lifecycle`:
+  `OPEN`, `CLOSING`, `QUIESCENT` (gate passed), `CLEANED` (fixture deleted) or
+  `WITHHELD`. Only `QUIESCENT` and `CLEANED` permit cleanup.
+- Gated teardown: `deleteAttemptFixtures()` first settles every registered run. It
+  closes a run the test never closed and reports that failure as new. For a run
+  that withheld its cleanup or never reached the gate, it re-checks the same real
+  gate: executor terminated, every transaction completed, and no tracked backend
+  transaction, lock wait or lock. A cancelled Future never counts. If quiescence
+  is still not confirmed, the teardown deletes nothing and throws a distinct
+  `AS18 outer fixture cleanup withheld` failure caused by the run's own cleanup
+  failure.
+- Bounded and atomic: otherwise the teardown runs one `fixtureTransaction`
+  (10 s, `lock_timeout` 5 s, `statement_timeout` 8 s). In it, the same FK-ordered
+  deletes remove the rows of any run fixture not yet `CLEANED`, then the primary
+  fixture. A failure rolls the whole transaction back, so no partly deleted fixture
+  remains. Tests without worker runs keep the same deletes, now atomic and bounded.
+- Fail closed: both a withheld and a rolled-back outer cleanup record the failure
+  through `AbstractIntegrationTest.recordIsolationLoss`. The container is shared per
+  JVM, so the base class's `@BeforeEach requireSharedPostgresqlIsolation` then fails
+  every later integration test in that JVM, in any class. Each such failure carries
+  the original failure as its cause, so the run cannot pass. Nothing truncates,
+  resets the context or stops the JVM. Only a qualification test that simulated a
+  loss clears it, and only that exact failure (`clearSimulatedIsolationLoss`).
+- Unchanged: `AttemptWorkers`, the AS18-IR-02 gate and recovery, the
+  `STATUS_UNKNOWN` handling and all existing oracles.
+
+**Regression oracles (real PostgreSQL).** Each new case calls the real JUnit methods,
+`deleteAttemptFixtures()` and `requireSharedPostgresqlIsolation()`, directly.
+
+- `as18Ir03OuterTeardownWithholdsCleanupAndFailsClosedWhileWorkerQuiescenceIsUnconfirmed`
+  uses a test-only seam (`forceUnconfirmedQuiescence`) so the real gate reports
+  unconfirmed quiescence. The worker is not actually blocked: it really commits a
+  Question and terminates. The run withholds its cleanup (`WITHHELD`). The outer
+  teardown then deletes nothing: independent reads still see all 13 primary rows,
+  every fixture row and the worker's Question. Its failure is distinct from the
+  primary, is caused by the run's cleanup failure and is recorded as the isolation
+  loss, and the guard refuses with it as cause. The primary
+  (`Injected AS18-IR-03 primary failure`) still cannot conceal its cleanup failure.
+  The seam and the recorded loss are then restored. The JUnit teardown re-checks the
+  real gate and removes every row.
+- `as18Ir03OuterTeardownClosesAnUnclosedWorkerRunAndDeletesOnlyOwnedRowsAfterQuiescence`:
+  a run is left unclosed after a committed same-Course worker write. The teardown
+  closes it (`CLEANED`, `STATUS_COMMITTED` at the gate, resources released). It
+  removes every primary and fixture row and the worker's Question, records no loss,
+  and leaves another instructor's Course and Skill untouched.
+- `as18Ir03FailedOuterCleanupRollsBackAtomicallyAndFailsLaterIntegrationTestsClosed`
+  takes the ordinary path, with no worker run. An unowned Skill in the primary
+  Course makes `DELETE courses` fail (`23503`, `fk_skills_course_id`), the failed
+  probe's shape. All 13 primary rows survive, including those deleted earlier in the
+  same transaction. The failure is recorded and the guard refuses with it as cause.
+
+**Executed commands (macOS, Docker 29.8.1, Testcontainers PostgreSQL, JDK 25.0.4.1;
+`-Djacoco.skip=true`).** Tested working tree: `0feaddd` plus this remediation, the
+tree committed as the remediation commit.
+
+```bash
+cd backend
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true \
+  '-Dit.test=AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#as18*+failureBeforeBlockerCommit*+cleanupFailureCannotQualify*+rollbackAndCloseFailures*+jdbcCompletionWait*'
+# -> 35/0/0/0: 21 as18* (18 existing incl. the non-cooperative worker case, 3 new)
+#    and 14 AS08 AttemptWorkers qualification cases
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true
+# -> 757/0/0/0 across all integration classes (TimedAttemptRuntime 100/0/0/0), BUILD SUCCESS, 3 min 24 s
+# Mutants (temporary, restored byte-identically by checksum), '#as18Ir03*' only:
+#   M3 previous unconditional autocommit teardown -> 3/3 detected; the withheld case
+#      reproduces the reported fk_skills_course_id teardown failure
+#   M4 outer teardown ignores the run outcome -> withheld case fails
+#   M5 no isolation-loss recording -> withheld and rolled-back cases fail
+```
+
+Counts are run/failures/errors/skipped. The production source, unit tests
+(`QuestionBankServiceTest`, `AttemptServiceTest`), migrations, OpenAPI, decisions
+including ADR007 §17, the runtime privilege matrix and all other non-test files are
+byte-identical to `0feaddd`. Not run, by risk: the 191 unit tests, because no
+production or unit-test file changed; the frontend, E2E, VM and release suites;
+hosted CI was not awaited.
+
+**Self-audit.**
+
+1. The outer teardown deletes nothing unless every registered run is confirmed
+   quiescent.
+2. No exit can bypass registration. A run registers before its first submission, and
+   an unclosed run is closed by the teardown.
+3. A cancelled Future never authorizes cleanup.
+4. No cleanup failure is lost. A withheld or rolled-back cleanup throws and is
+   recorded. A run that the teardown closed throws after a safe cleanup.
+5. After a loss, every later integration test in the JVM errors.
+6. Every outer cleanup step is bounded.
+7. Successful and ordinary cleanup pass across the full integration suite.
+8. `AttemptWorkers` and the 14 AS08 cases are unchanged and pass.
+
+Residuals, accepted:
+
+- AS08 cases that use `AttemptWorkers` without a `CoverageWorkerRun` are not
+  quiescence-gated, which is outside AS18-IR-03. Their outer cleanup is now bounded
+  and atomic and fails closed.
+- Teardown failures in other integration classes do not record a loss. Only the
+  guard is shared.
+- The fail-closed guard covers the classes that extend `AbstractIntegrationTest`.
+  `SharedRestInfrastructureIntegrationTest` uses no database.
+
+Provenance: this remediation was made by the Project Leader with AI assistance
+(Claude Code). Under the recorded agreement, it carries the contributor identity
+used by every PR-exclusive commit. Verdict:
+**AS18_IR03_TARGETED_TEST_REMEDIATION_COMPLETE_AUTHOR_VERIFIED**. AS18-IR-03 is
+`FIXED_AUTHOR_VERIFIED`, not independently verified. AS18-IR-02 and AS18-R06 are
+remediated within author verification, and their independent closure is pending.
+Still open:
+
+- a final micro-delta independent review;
+- Assessment/Adaptive CODEOWNER review, plus Leader review of the
+  `AbstractIntegrationTest` change;
+- required hosted CI and CodeQL, and the protected squash merge;
+- AD08/AD13, QA03/QA04, release and deployment.
