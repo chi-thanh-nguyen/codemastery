@@ -42,6 +42,24 @@ No browser/private draft persistence or backend authorization change is added.
 Controlled production-composition regressions assert actual mutation counts,
 read-only presentation, current recovery, obsolete success and navigation.
 
+**Causal eligibility clarification — FE16-R-B01, 27 November 2026.** The
+Project Leader explicitly authorizes this smallest task-local refinement of this
+same persistence decision. Reviewed baseline is `d4867a38c82b9d4f071ee78e5cb90db29261181f`
+(tree `08b99e15c2dede59b9eb60f9672efbb3430bbc30`), with main/merge-base
+`fe3160d535b33652587e14e2fc55ca267f6a5222`. A settled decoded success must be newer
+than the denial **and reach the latest scheduled Course-read floor**, alongside
+the existing current-owner, settled-success and cancellation rules. A real late
+Settings PUT acknowledgment can schedule B before B's effect starts, while A
+is still current. Success A at sequence 3 must not erase refusal when the floor
+is already 4; pending/transient B cannot undo that refusal. Eligible B success
+still clears it, without replay. `successfulRead >= scheduledRead.current` adds
+this missing condition; no owner-read or Settings lifetime change is needed.
+Coalesced calls still target actual next initiation, not one sequence per call.
+The original unmodified causal probe fails before and passes after the change;
+see testing. R-B01 is the residual R-A01/IR-02 subcase. Author disposition is
+`FIXED_AUTHOR_VERIFIED`, with independent closure reserved for the next reviewer.
+All other decisions and historical evidence below retain their original scope.
+
 ### `FE16-EXACT-DEADLINE-2026-11-27-r1`
 
 The existing assessment API module owns the bounded `parseAssignmentDeadline`

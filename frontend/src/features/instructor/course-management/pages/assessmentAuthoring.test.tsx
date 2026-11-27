@@ -26,10 +26,16 @@ import { instantMicros, localInputToRfc3339, resolveDeadlineIso, sameAssignment,
 
 import type { SharedCourseContextState } from '../hooks/useCourseEditor';
 let sharedProbe: SharedCourseContextState;
+// Observe the real owner without replacing its state or scheduling algorithm.
+let causalReads: { reads: number; success: number; floor?: number; refusal?: 403 | 404; blocked: boolean }[] | null = null;
 vi.mock('../hooks/useCourseEditor', async original => {
     const actual = await original<typeof import('../hooks/useCourseEditor')>();
     return { ...actual, useSharedCourseState: (courseId: string) => {
-        const state = actual.useSharedCourseState(courseId); sharedProbe = state; return state;
+        const state = actual.useSharedCourseState(courseId); sharedProbe = state;
+        causalReads?.push({ reads: vi.mocked(getOwnedCourse).mock.calls.length, success: state.course.successfulRead,
+            floor: state.settingsAcknowledgment?.reconcileAfter, refusal: state.course.assignmentRefusal,
+            blocked: state.course.assignmentWritesBlocked!() });
+        return state;
     } };
 });
 // Simulates an independent consumer/read while a write is pending, without bypassing the new write barrier.
@@ -2222,5 +2228,176 @@ describe('FE16-R-A02 and R-A03 exact boundary consumers', () => {
         const handoff = document.querySelector<HTMLAnchorElement>('a[aria-label="Grade: Loops Lab"]')!;
         const query = new URL(handoff.href).searchParams;
         expect(query.get('courseId')).toBe(courseId); expect(query.get('assignmentId')).toBe(assignmentId);
+    });
+});
+
+
+// FE16-R-B01: keep the original reviewer's UI path and outside-act network ordering.
+describe('FE16-R-B01 causally eligible refusal recovery', () => {
+    const actEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean };
+    afterEach(() => { causalReads = null; actEnvironment.IS_REACT_ACT_ENVIRONMENT = true; });
+
+    async function pendingSettings() {
+        causalReads = [];
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        let finish!: (body: OwnedCourse) => void;
+        vi.mocked(updateOwnedCourse).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+        await mountApp(`/teach/courses/${courseId}/settings`);
+        await type('Course title', 'Acknowledged later'); await click('Save changes');
+        expect(updateOwnedCourse).toHaveBeenCalledTimes(1);
+        await click('Assessments');
+        await click('Leave', confirmDialog('Leave without saving?'));
+        await click('Assignments');
+        return () => finish(ownedCourseFixture({ title: 'Acknowledged later' }));
+    }
+
+    async function lessonRetry() {
+        const alert = [...document.querySelectorAll<HTMLElement>('[role="alert"]')]
+            .find(node => node.textContent?.includes("Lessons couldn't be loaded."))!;
+        await click('Try again', alert);
+    }
+
+    async function lateSettingsRecovery(finishSettings: () => void, ordering: 'before' | 'after', status: 403 | 404) {
+        let finishA!: (body: OwnedCourse) => void, finishB!: (body: OwnedCourse) => void, failB!: (error: unknown) => void;
+        vi.mocked(getOwnedCourse).mockReturnValueOnce(new Promise(resolve => { finishA = resolve; }))
+            .mockReturnValueOnce(new Promise((resolve, reject) => { finishB = resolve; failB = reject; }));
+        await lessonRetry();
+        expect(getOwnedCourse).toHaveBeenCalledTimes(3);
+        const aOptions = vi.mocked(getOwnedCourse).mock.calls[2][1]!;
+        if (ordering === 'before') {
+            let atA: { reads: number; current: boolean | undefined } | undefined;
+            // These are network settlements, intentionally outside act. Preserve React's ordinary
+            // scheduling gap: Settings schedules B, then A resolves before B's effect starts.
+            actEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
+            try {
+                finishSettings();
+                queueMicrotask(() => {
+                    atA = { reads: vi.mocked(getOwnedCourse).mock.calls.length, current: aOptions.isCurrent?.() };
+                    finishA(ownedCourseFixture());
+                });
+                await vi.waitFor(() => expect(getOwnedCourse).toHaveBeenCalledTimes(4));
+            } finally { actEnvironment.IS_REACT_ACT_ENVIRONMENT = true; }
+            expect(atA).toEqual({ reads: 3, current: true });
+            // The earlier success was actually accepted in the pre-initiation render. A test
+            // accidentally letting B start first must fail this oracle, even if refusal survives.
+            const acceptedA = causalReads!.filter(read => read.reads === 3 && read.success === 3 && read.floor === 4);
+            expect(acceptedA.length).toBeGreaterThan(0);
+            expect(acceptedA.every(read => read.refusal === status && read.blocked)).toBe(true);
+        } else {
+            await act(async () => finishSettings());
+            expect(getOwnedCourse).toHaveBeenCalledTimes(4);
+            expect(aOptions.isCurrent?.()).toBe(false);
+            await act(async () => finishA(ownedCourseFixture()));
+            expect(sharedProbe.course.successfulRead).toBe(0);
+        }
+        expect(getOwnedCourse).toHaveBeenCalledTimes(4);
+        expect(aOptions.signal?.aborted).toBe(true);
+        expect(sharedProbe.course.loading).toBe(true);
+        expect(sharedProbe.course.assignmentRefusal).toBe(status);
+        expect(sharedProbe.course.assignmentWritesBlocked?.()).toBe(true);
+        expect(field('Instructions').disabled).toBe(true);
+        expect(text()).toContain(status === 403 ? "You don't have access to this course." : "This course isn't available.");
+        return { finishB, failB };
+    }
+
+    it.each([
+        { ordering: 'before' as const, status: 403 as const, outcome: '503' },
+        { ordering: 'after' as const, status: 403 as const, outcome: '503' },
+        { ordering: 'before' as const, status: 404 as const, outcome: 'network' },
+        { ordering: 'before' as const, status: 403 as const, outcome: 'protocol' },
+        { ordering: 'before' as const, status: 404 as const, outcome: 'success' },
+    ])('actual late Settings: A $ordering B initiation; refusal $status; B $outcome', async ({ ordering, status, outcome }) => {
+        const finishSettings = await pendingSettings();
+        vi.mocked(createAssignment).mockRejectedValue(http(404));
+        vi.mocked(getOwnedCourse).mockRejectedValueOnce(http(status));
+        await click('New assignment');
+        await type('Assignment title', 'Private creation'); await type('Instructions', '# Private');
+        await type('Deadline', '2027-01-02T12:30'); await choose('Related lesson', 'While Loops');
+        await click('Create assignment'); await settle(3);
+        expect(createAssignment).toHaveBeenCalledTimes(1);
+        expect(sharedProbe.course.assignmentRefusal).toBe(status);
+        const { finishB, failB } = await lateSettingsRecovery(finishSettings, ordering, status);
+        // B is still pending: retained A data cannot authorize any mutation or erase refusal.
+        expect(createAssignment).toHaveBeenCalledTimes(1);
+        if (outcome === 'success') {
+            await act(async () => finishB(ownedCourseFixture()));
+            expect(sharedProbe.course.successfulRead).toBe(4);
+            expect(sharedProbe.course.assignmentRefusal).toBeUndefined();
+            expect(sharedProbe.course.assignmentWritesBlocked?.()).toBe(false);
+            expect(sharedProbe.writesBlocked()).toBe(false);
+            expect(sharedProbe.settingsAcknowledgment).toBeNull();
+            expect(field('Instructions').disabled).toBe(false);
+            expect(createAssignment).toHaveBeenCalledTimes(1); // no automatic replay
+            vi.mocked(createAssignment).mockResolvedValueOnce(assignment());
+            vi.mocked(readOwnedAssignment).mockResolvedValueOnce(assignment());
+            await click('Create assignment');
+            expect(createAssignment).toHaveBeenCalledTimes(2);
+        } else {
+            await act(async () => failB(outcome === '503' ? http(503) : new ApiError(outcome as 'network' | 'protocol', 'Unavailable')));
+            expect(sharedProbe.course.loading).toBe(false);
+            expect(sharedProbe.course.successfulRead).toBe(ordering === 'before' ? 3 : 0);
+            expect(sharedProbe.course.assignmentRefusal).toBe(status);
+            expect(sharedProbe.course.assignmentWritesBlocked?.()).toBe(true);
+            expect(field('Instructions').disabled).toBe(true);
+            expect(field('Instructions').value).toBe('# Private');
+            expect(text()).toContain(status === 403 ? "You don't have access to this course." : "This course isn't available.");
+            const create = buttons().find(node => node.textContent?.trim() === 'Create assignment');
+            if (create) await click('Create assignment');
+            expect(createAssignment).toHaveBeenCalledTimes(1);
+            const unload = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(unload);
+            expect(unload.defaultPrevented).toBe(true);
+            await click('Back to assignments'); await click('Stay', confirmDialog('Leave without saving?'));
+            expect(field('Instructions').value).toBe('# Private');
+        }
+        expect(getOwnedCourse).toHaveBeenCalledTimes(4);
+    });
+
+    it.each(['save', 'publish', 'hide'])('keeps %s ineligible after late Settings schedules B and B503, including open confirmations', async action => {
+        const finishSettings = await pendingSettings();
+        vi.mocked(readOwnedAssignment).mockResolvedValue(assignment({ publicationStatus: action === 'hide' ? 'published' : 'hidden' }));
+        await act(async () => navigateProbe(`/teach/courses/${courseId}/assignments/${assignmentId}`));
+        await flush();
+        const name = action === 'save' ? 'Save changes' : action === 'publish' ? 'Publish assignment' : 'Hide assignment';
+        if (action === 'save') await type('Assignment title', 'Private retained edit');
+        else await click(name);
+        const button = find(name, action === 'save' ? document : confirmDialog(name + '?'));
+        const handler = (button as any)[Object.keys(button).find(key => key.startsWith('__reactProps'))!].onClick;
+        vi.mocked(getOwnedCourse).mockRejectedValueOnce(http(403));
+        await refreshSharedCourse();
+        const { failB } = await lateSettingsRecovery(finishSettings, 'before', 403);
+        await act(async () => failB(http(503)));
+        await act(async () => handler());
+        expect(replaceAssignment).not.toHaveBeenCalled();
+        expect(setAssignmentPublication).not.toHaveBeenCalled();
+        expect(sharedProbe.course.assignmentRefusal).toBe(403);
+        expect(field('Instructions').disabled).toBe(true);
+        expect(buttons().some(node => node.textContent?.trim() === 'Open grading')).toBe(false);
+        expect(getOwnedCourse).toHaveBeenCalledTimes(4);
+    });
+
+    it('coalesces repeated schedules at the reachable next-read floor and permits explicit recovery', async () => {
+        vi.mocked(getOwnedSkillGraph).mockResolvedValue(graphOf());
+        await mountApp(`/teach/courses/${courseId}/assignments/new`);
+        await type('Assignment title', 'Retained'); await type('Instructions', '# Keep'); await type('Deadline', '2027-01-02T12:30');
+        const button = find('Create assignment');
+        const handler = (button as any)[Object.keys(button).find(key => key.startsWith('__reactProps'))!].onClick;
+        vi.mocked(getOwnedCourse).mockRejectedValueOnce(http(404)).mockRejectedValueOnce(http(503)).mockResolvedValueOnce(ownedCourseFixture());
+        await refreshSharedCourse();
+        await act(async () => {
+            expect(sharedProbe.course.reload()).toBe(3);
+            expect(sharedProbe.course.revalidate()).toBe(3);
+            expect(sharedProbe.course.reload()).toBe(3);
+            expect(sharedProbe.course.assignmentWritesBlocked?.()).toBe(true);
+            handler();
+        });
+        expect(getOwnedCourse).toHaveBeenCalledTimes(3);
+        expect(sharedProbe.course.assignmentRefusal).toBe(404);
+        expect(createAssignment).not.toHaveBeenCalled();
+        await lessonRetry();
+        expect(getOwnedCourse).toHaveBeenCalledTimes(4);
+        expect(sharedProbe.course.successfulRead).toBe(4);
+        expect(sharedProbe.course.assignmentRefusal).toBeUndefined();
+        expect(sharedProbe.course.assignmentWritesBlocked?.()).toBe(false);
+        expect(createAssignment).not.toHaveBeenCalled();
     });
 });

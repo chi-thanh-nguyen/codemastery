@@ -1,5 +1,111 @@
 # Testing
 
+## FE16-R-B01 causal refusal recovery — 27 November 2026
+
+Refs #201, PR #270. Reviewed baseline `d4867a38c82b9d4f071ee78e5cb90db29261181f`,
+tree `08b99e15c2dede59b9eb60f9672efbb3430bbc30`; main/merge-base
+`fe3160d535b33652587e14e2fc55ca267f6a5222`. All six published commits remain ancestors.
+Authority: the Project Leader's explicit R-B01 implementation, focused testing,
+verification-record update and direct incremental publication instruction.
+OpenAI Codex implemented and author-verified this correction. Git attribution to
+heizseung does not establish personal implementation, signing or independent review.
+The complete latest independent report and its original causal/26-case probes
+were recovered and read; none is claimed unavailable or independently superseded.
+
+### Negative control and correction
+
+Before production edits the **unmodified original causal probe** ran on the exact
+reviewed source: **2 PASS / 1 FAIL / 0 SKIP**. Actual UI Settings Save (PUT pending)
+→ Assessments → Leave → Assignments → New assignment → related-Lesson Create404
+→ Course403 → Lessons Try again (A pending). The late Settings PUT resolves outside
+act, schedules floor 4 through acknowledgeSettings/revalidateCourse, then a queued
+microtask resolves A while GET count=3 and A.isCurrent()=true. A is accepted with
+successfulRead=3, refusal disappears; B starts at 4 and fails503. Read-only=false,
+assignmentWritesBlocked=false, explicit Create produces **POST 2, expected 1**.
+The paired A-after-B-initiation and coalesced scheduling controls passed.
+
+The same unmodified probe after correction: **3 PASS / 0 FAIL / 0 SKIP**. In the
+pre-initiation render success=3/floor=4 now retains refusal403 and the write barrier;
+after B503 read-only=true and actual POST count remains **1**. The production delta
+adds only scheduled-floor eligibility to the existing denial-clear predicate.
+Identity, decoded-success, error/loading and owner-read currentness remain in force.
+No added GET, retry, mutation replay or parallel state owner is introduced.
+
+Nine durable regressions live in the existing assessmentAuthoring suite. They
+preserve the actual late Settings UI path and outside-act network settlement,
+assert accepted A **before** B initiation (a changed scheduling order cannot pass),
+and cover 403/404, B pending/network/protocol/503 versus eligible B success, actual
+Create/Save/Publish/Hide request counts, open confirmation handlers, grading
+availability, retained drafts, Stay/unload and repeated/coalesced scheduling.
+Eligible success4 clears refusal and Settings reconciliation, permits explicit
+Create, and sends nothing automatically. Coalesced reload/revalidate/reload all
+return floor3 and issue one GET; explicit success4 recovers without a permanent lock.
+Before the production fix these durable cases gave **7 FAIL / 2 PASS** at the
+in-gap refusal oracle. The original POST-count failing assertion is retained in
+external evidence. Existing regressions cover ordinary recovery, initial transient
+failures, direct-write refusal, missing/present Lesson, obsolete success,
+same-owner child remount/draft disposal, Course/session replacement and sign-out.
+
+### Executed verification and applicability
+
+Node 24.21.0, Vitest 5.0.5. Locked dependencies reused in an isolated clone after
+package-lock equality; no package/configuration changes. Commands from repository root:
+
+```sh
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx -t 'FE16-R-B01|FE16-R-A01|FE16-IR Course refusal|grading handoff' --maxWorkers=1 --testTimeout=15000
+# 45 PASS / 0 FAIL / 144 deliberately unselected; includes all nine new cases.
+
+npm --prefix frontend test -- src/features/instructor/course-management/pages/fe16CausalIndependent.probe.test.tsx src/features/instructor/course-management/pages/fe16DeltaIndependent.probe.test.tsx --maxWorkers=1 --testTimeout=15000 --reporter=verbose
+# 29 PASS / 0 FAIL / 0 SKIP: original causal3 plus unmodified prior26.
+# Temporary probe files were moved outside the checkout before publication.
+
+npm --prefix frontend test -- src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/routes/index.test.tsx -t 'owner list reads|U2:|D1-R1|D1-R2|FE14-IR-01|owner read|Course.*read|Settings|D1|N3|N4|N5|N6|grading|Assignment|assignment' --maxWorkers=1 --testTimeout=15000
+# 45 PASS / 0 FAIL / 231 deliberately unselected; files disjoint from above.
+
+npm --prefix frontend run build
+# Typecheck and production build PASS; existing chunk-size advisory only.
+```
+
+These final selections total 119 executed cases across disjoint files. Repeated
+runs/filters are not added. The source bytes are bound to the final commit in the
+external delivery manifest; documentation-only updates do not alter tested source.
+Early author test runs exposed incomplete fixtures for the successful Create's
+follow-up read (and an expected second 404 legitimately scheduling GET5); the final
+fixture returns an acknowledged creation and its route read, keeping the exact
+four-GET oracle. Typecheck required a typed test-only React act-environment flag.
+Neither correction changes production scheduling or weakens a refusal assertion.
+
+FE14/FE15 shared acknowledgment, mutation obligations, floors and owner-read source
+remain byte-identical. Both S19 Grade/Open grading handoffs pass in the selected
+committed tests. FE17 production and FE13 are untouched; AS12/backend remains equal
+to integrated main. Deadline API/parser, exact intent/editor/native fallback,
+formatter, E2E source, contracts, routes and browser matrix are byte-identical to
+reviewed HEAD. IR-01/IR-03/R-A02/R-A03 independent dispositions remain applicable.
+Historical independently inspected run [45998514619, job 140503896015](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45998514619/job/140503896015),
+at merge `8120bea9fd8209f35c7c6c4a801c5a921f63fc0e`, tree identical to reviewed
+HEAD: **149 PASS / 0 FAIL / 11 SKIP**, exact boundary scenario passed on Chromium
+desktop/mobile, Firefox desktop and WebKit desktop/mobile, no affected skip.
+This is reused historical evidence, not fresh execution on this incremental commit.
+
+The bounded self-audit traces every Course scheduler (reload, revalidate, Settings
+acknowledgment and shared mutation recovery). Scheduled floor closes the barrier
+synchronously; accepted older A cannot clear refusal, B transient cannot remove
+it, and eligible current B clears it. Coalescing never advances an unreachable
+floor; identity replacement discards refusal under existing owner lifetime rules.
+Default fsck encounters the inherited optional commit-graph cache inconsistency;
+full object fsck with core.commitGraph=false passes and reachable objects are present.
+No source/history cache repair or other session resource change was performed.
+
+Author outcome: **FIXED_AUTHOR_VERIFIED**. No remaining R-B01 defect was reproduced.
+Latest independent REQUEST_CHANGES, R-A01/IR-02 partial acceptance and AC1/4/6 /
+FE16.author dispositions are not independently updated here. Existing formal AC10
+AT/device/zoom/contrast qualification remains. Independent closure, exact-head
+hosted CI, CODEOWNER/QA, protected integration, release and deployment remain separate.
+No new browser/REST stack, five-project matrix, full 460-case selection, unrelated
+frontend/backend/FE17/AS12 suites, CI dispatch/wait, merge or Project/Issue write:
+the unchanged paths have applicable prior evidence; the new causal path is covered
+directly. All historical records below remain unchanged.
+
 ## FE16-R-A01 / R-A02 / R-A03 targeted remediation — 27 November 2026
 
 Refs #201, PR #270. Reviewed/published baseline:

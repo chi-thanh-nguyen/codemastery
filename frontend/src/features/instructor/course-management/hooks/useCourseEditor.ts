@@ -175,7 +175,7 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
     const courseData = courseRead.data?.body ?? null;
     const successfulRead = courseRead.data?.sequence ?? 0;
     // The shell owns this evidence so incidental Assignment editor unmounts do not erase a refusal.
-    // A retained body is never affirmative recovery: only a later, settled, decoded owner GET is.
+    // Recovery must also satisfy any read already scheduled, even before its lifecycle starts.
     const [assignmentDenial, setAssignmentDenial] = useState<{
         identity: string; status: 403 | 404; read: number;
     } | null>(null);
@@ -186,7 +186,8 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
             denial = { identity, status: currentStatus, read: readSequence.current };
             setAssignmentDenial(denial);
         }
-    } else if (denial && !courseRead.loading && !courseRead.error && courseData && successfulRead > denial.read) {
+    } else if (denial && !courseRead.loading && !courseRead.error && courseData
+        && successfulRead > denial.read && successfulRead >= scheduledRead.current) {
         denial = null;
         setAssignmentDenial(null);
     } else if (assignmentDenial && assignmentDenial.identity !== identity) {
