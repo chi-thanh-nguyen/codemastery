@@ -1,4 +1,5 @@
 import { gradingPath } from '../../grading/hooks/useSubmissions';
+import { exactDeadlineUtc, parseAssignmentDeadline } from '../api/assessmentAuthoringApi';
 import { isDestinationLive } from '../../../../routes/routePaths';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -62,10 +63,12 @@ export function localTimeZone(): string {
 }
 
 export function formatDeadlineDisplay(isoString: string): { absolute: string; relative: string } {
-    const date = new Date(isoString);
+    const instant = parseAssignmentDeadline(isoString);
+    const date = instant ? new Date(instant.seconds * 1000) : new Date(isoString);
     if (Number.isNaN(date.getTime())) return { absolute: isoString, relative: '' };
     const timeZone = localTimeZone();
-    const absolute = formatDate(date, {
+    const boundary = instant && (date.getUTCFullYear() === 0 || date.getFullYear() < 1 || date.getFullYear() > 9999);
+    const absolute = boundary ? exactDeadlineUtc(isoString) : formatDate(date, {
         locale: 'en-US',
         options: { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone, timeZoneName: 'short' },
     }) || isoString;
@@ -82,6 +85,14 @@ export function formatDeadlineDisplay(isoString: string): { absolute: string; re
 export interface CourseLessonSource {
     status: 'loading' | 'ready' | 'error';
     data: OwnedCourse | null;
+    /** Current identity-safe owner-read result; absent in legacy presentation-only overrides. */
+    error?: unknown;
+    /** Includes a refresh while the last successful tree remains visible. */
+    loading?: boolean;
+    /** FE16 refusal survives retries and child remounts in the same Course/session owner. */
+    assignmentRefusal?: 403 | 404;
+    /** Reads the current owner barrier, including a retry scheduled before its GET starts. */
+    assignmentWritesBlocked?: () => boolean;
     reload: () => void;
 }
 
