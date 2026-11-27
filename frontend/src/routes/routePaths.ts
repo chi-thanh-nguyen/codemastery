@@ -59,6 +59,8 @@ export const WORKSPACE_ROUTES: RouteObject[] = [
     { id: 'learner', handle: { roles: ['Learner'] }, children: [
         { id: 'learner-home', path: ROUTE_PATHS.LEARNER_HOME },
         { id: 'my-courses', path: ROUTE_PATHS.MY_COURSES },
+        { id: 'learner-assessments', path: ROUTE_PATHS.COURSE_ASSESSMENTS },
+        { id: 'learner-assignment', path: ROUTE_PATHS.COURSE_ASSIGNMENT },
     ] },
     { id: 'notifications', path: ROUTE_PATHS.NOTIFICATIONS, handle: { roles: ['Learner', 'Instructor'] } },
     { id: 'profile', path: ROUTE_PATHS.PROFILE, handle: { protected: true } },
