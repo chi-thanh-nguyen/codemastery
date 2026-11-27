@@ -5837,3 +5837,163 @@ restricted role to prove parent locks and targeted moderation writes. IN21's Adm
 REST/orchestration/audit remains a downstream responsibility. Provisioning on actual
 hosts, independent infrastructure/CODEOWNER review, hosted CI and protected integration
 remain separate gates. Execution results are recorded in `docs/testing.md`.
+
+## CT17 packet-filter verification — 28 November 2026
+
+**Record ID:** `CT17-PFV-2026-11-28-r1`. **Status:** author-performed verification. It
+is not an independent acceptance, QA or security review.
+
+**Scope and authority.** The Project Leader authorized public HTTPS exposure of
+`https://codemastery.app` on `vm-codemastery` in the
+[Issue #70 Leader decision of 28 November 2026](https://github.com/chi-thanh-nguyen/codemastery/issues/70#issuecomment-7229517414).
+That decision makes exposure conditional on a current packet-filter verification
+covering the Azure NSG, the host firewall and Docker, and external checks; this record
+is that verification. It changes no Azure rule, host setting, container, volume,
+certificate, timer or credential. The only network change in this period was made by
+the Leader: the source of NSG rule `Allow-SSH-Admin` was set to the operator's current
+/32, between the probes at 22:23Z and 22:35Z.
+
+All times are UTC on 27 November 2026 (28 November in ICT). The operator's public IPv4
+address is redacted here; it is the single /32 in `Allow-SSH-Admin`.
+
+### Evidence sources
+
+| ID | Source | Time | Integrity |
+| --- | --- | --- | --- |
+| E1 | NSG `vm-codemastery-nsg` export (`az network nsg show`), downloaded by the Leader from Azure Cloud Shell | 22:56Z | `nsg-rules.json`, SHA-256 `7409b6edef1a237b7bb74a6a3f707e57e2aeac29c6bb584bc335926eb97d9de2` |
+| E2 | Effective security rules of NIC `vm-codemastery774` (`az network nic list-effective-nsg`), same source | 22:57Z | `effective-nsg.json`, SHA-256 `6ed228cec8f8e6365fdde2e0ac09f2e261f83d23a710037d854b20344c084575` |
+| E3 | Read-only host inspection over SSH as `azureuser`, pinned ED25519 host key `SHA256:1KMq6OQqC/oTFS0P/wn0rxnM/RqRxawQYV0SXmqxKoU` (equal to the host's own key) | 22:35Z | `ss`, `docker ps`, `ufw`, `iptables`/`ip6tables` (filter and nat), `nft list tables`, `sshd -T`, instance metadata (IMDS) |
+| E4 | `codemastery-ops verify` through the operator transport | 22:36Z | Result `VERIFIED` |
+| E5 | External probes from the operator workstation: TCP connect to ports 22, 80, 443, 3000, 5432, 8080, 8443, 9000 and 9001; HTTPS requests; `cd.py external` | 22:23Z (before the SSH rule change), 23:00Z | — |
+
+The Leader keeps E1 and E2; the hashes identify them. They are not committed, because
+the repository is public and new files need structural approval.
+
+### Azure NSG (E1, E2)
+
+Resource IDs: VM `/subscriptions/72a2b9e9-4347-4912-8c1e-7e927f79ef61/resourceGroups/rg-codemastery/providers/Microsoft.Compute/virtualMachines/vm-codemastery`
+(confirmed by IMDS); NSG `vm-codemastery-nsg` (resource GUID
+`1c08c72d-7f60-4df3-a3e2-c0a101f0d961`), associated with NIC `vm-codemastery774`.
+E2 shows two sources of rules: this NSG at the NIC, and one Azure Virtual Network
+Manager security admin rule. No subnet NSG appears.
+
+Effective inbound rules, in evaluation order:
+
+| Priority | Name | Source | Port | Access |
+| --- | --- | --- | --- | --- |
+| 300 | `Allow-SSH-Admin` | operator /32 | TCP 22 | Allow |
+| 310 | `Allow-HTTPS-Public` | `*` (0.0.0.0/0, ::/0) | TCP 443 | Allow |
+| 65000 | `AllowVnetInBound` (default) | `VirtualNetwork` | all | Allow |
+| 65001 | `AllowAzureLoadBalancerInBound` (default) | `AzureLoadBalancer` (168.63.129.16) | all | Allow |
+| 65500 | `DenyAllInBound` (default) | `*` | all | Deny |
+
+The Internet can therefore reach TCP 443, and TCP 22 only from the operator /32.
+Everything else from the Internet stops at `DenyAllInBound`.
+
+**Internal VNet traffic.** In E2, `VirtualNetwork` resolves to exactly
+`172.16.0.0/16` (the VM's address space; private IP 172.16.0.4) and the platform
+address `168.63.129.16`. No peered, VPN or gateway prefixes appear. `AllowVnetInBound`
+therefore admits **every port** from other addresses in 172.16.0.0/16. This is not
+public Internet exposure, but SSH is reachable from inside the VNet without the /32
+restriction (see finding PF-1).
+
+**Outbound.** The default rules allow VNet and Internet egress. The Network Manager
+rule `DefaultIPv6OutboundDeny` (admin rule collection
+`adminNetworkSecurityGroups/_e41f87a2_d3b40071-81dd-43cb-b245-bbdce50a64d0`, priority 0)
+denies **outbound IPv6** from `::/0` to a fixed list of Microsoft IPv6 /128
+addresses. It is outbound only, so it does not affect inbound exposure. It is also
+currently inert, because the VM has no global IPv6 address (E3) and its NIC has only
+an IPv4 configuration (IMDS). The VM's required egress to GitHub's OIDC key endpoint
+works over IPv4 (HTTP 200 at 22:36Z).
+
+### Host and Docker (E3)
+
+- Listening on non-loopback addresses: only `sshd` on 0.0.0.0:22 and [::]:22, and
+  `docker-proxy` on 0.0.0.0:443. Everything else is loopback-only: systemd-resolved
+  on port 53, chrony on port 323, plus the DHCP client on eth0 UDP 68.
+- Containers: `frontend` publishes `0.0.0.0:443->8080/tcp`. `backend` (8080), `postgres`
+  (5432) and `minio` publish nothing; `minio-init` has exited (0).
+- UFW is **inactive**. The iptables `INPUT` policy is ACCEPT, so the host adds no
+  source filtering, and the NSG is the only source restriction for 22 and 443.
+- `FORWARD` policy DROP. The only accepted new inbound forward is `DOCKER`:
+  `-d 172.18.0.2/32 ! -i br-… -o br-… -p tcp --dport 8080 -j ACCEPT` (the frontend).
+  Other traffic into either bridge is dropped, and `DOCKER-USER` is empty.
+- NAT: `DOCKER ! -i br-… -p tcp --dport 443 -j DNAT --to-destination 172.18.0.2:8080`
+  is the only DNAT rule.
+- IPv6: there is no global address, and `ip6tables` has no DNAT or accept rules for
+  the containers.
+- `sshd`: public-key authentication only (`passwordauthentication no`); root is
+  limited to keys.
+- The deployment identity `cmdeploy` has one key, `SHA256:aoS/YF4Pm2dWhGb32AP739pN7xGTVlu2kmUuC4PNPDQ`,
+  bound to `restrict,command="/usr/local/sbin/codemastery-ssh-gate"`.
+
+### Deployment state (E4)
+
+- `v0.1.0-rc.2`, source `84d10a3202ef96b0230eff6c22db060a08bcc02d`, deployed
+  2026-11-24T00:45:19Z.
+- All five container image identities equal the release. Flyway is `CURRENT`
+  (V001–V009).
+- Backend readiness (private health endpoint) is `UP`. The served certificate equals
+  the installed one (SHA-256 `05bb3c6e…d669`, valid until 2027-02-01).
+- No hold and no capture. The capture and TLS-renewal timers are `disabled`.
+- Feature behavior is not verified here.
+
+### External checks (E5)
+
+| Port | 22:23Z (operator address not yet admitted) | 23:00Z (operator address admitted) |
+| --- | --- | --- |
+| 22 | timeout | open |
+| 443 | open: trusted chain for `codemastery.app`, `GET /` 200 | open: same |
+| 80, 5432, 8080, 9000, 9001 | timeout | timeout |
+| 3000, 8443 | — | timeout |
+
+The 22:23Z column shows the /32 restriction in effect against a non-admitted Internet
+source. HTTPS to the bare IP address fails the TLS handshake, because ingress rejects
+other host names. Paths outside `/api` serve the SPA document: `/actuator/health`
+returns the frontend's `index.html`, not backend health. `/api/actuator/health` and
+`/api/` return the backend's 401 problem response. Backend health, MinIO and the
+container port 8080 are not reachable from the Internet.
+
+### Result against the Issue #70 boundary
+
+| Condition | Result |
+| --- | --- |
+| TCP 443 public only through the frontend Nginx TLS ingress, `/api` same-origin | **Satisfied**: E1/E2 rule 310, E3 (only `docker-proxy` 443 → frontend 8080), E5 |
+| TCP 22 only from authorized operator /32 or a temporary run /32 | **Satisfied for Internet sources**: rule 300, E5 at 22:23Z. **Not satisfied inside the VNet**: `AllowVnetInBound` (finding PF-1) |
+| PostgreSQL, MinIO, backend, internal 8080, admin and health endpoints not publicly exposed | **Satisfied**: no host publishing (E3), `DenyAllInBound` (E2), E5 |
+| No public 80, 5432, 8080, 9000, 9001 or other service ports | **Satisfied**: E2 and E5 |
+
+### Findings
+
+- **PF-1: SSH reachable from the VNet (open, Leader disposition required).**
+  - `AllowVnetInBound` (65000) admits TCP 22, and every other port, from
+    172.16.0.0/16. The host adds no filter.
+  - Only `sshd` (key-only) and the 443 ingress listen, so no internal service is
+    exposed. SSH is the only port the Issue #70 boundary restricts.
+  - Not exported, so the practical risk is unknown: whether other NICs exist in the
+    VNet, and whether `vm-codemastery774` has IP forwarding enabled. With IP
+    forwarding, a VNet peer could address the frontend container's bridge IP
+    directly; the Docker `DOCKER` chain admits only port 8080 there.
+  - Options:
+    - Accept the internal path, with the NIC/VNet evidence above.
+    - Separately authorize an NSG rule at a priority below 65000 that denies TCP 22
+      from `VirtualNetwork`, so that only the /32 rules (priority 300 and the
+      temporary Deploy gate) admit SSH.
+- **PF-2: no host firewall (informational).** UFW is inactive and `INPUT` accepts, so
+  the NSG is the only source filter. An NSG change alone, such as a wider SSH source,
+  would expose the host directly. No host rule is selected here.
+
+### What this does not establish
+
+- GitHub runner reachability: the NSG admits no runner address, and the optional
+  NSG gate has no Azure identity.
+- An outside view from a third network.
+- Azure Activity Log history of earlier rule changes.
+- Application feature behavior, recovery or independent review.
+
+`PACKET_FILTER_VERIFICATION` remains unset until PF-1 is disposed of and this record
+is integrated into `main`.
+
+This record was produced through AI-assisted development (Anthropic Claude Code) under
+the Leader's task. The tools used were the Azure CLI (Leader-run in Cloud Shell), OpenSSH, iptables/ss
+on the VM, curl and Python on the workstation.
