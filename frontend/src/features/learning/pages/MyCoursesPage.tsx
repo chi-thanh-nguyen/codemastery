@@ -18,6 +18,7 @@ import { PaginationBar, TableToolbar } from '../../../shared/components/DataTabl
 import { Page } from '../../../layouts/DashboardLayout';
 import { CourseTile } from '../../../shared/components/Tile';
 import { isPlainClick } from '../../../shared/components/SidebarNav';
+import { isDestinationLive } from '../../../routes/routePaths';
 import { control } from '../../../app/theme/theme';
 
 const failure = (error: unknown) => error instanceof ApiError ? error.message : 'The request could not be completed. Please try again.';
@@ -64,6 +65,7 @@ export function CourseMembershipActions({ courseId }: { courseId: string }) {
             {membership && (joined
                 ? <Button ref={primary} variant="outlined" disabled={busy} onClick={() => setConfirm(true)}>Leave course</Button>
                 : <Button ref={primary} variant="contained" disabled={busy} onClick={() => void mutate(true)}>{membership.status === 'left' ? 'Re-enroll' : 'Enroll in course'}</Button>)}
+            {joined && isDestinationLive(`/courses/${encodeURIComponent(courseId)}/assessments`, 'Learner') && <Button component={Link} to={`/courses/${encodeURIComponent(courseId)}/assessments`} variant="outlined" disabled={busy}>Assessments</Button>}
             <Button component={Link} to="/my-courses" variant={joined ? 'contained' : 'outlined'}>My courses</Button>
         </Box>
         {busy && <Typography role="status" variant="body2" sx={{ color: 'text.secondary' }}>{membership ? 'Updating membership…' : 'Checking membership…'}</Typography>}

@@ -3247,3 +3247,121 @@ is separately verified as `chi-thanh-nguyen`. Codex performed integration,
 verification and author audit. Metadata does not establish human contribution;
 no signature or independent approval is fabricated and global Git settings are
 unchanged. See [execution and remaining limits](testing.md#fe14-post-upstream-integration-verification--27-november-2026).
+
+## FE11 learner Assignment completion and bounded composition — 27 November 2026
+
+Authority: the Project Leader's explicit task, “FE11 — Comprehensive Code-Completeness
+Audit, Authorized Implementation Completion, Bounded Upstream Remediation and Final
+Self-Audit”, §§3, 7, 11–12. Codex implements and performs an **author self-audit**;
+this is not personal owner confirmation, independent review, whole-Issue acceptance,
+merge, deployment, release or operational authorization. Refs #196 / PR #305.
+
+Baseline: incoming `2c5aa49ed4ad37681964eb902616be53bb9caaea`, initial main
+`9228c11dfbf5b1361906ade6a3c3db64268c8c5b`, merge-base
+`23402754743e0d35048e74cbabebfa133e5e6da3`. The two incoming commits are FE11 work;
+nine initial main commits were inherited by ordinary merge `397c071699a88b3b4aa78a5231b3734a56366018`.
+Main advanced during execution through FE16 #270, `99abc4072b9893971d7cf15fe3174b25b3da63b9`;
+ordinary merge `3d0415903867bc61c8defa92747db07b1716a691` retains it. No history rewrite,
+force push, upstream branch import or unrelated worktree modification.
+
+Consumed authority: ADR010 CT09 authorization/lifecycle/rest, CT10 deadline/grading/
+replacement/rest, CT37-WIDGET and CT18-B5-ERRORS (12 November r1); CT16.routes and
+CT37.markdown (8 November r1); ADR007 §7 CT23 learner Quiz summaries; ADR014 §7
+current session generation/cancellation; ADR012 §§8, 9.2, 19.5 best-effort notifications;
+DESIGN r13 S10/S13/F9/shared file/Markdown/theme/accessibility, including main's FE16
+clarification. Existing server DTOs, admission and public OpenAPI remain unchanged.
+
+### FE11-D1: exact operation success sets
+
+Decision gap: the existing JSON/multipart transport accepted one numeric status,
+but CT10's one PUT succeeds as either 201 (created) or 200 (replaced). Under the
+above technical delegation, `RequestOptions.expectedStatus` additionally admits a
+nonempty explicit readonly success-status set. FE11 alone selects `[200, 201]`;
+existing numeric callers remain exact, binary remains exact 200 and no-content
+remains exact 204. Media, decoder, current-generation, abort, authentication and
+unknown-upload behavior remain inside the same shared lifecycle. No request is
+replayed. Alternatives rejected: status guessed from a previous read (racy), a
+second PUT after a status mismatch (duplicate mutation), accepting all 2xx (weakens
+the operation oracle), or a second transport (duplicates security behavior).
+This implements the existing backend contract; no status, API or security-policy
+amendment is made. Independent shared-consumer review remains required.
+
+### FE11-D2: S10 host ownership and bounded FE10 summary slice
+
+CT16's existing table explicitly co-owns S10 with FE10 (Quizzes) and FE11
+(Assignments); current S10 requires two independently paginated reads. Issue #196's
+older statement assigning the whole list to FE10 conflicts with this narrower
+current route contract and the present task's explicit C7 authorization. FE10 #294
+at `bec98bd0b740b746b4a069523d75175d05bf69fb` supplies a `LiveCourseAssessmentsPage`
+host with an Assignments placeholder. Its complete branch is neither imported
+nor modified. FE11 delivers that existing page module's live composition, with
+an optional `courseId/courseTitle` signature compatible with the inspected host,
+plus the Assignment-owned operation/paging/status/Open handoff. The original
+preview export and its props remain supported; its fixture model never enters
+production. FE11's default live tab is Assignments; the segmented switch has only
+Quizzes and Assignments. No score/grade is fabricated from a list summary.
+
+The cumulative FE10 contribution is the **one summary read/decoder/type plus its
+S10 table/pagination seam**, estimated **10–15%** of FE10 implementation effort:
+one of seven API operation families, with simple read lifecycle, against the much
+larger intro/history lookup, start/resume, timed answer/save-before-submit, expiry,
+unknown-outcome, result and route state machines. Host-only source overlap is
+bounded; no attempt, answer, history, result or diagnostic implementation is taken.
+The small API/type/host additions support the estimate; line count is not its basis.
+This is eligible under the task's cumulative less-than-20% allowance. A complete
+quiz journey remains FE10 #195 / PR #294 (and diagnostic entry FE09), outside FE11.
+Quiz Open is rendered only when `isDestinationLive` admits its delivered screen;
+otherwise an explicit unavailable caption is shown. FE10 must retain this host's
+Assignment slice and independent paging when integrating its attempt code. This
+is a delegated composition decision, not fabricated consent from the FE10 owner.
+Alternatives rejected: importing all #294, duplicate page hosts, filtering one
+mixed/incomplete page, or delaying the separable Assignment list.
+
+### FE11 integration and upstream ledger
+
+| Owner | Verified required capability | Bounded action / remaining handoff |
+| --- | --- | --- |
+| AS09 #160 / #297 | Learner list/detail, PUT 201/200, own PDF/ZIP file; owner grading | Satisfied on main `85a3fad`; source traced through AssignmentController/AssignmentService/SubmissionService and DTOs. No backend changes (0%). |
+| SH05 #154 / #289 | Private FileStorage/S3 | Satisfied on main `c5b9ac0`; no storage-policy/adapter change (0%). |
+| FE14 #199 / #279 | Shared multipart/binary/FileUploadField/Markdown and Course context | Satisfied on main `13d9ca7`; reused, no authoring changes (0%). |
+| FE17 #202 / #288 | Protected Instructor grading producer/UI | Satisfied on main `e2106f6`; retained. No FE17-owned changes (0%). |
+| FE34 #255 / #261 | Light/Dark/System | Satisfied on main `060b8f9`; semantic roles consumed, no duplicate preference state (0%). |
+| FE16 #201 / #270 | Owner Assignment authoring is useful for the full journey | Initially open at `ce7f0bbb`; merged during this task as `99abc40` and inherited intact. Not a whole-Issue prerequisite for learner code. No FE16-owned changes (0%). |
+| FE10 #195 / #294 | Shared S10 composition | Eligible 10–15% slice above; complete quiz journey intentionally excluded. |
+| FE08 #193 / #286 | Related Lesson destination `/courses/:courseId/lessons/:lessonId` | **Substantial; not implemented here (0% actual).** At `532039a`, client/hooks and a partial Lesson page are unmerged. Completing and qualifying lesson body, relational materials/Markdown, file delivery, visit/progress, contextual navigation, denial and lifecycle plus activating S7/S8 is estimated 35–50% of FE08 total implementation, well beyond the allowance. No route fixture or dead link is activated. FE11 preserves the canonical same-Course lesson handoff behind `isDestinationLive`; until FE08 delivers it, a clear unavailable caption appears. |
+| IN15 | Best-effort grade notifications | Separate downstream acceptance. Neither required for displaying a grade nor promised by this UI; no IN15 changes (0%). |
+
+S13 `/courses/:courseId/assignments/:assignmentId` and S10
+`/courses/:courseId/assessments` are production Learner routes, keyed by actual
+session and resource identity, and make **My courses** current. Course membership
+actions expose Assessments only for a read active/completed membership; the API
+independently authorizes every operation. Direct entry/reload reads current data;
+no selected File, submission state or credentials are persisted. Related Lesson
+activation remains the explicit upstream production-integration blocker. FE11-owned
+code completeness must not be called complete integrated delivery while it remains.
+
+### Lifecycle, errors and attribution
+
+The hook synchronously reserves a single mutation, checks current session and the
+confirmed submission timestamp at invocation, aborts obsolete reads/operations, and
+uses read initiation order to reject stale settlements. Every upload settlement
+starts a subsequent authoritative read before another upload is allowed. Network,
+5xx, cancelled uploads and unusable success are unknown outcomes; failed reads
+keep mutation disabled until deliberate read recovery. Cancelling cannot promise
+rollback. No automatic mutation/read retry, optimistic authoritative state or file
+persistence. Client extension/nonempty feedback does not replace backend admission.
+409 wording follows the reloaded graded/open state; 413 uses the approved exact
+message. The actual CT18 producer supplies no admitted file field errors for these
+400s; safe local/general feedback is used, consistent with CT16 and F14, without
+inventing fields or exposing arbitrary server diagnostics. The upload limit is
+never displayed. Download remains possible for a current file after closure/grading.
+
+The incoming Git objects record author and committer as
+`Le Phan Quoc Thang <thangle12012006@gmail.com>`. Under the task's explicit mutual
+consent arrangement, new assisted commits use those exact fields with current
+timestamps and command-scoped configuration. Codex performed the remediation,
+verification and author audit; the separately authenticated publishing account is
+`chi-thanh-nguyen`. These self-declared Git fields do not establish a legal identity
+or imply the contributor personally performed Codex's work. Other contributors'
+historical commits, AI disclosure, signatures and independent gates are preserved;
+no global identity, forged signature, credentials or co-author is introduced.
