@@ -678,8 +678,15 @@ class TimedAttempts {
                 call -> tx.execute(status -> call.<Supplier<?>>getArgument(1).get()));
         SkillGraphService skillGraph = mock(SkillGraphService.class);
         attemptSkills = skillGraph;
+        // Conforming persistence double: a successful write is visible to refreshed readback.
+        org.mockito.Mockito.doAnswer(call -> {
+            List<AttemptAnswer> stored = List.copyOf(call.getArgument(0));
+            when(attemptRepo.findAnswersInPositionOrderForUpdate(stored.getFirst().attempt_id()))
+                    .thenReturn(stored);
+            return null;
+        }).when(attemptRepo).updateAnswers(anyList());
         attemptService = new AttemptService(
-                attemptRepo, quizRepo, new QuizGradingService(), access, identities, guard, skillGraph, clock);
+                attemptRepo, quizRepo, new QuizGradingService(), access, identities, guard, skillGraph, clock, mock(ApplicationEventPublisher.class));
         lenient().when(identities.requireCurrentIdentity())
                 .thenReturn(new CurrentIdentity(learnerId, UserAccountService.IdentityRole.LEARNER));
     }
@@ -1033,7 +1040,7 @@ class TimedAttempts {
                     new QuizGradingService.GradedItem(Q1,true),new QuizGradingService.GradedItem(Q2,false))),
                 new QuizGradingService.Grade(new BigDecimal("50.00"),List.of(
                     new QuizGradingService.GradedItem(Q1,false),new QuizGradingService.GradedItem(Q2,true))));
-        AttemptService checked=new AttemptService(attemptRepo,quizRepo,provider,access,identities,attemptGuard,attemptSkills,clock);
+        AttemptService checked=new AttemptService(attemptRepo,quizRepo,provider,access,identities,attemptGuard,attemptSkills,clock,mock(ApplicationEventPublisher.class));
         AnswersInput input=new AnswersInput(List.of(new AnswerInput(Q1,List.of(false,true)),new AnswerInput(Q2,List.of(false,false,false))));
         assertThrows(IllegalStateException.class,()->checked.submit(COURSE,QUIZ,id,input));
         assertThrows(IllegalStateException.class,()->checked.submit(COURSE,QUIZ,id,input));
@@ -1322,6 +1329,41 @@ class TimedAttempts {
             verify(publisher, times(1)).publishEvent(any(Object.class));
         }
 
+        @ParameterizedTest
+        @ValueSource(strings = {"missing", "nullCorrectness", "wrongAttempt", "wrongPosition", "wrongCorrectness", "duplicate"})
+        void persistedAnswerReadbackMustBeCompleteAndConsistentBeforePublication(String fault) {
+            ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+            AttemptService service = new AttemptService(attemptRepo, quizRepo, new QuizGradingService(),
+                    access, identities, attemptGuard, attemptSkills, clock, publisher);
+            UUID attemptId = UUID.randomUUID();
+            Attempt active = new Attempt(attemptId, learnerId, QUIZ, 1, clock.instant(),
+                    clock.instant().plusSeconds(600), null, null);
+            AttemptAnswer first = new AttemptAnswer(UUID.randomUUID(), attemptId, Q1, 1,
+                    new Boolean[] {false, false}, null);
+            AttemptAnswer second = new AttemptAnswer(UUID.randomUUID(), attemptId, Q2, 3,
+                    new Boolean[] {false, false, false}, null);
+            AttemptAnswer persistedFirst = new AttemptAnswer(first.id(),
+                    fault.equals("wrongAttempt") ? UUID.randomUUID() : attemptId, Q1,
+                    fault.equals("wrongPosition") ? 2 : 1, new Boolean[] {false, true},
+                    fault.equals("nullCorrectness") ? null : !fault.equals("wrongCorrectness"));
+            AttemptAnswer persistedSecond = new AttemptAnswer(second.id(), attemptId, Q2, 3,
+                    new Boolean[] {true, true, false}, true);
+            org.mockito.Mockito.doNothing().when(attemptRepo).updateAnswers(anyList());
+            List<AttemptAnswer> readback = fault.equals("missing") ? List.of(persistedFirst)
+                    : fault.equals("duplicate") ? List.of(persistedFirst, persistedFirst)
+                    : List.of(persistedFirst, persistedSecond);
+            when(quizRepo.findInCourseForUpdate(QUIZ, COURSE)).thenReturn(Optional.of(quiz("published")));
+            when(quizRepo.findMembers(List.of(QUIZ))).thenReturn(Map.of(QUIZ, twoQuestions()));
+            when(attemptRepo.findInQuizForUpdate(attemptId, QUIZ)).thenReturn(Optional.of(active));
+            when(attemptRepo.findAnswersInPositionOrderForUpdate(attemptId))
+                    .thenReturn(List.of(first, second), readback);
+            when(attemptRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            assertThrows(IllegalStateException.class, () -> service.submit(COURSE, QUIZ, attemptId,
+                    new AnswersInput(List.of(new AnswerInput(Q1, List.of(false, true)),
+                            new AnswerInput(Q2, List.of(true, true, false))))));
+            verify(publisher, never()).publishEvent(any(Object.class));
+        }
+
         @Test
         void doesNotPublishOnGradingFailureAndPropagatesListenerExceptionFromSubmitAndExpiry() {
             ApplicationEventPublisher failingPublisher = mock(ApplicationEventPublisher.class);
@@ -1361,6 +1403,8 @@ class TimedAttempts {
             IllegalStateException submitErr = assertThrows(IllegalStateException.class,
                     () -> listenerFailureService.submit(COURSE, QUIZ, attemptId, submission));
             assertEquals("listener boom", submitErr.getMessage());
+            // The repository double has no physical rollback; restore the last committed capture.
+            when(attemptRepo.findAnswersInPositionOrderForUpdate(attemptId)).thenReturn(List.of(a1, a2));
 
             clock.advanceSeconds(600);
             IllegalStateException expiryErr = assertThrows(IllegalStateException.class,
@@ -1389,7 +1433,7 @@ class TimedAttempts {
             identities = mock(UserAccountService.class);
             attemptService = new AttemptService(
                     attemptRepo, quizRepo, new QuizGradingService(), access, identities,
-                    mock(CourseManagementService.class), mock(SkillGraphService.class));
+                    mock(CourseManagementService.class), mock(SkillGraphService.class), mock(ApplicationEventPublisher.class));
         }
 
         @org.junit.jupiter.api.AfterEach

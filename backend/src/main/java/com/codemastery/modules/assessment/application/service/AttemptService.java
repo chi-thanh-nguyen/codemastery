@@ -158,27 +158,6 @@ public class AttemptService {
                           QuizGradingService gradingService,
                           CourseAccessService courseAccess,
                           UserAccountService identities,
-                          CourseManagementService courseGuard, SkillGraphService skillGraph) {
-        this(attempts, quizzes, gradingService, courseAccess, identities, courseGuard, skillGraph,
-                Clock.systemUTC(), event -> {});
-    }
-
-    public AttemptService(AttemptRepository attempts,
-                          QuizRepository quizzes,
-                          QuizGradingService gradingService,
-                          CourseAccessService courseAccess,
-                          UserAccountService identities,
-                          CourseManagementService courseGuard, SkillGraphService skillGraph,
-                          Clock clock) {
-        this(attempts, quizzes, gradingService, courseAccess, identities, courseGuard, skillGraph,
-                clock, event -> {});
-    }
-
-    public AttemptService(AttemptRepository attempts,
-                          QuizRepository quizzes,
-                          QuizGradingService gradingService,
-                          CourseAccessService courseAccess,
-                          UserAccountService identities,
                           CourseManagementService courseGuard,
                           SkillGraphService skillGraph,
                           Clock clock,
@@ -810,9 +789,13 @@ public class AttemptService {
                 grade.scorePercentage()
         ));
         requireStoredAttempt(quiz.id(), attempt.user_id(), submittedAttempt);
-        requireCapturedAnswers(submittedAttempt, gradedAnswers, questionsById);
-        List<QuizSubmittedEvent.AnswerEvidence> answerEvidence = new ArrayList<>(gradedAnswers.size());
-        for (AttemptAnswer gradedAnswer : gradedAnswers) {
+        // ADR011 §4: both writes above flush. Reuse the repository's refresh-capable read
+        // under the already-held answer locks so evidence comes from persisted grading,
+        // including when this persistence context already contains the pre-grade entities.
+        List<AttemptAnswer> persistedAnswers = attempts.findAnswersInPositionOrderForUpdate(attempt.id());
+        requireCapturedAnswers(submittedAttempt, persistedAnswers, questionsById);
+        List<QuizSubmittedEvent.AnswerEvidence> answerEvidence = new ArrayList<>(persistedAnswers.size());
+        for (AttemptAnswer gradedAnswer : persistedAnswers) {
             Question question = question(questionsById, gradedAnswer.question_id());
             if (question == null || question.skill_id() == null || gradedAnswer.is_correct() == null) {
                 throw new IllegalStateException("Submitted answer evidence is incomplete");
@@ -834,7 +817,7 @@ public class AttemptService {
                 submittedAttempt.expires_at(),
                 submittedAttempt.submitted_at(),
                 answerEvidence));
-        return toAttemptResult(courseId, submittedAttempt, gradedAnswers, questionsById);
+        return toAttemptResult(courseId, submittedAttempt, persistedAnswers, questionsById);
     }
 
     private Map<UUID, List<Boolean>> validateAndCanonicalizeAnswers(AnswersInput input,
