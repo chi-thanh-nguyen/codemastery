@@ -2465,6 +2465,50 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                 assertEquals(1, probe.events.size());
             }
         }
+
+        @Test
+        void ct13QuizOutcomeAggregatesMultiLearnerLatestPairsHalfUpAndIgnoresUnsubmittedAndHiddenCourseFilter() {
+            UUID hiddenTestQuiz = UUID.randomUUID();
+            UUID diagnosticQuiz = UUID.randomUUID();
+            addQuiz(hiddenTestQuiz, "test");
+            addQuiz(diagnosticQuiz, "diagnostic");
+
+            // Learner 1: quizId latest is 50.00 (supersedes older 100.00); hiddenTestQuiz is 100.00; diagnostic 0.00 excluded.
+            terminal(quizId, 1, now, now.plusSeconds(10), true, true);
+            terminal(quizId, 2, now.plusSeconds(20), now.plusSeconds(30), true, false);
+            terminal(hiddenTestQuiz, 1, now, now.plusSeconds(10), true, true);
+            terminal(diagnosticQuiz, 1, now.plusSeconds(40), now.plusSeconds(50), false, false);
+
+            // Second joined learner: 50.00 on quizId, plus an unsubmitted attempt on hiddenTestQuiz (must not count).
+            jdbc.update("INSERT INTO attempts VALUES (?,?,?,?,?,?,?,?)",
+                    UUID.randomUUID(), foreignLearner, quizId, 1,
+                    java.time.OffsetDateTime.ofInstant(now, java.time.ZoneOffset.UTC),
+                    java.time.OffsetDateTime.ofInstant(now.plusSeconds(60), java.time.ZoneOffset.UTC),
+                    java.time.OffsetDateTime.ofInstant(now.plusSeconds(15), java.time.ZoneOffset.UTC),
+                    new BigDecimal("50.00"));
+            jdbc.update("INSERT INTO attempts VALUES (?,?,?,?,?,?,?,?)",
+                    UUID.randomUUID(), foreignLearner, hiddenTestQuiz, 1,
+                    java.time.OffsetDateTime.ofInstant(now, java.time.ZoneOffset.UTC),
+                    java.time.OffsetDateTime.ofInstant(now.plusSeconds(60), java.time.ZoneOffset.UTC),
+                    null, null);
+
+            jdbc.update("UPDATE quizzes SET publication_status='hidden' WHERE id=?", hiddenTestQuiz);
+            jdbc.update("UPDATE courses SET publication_status='hidden' WHERE id=?", courseId);
+
+            // (50.00 + 100.00 + 50.00) / 3 = 66.666... -> HALF_UP 66.67 over hidden Course and hidden test Quiz.
+            var combined = snapshot(() -> live.readQuizOutcome(courseId, Set.of(learner, foreignLearner)));
+            assertEquals(courseId, combined.courseId());
+            assertEquals(3L, combined.scoredLearnerQuizPairs());
+            assertEquals(new BigDecimal("66.67"), combined.averageQuizScore());
+
+            var singleLearner = snapshot(() -> live.readQuizOutcome(courseId, Set.of(foreignLearner)));
+            assertEquals(1L, singleLearner.scoredLearnerQuizPairs());
+            assertEquals(new BigDecimal("50.00"), singleLearner.averageQuizScore());
+
+            var emptyPopulation = snapshot(() -> live.readQuizOutcome(courseId, Set.of()));
+            assertEquals(0L, emptyPopulation.scoredLearnerQuizPairs());
+            assertNull(emptyPopulation.averageQuizScore());
+        }
     }
 
 }
