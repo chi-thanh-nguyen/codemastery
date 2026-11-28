@@ -8,17 +8,17 @@ import type { MasteryState, RecommendationType } from '../../../shared/component
 
 export type LessonProgressLabel = 'Not started' | 'Completed' | 'Mastered';
 
-export interface SkillLessonView { id: string; title: string; progress: LessonProgressLabel }
+export interface SkillLessonView { id: string; title: string; progress: LessonProgressLabel; recommended?: boolean; }
 
 export interface SkillView {
     id: string;
     name: string;
     description?: string;
-    /** One of the four approved states; missing learner data is shown as Unknown. */
     state: MasteryState;
     prerequisiteIds: string[];
-    /** Latest quiz score for this skill (0–100), when the owning contract provides one. */
     latestScore?: number | null;
+    latestAssessedAtLabel?: string;
+    updated?: boolean;
     relatedLessons: SkillLessonView[];
 }
 
@@ -27,9 +27,59 @@ export interface RecommendationView {
     type: RecommendationType;
     targetLessonId: string;
     targetLessonTitle: string;
-    /** Human-readable reason supplied by the backend, displayed verbatim. */
     reason: string;
-    /** Display label of the recommendation time (caller-formatted). */
     createdAtLabel: string;
+    targetCompleted?: boolean;
     skillId?: string;
+}
+
+export interface B6MasterySkill {
+    id: string;
+    name: string;
+    description: string | null;
+    state: MasteryState;
+    prerequisiteSkillIds: string[];
+    relatedLessonIds: string[];
+    latestScore: number | null;
+    latestAssessedAt: string | null;
+}
+
+export interface B6MasteryMap {
+    courseId: string;
+    learnerId: string;
+    adaptiveEnabled: boolean;
+    skills: B6MasterySkill[];
+}
+
+export interface B6CurrentRecommendation {
+    type: 'continue' | 'remedial';
+    targetLessonId: string;
+    reason: string;
+    recommendedAt: string;
+    targetCompleted: boolean;
+}
+
+export interface B6LessonGuidance {
+    lessonId: string;
+    unmasteredPrerequisiteSkillIds: string[];
+}
+
+export interface B6AdaptiveGuidance {
+    courseId: string;
+    adaptiveEnabled: boolean;
+    placementOffered: boolean;
+    placementQuizId: string | null;
+    currentRecommendation: B6CurrentRecommendation | null;
+    lessons: B6LessonGuidance[];
+}
+
+export interface MasteryLessonTitleEntry {
+    id: string;
+    title: string;
+}
+
+export interface MasteryLessonProgressStatus {
+    lessonId: string;
+    completed: boolean;
+    masterySkipped: boolean;
 }
