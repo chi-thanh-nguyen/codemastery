@@ -103,4 +103,77 @@ public final class AdminRequests {
             return new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid query");
         }
     }
+
+    /**
+     * CT12.rest course list query parameters. Syntax only (known single-valued parameters, digits); the
+     * status value, paging bounds and the role are decided by the service.
+     */
+    public record AdminCourseSearch(String query, String publicationStatus, Integer page, Integer size) {
+
+        private static final Set<String> PARAMETERS = Set.of("query", "publicationStatus", "page", "size");
+
+        public static AdminCourseSearch parse(MultiValueMap<String, String> params) {
+            if (!PARAMETERS.containsAll(params.keySet())
+                    || params.values().stream().anyMatch(values -> values.size() != 1)) {
+                throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid query");
+            }
+            String status = params.getFirst("publicationStatus");
+            if (status != null && status.isBlank()) {
+                throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid query");
+            }
+            return new AdminCourseSearch(params.getFirst("query"), status,
+                    number(params.getFirst("page")), number(params.getFirst("size")));
+        }
+
+        private static Integer number(String value) {
+            if (value == null) {
+                return null;
+            }
+            if (!value.matches("[0-9]+")) {
+                throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid query");
+            }
+            try {
+                return Integer.parseInt(value);
+            } catch (NumberFormatException exception) {
+                throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid query");
+            }
+        }
+    }
+
+    /**
+     * CT12.rest body of {@code PUT /api/admin/courses/{courseId}/publication}: exactly one string property,
+     * {@code publicationStatus}. Any other shape (missing, extra or repeated properties, a non-string value,
+     * malformed JSON or an escape sequence) is 400. The body is read as text so the role decision (stage 3)
+     * can precede the body rules (stage 4), as the existing password-reset requests also do.
+     */
+    public record CoursePublicationWrite(String publicationStatus) {
+
+        private static final String WS = "[ \\t\\r\\n]*";
+        private static final Pattern BODY = Pattern.compile(
+                WS + "\\{" + WS + "\"publicationStatus\"" + WS + ":" + WS
+                        + "\"([^\"\\\\\\x00-\\x1F]*)\"" + WS + "\\}" + WS);
+
+        public static CoursePublicationWrite parse(String json) {
+            if (json == null) {
+                throw invalid();
+            }
+            var matcher = BODY.matcher(json);
+            if (!matcher.matches()) {
+                throw invalid();
+            }
+            return new CoursePublicationWrite(matcher.group(1));
+        }
+
+        /** Only {@code hidden} is accepted; {@code published} and any other value are 400 (ADR012 section 10.3). */
+        public CoursePublicationWrite requireHidden() {
+            if (!"hidden".equals(publicationStatus)) {
+                throw invalid();
+            }
+            return this;
+        }
+
+        private static BusinessRuleException invalid() {
+            return new BusinessRuleException(HttpStatus.BAD_REQUEST, "Invalid request body");
+        }
+    }
 }
