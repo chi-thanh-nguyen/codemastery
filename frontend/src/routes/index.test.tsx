@@ -32,6 +32,9 @@ const detail = { ...course, prerequisiteDescription: null, syllabus: [] };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 function Probe() { auth = useAuth(); navigate = useNavigate(); return null; }
 beforeEach(() => {
+    // The lazy landing illustration may mount during any direct-entry test, independently of import timing.
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+    vi.stubGlobal('DOMMatrixReadOnly', class { m22 = 1; });
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T10:00:00Z')); vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080');
     fetcher = vi.fn((url: string, _init?: RequestInit) => {
         const pathname = new URL(url).pathname;
@@ -828,7 +831,7 @@ describe('FE32 Instructor navigation and parent-aware active section (CT16.route
     it('shows Teaching and Catalogue for Instructors and keeps Teaching active across /teach subroutes', async () => {
         await mount('/courses');
         await login('Teacher', 'Instructor');
-        expect([...host.querySelectorAll('header nav a')].map((link) => link.textContent)).toEqual(['Teaching', 'Catalogue']);
+        expect([...host.querySelectorAll('header nav a')].map((link) => link.textContent)).toEqual(['Teaching', 'Grading', 'Catalogue']);
         await go('/teach');
         expect(host.querySelector('main h1')?.textContent).toBe('Teaching');
         expect(host.querySelector('header nav [aria-current="page"]')?.textContent).toBe('Teaching');
@@ -881,7 +884,7 @@ describe('FE32 complete model and actual route activation', () => {
         expect(items.some(({ href }) => href === '/notifications')).toBe(false);
     });
     it.each([
-        ['Learner', ['Home', 'Catalogue', 'My courses']], ['Instructor', ['Teaching', 'Catalogue']], ['Administrator', ['Catalogue']],
+        ['Learner', ['Home', 'Catalogue', 'My courses']], ['Instructor', ['Teaching', 'Grading', 'Catalogue']], ['Administrator', ['Catalogue']],
     ] as const)('filters %s against the actual delivered route tree', (role, labels) => {
         expect(roleNavigation(role).map(({ label }) => label)).toEqual(labels);
         expect(notificationsAvailable(role)).toBe(role !== 'Administrator');
@@ -926,12 +929,13 @@ describe('FE32 complete model and actual route activation', () => {
     it('never leaks an active item to another role or highlights an inactive feature', () => {
         for (const role of ['Learner', 'Administrator'] as const) expect(currentSection('/teach/courses/one', role)).toBeUndefined();
         expect(currentSection('/courses/one/learn', 'Learner')).toBeUndefined();
-        expect(currentSection('/teach/grading', 'Instructor')).toBeUndefined();
+        expect(currentSection('/teach/grading', 'Instructor')).toBe('/teach/grading');
+        expect(currentSection('/teach/grading/one', 'Instructor')).toBe('/teach/grading');
         expect(currentSection('/admin', 'Administrator')).toBeUndefined();
         expect(currentSection('/courses/one')).toBe('/courses');
         expect(currentSection('/home')).toBeUndefined();
     });
-    it.each(['/admin', '/admin/users', '/admin/courses', '/admin/reports', '/admin/audit', '/teach/grading', '/teach/grading/one', '/teach/learners', '/teach/courses/one/learners'])
+    it.each(['/admin', '/admin/users', '/admin/courses', '/admin/reports', '/admin/audit', '/teach/learners', '/teach/courses/one/learners'])
     ('leaves inactive %s unregistered for anonymous visitors and every authenticated role', async (path) => {
         await mount(path);
         expect(location.pathname).toBe(path); expect(host.querySelector('main h1')?.textContent).toBe('Page not found');
@@ -946,7 +950,7 @@ describe('FE32 complete model and actual route activation', () => {
         expect(host.querySelector('header nav [aria-current]')?.textContent).toBe('Home');
         await login('B', 'Instructor');
         expect(host.querySelector('main h1')?.textContent).toBe("You don't have access to this page");
-        expect([...host.querySelectorAll('header nav a')].map((n) => n.textContent)).toEqual(['Teaching', 'Catalogue']);
+        expect([...host.querySelectorAll('header nav a')].map((n) => n.textContent)).toEqual(['Teaching', 'Grading', 'Catalogue']);
         expect(host.querySelector('header nav [aria-current]')).toBeNull();
         await login('C', 'Administrator');
         expect([...host.querySelectorAll('header nav a')].map((n) => n.textContent)).toEqual(['Catalogue']);
@@ -1154,4 +1158,28 @@ describe('FE28 production activation and shell integration', () => {
         expect(fetcher.mock.calls.some(([url]) => new URL(url).pathname === '/api/me/notifications')).toBe(false);
         await act(async () => proceed!()); expect(location.pathname).toBe('/notifications'); expect(host.querySelector('main h1')?.textContent).toBe('Notifications');
     });
+});
+
+describe('FE11 production activation', () => {
+    const assignmentPath = `/courses/${id}/assignments/${id}`, listPath = `/courses/${id}/assessments`;
+    function assignmentResponses() {
+        const original = fetcher.getMockImplementation()! as (url: string, init?: RequestInit) => Promise<Response>;
+        fetcher.mockImplementation((url:string,init?:RequestInit) => {
+            const path = new URL(url).pathname;
+            if (path === `/api${assignmentPath}`) return Promise.resolve(json({id,courseId:id,lessonId:null,title:'Production assignment',instructions:'**Actual decoded instructions**',deadlineAt:'2026-12-01T00:00:00Z',open:true,submission:null}));
+            if (path === `/api/courses/${id}/assignments`) return Promise.resolve(json({content:[{id,courseId:id,lessonId:null,title:'Production assignment',deadlineAt:'2026-12-01T00:00:00Z',open:true,submissionStatus:'none'}],page:0,size:20,totalElements:1,totalPages:1}));
+            return original(url,init);
+        });
+    }
+    it.each([assignmentPath,listPath])('anonymous direct entry %s requires login',async path=>{await mount(path);expect(location.pathname).toBe('/login');expect(fetcher).not.toHaveBeenCalled();});
+    it.each(['Instructor','Administrator'])('excludes %s from S10 and S13 without protected reads',async role=>{
+        await mount('/login');await login('Other role',role);fetcher.mockClear();await go(assignmentPath);expect(host.textContent).toContain("You don't have access to this page");await go(listPath);expect(host.textContent).toContain("You don't have access to this page");expect(fetcher.mock.calls.some(([url])=>new URL(url).pathname.includes('/assignments'))).toBe(false);
+    });
+    it('production list handoff reaches decoded S13 with My courses navigation and heading focus',async()=>{
+        await mount('/login');await login();assignmentResponses();await go(listPath);expect(host.textContent).toContain('Production assignment');
+        expect(currentSection(listPath,'Learner')).toBe('/my-courses');expect(currentSection(assignmentPath,'Learner')).toBe('/my-courses');
+        await act(async()=>host.querySelector<HTMLAnchorElement>(`a[href="${assignmentPath}"]`)!.click());expect(location.pathname).toBe(assignmentPath);
+        expect(host.querySelector('main h1')?.textContent).toBe('Production assignment');expect(host.querySelector('strong')?.textContent).toBe('Actual decoded instructions');expect(document.activeElement).toBe(host.querySelector('main h1'));
+    });
+    it('invalid assignment UUID causes no production assignment request',async()=>{await mount('/login');await login();fetcher.mockClear();await go(`/courses/${id}/assignments/bad`);expect(host.textContent).toContain('Invalid assignment link.');expect(fetcher.mock.calls.some(([url])=>new URL(url).pathname.includes('/assignments/'))).toBe(false);});
 });

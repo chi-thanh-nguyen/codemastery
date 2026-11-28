@@ -4370,7 +4370,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Self Learner; no request body; fixed practice/test only. Return existing active attempt 200 without timer reset; create next committed number 201. Overdue unsubmitted or diagnostic exposure gate 409. Server UTC microsecond time, captured full membership/order/all-false masks. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner; no request body; fixed full membership. Practice/test retakes follow ADR007; diagnostics follow ADR011 §11: no attempt on another Course diagnostic and no submitted attempt on this diagnostic, with active same-quiz resume. Return existing active attempt 200 without timer reset; create next committed number 201. Overdue unsubmitted or diagnostic exposure gate 409. Server UTC microsecond time, captured full membership/order/all-false masks. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4446,7 +4446,7 @@
             }
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       },
       "get": {
@@ -4454,7 +4454,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Self Learner, current Course/Quiz visibility; all own attempts, descending attemptNumber. No key; submittedAt/score null together until submitted. GET never finalizes. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner, current Course/Quiz visibility; all own attempts, descending attemptNumber. No key; submittedAt/score null together until submitted. GET never finalizes. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4531,7 +4531,7 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -4541,7 +4541,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Self Learner current access; own captured active/overdue view or immutable result. No key, GET never finalizes. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner current access; own captured active/overdue view or immutable result. No key, GET never finalizes. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4608,7 +4608,7 @@
             "$ref": "#/components/responses/B3Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -4618,7 +4618,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Self Learner full answer replacement; root/Quiz/Attempt locks then server time strictly before expiry. No grade/event. Terminal/overdue 409. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner full answer replacement; root/Quiz/Attempt locks then server time strictly before expiry. No grade/event. Terminal/overdue 409. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4688,7 +4688,7 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -4708,7 +4708,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Self Learner full validated answers; strictly before expiry grade/persist atomically. Already submitted returns immutable result, ignores new selections. Overdue unsubmitted 409 accepts no late masks. No automatic mutation retry/event execution approval. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner full validated answers; strictly before expiry grade/persist atomically. Already submitted returns immutable result, ignores new selections. Overdue unsubmitted 409 accepts no late masks. No automatic mutation retry. ADR011 approves synchronous in-transaction event execution, but AS12 and AD13 code are not delivered in this PR. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4778,7 +4778,7 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -4798,7 +4798,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Self Learner current access; submitted only, active/overdue 409. Per-question correctness, no answer key. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner current access; submitted only, active/overdue 409. Per-question correctness, no answer key. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4868,7 +4868,7 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -4878,7 +4878,7 @@
         "tags": [
           "Batch 3 contracts"
         ],
-        "description": "Instructor owner of admitted Course; submitted scoped Attempt including hidden Quiz. No learner impersonation/aggregate reporting; result omits keys. ADR007 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Instructor owner of admitted Course; submitted scoped Attempt including hidden Quiz. No learner impersonation/aggregate reporting; result omits keys. ADR007 is normative. Implemented in PR #296 as an Assessment-local capability. AS12 publication and AD13 atomic Adaptive execution remain blocked; this is not integrated US-06, independent acceptance or protected integration.",
         "security": [
           {
             "bearerAuth": []
@@ -4948,7 +4948,7 @@
             "$ref": "#/components/responses/B3Conflict"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
         "x-approval-reference": "../decisions/007-batch-03-contract-approvals.md"
       }
     },
@@ -5476,7 +5476,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Self Learner with current visibility; published assignments only, ordered by deadlineAt then UUID. open is derived from server time. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner with current visibility; published assignments only, ordered by deadlineAt then UUID. open is derived from server time. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates.",
         "security": [
           {
             "bearerAuth": []
@@ -5544,7 +5544,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -5554,7 +5554,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Self Learner with current visibility; own submission and own grade only. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner with current visibility; own submission and own grade only. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates.",
         "security": [
           {
             "bearerAuth": []
@@ -5612,7 +5612,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -5622,7 +5622,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Self Learner; multipart part file only (PDF or ZIP). Admitted only if server now is before deadlineAt (equality is late), sampled after the Assignment row lock, and the current submission is ungraded. A replacement records a strictly later submittedAt; a non-advancing clock is 500 with rollback. Errors follow ADR010 §14 precedence. 201 when created, 200 when replaced. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner; multipart part file only (PDF or ZIP). Admitted only if server now is before deadlineAt (equality is late), sampled after the Assignment row lock, and the current submission is ungraded. A replacement records a strictly later submittedAt; a non-advancing clock is 500 with rollback. Errors follow ADR010 §14 precedence. 201 when created, 200 when replaced. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates. Runtime database consumer privileges are CT17-P6-PRIVILEGES-2026-11-27-r16; no production grant or residual-risk acceptance is implied.",
         "security": [
           {
             "bearerAuth": []
@@ -5704,7 +5704,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -5729,7 +5729,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Self Learner with current visibility; own current submission file only. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner with current visibility; own current submission file only. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates. Runtime database consumer privileges are CT17-P6-PRIVILEGES-2026-11-27-r16; no production grant or residual-risk acceptance is implied.",
         "security": [
           {
             "bearerAuth": []
@@ -5793,7 +5793,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -6105,7 +6105,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; current submissions ordered by submittedAt then UUID, learner display names resolved through Course and Auth. No object keys. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; current submissions ordered by submittedAt then UUID, learner display names resolved through Course and Auth. No object keys. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates. Runtime database consumer privileges are CT17-P6-PRIVILEGES-2026-11-27-r16; no production grant or residual-risk acceptance is implied.",
         "security": [
           {
             "bearerAuth": []
@@ -6182,7 +6182,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -6192,7 +6192,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; submission of an Assignment in the owned Course. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; submission of an Assignment in the owned Course. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates. Runtime database consumer privileges are CT17-P6-PRIVILEGES-2026-11-27-r16; no production grant or residual-risk acceptance is implied.",
         "security": [
           {
             "bearerAuth": []
@@ -6265,7 +6265,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md"
       }
     },
@@ -6275,7 +6275,7 @@
         "tags": [
           "Batch 5 contracts"
         ],
-        "description": "Owning Instructor; grade 0-100 with at most two decimals, nonblank feedback and the reviewed submittedAt as a precondition (mismatch 409). Regrade replaces all three fields. Publishes no quiz event and changes no mastery or progress; the graded event is CT27. ADR010 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Owning Instructor; grade 0-100 with at most two decimals, nonblank feedback and the reviewed submittedAt as a precondition (mismatch 409). Regrade replaces all three fields. Publishes no quiz event and changes no mastery or progress; the graded event is CT27. ADR010 is normative. Implemented by AS09 (#160); author verification is recorded in docs/testing.md. Independent review, hosted CI, protected integration and operational acceptance remain separate gates. Runtime database consumer privileges are CT17-P6-PRIVILEGES-2026-11-27-r16; no production grant or residual-risk acceptance is implied.",
         "security": [
           {
             "bearerAuth": []
@@ -6348,7 +6348,7 @@
             "$ref": "#/components/responses/B5Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/010-batch-05-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -7217,7 +7217,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "CT03 requireLessonReadAccess on the Lesson (active/completed Learner member of the published Course and published Lesson, or owning Instructor including hidden preview); Administrator 403; other denials are the concealed 404. Questions newest first with all visible replies oldest first; hidden posts and replies of hidden questions never appear. CT30-ACCESS/POSTS/REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "CT03 requireLessonReadAccess on the Lesson (active/completed Learner member of the published Course and published Lesson, or owning Instructor including hidden preview); Administrator 403; other denials are the concealed 404. Questions newest first with all visible replies oldest first; hidden posts and replies of hidden questions never appear. CT30-ACCESS/POSTS/REST-2026-11-15-r1. ADR012 is normative. Implemented by IN06 (#181) in PR #303; independent review, hosted CI and protected integration remain gates.",
         "security": [
           {
             "bearerAuth": []
@@ -7255,7 +7255,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Committed JSON outcome.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7285,7 +7285,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       },
       "post": {
@@ -7293,7 +7293,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Same admission as the list. Creates a question (no parentPostId) or a one-level reply to a visible question of this Lesson; a reply to a reply is 400 and a hidden, missing or foreign parent is 404. Content is stored verbatim. A reply notifies the question author in the same transaction (CT30-NOTIFY-2026-11-15-r1). No edit or delete operation exists. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Same admission as the list. Creates a question (no parentPostId) or a one-level reply to a visible question of this Lesson; a reply to a reply is 400 and a hidden, missing or foreign parent is 404. Content is stored verbatim. A reply notifies the question author in the same transaction (CT30-NOTIFY-2026-11-15-r1). No edit or delete operation exists. ADR012 is normative. Implemented by IN06 (#181) in PR #303; independent review, hosted CI and protected integration remain gates.",
         "security": [
           {
             "bearerAuth": []
@@ -7312,7 +7312,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Created; specification only, NOT IMPLEMENTED.",
+            "description": "Created.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7345,7 +7345,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -7365,7 +7365,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Same admission as the discussion list. Reports the Lesson itself; status open; duplicates are allowed and resolved together by moderation. CT30-REPORTS-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Same admission as the discussion list. Reports the Lesson itself; status open; duplicates are allowed and resolved together by moderation. CT30-REPORTS-2026-11-15-r1. Implemented under IN06 (#181), checkpoint IN06.report, in the Interaction module; independent review, CI and protected integration remain gated. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7384,7 +7384,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Created; specification only, NOT IMPLEMENTED.",
+            "description": "Created.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7417,7 +7417,6 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -7437,7 +7436,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Same admission as the discussion list; the post must be a visible post of this Lesson, else 404. Status open; duplicates are allowed. CT30-REPORTS-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Same admission as the discussion list; the post must be a visible post of this Lesson, else 404. Status open; duplicates are allowed. CT30-REPORTS-2026-11-15-r1. Implemented under IN06 (#181), checkpoint IN06.report, in the Interaction module; independent review, CI and protected integration remain gated. ADR012 is normative.",
         "security": [
           {
             "bearerAuth": []
@@ -7465,7 +7464,7 @@
         ],
         "responses": {
           "201": {
-            "description": "Created; specification only, NOT IMPLEMENTED.",
+            "description": "Created.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7498,7 +7497,6 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
         "requestBody": {
           "required": true,
@@ -12016,7 +12014,7 @@
             "type": "string",
             "minLength": 1,
             "pattern": "\\S",
-            "description": "Stored verbatim; plain text."
+            "description": "Stored verbatim; plain text. NUL and unpaired UTF-16 surrogate escapes cannot be stored verbatim and receive a 400 field error after admission. No new text-length limit is imposed."
           },
           "parentPostId": {
             "type": [
@@ -12105,7 +12103,7 @@
             "type": "string",
             "minLength": 1,
             "pattern": "\\S",
-            "description": "Stored verbatim; plain text."
+            "description": "Stored verbatim; plain text. NUL and unpaired UTF-16 surrogate escapes cannot be stored verbatim and receive a 400 field error after admission. No new text-length limit is imposed."
           }
         },
         "required": [
@@ -13637,7 +13635,7 @@
   "x-batch-03-contracts": {
     "decisionReference": "../decisions/007-batch-03-contract-approvals.md",
     "status": "DELEGATED_APPROVED",
-    "implementation": "NOT_IMPLEMENTED",
+    "implementation": "SELECTED_CT04_OPERATIONS_IMPLEMENTED_IN_PR_296_INTEGRATION_BLOCKED",
     "checkpoints": [
       "CT23.questions",
       "CT23.composition",
@@ -13656,9 +13654,9 @@
     ],
     "retainedGates": [
       "Independent review, required CI and protected integration",
-      "Separate implementation authorization and actual artifacts/tests",
-      "CT08.execution/failure/verification-plan and CT22.atomic remain pending",
-      "CT25 diagnostic and CT28 notification binding remain pending",
+      "AS08 implementation authorized in PR #296; independent acceptance and downstream consumers remain separate",
+      "CT08.execution and CT22.atomic approved by ADR011; AS12 publication and AD13 runtime integration remain absent",
+      "CT25 approved in ADR011: Assessment start and quiz projection implemented in PR #296; AD10/AD13 initialization and guidance remain separate. CT28 approved in ADR012; no quiz-result Interaction consumer is implemented here",
       "Configuration values and scheduler/deadline/privilege qualification"
     ],
     "currentStateCorrection": "Current-state correction, 15 November 2026 (ADR012 §20 F7-15): PR #230 merged ADR007 as 3eeacc8 on 9 November 2026. The retained gate naming CT08.execution/failure/verification-plan and CT22.atomic as pending is historical: ADR011 approved them (PR #236, c80fda9). CT25 is approved in ADR011 and CT28 in ADR012 (PR #244, open). No approving review is recorded for these merges."

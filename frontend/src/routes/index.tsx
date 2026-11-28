@@ -1,3 +1,8 @@
+import { LiveAssignmentDetailPage } from '../features/assessment/pages/AssignmentDetailPage';
+import { LiveCourseAssessmentsPage } from '../features/assessment/pages/CourseAssessmentsPage';
+import { ProductionSubmissionListPage } from '../features/instructor/grading/pages/SubmissionListPage';
+import { ProductionGradeSubmissionPage } from '../features/instructor/grading/pages/GradeSubmissionPage';
+import { ProductionLessonEditorPage } from '../features/instructor/course-management/pages/LessonEditorPage';
 import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import type { RouteObject } from 'react-router';
@@ -249,9 +254,13 @@ export function AppRouter({ catalogue, preview }: { catalogue?: ReactNode; previ
         'course-detail': <CourseDetail />,
         'learner-home': <LearnerHome key={auth.generation} />,
         'my-courses': <MyCoursesPage key={auth.generation} />,
+        'learner-assessments': <LiveCourseAssessmentsPage key={auth.generation} />,
+        'learner-assignment': <LiveAssignmentDetailPage key={auth.generation} />,
         profile: <ProfilePage />,
         notifications: <LiveNotificationsPage key={auth.generation} />,
         teaching: <TeachingHomePage key={auth.generation} />,
+        grading: <ProductionSubmissionListPage key={auth.generation} />,
+        'grade-submission': <ProductionGradeSubmissionPage key={auth.generation} />,
         'create-course': <CreateCoursePage key={auth.generation} />,
         'course-editor': <CourseEditorShell key={auth.generation} />,
         'course-frame': <CourseEditorFrame />,
@@ -260,6 +269,7 @@ export function AppRouter({ catalogue, preview }: { catalogue?: ReactNode; previ
         'course-skills': <CourseSkillsSection />,
         'course-assessments': <CourseAssessmentsTab />,
         'course-settings': <CourseSettingsTab />,
+        'course-lesson': <ProductionLessonEditorPage />,
         'course-quiz': <CourseQuizEditor />,
         'course-assignment': <CourseAssignmentEditor />,
     };

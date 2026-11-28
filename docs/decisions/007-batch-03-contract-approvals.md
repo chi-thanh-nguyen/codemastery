@@ -571,3 +571,91 @@ runtime behavior tests. No validator package was installed; no Batch 3 unit,
 PostgreSQL, scheduler, frontend, E2E or atomic event test was run. No independent
 GitHub/CODEOWNER approval or CI success is claimed here. Clock alignment and
 scheduler/transaction timing across real instances remain qualification gates.
+
+## 16. AS08 ancestry assertion companion — 26 November 2026
+
+**AS08-ANCESTRY-2026-11-26-r1; DELEGATED_APPROVED.** The Project Leader's
+“AS08 — Full Implementation Completion, Bounded Upstream Remediation, and Final
+Self-Audit of PR #296” explicitly delegates bounded necessary technical decisions
+and supporting public bindings. Author: Codex, AI-assisted follow-up work under
+that instruction. This companion changes no earlier owner-only method, fixed
+Quiz capture, evidence schema, grading, execution marker or authorization predicate.
+
+Gap established against main `cc6cb54`: ADR005 §3.2's `readSkillIds` and
+`requireSkillInCourse` both require Instructor ownership. Reusing them from
+Learner attempts or actorless expiry fails 403/401, as reproduced by the real
+AS08 PostgreSQL tests. ADR007 §12 and ADR011 §12 still require Course ancestry
+validation, and Assessment cannot query Adaptive persistence.
+
+Add exactly one public assertion to existing `SkillGraphService`:
+
+```java
+public void requireAssessmentSkillsInCourse(UUID courseId, Set<UUID> skillIds);
+```
+
+Only `AttemptService` calls it. It exports no Skill, name, graph, boolean lookup
+or arbitrary learner data. Inputs are immutable IDs from Assessment-owned frozen
+Quiz definitions, never an HTTP selector. The caller has already admitted the
+Course in its read-only REPEATABLE READ snapshot, or runs inside its actual
+Course-root READ COMMITTED write callback. The assertion checks the active
+transaction/isolation/read-only combination before reading its own skill
+repository, and requires every supplied skill to belong to the Course. A foreign
+or inconsistent stored reference is an integrity failure (safe 500). Caller
+allowlist tests enforce the boundary; this method does not export or inspect
+Course's root marker. Course guard and CT03 remain the caller's responsibility.
+
+Alternatives: weakening the existing owner-only projection would change a settled
+boundary; actor impersonation and cross-module SQL violate the architecture;
+skipping ancestry would accept corrupt evidence; a general actorless graph read
+would disclose unnecessary data. This assertion preserves existing interfaces
+and reuses AD07's scoped repository query. Its scope is one metadata check plus
+focused tests, approximately 3–5% of AD07's full graph CRUD, DAG validation,
+mapping, concurrency, persistence, authorization and REST implementation.
+No new module, file, table, column, dependency or production configuration is
+introduced. It authorizes no AS12/AD13 wiring, deployment, review approval,
+operational acceptance or broader read audience. Independent CODEOWNER review
+and protected integration remain required.
+
+## 17. AS18 execution-coverage ancestry caller — 28 November 2026
+
+**AS18-EXEC-COVERAGE-2026-11-28-r1; DELEGATED_APPROVED.** The Project Leader's
+“AS18 Full Implementation Completion, Bounded Upstream Remediation, and Final
+Self-Audit of PR #307” explicitly delegates bounded technical decisions necessary
+for AS18 (#164). Author: Claude Code, AI-assisted work under that instruction.
+This amendment refines only §16's caller set and input provenance; §16's
+signature, transaction check, data returned and integrity semantics, ADR005 §3.3,
+ADR011 §§4/12 and every owner-only CT40 method are unchanged.
+
+Gap established against main `4ae384b`: ADR011 §4 step 6 requires
+`QuestionBankService.readCoverageForExecution` to apply ADR005 §3.3's semantics,
+including that every requested skill belongs to the Course, with no actor. ADR005
+§3.2's `readSkillIds`/`requireSkillInCourse` require Instructor ownership, and
+§16 allows only `AttemptService` with IDs from frozen Quiz definitions. Readiness
+asks for every Course skill, including skills no submitted Quiz captured, so §16's
+provenance does not cover it. Routing the call through an `AttemptService` helper
+would satisfy a file-name allowlist without changing what is actually authorized.
+
+`QuestionBankService.readCoverageForExecution` becomes the second and last direct
+caller of `SkillGraphService.requireAssessmentSkillsInCourse`. It calls the
+assertion only after `AttemptService.requireExecutionScope(courseId)` succeeds,
+that is inside submission's or expiry's Course-root READ COMMITTED callback with
+the Assessment-private marker bound for that Course, and only for a nonempty
+requested set. Inputs are the skill IDs Adaptive's execution orchestration
+supplies from its own Course graph (ADR011 §4 step 6), never an HTTP selector. A
+foreign or inconsistent skill is an integrity failure (safe 500); no concealment
+applies because no HTTP caller exists. The assertion still exports no Skill, name,
+graph or boolean lookup, and `readCoverage` keeps §3.2's owner-only scope.
+
+Alternatives: an `AttemptService` intermediary (rejected: circumvents the caller
+restriction and adds an Assessment service cycle); trusting Adaptive's set without
+ancestry (rejected: a foreign skill would become a silent zero); a new actorless
+SkillGraphService lookup (rejected: duplicates this assertion and widens the public
+surface); Instructor impersonation or cross-module SQL (rejected by ADR001).
+
+Scope: one caller, a Javadoc line in `SkillGraphService` and allowlist tests,
+about 1% of AD07's full scope. No new file, method, table, migration, dependency,
+configuration or runtime privilege. Verification obligations: allowlist tests
+(`AttemptServiceTest`) name exactly `AttemptService` and `QuestionBankService` as
+callers, and real PostgreSQL tests prove the execution-scope refusals of ADR011
+B6-V09 and cross-Course rejection. It authorizes no AD08/AD13 wiring, review
+approval, protected integration, deployment or broader read audience.

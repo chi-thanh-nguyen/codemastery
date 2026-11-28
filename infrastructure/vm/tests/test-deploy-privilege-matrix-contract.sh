@@ -10,7 +10,7 @@ bash -c '
   set -euo pipefail
   source "$1"
   runtime_matrix_values >/dev/null
-  [[ "$(runtime_matrix_values | wc -l | tr -d " ")" == 27 ]]  # CT17 r1 (24, V001-V006) + r2 password_reset_tokens + r3 refresh_sessions/refresh_tokens (V008); r4 (V009), r5, r6, r7, r8, r10, r11, r12 and r13 change rows only
+  [[ "$(runtime_matrix_values | wc -l | tr -d " ")" == 27 ]]  # CT17 r1 (24, V001-V006) + r2 password_reset_tokens + r3 refresh_sessions/refresh_tokens (V008); r4 (V009), r5, r6, r7, r8, r10, r11, r12, r13, r14, r15 and r16 change rows only
   approved="$RUNTIME_PRIVILEGE_MATRIX"
   reject() {
     RUNTIME_PRIVILEGE_MATRIX="$2"
@@ -82,7 +82,8 @@ section = record.split("## CT17 runtime database privileges and operation gates 
 # supersedes r6's, r11's lesson_progress row supersedes r4's and r12's courses, chapters and lessons rows
 # supersede r1's, as do its learning_materials, assignments and submissions rows.
 # r13 replaces notifications with the IN07 ceiling row; r14 replaces learning_materials
-# with the CO09 ceiling row. Both preserve the reviewed 27-relation inventory.
+# with the CO09 ceiling row; r15 replaces attempts/attempt_answers and r16 replaces
+# submissions. These revisions preserve the reviewed 27-relation inventory.
 # r9 (multi-version predecessor deferral) changes no row.
 r1_part, r2_part = section.split("### CT17-P6-PRIVILEGES-2026-11-13-r2", 1)
 r2_part = r2_part.split("\n## ", 1)[0].split("\n### ", 1)[0]
@@ -95,8 +96,11 @@ r8_part = record.split("### CT17-P6-PRIVILEGES-2026-11-23-r8", 1)[1].split("\n##
 r10_part = record.split("### CT17-P6-PRIVILEGES-2026-11-24-r10", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
 r11_part = record.split("### CT17-P6-PRIVILEGES-2026-11-24-r11", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
 r12_part = record.split("### CT17-P6-PRIVILEGES-2026-11-25-r12", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
-for revision in ("CT17-P6-PRIVILEGES-2026-11-25-r13", "CT17-P6-PRIVILEGES-2026-11-26-r14"):
+for revision in ("CT17-P6-PRIVILEGES-2026-11-25-r13", "CT17-P6-PRIVILEGES-2026-11-26-r14",
+                 "CT17-P6-PRIVILEGES-2026-11-26-r15", "CT17-P6-PRIVILEGES-2026-11-27-r16", "CT17-P6-PRIVILEGES-2026-11-27-r17"):
     assert len(re.findall(r"^### " + re.escape(revision) + r" —", record, re.M)) == 1, f"missing or duplicate revision: {revision}"
+revision_numbers = re.findall(r"^### CT17-P6-PRIVILEGES-\d{4}-\d{2}-\d{2}-r(\d+) —", record, re.M)
+assert len(revision_numbers) == len(set(revision_numbers)), "CT17 matrix revision numbers must be unique across dates"
 r13_part = record.split("### CT17-P6-PRIVILEGES-2026-11-25-r13", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
 def documented_rows(text):
     rows = {}
@@ -171,11 +175,23 @@ for rel, forbidden in {"courses": {"UPDATE:instructor_id", "DELETE"}, "chapters"
     granted = set(r12[rel][0]) | set(r12[rel][1])
     assert not granted & forbidden, f"r12 grants a never-granted privilege on {rel}: {granted & forbidden}"
 assert r13 == {"notifications": normalize({"SELECT", "INSERT"}, {"UPDATE:is_read"})}, "CT17 r13 must match the IN07 ceiling exactly"
-documented = {**r1, **r2, **r3, **r4, **r5, **r6, **r7, **r8, **r10, **r11, **r12, **r13, **r14}
+r15_part = record.split("### CT17-P6-PRIVILEGES-2026-11-26-r15", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
+r15 = documented_rows(r15_part)
+assert r15 == {"attempts": normalize({"SELECT", "INSERT"}, {"UPDATE:submitted_at", "UPDATE:score_percentage"}),
+               "attempt_answers": normalize({"SELECT", "INSERT"}, {"UPDATE:selected_options", "UPDATE:is_correct"})}, "CT17 r15 must equal the AS08 ceiling rows"
+r16_part = record.split("### CT17-P6-PRIVILEGES-2026-11-27-r16", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
+r16 = documented_rows(r16_part)
+assert r16 == {"submissions": normalize({"SELECT", "INSERT"}, {f"UPDATE:{c}" for c in
+    ("object_key", "original_filename", "submitted_at", "grade_percentage", "feedback", "graded_at")})}, "CT17 r16 must match the AS09 ceiling"
+r17_part = record.split("### CT17-P6-PRIVILEGES-2026-11-27-r17", 1)[1].split("\n## ", 1)[0].split("\n### ", 1)[0]
+r17 = documented_rows(r17_part)
+assert r17 == {"discussion_posts": normalize({"SELECT", "INSERT"}, {"UPDATE:is_hidden"}),
+               "content_reports": normalize({"SELECT", "INSERT"}, {"UPDATE:status", "UPDATE:resolved_at"})}, "CT17 r17 must equal the IN06 ceiling rows"
+documented = {**r1, **r2, **r3, **r4, **r5, **r6, **r7, **r8, **r10, **r11, **r12, **r13, **r14, **r15, **r16, **r17}
 if executable != documented:
     for rel in sorted(set(executable) | set(documented)):
         if executable.get(rel) != documented.get(rel):
             print(f"mismatch for {rel}: script={executable.get(rel)} record={documented.get(rel)}", file=sys.stderr)
-    sys.exit("RUNTIME_PRIVILEGE_MATRIX differs from CT17-P6-PRIVILEGES r1 plus the r2, r3, r4, r5, r6, r7, r8, r10, r11, r12, r13 and r14 rows")
-print(f"MATRIX_CONTRACT_SYNC_PASS: {len(executable)} relations match r1 ({len(r1)} rows, history intact) plus approved r2 ({len(r2)} rows), r3 ({len(r3)} rows) and ceiling-bounded r4 ({len(r4)} rows) r5 ({len(r5)} rows), r6 ({len(r6)} rows), r7 ({len(r7)} rows), r8 ({len(r8)} rows), r10 ({len(r10)} rows), r11 ({len(r11)} rows) r12 ({len(r12)} rows) r13 ({len(r13)} row) and r14 ({len(r14)} row)")
+    sys.exit("RUNTIME_PRIVILEGE_MATRIX differs from CT17-P6-PRIVILEGES r1 plus the r2, r3, r4, r5, r6, r7, r8, r10, r11, r12, r13, r14, r15, r16 and r17 rows")
+print(f"MATRIX_CONTRACT_SYNC_PASS: {len(executable)} relations match r1 ({len(r1)} rows, history intact) plus approved r2 ({len(r2)} rows), r3 ({len(r3)} rows) and ceiling-bounded r4 ({len(r4)} rows) r5 ({len(r5)} rows), r6 ({len(r6)} rows), r7 ({len(r7)} rows), r8 ({len(r8)} rows), r10 ({len(r10)} rows), r11 ({len(r11)} rows) r12 ({len(r12)} rows) r13 ({len(r13)} row) and r14 ({len(r14)} row), r15 ({len(r15)} rows) r16 ({len(r16)} row) and r17 ({len(r17)} rows)")
 PY

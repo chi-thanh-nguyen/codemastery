@@ -51,6 +51,23 @@ public class UserAccountService {
     }
 
     /**
+     * CT01-LEARNER-NAMES-2026-11-12-r1: Course-only stored-name projection for an
+     * owner-admitted page. Historical memberships and later role/status changes retain names.
+     */
+    @Transactional(readOnly = true)
+    public Map<UUID, String> learnerDisplayNames(Set<UUID> learnerIds) {
+        Set<UUID> ids = Set.copyOf(learnerIds);
+        if (ids.size() > 100) {
+            throw new IllegalArgumentException("At most 100 learner IDs per call");
+        }
+        Map<UUID, String> names = new HashMap<>();
+        for (UUID id : ids) {
+            users.findById(id).ifPresent(user -> names.put(id, user.displayName()));
+        }
+        return Map.copyOf(names);
+    }
+
+    /**
      * CT01.user-summaries (ADR012 section 3.4): the stored display name and current role literal
      * ({@code learner}, {@code instructor} or {@code admin}) of existing accounts. Unknown IDs are
      * omitted. Callers pass only IDs taken from rows they are returning, at most 100 per call; this

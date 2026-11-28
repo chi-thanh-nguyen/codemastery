@@ -4,7 +4,8 @@
 #  - Secrets (DB password, JWT secret, storage keys) have NO committed default value.
 #    AppConfig validates active datasource inputs before initialization. Its lazy
 #    JWT/CORS/scheduler settings validate when injected by a consumer; unused optional
-#    integrations do not become startup requirements. Never commit real values.
+#    integrations do not become startup requirements. Quiz expiry is explicitly required,
+#    including when disabled (ADR007 §3.2). Never commit real values.
 #  - Every variable used here must be listed with a placeholder in the root .env.example.
 #  - Environment variables always take precedence over this file.
 
@@ -112,14 +113,18 @@ codemastery:
     secret-key: ${STORAGE_SECRET_KEY}
     path-style-access: ${STORAGE_PATH_STYLE_ACCESS:true}
 
-  assessment:
-    auto-submit:
-      fixed-delay: ${ATTEMPT_AUTO_SUBMIT_DELAY:PT30S}     # how often expired quiz attempts are auto-submitted
-
   interaction:
     deadline-reminder:
       fixed-delay: ${DEADLINE_REMINDER_DELAY:PT15M}       # how often upcoming deadlines are checked
       lead-time: ${DEADLINE_REMINDER_LEAD_TIME:PT24H}     # notify when a deadline is closer than this
+
+# ADR007 §3.2: explicit operator inputs, validated even when disabled; no production defaults.
+app:
+  quiz:
+    auto-submit:
+      enabled: ${APP_QUIZ_AUTO_SUBMIT_ENABLED}
+      delay-ms: ${APP_QUIZ_AUTO_SUBMIT_DELAY_MS}
+      batch-size: ${APP_QUIZ_AUTO_SUBMIT_BATCH_SIZE}
 
 ---
 # Production / deployed VM: structured (ECS JSON) logs for operational use.

@@ -86,7 +86,7 @@ provision_db_roles >/dev/null
 umask 077
 { printf 'DB_HOST=postgres\nDB_PORT=5432\nDB_NAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\n' "$(env_get DB_NAME)" "$(env_get DB_USER)" "$(env_get DB_PASSWORD)"
   printf 'SPRING_FLYWAY_URL=%s\nSPRING_FLYWAY_USER=%s\nSPRING_FLYWAY_PASSWORD=%s\n' "$(env_get SPRING_FLYWAY_URL)" "$(env_get SPRING_FLYWAY_USER)" "$(env_get SPRING_FLYWAY_PASSWORD)"
-  printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=https://codemastery.example.test\nSTORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\nSPRING_PROFILES_ACTIVE=prod\n' "$(openssl rand -hex 32)"
+  printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=https://codemastery.example.test\nSTORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\nSPRING_PROFILES_ACTIVE=prod\nAPP_QUIZ_AUTO_SUBMIT_ENABLED=false\nAPP_QUIZ_AUTO_SUBMIT_DELAY_MS=1000\nAPP_QUIZ_AUTO_SUBMIT_BATCH_SIZE=2\n' "$(openssl rand -hex 32)"
 } > "$work/backend.env"
 # Read the whole log before matching: `docker logs | grep -q` fails under pipefail
 # (docker logs gets SIGPIPE, status 141) once the log outgrows the pipe buffer.
@@ -399,7 +399,7 @@ check "CO09 publication" "$STATUS/$(field publicationStatus)" "200/published"
 call POST "$material_path" "$token_i" '{"title":"Video","materialType":"external_video","externalVideoUrl":"https://www.youtube-nocookie.com/embed/test_01"}'
 check "CO09 canonical video creation" "$STATUS/$(field materialType)" "201/external_video"
 
-echo "== AS09 owner assignments (r12: assignments SELECT, INSERT, UPDATE(definition, publication); submissions SELECT(id, assignment_id, graded_at))"
+echo "== AS09 assignments and submissions (r12/r16)"
 assigned=/api/courses/$authored
 call POST "$assigned/assignments" "$token_i" "{\"title\":\"Project\",\"instructions\":\"Submit a ZIP\",\"deadlineAt\":\"9999-12-31T23:59:59.999999Z\",\"lessonId\":\"$lesson_a\"}"
 check "create an Assignment at the latest representable deadline (INSERT)" "$STATUS/$(field publicationStatus)/$(field deadlineAt)" "201/hidden/9999-12-31T23:59:59.999999Z"
@@ -432,9 +432,24 @@ call GET "$assigned/owned-assignments" "$token_i"
 check "owner list with submission and graded counts (column SELECT)" "$STATUS/$(field totalElements)/$(field content.0.submissionCount)/$(field content.0.gradedCount)" "200/1/2/1"
 call GET "$assigned/owned-assignments/$assignment" "$token_i"; check "owner read" "$STATUS/$(field title)" "200/Project 2"
 call GET "$assigned/owned-assignments" "$token_a"; check "a Learner cannot read owner assignments" "$STATUS" 403
+# AS09 r16: backend queries execute as the configured non-owner runtime login.
+call PUT "$assigned/membership" "$token_a"
+check "learner joins the authored Course" "$STATUS" 200
+call GET "$assigned/assignments" "$token_a"
+check "learner assignment page (real schema joins)" "$STATUS/$(field totalElements)" "200/1"
+call GET "$assigned/assignments/$assignment" "$token_a"
+check "own ungraded submission has nullable grade" "$STATUS/$(field submission.graded)/$(field submission.gradePercentage)" "200/False/None"
+call GET "$assigned/owned-assignments/$assignment/submissions" "$token_i"
+check "owner receives page-bounded historical names" "$STATUS/$(field totalElements)" "200/2"
+submission="$(field content.0.id)"; submitted_at="$(field content.0.submittedAt)"
+call PUT "$assigned/owned-assignments/$assignment/submissions/$submission/grade" "$token_i" "{\"gradePercentage\":99.99,\"feedback\":\"Reviewed\",\"submittedAt\":\"$submitted_at\"}"
+check "locked grade writes only approved runtime columns" "$STATUS/$(field gradePercentage)/$(field feedback)" "200/99.99/Reviewed"
+call PUT "$assigned/owned-assignments/$assignment/submissions/$submission/grade" "$token_i" "{\"gradePercentage\":80,\"feedback\":\"Updated\",\"submittedAt\":\"$submitted_at\"}"
+check "regrade remains supported" "$STATUS/$(field feedback)" "200/Updated"
 psql_admin >/dev/null <<SQL
 DELETE FROM public.submissions WHERE assignment_id='$assignment';
 DELETE FROM public.assignments WHERE id='$assignment';
+DELETE FROM public.enrollments WHERE course_id='$authored';
 DELETE FROM public.learning_materials WHERE lesson_id IN (SELECT id FROM public.lessons WHERE chapter_id IN ('$chapter_a','$chapter_b'));
 DELETE FROM public.lessons WHERE chapter_id IN ('$chapter_a','$chapter_b');
 DELETE FROM public.chapters WHERE course_id='$authored';
@@ -505,6 +520,23 @@ call GET "$notification_path" "$token_adm"
 check "Administrator can list own notifications" "$STATUS/$(field totalElements)" 200/0
 check "mark-read and mark-all committed under the runtime role" "$(psql_admin <<<"SELECT count(*) FILTER (WHERE is_read) || '/' || count(*) FROM public.notifications;")" 2/3
 
+echo "== IN06 discussion and reports (r17)"
+discussion=/api/lessons/$lesson/discussion
+call POST "$discussion" "$token_a" '{"content":"Runtime question"}'
+check "create question through CT03 under the runtime role" "$STATUS/$(field authorRole)" "201/Learner"
+interaction_question="$(field id)"
+call POST "$discussion" "$token_c" "{\"content\":\"Runtime reply\",\"parentPostId\":\"$interaction_question\"}"
+check "reply holds parent SHARE and writes its notification" "$STATUS/$(field parentPostId)" "201/$interaction_question"
+call GET "$discussion?size=1" "$token_a"
+check "question pagination embeds the reply" "$STATUS/$(field totalElements)/$(field content.0.replies.0.content)" "200/1/Runtime reply"
+call POST "/api/lessons/$lesson/reports" "$token_a" '{"reason":"Runtime lesson report"}'
+check "create Lesson report under runtime role" "$STATUS/$(field status)" "201/open"
+call POST "$discussion/$interaction_question/reports" "$token_a" '{"reason":"Runtime post report"}'
+check "create post report under runtime role" "$STATUS/$(field status)" "201/open"
+call POST "$discussion" "$token_adm" '{'
+check "Administrator admission precedes malformed JSON" "$STATUS" 403
+check "reply notification committed under runtime role" "$(psql_admin <<<"SELECT count(*) FROM public.notifications WHERE message LIKE 'New reply to your question in %';")" 1
+
 echo "== current account state is enforced (users SELECT on every protected request)"
 psql_admin >/dev/null <<<"UPDATE public.users SET account_status='locked' WHERE email='learner.c@example.test';"
 call GET "/api/me/courses" "$token_c"; check "locked account's existing token is rejected" "$STATUS" 401
@@ -572,7 +604,7 @@ echo "== no permission failure anywhere, and the matrix is unchanged"
 denials="$(docker logs "$backend" 2>&1 | count_permission_errors)"
 check "backend log entries reporting permission denied / SQLSTATE 42501" "$denials" 0
 verify_runtime_privileges complete >/dev/null
-echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank, AS06 quiz composition, CO06 Instructor authoring, CO09 relational materials, AS09 owner assignments, the IN10 audit read, and IN07 notifications under the matrix"
+echo "RUNTIME_CONSUMER_TESTS_PASS: real Auth, ADR014 refresh sessions, AU07 request worker and reset confirmation, catalogue/detail, CT22 membership, CO08 progress/resume, the AD07 skill graph, the AS05 question bank, AS06 quiz composition, CO06 Instructor authoring, CO09 relational materials, AS09 owner assignments, the IN10 audit read, IN07 notifications and IN06 discussion/report intake under the matrix"
 BASH
 PGTEST_CONTAINER="$container" PGTEST_NETWORK="$network" \
   BACKEND_IMAGE="${BACKEND_IMAGE:-codemastery-backend:privilege-test}" \
@@ -612,7 +644,7 @@ provision_db_roles >/dev/null
 umask 077
 { printf 'DB_HOST=postgres\nDB_PORT=5432\nDB_NAME=%s\nDB_USER=%s\nDB_PASSWORD=%s\n' "$(env_get DB_NAME)" "$(env_get DB_USER)" "$(env_get DB_PASSWORD)"
   printf 'SPRING_FLYWAY_URL=%s\nSPRING_FLYWAY_USER=%s\nSPRING_FLYWAY_PASSWORD=%s\n' "$(env_get SPRING_FLYWAY_URL)" "$(env_get SPRING_FLYWAY_USER)" "$(env_get SPRING_FLYWAY_PASSWORD)"
-  printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=https://codemastery.example.test\nSTORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\nSPRING_PROFILES_ACTIVE=prod\n' "$(openssl rand -hex 32)"
+  printf 'JWT_SECRET=%s\nCORS_ALLOWED_ORIGINS=https://codemastery.example.test\nSTORAGE_ACCESS_KEY=unused-in-this-test\nSTORAGE_SECRET_KEY=unused-in-this-test\nSPRING_PROFILES_ACTIVE=prod\nAPP_QUIZ_AUTO_SUBMIT_ENABLED=false\nAPP_QUIZ_AUTO_SUBMIT_DELAY_MS=1000\nAPP_QUIZ_AUTO_SUBMIT_BATCH_SIZE=2\n' "$(openssl rand -hex 32)"
 } > "$work/upgrade.env"
 { cat "$work/upgrade.env"; printf 'SPRING_FLYWAY_TARGET=8\n'; } > "$work/upgrade-v008.env"
 # This build's entities expect V009, so schema validation stops it once Flyway has

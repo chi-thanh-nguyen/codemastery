@@ -16,7 +16,6 @@ import { SkillGraphEditorPage } from '../../features/instructor/skill-graph-edit
 import type { SkillEditorTab } from '../../features/instructor/skill-graph-editor/pages/SkillGraphEditorPage';
 import type { EditableSkill, MappingLesson, ReadinessCheck } from '../../features/instructor/skill-graph-editor/types/skillGraphTypes';
 import { SubmissionListPage } from '../../features/instructor/grading/pages/SubmissionListPage';
-import type { GradingFilter } from '../../features/instructor/grading/pages/SubmissionListPage';
 import { GradeSubmissionPage } from '../../features/instructor/grading/pages/GradeSubmissionPage';
 import type { SubmissionRow } from '../../features/instructor/grading/types/gradingTypes';
 import { LearnerInsightsPage } from '../../features/instructor/learner-insights/pages/LearnerInsightsPage';
@@ -107,9 +106,9 @@ export function InstructorPreview({ state, setState, screen, item, tab, go }: Pr
     if (screen === 'grading') return <GradingList state={state} go={go} />;
     if (screen === 'grade') {
         const submission = state.submissions.find((row) => row.id === item) ?? state.submissions[0];
-        return <GradeSubmissionPage key={submission.id} submission={submission} back={{ label: 'Grading', href: '#', onClick: () => go('grading') }} onDownload={() => notify('Download is pending the storage contract (CT09).')}
-            notice={<ContractNote>Sample grading. Saving updates this preview only; in production the learner is notified by the Interaction module.</ContractNote>}
-            onSave={(grade, feedback) => { setState((value) => ({ ...value, submissions: value.submissions.map((row) => row.id === submission.id ? { ...row, graded: { grade, feedback, gradedAtLabel: nowLabel } } : row) })); notify('Grade saved (sample).'); }} />;
+        return <GradeSubmissionPage key={submission.id} submission={submission} back={{ label: 'Grading', href: '#', onClick: () => go('grading') }} onDownload={() => notify('Sample download only.')}
+            notice={<ContractNote>Sample grading. Saving updates this preview only.</ContractNote>}
+            onSave={(grade, feedback) => { setState((value) => ({ ...value, submissions: value.submissions.map((row) => row.id === submission.id ? { ...row, graded: { grade, feedback, gradedAtLabel: nowLabel } } : row) })); notify('Grade saved.'); }} />;
     }
     if (screen === 'learners') return <LearnerInsightsPage rows={fx.learnerRows} courses={[fx.COURSE_TITLE]} onOpen={(id) => go('learner', { item: id })} />;
     if (screen === 'learner') return <LearnerDetail id={item ?? 'u-linh'} go={go} />;
@@ -117,8 +116,7 @@ export function InstructorPreview({ state, setState, screen, item, tab, go }: Pr
 }
 
 function GradingList({ state, go }: { state: InstructorState; go: Go }) {
-    const [filter, setFilter] = useState<GradingFilter>('ungraded');
-    return <SubmissionListPage rows={state.submissions} filter={filter} onFilterChange={setFilter} onOpen={(id) => go('grade', { item: id })} />;
+    return <SubmissionListPage rows={state.submissions} onOpen={(id) => go('grade', { item: id })} />;
 }
 
 function LearnerDetail({ id, go }: { id: string; go: Go }) {

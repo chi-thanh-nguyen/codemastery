@@ -12,8 +12,10 @@ import com.codemastery.modules.course.application.service.CourseManagementServic
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -21,8 +23,10 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * CT23.questions and the QuestionBankService bindings of CT23.bindings (ADR007 §§4, 7).
@@ -37,6 +41,11 @@ import org.springframework.transaction.annotation.Transactional;
  * </ul>
  * Both CT40 lookups join the caller's transaction: inside the guard they read under the held
  * Course root, and in an owner read they share its REPEATABLE READ snapshot.
+ *
+ * <p>AS18 (#164) adds CT40.coverage {@link #readCoverage(UUID, Set)} and its ADR011 §§4/12
+ * execution-only companion {@link #readCoverageForExecution(UUID, Set)}. The companion reaches
+ * AD07's {@code SkillGraphService.requireAssessmentSkillsInCourse} under ADR007 §17
+ * ({@code AS18-EXEC-COVERAGE-2026-11-28-r1}) and never Course ownership.
  */
 @Service
 public class QuestionBankService {
@@ -67,6 +76,27 @@ public class QuestionBankService {
             Objects.requireNonNull(difficulty, "difficulty");
             options = List.copyOf(options);
             correctOptions = List.copyOf(correctOptions);
+        }
+    }
+
+    /**
+     * Deeply immutable per-skill question count snapshot returned by CT40.coverage (ADR005 §3.3)
+     * and execution-only coverage lookups (ADR011 §§4, 12); contains no answer keys.
+     */
+    public record CoverageSnapshot(UUID courseId, Map<UUID, Long> questionCounts) {
+        public CoverageSnapshot {
+            Objects.requireNonNull(courseId, "courseId");
+            Objects.requireNonNull(questionCounts, "questionCounts");
+            Map<UUID, Long> normalized = new HashMap<>(questionCounts.size());
+            for (var entry : questionCounts.entrySet()) {
+                UUID skill = Objects.requireNonNull(entry.getKey(), "skillId");
+                Long count = Objects.requireNonNull(entry.getValue(), "questionCount");
+                if (count < 0) {
+                    throw new IllegalArgumentException("questionCount must be non-negative");
+                }
+                normalized.put(skill, count);
+            }
+            questionCounts = Map.copyOf(normalized);
         }
     }
 
@@ -153,6 +183,84 @@ public class QuestionBankService {
     }
 
     /**
+     * CT40.coverage (ADR005 §3.3): owner-scoped count of distinct valid Questions per requested Course
+     * skill. Standalone, it runs in its own REPEATABLE READ read-only snapshot, so admission, skill
+     * scope and Question rows are read coherently. For a readiness decision the caller runs it inside
+     * ADR005 §5's Course-root READ COMMITTED write unit, which it joins. Any other active context is
+     * rejected before the first query: joining never changes the isolation of an existing transaction.
+     */
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public CoverageSnapshot readCoverage(UUID courseId, Set<UUID> skillIds) {
+        requireId(courseId);
+        requireCoherentCoverageContext();
+        courseAccess.requireCourseOwnership(courseId);
+        Set<UUID> requestedSkills = requireNonNullSkillIds(skillIds);
+        if (requestedSkills.isEmpty()) {
+            return new CoverageSnapshot(courseId, Map.of());
+        }
+        if (!Set.copyOf(courseSkillIds(courseId)).containsAll(requestedSkills)) {
+            throw unavailable();
+        }
+        return buildCoverageSnapshot(courseId, requestedSkills);
+    }
+
+    /**
+     * ADR011 §§4, 12: actorless execution-only companion of {@link #readCoverage(UUID, Set)} with the
+     * same population and shape. Only Adaptive's in-transaction submission orchestration may call it,
+     * inside {@code AttemptService}'s bound Course execution scope; the scope is verified before any
+     * query. Course ancestry uses ADR007 §17's execution-coverage caller of the AS08 assertion; a
+     * foreign or inconsistent skill is an integrity failure (safe 500), never a client error.
+     */
+    public CoverageSnapshot readCoverageForExecution(UUID courseId, Set<UUID> skillIds) {
+        requireId(courseId);
+        AttemptService.requireExecutionScope(courseId);
+        Set<UUID> requestedSkills = requireNonNullSkillIds(skillIds);
+        if (requestedSkills.isEmpty()) {
+            return new CoverageSnapshot(courseId, Map.of());
+        }
+        skillGraph.requireAssessmentSkillsInCourse(courseId, requestedSkills);
+        return buildCoverageSnapshot(courseId, requestedSkills);
+    }
+
+    /** ADR005 §§3.3, 5: an owner snapshot or the Course-root write unit; never a mixed context. */
+    private static void requireCoherentCoverageContext() {
+        Integer isolation = TransactionSynchronizationManager.getCurrentTransactionIsolationLevel();
+        boolean readOnly = TransactionSynchronizationManager.isCurrentTransactionReadOnly();
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !(readOnly && Integer.valueOf(TransactionDefinition.ISOLATION_REPEATABLE_READ).equals(isolation)
+                    || !readOnly && Integer.valueOf(TransactionDefinition.ISOLATION_READ_COMMITTED).equals(isolation))) {
+            throw new IllegalStateException("Coverage requires an owner snapshot or the Course configuration unit");
+        }
+    }
+
+    private CoverageSnapshot buildCoverageSnapshot(UUID courseId, Set<UUID> requestedSkills) {
+        Map<UUID, Long> counts = new HashMap<>(requestedSkills.size());
+        for (UUID skillId : requestedSkills) {
+            counts.put(skillId, 0L);
+        }
+        List<Question> rows = questions.findAllInSkills(requestedSkills);
+        if (rows == null) {
+            throw new IllegalStateException("Invalid question coverage query result");
+        }
+        Set<UUID> seenQuestionIds = new HashSet<>(rows.size());
+        for (Question question : rows) {
+            requireStoredDefinition(question);
+            if (!requestedSkills.contains(question.skill_id()) || !seenQuestionIds.add(question.id())) {
+                throw new IllegalStateException("Stored question coverage projection is inconsistent");
+            }
+            counts.merge(question.skill_id(), 1L, Long::sum);
+        }
+        return new CoverageSnapshot(courseId, counts);
+    }
+
+    private static Set<UUID> requireNonNullSkillIds(Set<UUID> skillIds) {
+        if (skillIds == null || skillIds.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("Skill identifiers must not be null");
+        }
+        return Set.copyOf(skillIds);
+    }
+
+    /**
      * CT40 {@code SkillGraphService.requireSkillInCourse(courseId, skillId)} (ADR005 §3.2): returns
      * normally for a skill of the Course, otherwise the same safe 404. Producer: AD07 (#165).
      */
@@ -231,13 +339,18 @@ public class QuestionBankService {
                 input.options().toArray(String[]::new), input.correctOptions().toArray(Boolean[]::new));
     }
 
-    private QuestionView toView(Question question) {
+    /** A stored row violating V004/data-model §11 is an integrity failure (safe 500). */
+    private static void requireStoredDefinition(Question question) {
         if (question == null || question.id() == null || question.skill_id() == null
                 || question.options() == null || question.correct_options() == null
                 || !isDefinition(question.prompt(), question.kind(), question.difficulty(),
                 Arrays.asList(question.options()), Arrays.asList(question.correct_options()))) {
             throw new IllegalStateException("Stored question definition violates V004");
         }
+    }
+
+    private QuestionView toView(Question question) {
+        requireStoredDefinition(question);
         return new QuestionView(question.id(), question.skill_id(), question.prompt(), question.kind(),
                 question.difficulty(), List.of(question.options()), List.of(question.correct_options()));
     }

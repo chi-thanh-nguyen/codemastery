@@ -37,11 +37,21 @@ export type DeliveredCourseTab = 'content' | 'skills' | 'assessments' | 'setting
  * (400, 403, 404) never reach it: the read discards the copy and the shell shows the F14 state instead.
  */
 export function CourseRefreshAlert({ course }: { course: { data: OwnedCourse | null; error: unknown; reload: () => void } | undefined }) {
-    if (!course?.data || !course.error || courseRefused(course.error)) return null;
-    return <Alert severity="warning" sx={{ mb: 2.5 }}
+    const ctx = useCourseEditorContext();
+    if (ctx?.mutationPending) return <Alert severity="info" sx={{ mb: 2.5 }}
+        action={<Button onClick={ctx.cancelMutation}>Stop waiting</Button>}>
+        A sent change is still pending. It will be checked when the request settles. Stopping does not undo it.
+    </Alert>;
+    if (course?.data && course.error && !courseRefused(course.error)) return <Alert severity="warning" sx={{ mb: 2.5 }}
         action={<Button size="small" variant="text" onClick={course.reload}>Try again</Button>}>
         We couldn&apos;t load this course. The last loaded version is shown.
     </Alert>;
+    if (ctx?.mutationUncertain) return <Alert severity="warning" sx={{ mb: 2.5 }}
+        action={<Button onClick={() => { ctx.course.reload(); ctx.skillGraph.reload(); }}>Inspect current state</Button>}>
+        A change had an unknown outcome. Review the current lesson, materials and skills before another explicit attempt.
+        A resource read cannot prove that an unobserved server operation has stopped. Nothing is replayed automatically.
+    </Alert>;
+    return null;
 }
 
 function activeTabFrom(pathname: string): DeliveredCourseTab {
@@ -128,13 +138,11 @@ export function CourseEditorFrame() {
         setAlert(null);
         try {
             await ops.setPublication(next);
-            course.reload();
             setNotice(next === 'published' ? 'Course published.' : 'Course hidden.');
         } catch (error) {
             if (isCancelled(error)) return;
             if (outcomeUnknown(error)) {
                 setAlert("We couldn't confirm whether the course publication changed.");
-                course.reload();
                 return;
             }
             setAlert(error instanceof ApiError ? error.message : 'Something went wrong on our side. Try again in a moment.');
@@ -147,8 +155,8 @@ export function CourseEditorFrame() {
             back={{ label: 'Teaching', href: '/teach', onClick: () => go('/teach') }}
             meta={<PublicationPill publication={data.publicationStatus} />}
             actions={published
-                ? <Button variant="outlined" onClick={() => setConfirmPub('hidden')} disabled={ops.busy} startIcon={<PresentationIcon name="eye-off" />}>Hide course</Button>
-                : <Button variant="contained" onClick={() => setConfirmPub('published')} disabled={ops.busy} startIcon={<PresentationIcon name="eye" />}>Publish course</Button>} />
+                ? <Button variant="outlined" onClick={() => setConfirmPub('hidden')} disabled={ops.busy || course.revalidating || !!course.error} startIcon={<PresentationIcon name="eye-off" />}>Hide course</Button>
+                : <Button variant="contained" onClick={() => setConfirmPub('published')} disabled={ops.busy || course.revalidating || !!course.error} startIcon={<PresentationIcon name="eye" />}>Publish course</Button>} />
         {notice && <Typography role="status" sx={{ color: 'text.secondary', mb: 2 }}>{notice}</Typography>}
         {alert && <Alert severity="warning" sx={{ mb: 2.5 }}>{alert}</Alert>}
         <CourseRefreshAlert course={course} />
@@ -183,7 +191,10 @@ export function CourseEditorFrame() {
 /** S18 Content tab: chapters, canonical ordered lessons, mapped-skill counts, reorder and lesson publication. */
 export function CourseContentTab() {
     const { courseId, course, skillGraph } = useCourseEditorContext()!;
-    const ops = useCourseOperations(courseId);
+    const ops = useCourseOperations(courseId), navigate = useNavigate();
+    const locked = ops.busy || course.revalidating || !!course.error;
+    const [editingChapter, setEditingChapter] = useState<string | null>(null);
+    const [publication, setPublication] = useState<{ lessonId: string; next: CoursePublicationStatus } | null>(null);
     const data = course.data!;
     const [chapterModal, setChapterModal] = useState(false);
     const [chapterTitle, setChapterTitle] = useState('');
@@ -208,13 +219,14 @@ export function CourseContentTab() {
         if (!/\S/.test(chapterTitle)) { setChapterError('Enter a chapter title.'); return; }
         setChapterError(null); setErrorAlert(null);
         try {
-            await ops.createChapter(chapterTitle.trim());
+            if (editingChapter) await ops.updateChapter(editingChapter, chapterTitle.trim());
+            else await ops.createChapter(chapterTitle.trim());
             setChapterModal(false); setChapterTitle('');
-            course.reload();
-            setStatusLine('Chapter added.');
+            setStatusLine(editingChapter ? 'Chapter saved.' : 'Chapter added.');
         } catch (error) {
             if (isCancelled(error)) return;
-            setErrorAlert(errorMessage(error));
+            setErrorAlert(outcomeUnknown(error) ? 'The change could not be confirmed. Check the refreshed course before trying again.' : errorMessage(error));
+            if (courseRefused(error)) course.reload();
         }
     }
 
@@ -228,11 +240,11 @@ export function CourseContentTab() {
                 contentMarkdown: /\S/.test(lessonContent) ? lessonContent : null,
             });
             setLessonModal(null); setLessonTitle(''); setLessonContent('');
-            course.reload();
             setStatusLine('Lesson added.');
         } catch (error) {
             if (isCancelled(error)) return;
-            setErrorAlert(errorMessage(error));
+            setErrorAlert(outcomeUnknown(error) ? 'The change could not be confirmed. Check the refreshed course before trying again.' : errorMessage(error));
+            if (courseRefused(error)) course.reload();
         }
     }
 
@@ -248,11 +260,11 @@ export function CourseContentTab() {
         setErrorAlert(null);
         try {
             await ops.orderLessons(chapterId, ids);
-            course.reload();
             setStatusLine(`Moved ${movedLesson.title} to position ${targetIndex + 1}.`);
         } catch (error) {
             if (isCancelled(error)) return;
-            setErrorAlert(errorMessage(error));
+            setErrorAlert(outcomeUnknown(error) ? 'The change could not be confirmed. Check the refreshed course before trying again.' : errorMessage(error));
+            if (courseRefused(error)) course.reload();
         }
     }
 
@@ -260,31 +272,45 @@ export function CourseContentTab() {
         setErrorAlert(null);
         try {
             await ops.setLessonPublication(lessonId, next);
-            course.reload();
             setStatusLine(next === 'published' ? 'Lesson published.' : 'Lesson hidden.');
         } catch (error) {
             if (isCancelled(error)) return;
-            setErrorAlert(errorMessage(error));
+            setErrorAlert(outcomeUnknown(error) ? 'The change could not be confirmed. Check the refreshed course before trying again.' : errorMessage(error));
+            if (courseRefused(error)) course.reload();
         }
     }
 
+    async function moveChapter(chapterId: string, direction: -1 | 1) {
+        if (locked) return;
+        const index = data.chapters.findIndex((item) => item.id === chapterId), target = index + direction;
+        if (index < 0 || target < 0 || target >= data.chapters.length) return;
+        const ids = data.chapters.map((item) => item.id); [ids[index], ids[target]] = [ids[target], ids[index]];
+        setErrorAlert(null);
+        try { await ops.orderChapters(ids); setStatusLine(`Moved ${data.chapters[index].title} to position ${target + 1}.`); }
+        catch (error) { if (isCancelled(error)) return; setErrorAlert(errorMessage(error)); if (courseRefused(error)) course.reload(); }
+    }
     return <Box sx={{ display: 'grid', gap: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
             <Typography component="h2" variant="h2">Content</Typography>
-            <Button variant="outlined" onClick={() => { setChapterTitle(''); setChapterError(null); setChapterModal(true); }}
-                disabled={ops.busy} startIcon={<PresentationIcon name="plus" />}>Add chapter</Button>
+            <Button variant="outlined" onClick={() => { setEditingChapter(null); setChapterTitle(''); setChapterError(null); setChapterModal(true); }}
+                disabled={locked} startIcon={<PresentationIcon name="plus" />}>Add chapter</Button>
         </Box>
         {errorAlert && <Alert severity="error">{errorAlert}</Alert>}
+        {!!skillGraph.error && <Alert severity="warning" action={<Button onClick={skillGraph.reload}>Try again</Button>}>Skill mappings are unavailable.</Alert>}
         <Typography role="status" className="cm-visually-hidden">{statusLine}</Typography>
         {data.chapters.length === 0
             ? <EmptyView icon="book" headingLevel="h3" title="No chapters yet"
                 message="Add chapters and lessons to structure your course."
                 action={<Button variant="contained" onClick={() => setChapterModal(true)} startIcon={<PresentationIcon name="plus" />}>Add chapter</Button>} />
-            : data.chapters.map((chapter) => <Box component="section" key={chapter.id} aria-labelledby={`chapter-${chapter.id}`} sx={{ display: 'grid', gap: 1.5 }}>
+            : data.chapters.map((chapter, chapterIndex) => <Box component="section" key={chapter.id} aria-labelledby={`chapter-${chapter.id}`} sx={{ display: 'grid', gap: 1.5 }}>
                 <Box sx={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
                     <Typography id={`chapter-${chapter.id}`} component="h3" variant="h3">Chapter {chapter.position}: {chapter.title}</Typography>
-                    <Button variant="text" disabled={ops.busy} onClick={() => { setLessonTitle(''); setLessonContent(''); setLessonError(null); setLessonModal(chapter.id); }}
-                        startIcon={<PresentationIcon name="plus" />}>Add lesson</Button>
+                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    <Button disabled={locked} onClick={() => { setEditingChapter(chapter.id); setChapterTitle(chapter.title); setChapterError(null); setChapterModal(true); }}>Edit chapter</Button>
+                    <CircleAction label={`Move ${chapter.title} up`} icon="move-up" variant="plain" disabled={locked || chapterIndex === 0} onClick={() => void moveChapter(chapter.id, -1)} />
+                    <CircleAction label={`Move ${chapter.title} down`} icon="move-down" variant="plain" disabled={locked || chapterIndex === data.chapters.length - 1} onClick={() => void moveChapter(chapter.id, 1)} />
+                    <Button variant="text" disabled={locked} onClick={() => { setLessonTitle(''); setLessonContent(''); setLessonError(null); setLessonModal(chapter.id); }}
+                        startIcon={<PresentationIcon name="plus" />}>Add lesson</Button></Box>
                 </Box>
                 {chapter.lessons.length === 0
                     ? <Box sx={{ border: `1.5px dashed ${roles.line.strong}`, borderRadius: `${radius.lg}px`, p: 3, textAlign: 'center', color: 'text.secondary' }}>
@@ -303,17 +329,18 @@ export function CourseContentTab() {
                                 <Box sx={{ flex: '1 1 200px', minWidth: 0 }}>
                                     <Typography sx={{ fontWeight: 600, overflowWrap: 'anywhere' }}>{lesson.title}</Typography>
                                     <Typography variant="caption" sx={{ color: mapped ? 'text.secondary' : roles.tone.butter.strong }}>
-                                        {mapped ? `${mapped} ${mapped === 1 ? 'skill' : 'skills'} mapped` : 'No skill mapped yet'}
+                                        {!skillGraph.graph || skillGraph.error ? 'Skill mappings unavailable' : mapped ? `${mapped} ${mapped === 1 ? 'skill' : 'skills'} mapped` : 'No skill mapped yet'}
                                     </Typography>
                                 </Box>
                                 <PublicationPill publication={lesson.publicationStatus} />
                                 <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <Button size="small" variant="outlined" disabled={locked} onClick={() => navigate(`/teach/courses/${encodeURIComponent(courseId)}/lessons/${encodeURIComponent(lesson.id)}`)}>Edit</Button>
                                     <CircleAction label={`Move ${lesson.title} up`} icon="move-up" variant="plain"
-                                        disabled={ops.busy || index === 0} onClick={() => void moveLesson(chapter.id, lesson.id, -1)} />
+                                        disabled={locked || index === 0} onClick={() => void moveLesson(chapter.id, lesson.id, -1)} />
                                     <CircleAction label={`Move ${lesson.title} down`} icon="move-down" variant="plain"
-                                        disabled={ops.busy || index === chapter.lessons.length - 1} onClick={() => void moveLesson(chapter.id, lesson.id, 1)} />
-                                    <Button size="small" variant="outlined" disabled={ops.busy}
-                                        onClick={() => void toggleLessonPublication(lesson.id, isPublished ? 'hidden' : 'published')}>
+                                        disabled={locked || index === chapter.lessons.length - 1} onClick={() => void moveLesson(chapter.id, lesson.id, 1)} />
+                                    <Button size="small" variant="outlined" disabled={locked}
+                                        onClick={() => setPublication({ lessonId: lesson.id, next: isPublished ? 'hidden' : 'published' })}>
                                         {isPublished ? 'Hide lesson' : 'Publish lesson'}
                                     </Button>
                                 </Box>
@@ -321,57 +348,58 @@ export function CourseContentTab() {
                         })}
                     </Box>}
             </Box>)}
-        <Dialog open={chapterModal} onClose={() => { if (!ops.busy) setChapterModal(false); }} fullWidth maxWidth="xs" aria-labelledby="add-chapter-title">
-            <DialogTitle id="add-chapter-title">Add chapter</DialogTitle>
+        <Dialog open={chapterModal} onClose={() => { if (!locked) setChapterModal(false); }} fullWidth maxWidth="xs" aria-labelledby="add-chapter-title">
+            <DialogTitle id="add-chapter-title">{editingChapter ? 'Edit chapter' : 'Add chapter'}</DialogTitle>
             <DialogContent>
-                <TextField autoFocus fullWidth label="Chapter title" value={chapterTitle} sx={{ mt: 1 }} disabled={ops.busy}
+                <TextField autoFocus fullWidth label="Chapter title" value={chapterTitle} sx={{ mt: 1 }} disabled={locked}
                     onChange={(event) => { setChapterTitle(event.target.value); setChapterError(null); }}
                     error={!!chapterError} helperText={chapterError} required />
             </DialogContent>
             <DialogActions>
-                <Button variant="outlined" onClick={() => setChapterModal(false)} disabled={ops.busy}>Cancel</Button>
-                <Button variant="contained" onClick={() => void addChapter()} disabled={ops.busy}>Add chapter</Button>
+                <Button variant="outlined" onClick={() => setChapterModal(false)} disabled={locked}>Cancel</Button>
+                <Button variant="contained" onClick={() => void addChapter()} disabled={locked}>{editingChapter ? 'Save chapter' : 'Add chapter'}</Button>
             </DialogActions>
         </Dialog>
-        <Dialog open={lessonModal !== null} onClose={() => { if (!ops.busy) setLessonModal(null); }} fullWidth maxWidth="sm" aria-labelledby="add-lesson-title">
+        <Dialog open={lessonModal !== null} onClose={() => { if (!locked) setLessonModal(null); }} fullWidth maxWidth="sm" aria-labelledby="add-lesson-title">
             <DialogTitle id="add-lesson-title">Add lesson</DialogTitle>
             <DialogContent sx={{ display: 'grid', gap: 2 }}>
-                <TextField autoFocus fullWidth label="Lesson title" value={lessonTitle} sx={{ mt: 1 }} disabled={ops.busy}
+                <TextField autoFocus fullWidth label="Lesson title" value={lessonTitle} sx={{ mt: 1 }} disabled={locked}
                     onChange={(event) => { setLessonTitle(event.target.value); setLessonError(null); }}
                     error={!!lessonError} helperText={lessonError} required />
-                <TextField fullWidth multiline minRows={4} label="Content (optional)" value={lessonContent} disabled={ops.busy}
+                <TextField fullWidth multiline minRows={4} label="Content (optional)" value={lessonContent} disabled={locked}
                     onChange={(event) => setLessonContent(event.target.value)}
                     helperText="Markdown text. The new lesson stays hidden until you publish it." />
             </DialogContent>
             <DialogActions>
-                <Button variant="outlined" onClick={() => setLessonModal(null)} disabled={ops.busy}>Cancel</Button>
-                <Button variant="contained" onClick={() => void addLesson()} disabled={ops.busy}>Add lesson</Button>
+                <Button variant="outlined" onClick={() => setLessonModal(null)} disabled={locked}>Cancel</Button>
+                <Button variant="contained" onClick={() => void addLesson()} disabled={locked}>Add lesson</Button>
             </DialogActions>
         </Dialog>
+        <ConfirmDialog open={publication !== null} title={publication?.next === 'published' ? 'Publish lesson?' : 'Hide lesson?'}
+            message={publication?.next === 'published' ? 'Learners can see this lesson when its course is published.' : 'Learners will no longer see this lesson.'}
+            confirmLabel={publication?.next === 'published' ? 'Publish lesson' : 'Hide lesson'} onCancel={() => setPublication(null)}
+            onConfirm={() => { const next = publication!; setPublication(null); void toggleLessonPublication(next.lessonId, next.next); }} />
     </Box>;
 }
 
 /** S18 Settings tab: course title, description, optional prerequisites text, and metadata save. */
 export function CourseSettingsTab() {
-    const { courseId, course, settingsAcknowledgment, acknowledgeSettings, setTabDirty } = useCourseEditorContext()!;
+    const { courseId, course, settingsAcknowledgment, setTabDirty } = useCourseEditorContext()!;
     const ops = useCourseOperations(courseId);
     const data = course.data!;
     // Keyed by the course identity only (U5): a re-read after a save, or another writer's change, must not remount the
     // form, which would drop the "Saved" status or an unsaved draft. The form adopts new committed values itself.
     return <CourseSettingsForm key={data.id}
         course={data} successfulRead={course.successfulRead} refreshError={course.error}
-        acknowledgment={settingsAcknowledgment} ops={ops} onSaved={acknowledgeSettings}
-        onUnknown={course.reload} setTabDirty={setTabDirty} />;
+        acknowledgment={settingsAcknowledgment} ops={ops} setTabDirty={setTabDirty} />;
 }
 
-function CourseSettingsForm({ course, successfulRead, refreshError, acknowledgment, ops, onSaved, onUnknown, setTabDirty }: {
+function CourseSettingsForm({ course, successfulRead, refreshError, acknowledgment, ops, setTabDirty }: {
     course: OwnedCourse;
     successfulRead: number;
     refreshError: unknown;
     acknowledgment: SettingsAcknowledgment | null;
     ops: ReturnType<typeof useCourseOperations>;
-    onSaved: (metadata: OwnedCourse) => void;
-    onUnknown: () => number;
     setTabDirty: (dirty: boolean) => void;
 }) {
     const baseline = acknowledgment?.metadata ?? course;
@@ -425,7 +453,6 @@ function CourseSettingsForm({ course, successfulRead, refreshError, acknowledgme
             setPrerequisites(saved.prerequisiteDescription ?? '');
             setDirty(false);
             setSavedNotice(true);
-            onSaved(saved);
         } catch (error) {
             if (isCancelled(error)) return;
             const fields = fieldErrorsFrom(error, {
@@ -436,14 +463,13 @@ function CourseSettingsForm({ course, successfulRead, refreshError, acknowledgme
             if (Object.keys(fields).length) { setErrors(fields); return; }
             if (outcomeUnknown(error)) {
                 setAlert("We couldn't confirm whether your changes were saved.");
-                onUnknown();
                 return;
             }
             setAlert(error instanceof ApiError ? error.message : 'Something went wrong on our side. Try again in a moment.');
         }
     }
 
-    const status = ops.busy ? 'Saving…' : dirty ? 'Unsaved changes' : savedNotice
+    const status = ops.pending ? 'Saving…' : dirty ? 'Unsaved changes' : savedNotice
         ? acknowledgment !== null
             ? refreshError ? "Settings saved, but the current values couldn't be loaded." : 'Settings saved. Refreshing course…'
             : 'Saved'
@@ -454,13 +480,13 @@ function CourseSettingsForm({ course, successfulRead, refreshError, acknowledgme
         <Tile padding={{ xs: 3, sm: 4 }}>
             <Box component="form" noValidate onSubmit={(event) => { event.preventDefault(); void save(); }}
                 sx={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 2.5 }}>
-                <TextField label="Course title" value={title} required disabled={ops.busy}
+                <TextField label="Course title" value={title} required disabled={ops.pending}
                     onChange={(event) => { setTitle(event.target.value); setDirty(true); setSavedNotice(false); setErrors({}); }}
                     error={!!errors.title} helperText={errors.title} />
-                <TextField label="Description" multiline minRows={4} value={description} required disabled={ops.busy}
+                <TextField label="Description" multiline minRows={4} value={description} required disabled={ops.pending}
                     onChange={(event) => { setDescription(event.target.value); setDirty(true); setSavedNotice(false); setErrors({}); }}
                     error={!!errors.description} helperText={errors.description ?? 'Shown on the course detail page.'} />
-                <TextField label="Prerequisites (optional)" multiline minRows={2} value={prerequisites} disabled={ops.busy}
+                <TextField label="Prerequisites (optional)" multiline minRows={2} value={prerequisites} disabled={ops.pending}
                     onChange={(event) => { setPrerequisites(event.target.value); setDirty(true); setSavedNotice(false); setErrors({}); }}
                     error={!!errors.prerequisites} helperText={errors.prerequisites ?? 'A learner-facing description. It never blocks enrolment.'} />
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, alignItems: 'center' }}>

@@ -2228,6 +2228,35 @@ record and its authorization remain intact. This r14 record is based on effectiv
 r13; it changes no privilege beyond the already authorized CO09 material extension.
 The previous independent review is historical evidence, not approval of this merge.
 
+### CT17-P6-PRIVILEGES-2026-11-27-r16 — AS09 submissions (within ADR012 §19.2, 27 November 2026)
+
+The Project Leader's explicit **“AS09 Full-Scope Completion, Bounded Upstream
+Implementation, and Post-Implementation Audit”** task authorizes this consumer,
+its dated matrix extension, deployment-script synchronization and tests. This
+replaces only r12's submission row, within the unchanged ADR012 §19.2 ceiling:
+
+| Relation (schema) | Runtime privileges | Consumer |
+|---|---|---|
+| `submissions` (public) | SELECT, INSERT; UPDATE (object_key, original_filename, submitted_at, grade_percentage, feedback, graded_at) | AS09 learner reads, file replacement, owner listing/download/grading, CT27 producer admission |
+
+Full SELECT is exercised by the Submission entity projection; INSERT stores a
+first submission; the six column UPDATE grants cover replacement and grade writes
+and PostgreSQL row locks. Assignment grants remain r12. Identity updates (`id`,
+`assignment_id`, `user_id`), DELETE, TRUNCATE and DDL remain denied. This changes
+no effective contract ceiling or production privilege. The executable matrix,
+contract/containment tests and real PostgreSQL/MinIO consumer tests ship together.
+Author-side verification, independent CODEOWNER review, CI, protected integration,
+operator provisioning, residual-risk acceptance and deployment are separate gates.
+
+Sequencing provenance: the Project Leader's **“AS09 Safe Main Integration,
+Targeted Remediation and Post-Integration Self-Audit”** task authorizes this
+renumbering because merged AS08 PR #296 already occupies
+`CT17-P6-PRIVILEGES-2026-11-26-r15`. AS08 r15 remains intact; this r16 extension
+builds on it and changes only the Submission row. The AS09 candidate was formerly
+`CT17-P6-PRIVILEGES-2026-11-27-r15` at `b36d9397`; its exact-SHA verification
+records remain historical evidence, not verification of this integrated candidate.
+No privilege authority or approved ceiling is expanded by the renumbering.
+
 ## CT17-INGRESS-COOKIE-2026-11-16-r1 — refresh-cookie transport (DELEGATED_APPROVED, 16 November 2026)
 
 **DELEGATED_TECHNICAL_APPROVAL; DELEGATED_APPROVED** under the same instruction,
@@ -5628,6 +5657,28 @@ The Retry-After description above was corrected in the same follow-up
 wait; Resolver 1.9.27 retries immediately for a negative number or past date.
 The Docker retry properties are unchanged.
 
+
+### CT17-P6-PRIVILEGES-2026-11-26-r15 — AS08 timed attempts (26 November 2026)
+
+**DELEGATED_APPROVED within the existing ADR012 §19.2 ceiling.** The Project
+Leader's AS08 completion task explicitly authorizes the necessary runtime bindings
+and bounded technical selection. This revision replaces only the r6/r7 Attempt
+rows below; every other row, inventory and migration is unchanged. It grants
+nothing on a live database and authorizes no deployment or operational risk.
+
+| Relation | Runtime privileges | Implemented consumer |
+|---|---|---|
+| `attempts` (assessment) | SELECT, INSERT; UPDATE (submitted_at, score_percentage) | AS08 scoped reads, numbering, discovery, row locking, capture and terminal transition |
+| `attempt_answers` (assessment) | SELECT, INSERT; UPDATE (selected_options, is_correct) | AS08 captured reads/locks, answer replacement and exact-mask grading |
+
+The adapters use dynamic, mutable-column updates. No DELETE, TRUNCATE, ownership,
+DDL, grant option, attempt identity/timer rewrite or captured answer membership
+rewrite is allowed. SELECT covers the complete scalar projections; PostgreSQL
+row locks use the existing approved mutable-column UPDATE privileges. No migration
+or schema expansion is needed. The executable matrix, containment assertions and
+consumer tests ship together. AS12 publication, AD13 execution and operational
+statement/transaction deadline qualification remain separate gates.
+
 ## Shared CI reliability remediation — 26 November 2026
 
 This implementation follows DP01, ADR003's byte-clean PostgreSQL image, ADR008
@@ -5762,3 +5813,27 @@ The optional cache argument is conditional in the release and ingress shell
 consumers. It uses no empty array expansion under nounset, preserving the
 operator's Bash 3.2 path when the CI-only input is absent. A regression executes
 the actual consumer shell for absent, empty and spaced paths on native Bash.
+
+
+### CT17-P6-PRIVILEGES-2026-11-27-r17 — IN06 discussion and reports (27 November 2026)
+
+**Authority.** The Project Leader's explicit IN06 completion instruction delegates this
+consumer revision within ADR012 §19.2. OpenAI Codex implemented it in PR #303. This
+replaces only the two deferred r1 rows below and preserves r2–r16, all 27 relations,
+all reviewed columns and immutable/Flyway history. It authorizes tooling, not grants
+on a shared or deployed database. No migration is added or edited.
+
+| Relation | Privileges | Consumer and rationale |
+|---|---|---|
+| `discussion_posts` (interaction) | SELECT, INSERT; UPDATE (is_hidden) | CT30 question/reply reads and inserts; parent FOR SHARE; CT32 FOR UPDATE and targeted hiding |
+| `content_reports` (interaction) | SELECT, INSERT; UPDATE (status, resolved_at) | CT30 intake; CT32 queue, deterministic report FOR UPDATE and terminal resolution/dismissal |
+
+No DELETE, immutable-column UPDATE, table-wide UPDATE, DDL, TRUNCATE, REFERENCES,
+TRIGGER, MAINTAIN or grant option is permitted. Existing r13 notifications cover the
+reply notification in the same transaction. `deploy.sh`, matrix-contract and
+containment probes and real-backend runtime-role consumer tests ship together.
+The focused PostgreSQL suite additionally invokes real JPA adapters under a local
+restricted role to prove parent locks and targeted moderation writes. IN21's Admin
+REST/orchestration/audit remains a downstream responsibility. Provisioning on actual
+hosts, independent infrastructure/CODEOWNER review, hosted CI and protected integration
+remain separate gates. Execution results are recorded in `docs/testing.md`.

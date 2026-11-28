@@ -25,7 +25,8 @@ import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
-
+import com.codemastery.modules.assessment.application.service.SubmissionService.GradeInput;
+import java.math.BigDecimal;
 /**
  * Closed CT10.rest JSON request bodies (ADR010 §§8, 12, 14; OpenAPI B5AssignmentWrite,
  * PublicationWrite). Unknown, missing, duplicate or coerced members yield empty so controllers
@@ -36,6 +37,7 @@ public final class AssignmentRequests {
     private static final JsonMapper STRICT_JSON = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
             .build();
     private static final Set<String> WRITE_MEMBERS =
             Set.of("title", "instructions", "deadlineAt", "lessonId");
@@ -44,6 +46,8 @@ public final class AssignmentRequests {
             "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
     private static final Pattern RFC_3339_DATE_TIME = Pattern.compile(
             "([0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2})(?:\\.([0-9]+))?([Zz]|[+-][0-9]{2}:[0-9]{2})");
+
+    private static final Set<String> GRADE_MEMBERS = Set.of("gradePercentage", "feedback", "submittedAt");
 
     private AssignmentRequests() {
     }
@@ -181,5 +185,41 @@ public final class AssignmentRequests {
             return Optional.empty();
         }
         return Optional.of(parsed);
+    }
+
+    public record GradeSubmissionRequest(BigDecimal gradePercentage, String feedback, Instant submittedAt) {
+        public GradeInput toInput() {
+            return new GradeInput(gradePercentage, feedback, submittedAt);
+        }
+    }
+
+    public static Optional<GradeSubmissionRequest> parseGrade(byte[] utf8Bytes) {
+        return decodeUtf8(utf8Bytes).flatMap(AssignmentRequests::parseGrade);
+    }
+
+    public static Optional<GradeSubmissionRequest> parseGrade(String json) {
+        Optional<JsonNode> node = object(json, GRADE_MEMBERS);
+        if (node.isEmpty()) {
+            return Optional.empty();
+        }
+        JsonNode input = node.get();
+        JsonNode grade = input.get("gradePercentage");
+        JsonNode feedback = input.get("feedback");
+        JsonNode submittedAt = input.get("submittedAt");
+        if (!grade.isNumber() || !feedback.isString() || !submittedAt.isString()) {
+            return Optional.empty();
+        }
+        BigDecimal parsedGrade;
+        try {
+            parsedGrade = grade.decimalValue();
+        } catch (RuntimeException invalidNumber) {
+            return Optional.empty();
+        }
+        Optional<Instant> parsedSubmittedAt = parseMicrosecondInstant(submittedAt.asString());
+        if (parsedSubmittedAt.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new GradeSubmissionRequest(
+                parsedGrade, feedback.asString(), parsedSubmittedAt.get()));
     }
 }

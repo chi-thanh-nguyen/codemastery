@@ -1,3 +1,6 @@
+import { gradingPath } from '../../grading/hooks/useSubmissions';
+import { exactDeadlineUtc, parseAssignmentDeadline } from '../api/assessmentAuthoringApi';
+import { isDestinationLive } from '../../../../routes/routePaths';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Alert, Box, Button, Skeleton, Typography } from '@mui/material';
@@ -60,10 +63,12 @@ export function localTimeZone(): string {
 }
 
 export function formatDeadlineDisplay(isoString: string): { absolute: string; relative: string } {
-    const date = new Date(isoString);
+    const instant = parseAssignmentDeadline(isoString);
+    const date = instant ? new Date(instant.seconds * 1000) : new Date(isoString);
     if (Number.isNaN(date.getTime())) return { absolute: isoString, relative: '' };
     const timeZone = localTimeZone();
-    const absolute = formatDate(date, {
+    const boundary = instant && (date.getUTCFullYear() === 0 || date.getFullYear() < 1 || date.getFullYear() > 9999);
+    const absolute = boundary ? exactDeadlineUtc(isoString) : formatDate(date, {
         locale: 'en-US',
         options: { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone, timeZoneName: 'short' },
     }) || isoString;
@@ -80,6 +85,14 @@ export function formatDeadlineDisplay(isoString: string): { absolute: string; re
 export interface CourseLessonSource {
     status: 'loading' | 'ready' | 'error';
     data: OwnedCourse | null;
+    /** Current identity-safe owner-read result; absent in legacy presentation-only overrides. */
+    error?: unknown;
+    /** Includes a refresh while the last successful tree remains visible. */
+    loading?: boolean;
+    /** FE16 refusal survives retries and child remounts in the same Course/session owner. */
+    assignmentRefusal?: 403 | 404;
+    /** Reads the current owner barrier, including a retry scheduled before its GET starts. */
+    assignmentWritesBlocked?: () => boolean;
     reload: () => void;
 }
 
@@ -127,7 +140,7 @@ export function useLessonLookup(course: CourseLessonSource | undefined) {
 export function CourseUnavailable({ status }: { status: number | undefined }) {
     const back = <Button component={Link} to="/courses" variant="contained">Back to catalogue</Button>;
     if (status === 400) return <SystemStateView icon="search" title="We can't open this course from this link." message="Check the address, or continue from the catalogue." actions={back} />;
-    if (status === 403) return <SystemStateView icon="shield" title="You don't have access to this course" message="Only the course's instructor can manage its assessments." actions={back} />;
+    if (status === 403) return <SystemStateView icon="shield" title="You don't have access to this course" message="Only the course's instructor can manage this course." actions={back} />;
     return <SystemStateView icon="search" title="Course not available" message="This course doesn't exist or isn't published." actions={back} />;
 }
 export const courseRefused = (error: unknown) => [400, 403, 404].includes(failureStatus(error) ?? 0);
@@ -333,7 +346,7 @@ function AssignmentsView({ courseId, page, onPage, courseContext, onRefused }: {
                 render: (assignment) => <span className="cm-tabular">{assignment.gradedCount}</span>,
             },
         ]}
-        actions={(assignment) => <Button component={Link} to={assignmentPath(courseId, assignment.id)} variant="outlined" size="small" aria-label={`Open assignment: ${assignment.title}`}>Open</Button>}
+        actions={(assignment) => <><Button component={Link} to={assignmentPath(courseId, assignment.id)} variant="outlined" size="small" aria-label={`Open assignment: ${assignment.title}`}>Open</Button>{assignment.submissionCount > 0 && isDestinationLive('/teach/grading', 'Instructor') && <Button component={Link} to={gradingPath(courseId, assignment.id)} variant="outlined" size="small" aria-label={`Grade: ${assignment.title}`}>Grade</Button>}</>}
         footer={data && <PaginationBar page={data.page} totalPages={data.totalPages} totalItems={data.totalElements} pageSize={data.size} itemsOnPage={data.content.length} onChange={onPage} noun="assignments" nounOne="assignment" />} />;
 }
 
