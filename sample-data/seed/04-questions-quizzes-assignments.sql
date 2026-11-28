@@ -28,110 +28,100 @@
 \else
 \getenv seed_target_system_identifier CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER
 \endif
+\if :{?seed_target_system_identifier}
+\else
+\set seed_target_system_identifier ''
+\endif
+
 \if :{?assignment_loops_deadline}
 \else
 \getenv assignment_loops_deadline CODEMASTERY_SEED_ASSIGNMENT_LOOPS_DEADLINE
 \endif
+\if :{?assignment_loops_deadline}
+\else
+\set assignment_loops_deadline ''
+\endif
+
 \if :{?assignment_files_deadline}
 \else
 \getenv assignment_files_deadline CODEMASTERY_SEED_ASSIGNMENT_FILES_DEADLINE
 \endif
-
-\if :{?seed_target_system_identifier}
-\else
-DO $sd04_input$
-BEGIN
-    RAISE EXCEPTION 'Required input seed_target_system_identifier is missing.';
-END;
-$sd04_input$;
-\endif
-
-\if :{?assignment_loops_deadline}
-\else
-DO $sd04_input$
-BEGIN
-    RAISE EXCEPTION 'Required input assignment_loops_deadline is missing.';
-END;
-$sd04_input$;
-\endif
-
 \if :{?assignment_files_deadline}
 \else
-DO $sd04_input$
-BEGIN
-    RAISE EXCEPTION 'Required input assignment_files_deadline is missing.';
-END;
-$sd04_input$;
+\set assignment_files_deadline ''
 \endif
 
 -- READ COMMITTED regardless of the database default, for the same reason as SD02/SD03:
 -- a loader waiting on the lock must see rows another loader has committed.
 BEGIN ISOLATION LEVEL READ COMMITTED;
 
--- Verify the target and load-time deadline inputs before taking any lock: the
--- connected cluster must have the independently obtained system identifier, and this
--- database must carry the catalog-level disposable-target attestation bound to it.
+-- Validate inputs, target cluster identity and disposable attestation before any lock or write.
 SET LOCAL codemastery.seed_expected_target = :'seed_target_system_identifier';
 SET LOCAL codemastery.seed_assignment_loops_deadline = :'assignment_loops_deadline';
 SET LOCAL codemastery.seed_assignment_files_deadline = :'assignment_files_deadline';
 
 DO $sd04_target$
 DECLARE
-    expected_identifier text := current_setting('codemastery.seed_expected_target');
-    loops_deadline_raw text := current_setting('codemastery.seed_assignment_loops_deadline');
-    files_deadline_raw text := current_setting('codemastery.seed_assignment_files_deadline');
-    loops_deadline timestamptz;
-    files_deadline timestamptz;
-    actual_identifier text;
-    attestation text;
-    ts_pattern constant text := '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt ][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?([Zz]|[+-][0-9]{2}:[0-9]{2})$';
+    expected_identifier constant text := current_setting('codemastery.seed_expected_target');
+    loops_raw constant text := current_setting('codemastery.seed_assignment_loops_deadline');
+    files_raw constant text := current_setting('codemastery.seed_assignment_files_deadline');
+    ts_regex constant text := '^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt ][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?([Zz]|[+-][0-9]{2}:[0-9]{2})$';
+    loops_ts timestamptz;
+    files_ts timestamptz;
+    cluster_id text := NULL;
+    db_attestation text;
 BEGIN
-    IF expected_identifier !~ '^[1-9][0-9]{0,19}$' THEN
-        RAISE EXCEPTION 'SD04 target verification failed: malformed expected system identifier';
-    END IF;
-
-    IF loops_deadline_raw !~ ts_pattern OR files_deadline_raw !~ ts_pattern THEN
-        RAISE EXCEPTION 'SD04 requires ISO-8601 assignment deadlines with an explicit timezone offset';
-    END IF;
+    CASE
+        WHEN expected_identifier = '' THEN
+            RAISE EXCEPTION 'Required input seed_target_system_identifier is missing.';
+        WHEN loops_raw = '' THEN
+            RAISE EXCEPTION 'Required input assignment_loops_deadline is missing.';
+        WHEN files_raw = '' THEN
+            RAISE EXCEPTION 'Required input assignment_files_deadline is missing.';
+        WHEN expected_identifier !~ '^[1-9][0-9]{0,19}$' THEN
+            RAISE EXCEPTION 'SD04 target verification failed: malformed expected system identifier';
+        WHEN loops_raw !~ ts_regex OR files_raw !~ ts_regex THEN
+            RAISE EXCEPTION 'SD04 requires ISO-8601 assignment deadlines with an explicit timezone offset';
+        ELSE
+            NULL;
+    END CASE;
 
     BEGIN
-        loops_deadline := loops_deadline_raw::timestamptz;
-        files_deadline := files_deadline_raw::timestamptz;
+        loops_ts := loops_raw::timestamptz;
+        files_ts := files_raw::timestamptz;
     EXCEPTION WHEN OTHERS THEN
         RAISE EXCEPTION 'SD04 assignment deadline is not a valid timestamp';
     END;
 
-    IF loops_deadline > '9999-12-31T23:59:59.999999Z'::timestamptz
-       OR files_deadline > '9999-12-31T23:59:59.999999Z'::timestamptz THEN
+    IF greatest(loops_ts, files_ts) > '9999-12-31T23:59:59.999999Z'::timestamptz THEN
         RAISE EXCEPTION 'SD04 assignment deadline exceeds year 9999 representable limit';
     END IF;
-
-    IF loops_deadline <= clock_timestamp() OR files_deadline <= clock_timestamp() THEN
+    IF least(loops_ts, files_ts) <= clock_timestamp() THEN
         RAISE EXCEPTION 'SD04 requires both assignment deadlines to be in the future at load time';
     END IF;
 
     BEGIN
-        SELECT system_identifier::text INTO actual_identifier FROM pg_control_system();
+        SELECT ctrl.system_identifier::text INTO cluster_id FROM pg_control_system() AS ctrl;
     EXCEPTION WHEN OTHERS THEN
-        actual_identifier := NULL;
+        cluster_id := NULL;
     END;
-    IF actual_identifier IS NULL THEN
+    IF cluster_id IS NULL THEN
         RAISE EXCEPTION 'SD04 target verification failed: cluster identity is unavailable';
     END IF;
-    IF actual_identifier <> expected_identifier THEN
+    IF cluster_id IS DISTINCT FROM expected_identifier THEN
         RAISE EXCEPTION 'SD04 target verification failed: connected cluster is not the expected target';
     END IF;
 
-    -- Read the stored database setting, not current_setting(): a session or
-    -- PGOPTIONS value must not be able to impersonate the attestation.
-    SELECT substr(setting, length('codemastery.seed_target=') + 1)
-    INTO attestation
-    FROM pg_catalog.pg_db_role_setting stored
-    CROSS JOIN LATERAL unnest(stored.setconfig) AS setting
-    WHERE stored.setdatabase = (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database())
-      AND stored.setrole = 0
-      AND setting LIKE 'codemastery.seed\_target=%';
-    IF attestation IS DISTINCT FROM 'disposable:' || actual_identifier THEN
+    -- Stored catalog setting only (never current_setting / PGOPTIONS).
+    SELECT split_part(entry, '=', 2)
+    INTO db_attestation
+    FROM pg_catalog.pg_database db
+    JOIN pg_catalog.pg_db_role_setting rs ON rs.setdatabase = db.oid AND rs.setrole = 0
+    CROSS JOIN LATERAL unnest(rs.setconfig) AS entry
+    WHERE db.datname = current_database()
+      AND entry LIKE 'codemastery.seed\_target=%';
+
+    IF db_attestation IS DISTINCT FROM ('disposable:' || cluster_id) THEN
         RAISE EXCEPTION 'SD04 target verification failed: database is not attested as a disposable seed target';
     END IF;
 END
@@ -1192,10 +1182,7 @@ DECLARE
     python_course constant uuid := '68ea4540-e9da-5605-9054-28b29afa0992';
     lesson_l10 constant uuid := '3b413f38-5f6d-50c2-a28a-6ebbc9f70a12';
     lesson_l20 constant uuid := '7cdc242d-2dc4-51fa-abaa-852d131818bd';
-    expected_question record;
-    expected_quiz record;
-    expected_member record;
-    expected_assignment record;
+    conflict_id uuid;
 BEGIN
     IF NOT EXISTS (
         SELECT 1
@@ -1227,98 +1214,58 @@ BEGIN
         RAISE EXCEPTION 'SD04 requires the twenty SD03 course/python skills S01-S20; load 03-skill-graph-and-lesson-mapping.sql first';
     END IF;
 
-    FOR expected_question IN SELECT * FROM sd04_question_seed ORDER BY id LOOP
-        IF EXISTS (
-            SELECT 1
-            FROM public.questions existing_q
-            WHERE existing_q.id = expected_question.id
-              AND existing_q.skill_id = expected_question.skill_id
-              AND existing_q.prompt = expected_question.prompt
-              AND existing_q.kind = expected_question.kind
-              AND existing_q.difficulty = expected_question.difficulty
-              AND existing_q.options = expected_question.options
-              AND existing_q.correct_options = expected_question.correct_options
-        ) THEN
-            CONTINUE;
-        END IF;
+    SELECT s.id INTO conflict_id
+    FROM sd04_question_seed s
+    JOIN public.questions e ON e.id = s.id
+    WHERE (e.skill_id, e.prompt, e.kind, e.difficulty, e.options, e.correct_options)
+       IS DISTINCT FROM (s.skill_id, s.prompt, s.kind, s.difficulty, s.options, s.correct_options)
+    ORDER BY s.id
+    LIMIT 1;
+    IF conflict_id IS NOT NULL THEN
+        RAISE EXCEPTION 'SD04 Question % conflicts with an existing Question', conflict_id;
+    END IF;
 
-        IF EXISTS (SELECT 1 FROM public.questions WHERE id = expected_question.id) THEN
-            RAISE EXCEPTION 'SD04 Question % conflicts with an existing Question', expected_question.id;
-        END IF;
+    INSERT INTO public.questions (id, skill_id, prompt, kind, difficulty, options, correct_options)
+    SELECT id, skill_id, prompt, kind, difficulty, options, correct_options
+    FROM sd04_question_seed
+    ORDER BY id
+    ON CONFLICT (id) DO NOTHING;
 
-        INSERT INTO public.questions (id, skill_id, prompt, kind, difficulty, options, correct_options)
-        VALUES (
-            expected_question.id,
-            expected_question.skill_id,
-            expected_question.prompt,
-            expected_question.kind,
-            expected_question.difficulty,
-            expected_question.options,
-            expected_question.correct_options
-        );
-    END LOOP;
+    SELECT s.id INTO conflict_id
+    FROM sd04_quiz_seed s
+    JOIN public.quizzes e ON e.id = s.id
+    WHERE (e.course_id, e.title, e.kind, e.time_limit_seconds, e.publication_status)
+       IS DISTINCT FROM (s.course_id, s.title, s.kind, s.time_limit_seconds, s.publication_status)
+    ORDER BY s.id
+    LIMIT 1;
+    IF conflict_id IS NOT NULL THEN
+        RAISE EXCEPTION 'SD04 Quiz % conflicts with an existing Quiz', conflict_id;
+    END IF;
 
-    FOR expected_quiz IN SELECT * FROM sd04_quiz_seed ORDER BY id LOOP
-        IF EXISTS (
-            SELECT 1
-            FROM public.quizzes existing_quiz
-            WHERE existing_quiz.id = expected_quiz.id
-              AND existing_quiz.course_id = expected_quiz.course_id
-              AND existing_quiz.title = expected_quiz.title
-              AND existing_quiz.kind = expected_quiz.kind
-              AND existing_quiz.time_limit_seconds = expected_quiz.time_limit_seconds
-              AND existing_quiz.publication_status = expected_quiz.publication_status
-        ) THEN
-            CONTINUE;
-        END IF;
+    INSERT INTO public.quizzes (id, course_id, title, kind, time_limit_seconds, publication_status)
+    SELECT id, course_id, title, kind, time_limit_seconds, publication_status
+    FROM sd04_quiz_seed
+    ORDER BY id
+    ON CONFLICT (id) DO NOTHING;
 
-        IF EXISTS (SELECT 1 FROM public.quizzes WHERE id = expected_quiz.id) THEN
-            RAISE EXCEPTION 'SD04 Quiz % conflicts with an existing Quiz', expected_quiz.id;
-        END IF;
+    SELECT s.id INTO conflict_id
+    FROM sd04_quiz_question_seed s
+    JOIN public.quiz_questions e
+      ON e.id = s.id
+      OR (e.quiz_id = s.quiz_id AND (e.question_id = s.question_id OR e.position = s.position))
+    WHERE (e.id, e.quiz_id, e.question_id, e.position)
+       IS DISTINCT FROM (s.id, s.quiz_id, s.question_id, s.position)
+    ORDER BY s.quiz_id, s.position
+    LIMIT 1;
+    IF conflict_id IS NOT NULL THEN
+        RAISE EXCEPTION 'SD04 quiz question % conflicts with an existing membership ID, question or position', conflict_id;
+    END IF;
 
-        INSERT INTO public.quizzes (id, course_id, title, kind, time_limit_seconds, publication_status)
-        VALUES (
-            expected_quiz.id,
-            expected_quiz.course_id,
-            expected_quiz.title,
-            expected_quiz.kind,
-            expected_quiz.time_limit_seconds,
-            expected_quiz.publication_status
-        );
-    END LOOP;
-
-    FOR expected_member IN SELECT * FROM sd04_quiz_question_seed ORDER BY quiz_id, position LOOP
-        IF EXISTS (
-            SELECT 1
-            FROM public.quiz_questions existing_member
-            WHERE existing_member.id = expected_member.id
-              AND existing_member.quiz_id = expected_member.quiz_id
-              AND existing_member.question_id = expected_member.question_id
-              AND existing_member.position = expected_member.position
-        ) THEN
-            CONTINUE;
-        END IF;
-
-        IF EXISTS (
-            SELECT 1
-            FROM public.quiz_questions existing_member
-            WHERE existing_member.id = expected_member.id
-               OR (existing_member.quiz_id = expected_member.quiz_id
-                   AND existing_member.question_id = expected_member.question_id)
-               OR (existing_member.quiz_id = expected_member.quiz_id
-                   AND existing_member.position = expected_member.position)
-        ) THEN
-            RAISE EXCEPTION 'SD04 quiz question % conflicts with an existing membership ID, question or position', expected_member.id;
-        END IF;
-
-        INSERT INTO public.quiz_questions (id, quiz_id, question_id, position)
-        VALUES (
-            expected_member.id,
-            expected_member.quiz_id,
-            expected_member.question_id,
-            expected_member.position
-        );
-    END LOOP;
+    INSERT INTO public.quiz_questions (id, quiz_id, question_id, position)
+    SELECT id, quiz_id, question_id, position
+    FROM sd04_quiz_question_seed
+    ORDER BY quiz_id, position
+    ON CONFLICT (id) DO NOTHING;
 
     IF EXISTS (
         SELECT 1
@@ -1338,36 +1285,22 @@ BEGIN
         RAISE EXCEPTION 'SD04 course/python skills already have Questions outside the approved bank';
     END IF;
 
-    FOR expected_assignment IN SELECT * FROM sd04_assignment_seed ORDER BY id LOOP
-        IF EXISTS (
-            SELECT 1
-            FROM public.assignments existing_assignment
-            WHERE existing_assignment.id = expected_assignment.id
-              AND existing_assignment.course_id = expected_assignment.course_id
-              AND existing_assignment.lesson_id IS NOT DISTINCT FROM expected_assignment.lesson_id
-              AND existing_assignment.title = expected_assignment.title
-              AND existing_assignment.instructions = expected_assignment.instructions
-              AND existing_assignment.deadline_at = expected_assignment.deadline_at
-              AND existing_assignment.publication_status = expected_assignment.publication_status
-        ) THEN
-            CONTINUE;
-        END IF;
+    SELECT s.id INTO conflict_id
+    FROM sd04_assignment_seed s
+    JOIN public.assignments e ON e.id = s.id
+    WHERE (e.course_id, e.lesson_id, e.title, e.instructions, e.deadline_at, e.publication_status)
+       IS DISTINCT FROM (s.course_id, s.lesson_id, s.title, s.instructions, s.deadline_at, s.publication_status)
+    ORDER BY s.id
+    LIMIT 1;
+    IF conflict_id IS NOT NULL THEN
+        RAISE EXCEPTION 'SD04 Assignment % conflicts with an existing Assignment', conflict_id;
+    END IF;
 
-        IF EXISTS (SELECT 1 FROM public.assignments WHERE id = expected_assignment.id) THEN
-            RAISE EXCEPTION 'SD04 Assignment % conflicts with an existing Assignment', expected_assignment.id;
-        END IF;
-
-        INSERT INTO public.assignments (id, course_id, lesson_id, title, instructions, deadline_at, publication_status)
-        VALUES (
-            expected_assignment.id,
-            expected_assignment.course_id,
-            expected_assignment.lesson_id,
-            expected_assignment.title,
-            expected_assignment.instructions,
-            expected_assignment.deadline_at,
-            expected_assignment.publication_status
-        );
-    END LOOP;
+    INSERT INTO public.assignments (id, course_id, lesson_id, title, instructions, deadline_at, publication_status)
+    SELECT id, course_id, lesson_id, title, instructions, deadline_at, publication_status
+    FROM sd04_assignment_seed
+    ORDER BY id
+    ON CONFLICT (id) DO NOTHING;
 END
 $sd04$;
 
