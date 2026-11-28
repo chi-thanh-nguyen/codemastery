@@ -773,3 +773,17 @@ Execution of V008 against a shared or production database is not authorized here
 No other module reads or writes these tables, and they never appear in a REST
 representation.
 
+
+
+### IN06 executable consumer — 27 November 2026
+
+PR #303 consumes the existing V006 `discussion_posts` and `content_reports`
+representations without schema changes. CT30 pages visible root questions newest
+first, embeds visible replies oldest first, and hides descendants of hidden roots.
+Reply insertion takes the question's `FOR SHARE` lock and creates the derived-ID
+notification inside the same transaction. CT32 locks content first, then all open
+reports for that target in UUID order, and writes only `is_hidden` or
+`status,resolved_at`. Resolved and dismissed reports remain terminal. The IN06
+handoff requires the Admin caller's read-write READ COMMITTED transaction; Admin
+retains Course-root hiding and audit orchestration. The exact tooling privileges
+are CT17-P6 r17 in `deployment.md`; no shared database grant is applied here.

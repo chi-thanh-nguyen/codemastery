@@ -1,5 +1,363 @@
 # Development Setup
 
+## FE16 refusal persistence and exact deadline remediation — 27 November 2026
+
+Refs #201, PR #270. Authority: the Project Leader's explicit targeted instruction
+for FE16-R-A01, R-A02 and R-A03, including bounded technical refinements, tests,
+author verification, incremental commit/push and PR-body maintenance. Baseline
+`d8b021ba55738335a43f1bd2d5f0958ef8da2996`, tree
+`3cd876dd3988b056d1cc4f92e1713aa530ab72b7`; main/merge-base
+`fe3160d535b33652587e14e2fc55ca267f6a5222`. The five published commits already
+include AS12; no additional integration or history reconstruction is necessary.
+The final independent report, its probes/archive, prior remediation evidence,
+live #201/#270 and failed hosted E2E job 140435509480 were inspected. The report's
+REQUEST_CHANGES is not independently superseded by this author correction.
+Historical records below retain their original revision and evidence scope.
+
+### `FE16-COURSE-REFUSAL-PERSISTENCE-2026-11-27-r1`
+
+Refines COURSE-REFUSAL r1's implementation without changing shared owner-read
+semantics. The existing Course shell owns FE16's established 403/404 together
+with its Course/session identity and actual read sequence. This lifetime survives
+Assignment child remounts. A pending, transient or protocol read cannot remove
+it; only a later, current, settled decoded owner GET clears the derived refusal.
+The owner-read lifecycle still rejects obsolete/superseded/session responses.
+Changing Course/session discards this evidence. Recreating the whole Course owner
+requires its own new authoritative read; no cross-owner private cache is added.
+Direct mutation refusal and Assignment disappearance remain separate editor state.
+
+The additive FE16-only Course members are `assignmentRefusal` and
+`assignmentWritesBlocked`. Reload synchronously closes the latter before GET
+initiation, so stale Create/Save/Publish/Hide or open confirmation handlers cannot
+slip through the scheduling gap. Existing error/loading/data/successfulRead remain
+truthful attempt state. Refusal copy, read-only controls, grading availability and
+Stay/Leave/unload protection use established refusal. Deliberate retry remains
+available and successful recovery never replays a write. Initial transient-only
+failures retain their prior behavior. FE14/FE15 do not consume the new policy.
+
+Reject deriving authority from absence of error, stale retained data, successful
+reads from another identity, an editor-local latch lost on remount, global
+useOwnerRead changes, a shared mutation lock, polling or another Course fetch.
+No browser/private draft persistence or backend authorization change is added.
+Controlled production-composition regressions assert actual mutation counts,
+read-only presentation, current recovery, obsolete success and navigation.
+
+**Causal eligibility clarification — FE16-R-B01, 27 November 2026.** The
+Project Leader explicitly authorizes this smallest task-local refinement of this
+same persistence decision. Reviewed baseline is `d4867a38c82b9d4f071ee78e5cb90db29261181f`
+(tree `08b99e15c2dede59b9eb60f9672efbb3430bbc30`), with main/merge-base
+`fe3160d535b33652587e14e2fc55ca267f6a5222`. A settled decoded success must be newer
+than the denial **and reach the latest scheduled Course-read floor**, alongside
+the existing current-owner, settled-success and cancellation rules. A real late
+Settings PUT acknowledgment can schedule B before B's effect starts, while A
+is still current. Success A at sequence 3 must not erase refusal when the floor
+is already 4; pending/transient B cannot undo that refusal. Eligible B success
+still clears it, without replay. `successfulRead >= scheduledRead.current` adds
+this missing condition; no owner-read or Settings lifetime change is needed.
+Coalesced calls still target actual next initiation, not one sequence per call.
+The original unmodified causal probe fails before and passes after the change;
+see testing. R-B01 is the residual R-A01/IR-02 subcase. Author disposition is
+`FIXED_AUTHOR_VERIFIED`, with independent closure reserved for the next reviewer.
+All other decisions and historical evidence below retain their original scope.
+
+### `FE16-EXACT-DEADLINE-2026-11-27-r1`
+
+The existing assessment API module owns the bounded `parseAssignmentDeadline`
+helper and exact UTC serialization; no new file, dependency or project-wide date
+abstraction. Admission keeps its existing strict four-digit/calendar/offset and
+1..6 fractional-digit response grammar. Validated numeric components construct
+fraction-free calendar seconds using setUTCFullYear (including years 0000–0099),
+apply the offset, and compare UTC seconds to the inclusive 0000–9999 bounds.
+Microseconds stay separate; decoded deadline strings and outgoing payloads stay
+verbatim. Comparison alone also accepts zero sub-microsecond request spellings,
+as the backend does; extracting the helper does not broaden response admission.
+
+Native input and localized Assignment display derive Date from whole seconds,
+never the complete microsecond string. Existing exact draft-intent and immutable
+sent snapshots remain separate from persisted Assignment state. This preserves
+IR-01, both DST-fold occurrences, deliberate replacements and PS-A01. List/read,
+creation/replacement/publication and FE17 owner-Assignment selectors share the
+same decoder. Submission version tokens are still echoed unchanged.
+
+Reject removing UTC-range checks, clamping, rounding or normalizing stored
+strings, Date.UTC's 0–99 remapping, and using the old permissive comparison helper
+as an admission parser. This corrects an actual shared-decoder defect under the
+new explicit authorization; it does not change ADR010/OpenAPI/backend range,
+precision, endpoints or the native-input supported domain. NATIVE-BOUNDARY r1's
+prior recommendation against a decoder workaround is refined only to permit
+this contract-preserving correction, not contract narrowing.
+
+### `FE16-RECOVERY-ERA-2026-11-27-r1`
+
+The shared owner deadline formatter shows exact UTC for UTC year zero or local
+years outside 0001–9999. Thus 0000/BCE cannot be confused with 0001/CE, and local
+year crossings cannot silently misrepresent the calendar. Ordinary localized
+absolute dates, timezone labels and relative captions remain. S19 uses the actual
+current recovery response, not the retained draft or an older persisted value.
+The same bounded correction applies to the Assignments list and grading selector.
+Native UTC fallback, accessible labeling and deliberate Replace remain unchanged.
+Reject substituting draft state, hiding the boundary or a broad formatting redesign.
+
+N7, G4/G7, existing DRAFT/RECOVERY-BASELINE, CT10/16/18/21/37 and ADR014 remain
+effective; no DESIGN, canonical ADR, OpenAPI, backend, route or dependency change.
+Accepted FE17 production behavior, original FE13 history and AS12 integration are
+preserved. OpenAI Codex implemented and author-verified this delta. Git metadata
+attribution to heizseung does not establish personal implementation, signing,
+independent review or pushing by that contributor. Verification limits, including
+unavailable real browsers, are explicit in testing; independent review, exact-head
+hosted checks, formal QA and protected integration remain separate.
+
+## FE16 targeted independent-review remediation — 27 November 2026
+
+Refs #201, PR #270. The Project Leader explicitly authorizes correction of
+FE16-IR-01/02/03, focused regressions, task-local decisions, author self-audit and
+incremental publication. Independent `REQUEST_CHANGES` applies to reviewed HEAD
+`bd742f4c2774105675234ed2bbe250e3fd87fe26`, not to the remediated revision.
+Main/merge-base remains `e2106f68c612468f1d6e4eb5f86c086256010bc7`.
+The complete supplied independent report and evidence archive were inspected;
+their six negative assertions were reproduced before editing production code.
+The historical records below keep their original results and revision scope.
+
+### `FE16-DEADLINE-INTENT-2026-11-27-r1`
+
+Refines the implementation of DRAFT r1 and RECOVERY-BASELINE r1. Persisted
+Assignment state, retained draft deadline intent and an immutable sent snapshot
+have separate ownership. The draft binding captures the exact instant at load
+or deliberate deadline selection. A current owner GET advances persisted state;
+retaining a newer draft never swaps its binding. An unchanged sent draft may
+adopt the confirmed body and become Saved; newer edits remain explicitly unsaved.
+A later deliberate selection resolves against the current persisted Assignment,
+not the older draft binding. This preserves both DST-fold identity/microseconds
+and PS-A01's prohibition on resurrecting obsolete fractional seconds.
+
+Reject merely reverting persisted-baseline advancement, retaining only native
+text, comparing milliseconds, or inferring intent from text equality after a
+GET. They cannot preserve both earlier and newer edits. Publication and differing
+or unknown recovery results retain draft intent; another mutation is explicit.
+Full replacement, last-save-wins, single flight and cancellation remain unchanged.
+
+### `FE16-COURSE-REFUSAL-2026-11-27-r1`
+
+The existing identity-safe shared Course owner read supplies `error` and a
+pending-read flag to FE16 through additive, optional interface members. It retains
+FE14's one shared pipeline, sequence, error and session semantics. No polling,
+new endpoint or parallel read owner is added. A selected-Lesson POST 404 is
+ambiguous: one Course refresh follows; only a current definitive Course 403/404
+establishes read-only refusal. The draft and Stay/Leave/unload guards remain;
+create/save/publication handlers enforce the same refusal and pending-read guard.
+A successful tree missing the Lesson permits correction. Network/protocol/5xx
+is an unconfirmed refresh, never deletion or ownership loss, and does not impose
+a permanent mutation lock. Nothing is replayed. Suppress the redundant missing-
+Lesson reread for the ID already inspected by this POST recovery.
+
+Reject blaming the Lesson from POST 404 alone, using `status` without error
+classification, or using the broader Course mutation-revalidation flag as a
+permanent FE16 lock after transient failure. Other shared consumers retain their
+existing policies; optional members preserve existing context overrides.
+
+### `FE16-NATIVE-BOUNDARY-2026-11-27-r1`
+
+The normal control remains native `datetime-local`; its supported local parser
+remains positive four-digit years with calendar/DST-gap and UTC-range checks.
+For a decoded deadline outside that local domain, show a labeled exact UTC
+`time` value with all microseconds and an explicit Replace deadline action.
+Replacement focuses the native control and clears the old binding; an empty or
+invalid replacement cannot be submitted. Unrelated edits/recovery/publication
+keep the existing exact instant. No server response is rejected for this UI limit.
+
+Chrome accepts positive local year 10000, but native year zero/negative years
+sanitize to blank. Direct JavaScript parsing of a five-digit local year also
+needs expanded-year normalization outside the existing parser. Use the same
+truthful UTC fallback for extended local years instead of expanding that parser
+in this bounded correction. Reject clamping, year-zero coercion, a new picker,
+contract narrowing or changes to the shared Assignment decoder. UTC 0000–9999
+and backend/OpenAPI precision remain unchanged.
+
+Authority for all three task-local refinements is this remediation instruction;
+N7, POST-SQUASH, G4/G7, CT10/16/18/21/37, architecture and security remain effective.
+No DESIGN/ADR/OpenAPI, FE13 or FE17-owned source change is needed. OpenAI Codex
+implemented and author-verified the corrections; this is not independent closure.
+Git attribution remains `Le Phan Quoc Thang <thangle12012006@gmail.com>` associated
+with `heizseung`; authenticated publication uses `chi-thanh-nguyen`. Metadata does
+not prove personal implementation, signing, review or pushing by heizseung.
+Focused execution, limitations and preserved behavior are recorded in testing.
+
+## FE16 post-squash integration and recovery decisions — 27 November 2026
+
+Refs #201, existing PR #270. The Project Leader explicitly authorizes full FE16
+completion, isolated post-squash reconstruction, task-local decisions, bounded
+upstream work, author self-audit, direct remediation and publication. This record
+supersedes only the **current stack instructions** of `FE16-STACK-2026-11-27-r1`;
+its original record below is preserved as historical evidence. N7 and DRAFT r1
+remain effective within their original scope. Historical verification below was
+not executed on this revision.
+
+### `FE16-POST-SQUASH-2026-11-27-r1`
+
+- Live main is `e2106f68c612468f1d6e4eb5f86c086256010bc7`, the FE17 #288
+  squash merge. Its tree and independently accepted FE17 HEAD
+  `b69e4acd4713ce1750b941002d1607e2f4a92acd` both equal
+  `27ca5f24e9f94ddcd123a8b19a84a83ad4d114cd`.
+- Transplant only `ca55b231` and `28ad6ffa` from `11ba8e49..28ad6ffa` onto
+  that main, without replaying FE17 or FE13. The two documentation conflicts
+  retain **both complete records**. The initial effective delta remains seven
+  files, +673/-18. Range-diff changes only document insertion context; all five
+  non-document files exactly match the original FE16 HEAD before remediation.
+- Preserve original HEAD with
+  `refs/heads/backup/fe16-post-squash-20261127-pre-restack`. Original patches,
+  metadata, histories and a verified complete Git bundle live outside tracked
+  files. Existing FE13/FE16/FE17 reconstruction backups remain. PR #271 is still
+  `c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2`; no other open PR consumes the
+  #270 branch. Do not modify that PR, FE13, #288 or main.
+- PR #270 now targets main directly. The deleted FE17 branch and “merge #288
+  first” instructions below describe the earlier stacked revision only.
+  Alternatives rejected: merging obsolete ancestry, replaying FE17, or discarding
+  one side of the documentation conflicts. They would obscure ownership or lose
+  accepted behavior/provenance. Publication uses the refreshed original remote
+  SHA in an explicit force-with-lease, never unconditional force.
+- No missing upstream slice was found: AS09/CO06/FE14/FE15/FE08/FE03/FE32/FE34/FE17
+  supply the exact consumed capabilities. New functional scope is **0% per
+  upstream Issue**, including tests/supporting work; no upstream implementation,
+  backend, contract, route, dependency or migration change is needed.
+- Verification: ancestry/range-diff, complete history bundle, unchanged accepted
+  grading blobs and shared dependencies, focused consumers and both real REST
+  grading handoffs. Independent FE17 evidence remains applicable to unchanged
+  behavior; this task does not independently re-accept it.
+
+### `FE16-RECOVERY-BASELINE-2026-11-27-r1`
+
+- A current GET confirming an earlier full replacement advances the persisted
+  deadline baseline, as an acknowledged PUT does. An unchanged sent draft adopts
+  the confirmed body; newer unsent edits remain dirty and verbatim. A subsequent
+  explicit return to an older displayed date must not resurrect the old date's
+  microseconds. An unconfirmed differing GET or publication reconciliation still
+  retains the draft's original exact baseline. This refines the implementation
+  of DRAFT r1 without changing full replacement or last-save-wins semantics.
+- A creation 404 with no related Lesson is a definitive unavailable Course,
+  rather than an unknown Assignment creation. Retain the draft read-only and
+  offer catalogue navigation. A Lesson-related 404 retains the existing bounded
+  Course refresh/field recovery; failed GETs never establish deletion.
+- Read-only retained drafts still use the existing dirty-navigation and native
+  unload protection. Catalogue departure asks Stay/Leave; session-generation
+  replacement still discards private resource state. No new persistence,
+  synchronization restriction or automatic mutation replay is introduced.
+- Validate the UTC instant range after applying RFC 3339 offsets when decoding
+  Assignment deadlines, matching OpenAPI and the actual backend parser.
+- Authority: the Leader's explicit task-local technical delegation. Alternatives
+  (keeping a stale baseline, treating definitive 404 as retryable creation,
+  silently losing refused drafts, admitting an out-of-contract UTC year) contradict
+  existing S19/ADR010/CT16 requirements. Scope is FE16 only; no amendment of
+  canonical contracts, no wider FE15/S20 N7 resolution, no owner confirmation or
+  security/operational waiver. Negative controls and focused regressions verify
+  each correction; see the current testing record.
+
+OpenAI Codex performed implementation and author self-audit. Verified Git metadata
+uses `Le Phan Quoc Thang <thangle12012006@gmail.com>` for Author and Committer;
+GitHub associates this with `heizseung`. Authenticated publication is by
+`chi-thanh-nguyen`. Metadata is not proof of personal implementation, signature
+or review. Graphify was used only for navigation of its stale graph; source was
+verified directly. Impeccable context/audit guidance and its mechanical detector
+were used; Playwright supplies controlled and real REST/browser evidence. No AI
+service is introduced into the product. Independent review, CI, QA, protected
+integration, release and deployment remain separate.
+
+## FE16 completion and FE13 consolidation decisions — 27 November 2026
+
+Refs #201, PR #270; explicit Project Leader instruction “Consolidate FE13 PRs,
+Repurpose PR #270 for Complete FE16 Implementation, Synchronize with FE17, and
+Perform Full-Scope Self-Audit”. The Leader authorizes the implementation,
+reconstruction, scoped decisions/documentation and publication. This is author
+verification, not independent acceptance, protected integration or deployment.
+
+### `FE16-STACK-2026-11-27-r1`
+
+- Retain FE13 PR #271 at `c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2`.
+  Its ancestor `1e0953023c70982859087a4490d714dac8b6a4be` is PR #270's old
+  HEAD; #271 is one commit ahead, zero behind. `discussionApi.ts` and
+  `useDiscussion.ts` have identical blobs at both HEADs. The remaining change
+  to the shared types adds `mine?`; #271 retains the original FE13 API/hook
+  implementation plus its UI. No FE13 production file or historical commit is
+  changed by this task. Full original histories, PR bodies, binary patches and
+  a verified complete Git bundle are retained outside tracked files.
+- Reconstruct #270 directly on FE17 HEAD
+  `11ba8e49be6af16f5114d264e8bb1cc16b8bdbd1`, with base branch
+  `feature/learning-progress-ui`. Merge #288 before #270, then retarget/restack
+  only the FE16 delta on main; a squash merge requires tree/patch comparison,
+  not assumed ancestry. PR #288's HEAD, history, base and body remain unchanged.
+- The FE17 baseline includes main `13d9ca7e58ead77ecc66efc8408199059d57588a`:
+  PR #273 authoring, PR #297 AS09 and PR #279 FE14/CT37 are already present.
+  Refreshed main also contains AS16 PR #301 (`daddc507f1bb109f66c988537c00cab7bc08f256`),
+  which changes no consumed FE16/FE17 frontend or authoring binding. No
+  temporary main reconciliation is needed. This does not certify the AS16 journey.
+- Alternatives: duplicating FE17 in a main-targeted PR would obscure ownership;
+  rewriting #288 or cosmetically rebuilding #271 would invalidate unrelated
+  evidence. Neither is needed. No additional upstream capability is required:
+  cumulative upstream additions are zero for each consumed Issue.
+- Authority: the Leader's explicit stack/reconstruction delegation in this task.
+  Security/API/architecture unchanged. New Git Author and Committer metadata are
+  `Le Phan Quoc Thang <thangle12012006@gmail.com>`, verified through GitHub's
+  `heizseung` association on commit `49eaff63f1d79b1a7cc97b67e9cbb50640ac1b79`.
+  The authenticated publisher is `chi-thanh-nguyen`. Metadata attribution does
+  not assert personal authorship, signature, review or pushing by heizseung.
+
+### `FE16-N7-2026-11-27-r1`
+
+- Actual `AssignmentRequests` manually validates closed writes and raises a
+  `BusinessRuleException`; `GlobalExceptionHandler` returns the safe CT18 400
+  without Assignment field errors. `httpClient.ts` replaces server detail and
+  admits only safe authentication fields, not arbitrary Assignment diagnostics.
+  OpenAPI and CT18 do not guarantee useful per-field Assignment reasons.
+- Select local title/instructions/deadline validation with a submit summary,
+  linked field errors and first-error focus. When a 400 has no admitted field
+  errors, show the shared safe form message and preserve the exact draft and
+  selected Preview. Refused drafts remain read-only for 403/404; Preview stays usable.
+  This is the existing F14 fallback, explicitly reconciled for FE16 in S19.
+- Alternatives: fabricated `errors[]` or raw server text would misrepresent the
+  implemented contract and weaken diagnostic isolation; adding a global error
+  response/transport contract is unnecessary and beyond this correction.
+- Authority: explicit task-local technical decision and N7 reconciliation
+  delegation from the Project Leader. No CT18/CT16/OpenAPI change, new status,
+  backend implementation, risk waiver or broader FE15/S20 N7 resolution.
+- Verify with the actual disposable-backend Assignment 400, existing transport
+  tests, local validation/focus and draft/Preview refusal tests. Hypothetical
+  field-error doubles are not proof of a server capability.
+
+### `FE16-DRAFT-2026-11-27-r1`
+
+- Use the existing CT37 `MarkdownRenderer` and Lesson editor's segmented
+  Instructions/Preview pattern. Switching views changes no draft, deadline,
+  related Lesson or mutation state; validation brings an invalid Instructions
+  field back into view. The renderer admits links, treats raw HTML as text,
+  replaces images with links, and renders code without execution.
+- Keep each draft's exact original server deadline until that draft is replaced
+  by a confirmed body. A publication/recovery read must not replace its precision
+  baseline while edits are retained. Reject invalid native calendar normalization
+  rather than silently choosing a different local time; past deadlines remain valid.
+- A later recovery read may confirm an earlier save while the user has newer
+  edits. Only the unchanged sent snapshot can become “Saved”; newer edits remain
+  dirty with an explicit earlier-save notice. A failed GET after a lesson-related
+  404 cannot prove deletion. Never replay a mutation.
+- Alternatives: `Date`-roundtripping an untouched deadline loses microseconds;
+  overwriting retained drafts loses work; treating a failed read as deletion or
+  an earlier save as the current draft's success makes unsupported claims.
+- Authority: the same task's delegated bounded technical decisions, preserving
+  ADR010 full-replacement/last-save-wins and the existing navigation limitation.
+  No new API, dependency, route, persistence, shared theme state or upstream slice.
+  Verify the concurrency/precision regressions and real browser authoring journey.
+
+G4 is the already recorded FE17 delegated choice of `courseId`/`assignmentId`
+below. G7 is the FE15/FE16 owner confirmation reported through the Project Leader
+in live Issue #201's 25 November entry; this task does not invent personal owner
+statements or reopen that confirmation. The two existing FE17 grading handoffs
+and their route activation checks are preserved.
+
+OpenAI Codex implemented and self-audited these FE16 changes. Graphify was used
+for navigation (the graph predates this authoring implementation); source was
+verified directly. Impeccable guidance was read directly because no engine was
+available at the inspected local locations. Playwright supplies rendered and
+real REST evidence. No AI service is added to the product. Executed verification
+and remaining independent gates are recorded in `docs/testing.md`.
+
 ## FE17 targeted recovery, selection and responsive remediation — 27 November 2026
 
 PR #288 / Issue #202: author-verified correction of FE17-IR-01 (P1), IR-02 (P2)
@@ -2889,3 +3247,152 @@ is separately verified as `chi-thanh-nguyen`. Codex performed integration,
 verification and author audit. Metadata does not establish human contribution;
 no signature or independent approval is fabricated and global Git settings are
 unchanged. See [execution and remaining limits](testing.md#fe14-post-upstream-integration-verification--27-november-2026).
+
+## FE11 learner Assignment completion and bounded composition — 27 November 2026
+
+Authority: the Project Leader's explicit task, “FE11 — Comprehensive Code-Completeness
+Audit, Authorized Implementation Completion, Bounded Upstream Remediation and Final
+Self-Audit”, §§3, 7, 11–12. Codex implements and performs an **author self-audit**;
+this is not personal owner confirmation, independent review, whole-Issue acceptance,
+merge, deployment, release or operational authorization. Refs #196 / PR #305.
+
+Baseline: incoming `2c5aa49ed4ad37681964eb902616be53bb9caaea`, initial main
+`9228c11dfbf5b1361906ade6a3c3db64268c8c5b`, merge-base
+`23402754743e0d35048e74cbabebfa133e5e6da3`. The two incoming commits are FE11 work;
+nine initial main commits were inherited by ordinary merge `397c071699a88b3b4aa78a5231b3734a56366018`.
+Main advanced during execution through FE16 #270, `99abc4072b9893971d7cf15fe3174b25b3da63b9`;
+ordinary merge `3d0415903867bc61c8defa92747db07b1716a691` retains it. No history rewrite,
+force push, upstream branch import or unrelated worktree modification.
+
+Consumed authority: ADR010 CT09 authorization/lifecycle/rest, CT10 deadline/grading/
+replacement/rest, CT37-WIDGET and CT18-B5-ERRORS (12 November r1); CT16.routes and
+CT37.markdown (8 November r1); ADR007 §7 CT23 learner Quiz summaries; ADR014 §7
+current session generation/cancellation; ADR012 §§8, 9.2, 19.5 best-effort notifications;
+DESIGN r13 S10/S13/F9/shared file/Markdown/theme/accessibility, including main's FE16
+clarification. Existing server DTOs, admission and public OpenAPI remain unchanged.
+
+### FE11-D1: exact operation success sets
+
+Decision gap: the existing JSON/multipart transport accepted one numeric status,
+but CT10's one PUT succeeds as either 201 (created) or 200 (replaced). Under the
+above technical delegation, `RequestOptions.expectedStatus` additionally admits a
+nonempty explicit readonly success-status set. FE11 alone selects `[200, 201]`;
+existing numeric callers remain exact, binary remains exact 200 and no-content
+remains exact 204. Media, decoder, current-generation, abort, authentication and
+unknown-upload behavior remain inside the same shared lifecycle. No request is
+replayed. Alternatives rejected: status guessed from a previous read (racy), a
+second PUT after a status mismatch (duplicate mutation), accepting all 2xx (weakens
+the operation oracle), or a second transport (duplicates security behavior).
+This implements the existing backend contract; no status, API or security-policy
+amendment is made. Independent shared-consumer review remains required.
+
+### FE11-D2: S10 host ownership and bounded FE10 summary slice
+
+CT16's existing table explicitly co-owns S10 with FE10 (Quizzes) and FE11
+(Assignments); current S10 requires two independently paginated reads. Issue #196's
+older statement assigning the whole list to FE10 conflicts with this narrower
+current route contract and the present task's explicit C7 authorization. FE10 #294
+at `bec98bd0b740b746b4a069523d75175d05bf69fb` supplies a `LiveCourseAssessmentsPage`
+host with an Assignments placeholder. Its complete branch is neither imported
+nor modified. FE11 delivers that existing page module's live composition, with
+an optional `courseId/courseTitle` signature compatible with the inspected host,
+plus the Assignment-owned operation/paging/status/Open handoff. The original
+preview export and its props remain supported; its fixture model never enters
+production. FE11's default live tab is Assignments; the segmented switch has only
+Quizzes and Assignments. No score/grade is fabricated from a list summary.
+
+The cumulative FE10 contribution is the **one summary read/decoder/type plus its
+S10 table/pagination seam**, estimated **10–15%** of FE10 implementation effort:
+one of seven API operation families, with simple read lifecycle, against the much
+larger intro/history lookup, start/resume, timed answer/save-before-submit, expiry,
+unknown-outcome, result and route state machines. Host-only source overlap is
+bounded; no attempt, answer, history, result or diagnostic implementation is taken.
+The small API/type/host additions support the estimate; line count is not its basis.
+This is eligible under the task's cumulative less-than-20% allowance. A complete
+quiz journey remains FE10 #195 / PR #294 (and diagnostic entry FE09), outside FE11.
+Quiz Open is rendered only when `isDestinationLive` admits its delivered screen;
+otherwise an explicit unavailable caption is shown. FE10 must retain this host's
+Assignment slice and independent paging when integrating its attempt code. This
+is a delegated composition decision, not fabricated consent from the FE10 owner.
+Alternatives rejected: importing all #294, duplicate page hosts, filtering one
+mixed/incomplete page, or delaying the separable Assignment list.
+
+### FE11 integration and upstream ledger
+
+| Owner | Verified required capability | Bounded action / remaining handoff |
+| --- | --- | --- |
+| AS09 #160 / #297 | Learner list/detail, PUT 201/200, own PDF/ZIP file; owner grading | Satisfied on main `85a3fad`; source traced through AssignmentController/AssignmentService/SubmissionService and DTOs. No backend changes (0%). |
+| SH05 #154 / #289 | Private FileStorage/S3 | Satisfied on main `c5b9ac0`; no storage-policy/adapter change (0%). |
+| FE14 #199 / #279 | Shared multipart/binary/FileUploadField/Markdown and Course context | Satisfied on main `13d9ca7`; reused, no authoring changes (0%). |
+| FE17 #202 / #288 | Protected Instructor grading producer/UI | Satisfied on main `e2106f6`; retained. No FE17-owned changes (0%). |
+| FE34 #255 / #261 | Light/Dark/System | Satisfied on main `060b8f9`; semantic roles consumed, no duplicate preference state (0%). |
+| FE16 #201 / #270 | Owner Assignment authoring is useful for the full journey | Initially open at `ce7f0bbb`; merged during this task as `99abc40` and inherited intact. Not a whole-Issue prerequisite for learner code. No FE16-owned changes (0%). |
+| FE10 #195 / #294 | Shared S10 composition | Eligible 10–15% slice above; complete quiz journey intentionally excluded. |
+| FE08 #193 / #286 | Related Lesson destination `/courses/:courseId/lessons/:lessonId` | **Substantial; not implemented here (0% actual).** At `532039a`, client/hooks and a partial Lesson page are unmerged. Completing and qualifying lesson body, relational materials/Markdown, file delivery, visit/progress, contextual navigation, denial and lifecycle plus activating S7/S8 is estimated 35–50% of FE08 total implementation, well beyond the allowance. No route fixture or dead link is activated. FE11 preserves the canonical same-Course lesson handoff behind `isDestinationLive`; until FE08 delivers it, a clear unavailable caption appears. |
+| IN15 | Best-effort grade notifications | Separate downstream acceptance. Neither required for displaying a grade nor promised by this UI; no IN15 changes (0%). |
+
+S13 `/courses/:courseId/assignments/:assignmentId` and S10
+`/courses/:courseId/assessments` are production Learner routes, keyed by actual
+session and resource identity, and make **My courses** current. Course membership
+actions expose Assessments only for a read active/completed membership; the API
+independently authorizes every operation. Direct entry/reload reads current data;
+no selected File, submission state or credentials are persisted. Related Lesson
+activation remains the explicit upstream production-integration blocker. FE11-owned
+code completeness must not be called complete integrated delivery while it remains.
+
+### Lifecycle, errors and attribution
+
+The hook synchronously reserves a single mutation, checks current session and the
+confirmed submission timestamp at invocation, aborts obsolete reads/operations, and
+uses read initiation order to reject stale settlements. Every upload settlement
+starts a subsequent authoritative read before another upload is allowed. Network,
+5xx, cancelled uploads and unusable success are unknown outcomes; failed reads
+keep mutation disabled until deliberate read recovery. Cancelling cannot promise
+rollback. No automatic mutation/read retry, optimistic authoritative state or file
+persistence. Client extension/nonempty feedback does not replace backend admission.
+409 wording follows the reloaded graded/open state; 413 uses the approved exact
+message. The actual CT18 producer supplies no admitted file field errors for these
+400s; safe local/general feedback is used, consistent with CT16 and F14, without
+inventing fields or exposing arbitrary server diagnostics. The upload limit is
+never displayed. Download remains possible for a current file after closure/grading.
+
+The incoming Git objects record author and committer as
+`Le Phan Quoc Thang <thangle12012006@gmail.com>`. Under the task's explicit mutual
+consent arrangement, new assisted commits use those exact fields with current
+timestamps and command-scoped configuration. Codex performed the remediation,
+verification and author audit; the separately authenticated publishing account is
+`chi-thanh-nguyen`. These self-declared Git fields do not establish a legal identity
+or imply the contributor personally performed Codex's work. Other contributors'
+historical commits, AI disclosure, signatures and independent gates are preserved;
+no global identity, forged signature, credentials or co-author is introduced.
+
+### FE11 targeted remediation follow-up — 28 November 2026
+
+The Project Leader explicitly authorized targeted remediation of independent
+FE11-IR-01 (P2) and FE11-IR-02 (P3), regressions, documentation, author self-audit,
+commit and direct ordinary push to existing PR #305. Incoming reviewed HEAD was
+`75b6db7f6c2ed21182806c2f859264e581088908`; main/merge-base remained `99abc407`.
+The independent **REQUEST_CHANGES** history qualifies the earlier lifecycle and
+code-complete claims above: those claims did not establish safety across GET
+settlement before React commits. The earlier custom 400/415 copy also diverged
+from ADR010 §13's shared fallback, despite the preceding general-feedback wording.
+
+The corrected hook synchronously installs authority before releasing reservations;
+React only acknowledges matching committed presentation. File selection and
+submission callbacks must refer to that evidence. The dialog retains the exact
+reviewed filename/submitted-time string, withdraws obsolete confirmation, and the
+hook rejects stale/null replacement tokens. Cancel is bound to its rendered
+operation controller. Shared safe `ApiError.message` supplies 400/415; exact
+409/413 and unknown-outcome reconciliation remain. No contract, FE11-D1/FE11-D2,
+shared transport, storage or dependency decision changes. No setup input changes.
+
+Both findings are **FIXED_AUTHOR_VERIFIED**, subject to subsequent independent
+closure; the seven original failing invariants now pass. The detailed regression
+sensitivity, final tested source, real disposable smoke, preservation and remaining
+gates are in [the remediation record](testing.md#fe11-targeted-ir-01ir-02-remediation--28-november-2026).
+FE11-owned implementation completeness is restored by author verification only.
+FE08's Related Lesson and FE10's complete attempt/integration handoffs remain;
+whole-Issue acceptance, CODEOWNER/QA, hosted checks and protected integration are
+separate. The existing consent-based metadata arrangement above remains applicable:
+Codex performed the corrections and checks, Git author/committer fields retain the
+original contributor, and authenticated publication uses `chi-thanh-nguyen`.

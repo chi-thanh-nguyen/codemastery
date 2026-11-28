@@ -32,6 +32,9 @@ const detail = { ...course, prerequisiteDescription: null, syllabus: [] };
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 function Probe() { auth = useAuth(); navigate = useNavigate(); return null; }
 beforeEach(() => {
+    // The lazy landing illustration may mount during any direct-entry test, independently of import timing.
+    vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+    vi.stubGlobal('DOMMatrixReadOnly', class { m22 = 1; });
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T10:00:00Z')); vi.stubEnv('VITE_API_BASE_URL', 'http://localhost:8080');
     fetcher = vi.fn((url: string, _init?: RequestInit) => {
         const pathname = new URL(url).pathname;
@@ -1155,4 +1158,28 @@ describe('FE28 production activation and shell integration', () => {
         expect(fetcher.mock.calls.some(([url]) => new URL(url).pathname === '/api/me/notifications')).toBe(false);
         await act(async () => proceed!()); expect(location.pathname).toBe('/notifications'); expect(host.querySelector('main h1')?.textContent).toBe('Notifications');
     });
+});
+
+describe('FE11 production activation', () => {
+    const assignmentPath = `/courses/${id}/assignments/${id}`, listPath = `/courses/${id}/assessments`;
+    function assignmentResponses() {
+        const original = fetcher.getMockImplementation()! as (url: string, init?: RequestInit) => Promise<Response>;
+        fetcher.mockImplementation((url:string,init?:RequestInit) => {
+            const path = new URL(url).pathname;
+            if (path === `/api${assignmentPath}`) return Promise.resolve(json({id,courseId:id,lessonId:null,title:'Production assignment',instructions:'**Actual decoded instructions**',deadlineAt:'2026-12-01T00:00:00Z',open:true,submission:null}));
+            if (path === `/api/courses/${id}/assignments`) return Promise.resolve(json({content:[{id,courseId:id,lessonId:null,title:'Production assignment',deadlineAt:'2026-12-01T00:00:00Z',open:true,submissionStatus:'none'}],page:0,size:20,totalElements:1,totalPages:1}));
+            return original(url,init);
+        });
+    }
+    it.each([assignmentPath,listPath])('anonymous direct entry %s requires login',async path=>{await mount(path);expect(location.pathname).toBe('/login');expect(fetcher).not.toHaveBeenCalled();});
+    it.each(['Instructor','Administrator'])('excludes %s from S10 and S13 without protected reads',async role=>{
+        await mount('/login');await login('Other role',role);fetcher.mockClear();await go(assignmentPath);expect(host.textContent).toContain("You don't have access to this page");await go(listPath);expect(host.textContent).toContain("You don't have access to this page");expect(fetcher.mock.calls.some(([url])=>new URL(url).pathname.includes('/assignments'))).toBe(false);
+    });
+    it('production list handoff reaches decoded S13 with My courses navigation and heading focus',async()=>{
+        await mount('/login');await login();assignmentResponses();await go(listPath);expect(host.textContent).toContain('Production assignment');
+        expect(currentSection(listPath,'Learner')).toBe('/my-courses');expect(currentSection(assignmentPath,'Learner')).toBe('/my-courses');
+        await act(async()=>host.querySelector<HTMLAnchorElement>(`a[href="${assignmentPath}"]`)!.click());expect(location.pathname).toBe(assignmentPath);
+        expect(host.querySelector('main h1')?.textContent).toBe('Production assignment');expect(host.querySelector('strong')?.textContent).toBe('Actual decoded instructions');expect(document.activeElement).toBe(host.querySelector('main h1'));
+    });
+    it('invalid assignment UUID causes no production assignment request',async()=>{await mount('/login');await login();fetcher.mockClear();await go(`/courses/${id}/assignments/bad`);expect(host.textContent).toContain('Invalid assignment link.');expect(fetcher.mock.calls.some(([url])=>new URL(url).pathname.includes('/assignments/'))).toBe(false);});
 });

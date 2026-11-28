@@ -10,7 +10,8 @@ export interface AuthSessionAccess {
 export interface RequestOptions<T> {
     method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
     auth: 'public' | 'authenticated';
-    expectedStatus: number;
+    /** Exact operation-defined successes; a set never causes mutation replay. */
+    expectedStatus: number | readonly number[];
     decode: (value: unknown) => T;
     query?: URLSearchParams;
     body?: unknown;
@@ -135,12 +136,15 @@ export function createHttpClient(apiBase: string, access?: AuthSessionAccess, br
         const url = endpointFor(root, path, options.query);
         const mode = options.responseMode ?? 'json';
         // Modes are chosen explicitly; nothing is inferred from method, decoder, status or payload.
+        const expected = typeof options.expectedStatus === 'number' ? [options.expectedStatus] : options.expectedStatus;
+        const statusValid = Array.isArray(expected) && expected.length > 0 && expected.every(s => Number.isInteger(s) && s >= 200 && s < 300) && new Set(expected).size === expected.length;
+        const acceptsStatus = (status: number) => expected.includes(status);
         const multipart = 'bodyFormat' in options && options.bodyFormat === 'multipart';
         const modeValid = mode === 'binary' ? options.method === 'GET' && options.auth === 'authenticated' && options.expectedStatus === 200
             : mode === 'no-content'
             ? options.decode === undefined && options.expectedStatus === 204
             : (mode === 'json' || mode === 'json-with-metadata' && options.method === 'GET') && typeof options.decode === 'function';
-        if (!modeValid || !['public', 'authenticated'].includes(options.auth) ||
+        if (!statusValid || !modeValid || !['public', 'authenticated'].includes(options.auth) ||
             !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(options.method) ||
             options.method === 'GET' && options.body !== undefined ||
             multipart && (!(options.body instanceof FormData) || options.auth !== 'authenticated' || !['POST', 'PUT'].includes(options.method))) {
@@ -205,7 +209,7 @@ export function createHttpClient(apiBase: string, access?: AuthSessionAccess, br
             return decoded;
         }
         const media = (response.headers.get('Content-Type') ?? '').split(';')[0].trim().toLowerCase();
-        if (response.ok && (response.status !== options.expectedStatus || media !== 'application/json')) throw multipart ? unknownUpload(response.status) : protocolError();
+        if (response.ok && (!acceptsStatus(response.status) || media !== 'application/json')) throw multipart ? unknownUpload(response.status) : protocolError();
         if (!response.ok && media !== 'application/problem+json') throw httpFailure(response.status, undefined, media, url.pathname);
         let value: unknown;
         try { value = await response.json(); } catch {
@@ -215,7 +219,7 @@ export function createHttpClient(apiBase: string, access?: AuthSessionAccess, br
         }
         requireCurrent();
         if (!response.ok) throw httpFailure(response.status, value, media, url.pathname);
-        if (response.status !== options.expectedStatus || media !== 'application/json') throw multipart ? unknownUpload(response.status) : protocolError();
+        if (!acceptsStatus(response.status) || media !== 'application/json') throw multipart ? unknownUpload(response.status) : protocolError();
         let decoded: unknown;
         try {
             decoded = options.decode!(value);

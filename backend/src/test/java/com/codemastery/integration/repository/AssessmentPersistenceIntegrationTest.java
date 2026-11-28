@@ -1064,21 +1064,64 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
             jdbc.update("INSERT INTO quiz_questions VALUES (?,?,?,3)", UUID.randomUUID(), id, q2);
         }
 
+        /** AS18-IR-03: every {@link CoverageWorkerRun} of this test, registered once its workers exist. */
+        final List<CoverageWorkerRun> workerRuns = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        /**
+         * AS18-IR-03: the outer teardown obeys the same quiescence gate as {@link CoverageWorkerRun}. It first
+         * settles every registered run (closing one the test never closed). If any run's workers are not
+         * confirmed quiescent, it deletes nothing and records an isolation loss, so later integration tests in
+         * this JVM fail closed. Otherwise it deletes, in one bounded committed transaction, the rows of any run
+         * fixture that was not cleaned and then the primary fixture; a failure rolls that whole transaction back
+         * and also records an isolation loss. Tests without worker runs keep the same deletes, now atomic.
+         */
         @org.junit.jupiter.api.AfterEach
         void deleteAttemptFixtures() {
             org.springframework.security.core.context.SecurityContextHolder.clearContext();
-            jdbc.update("DELETE FROM attempt_answers WHERE attempt_id IN (SELECT a.id FROM attempts a JOIN quizzes q ON q.id=a.quiz_id WHERE q.course_id=?)", courseId);
-            jdbc.update("DELETE FROM attempts WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=?)", courseId);
-            jdbc.update("DELETE FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=?)", courseId);
-            jdbc.update("DELETE FROM quizzes WHERE course_id=?", courseId);
-            jdbc.update("DELETE FROM questions WHERE skill_id=?", skillId);
-            jdbc.update("DELETE FROM skills WHERE id=?", skillId);
-            jdbc.update("DELETE FROM enrollments WHERE course_id=?", courseId);
-            jdbc.update("DELETE FROM courses WHERE id=?", courseId);
-            for (UUID id : List.of(owner,learner,foreignLearner,admin)) {
-                jdbc.update("DELETE FROM refresh_sessions WHERE user_id=?", id);
-                jdbc.update("DELETE FROM users WHERE id=?", id);
+            List<Throwable> failures = new ArrayList<>();
+            boolean quiescent = true;
+            for (var run : workerRuns) quiescent &= run.settleForTeardown(failures);
+            if (!quiescent) {
+                throw isolationLost("AS18 outer fixture cleanup withheld: worker quiescence was not established", failures);
             }
+            try {
+                fixtureTransaction(() -> {
+                    jdbc.update("DELETE FROM attempt_answers WHERE attempt_id IN (SELECT a.id FROM attempts a JOIN quizzes q ON q.id=a.quiz_id WHERE q.course_id=?)", courseId);
+                    jdbc.update("DELETE FROM attempts WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=?)", courseId);
+                    for (var run : workerRuns) {
+                        if (run.lifecycle != WorkerRunLifecycle.CLEANED) run.fixture.deleteOwnedRows();
+                    }
+                    jdbc.update("DELETE FROM quiz_questions WHERE quiz_id IN (SELECT id FROM quizzes WHERE course_id=?)", courseId);
+                    jdbc.update("DELETE FROM quizzes WHERE course_id=?", courseId);
+                    jdbc.update("DELETE FROM questions WHERE skill_id=?", skillId);
+                    jdbc.update("DELETE FROM skills WHERE id=?", skillId);
+                    jdbc.update("DELETE FROM enrollments WHERE course_id=?", courseId);
+                    jdbc.update("DELETE FROM courses WHERE id=?", courseId);
+                    for (UUID id : List.of(owner,learner,foreignLearner,admin)) {
+                        jdbc.update("DELETE FROM refresh_sessions WHERE user_id=?", id);
+                        jdbc.update("DELETE FROM users WHERE id=?", id);
+                    }
+                });
+            } catch (RuntimeException | Error failure) {
+                List<Throwable> all = new ArrayList<>(List.of(failure));
+                all.addAll(failures);
+                throw isolationLost("Outer fixture cleanup failed and was rolled back", all);
+            }
+            if (!failures.isEmpty()) {
+                // Cleanup was safe and complete; a run the teardown had to close still failed visibly.
+                var failure = new IllegalStateException("AS18 worker run failed when closed by the outer teardown", failures.getFirst());
+                failures.stream().skip(1).forEach(failure::addSuppressed);
+                throw failure;
+            }
+        }
+
+        /** Builds the distinct teardown failure and records it, so the shared database fails closed. */
+        IllegalStateException isolationLost(String message, List<Throwable> failures) {
+            var failure = new IllegalStateException(message + "; later integration tests in this JVM fail closed",
+                    failures.isEmpty() ? null : failures.getFirst());
+            failures.stream().skip(1).forEach(failure::addSuppressed);
+            recordIsolationLoss(failure);
+            return failure;
         }
 
         void as(UUID user, com.codemastery.modules.auth.domain.model.Role role) {
@@ -1119,6 +1162,9 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
         }
 
         enum CommitAdmission { PENDING, CANCELLED, ADMITTED }
+
+        /** AS18-IR-03: a {@link CoverageWorkerRun}'s cleanup outcome; only QUIESCENT and CLEANED permit cleanup. */
+        enum WorkerRunLifecycle { OPEN, CLOSING, QUIESCENT, CLEANED, WITHHELD }
 
         final class WorkerTransaction {
             volatile CommitAdmission admission = CommitAdmission.PENDING;
@@ -1420,9 +1466,10 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
             if (workers.blocker != null) assertTrue(workers.blocker.isClosed());
             assertFalse(workers.backendPids.isEmpty());
             for (int pid : workers.backendPids) {
-                assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE pid=? "
+                // The pool may hand this probe a worker's returned connection; a backend never observes itself as leaked.
+                assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE pid=? AND pid<>pg_backend_pid() "
                         + "AND (xact_start IS NOT NULL OR wait_event_type='Lock')", Integer.class, pid));
-                assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM pg_locks WHERE pid=? "
+                assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM pg_locks WHERE pid=? AND pid<>pg_backend_pid() "
                         + "AND (relation='courses'::regclass OR locktype='advisory')", Integer.class, pid));
             }
             assertEquals(0, dataSource.unwrap(com.zaxxer.hikari.HikariDataSource.class)
@@ -1883,6 +1930,12 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                 var attempt=tx.execute(status->{jdbc.execute("SET LOCAL ROLE "+role);return at(now).start(courseId,quizId).attempt();});
                 var result=tx.execute(status->{jdbc.execute("SET LOCAL ROLE "+role);return at(now.plusSeconds(1)).submit(courseId,quizId,attempt.attemptId(),answers(true));});
                 assertEquals(new BigDecimal("50.00"),result.scorePercentage());
+                TransactionTemplate report=new TransactionTemplate(transactionManager);report.setReadOnly(true);
+                report.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+                var outcome=report.execute(status->{jdbc.execute("SET LOCAL ROLE "+role);
+                    return live.readQuizOutcome(courseId,Set.of(learner,foreignLearner));}); // AS17 CT13 read under r15
+                assertEquals(new com.codemastery.modules.assessment.application.service.AttemptService.QuizOutcome(
+                        courseId,1L,new BigDecimal("50.00")),outcome);
                 for(String forbidden:List.of("UPDATE public.attempts SET expires_at=expires_at WHERE false",
                         "UPDATE public.attempt_answers SET question_id=question_id WHERE false",
                         "DELETE FROM public.attempts WHERE false", "DELETE FROM public.attempt_answers WHERE false")) {
@@ -2464,6 +2517,1155 @@ class AssessmentPersistenceIntegrationTest extends AbstractIntegrationTest {
                 at(now.plusSeconds(100)).finalizeExpired(attempt.attemptId());
                 assertEquals(1, probe.events.size());
             }
+        }
+
+        @Autowired
+        private com.codemastery.modules.assessment.application.service.QuestionBankService liveQuestionBank;
+
+        @Test
+        void as18CoverageReadsEnforceCt40ScopeExecutionMarkerIntegrityAndZeroCountsInPostgresql() {
+            UUID emptySkill = UUID.randomUUID();
+            UUID foreignCourse = UUID.randomUUID();
+            UUID foreignSkill = UUID.randomUUID();
+            UUID unusedQ = UUID.randomUUID();
+            // AS18-IR-01: one setup transaction, so a failed statement leaves no row for the teardown to trip over.
+            fixtureTransaction(() -> {
+                jdbc.update("INSERT INTO skills (id, course_id, name) VALUES (?, ?, ?)", emptySkill, courseId, "Arrays");
+                jdbc.update("INSERT INTO courses (id, instructor_id, title, description, publication_status, adaptive_enabled) "
+                                + "VALUES (?, ?, 'Foreign AS18', 'Fixture', 'published', false)",
+                        foreignCourse, owner);
+                jdbc.update("INSERT INTO skills (id, course_id, name) VALUES (?, ?, ?)", foreignSkill, foreignCourse, "Recursion");
+                questionRepository.save(new Question(unusedQ, skillId, "Unused hard question", "single_choice", "hard",
+                        new String[] {"A", "B"}, new Boolean[] {true, false}));
+            });
+
+            try {
+                assertThrows(IllegalStateException.class,
+                        () -> liveQuestionBank.readCoverageForExecution(courseId, Set.of(skillId)));
+                assertThrows(IllegalStateException.class,
+                        () -> snapshot(() -> liveQuestionBank.readCoverageForExecution(courseId, Set.of(skillId))));
+                asLearner();
+                guard.withLearnerAssessmentWrite(courseId, () -> {
+                    assertThrows(IllegalStateException.class,
+                            () -> liveQuestionBank.readCoverageForExecution(courseId, Set.of(skillId)));
+                    return null;
+                });
+
+                assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                        () -> snapshot(() -> liveQuestionBank.readCoverage(courseId, Set.of(skillId))));
+
+                asOwner();
+                var emptySnapshot = liveQuestionBank.readCoverage(courseId, Set.of());
+                assertEquals(courseId, emptySnapshot.courseId());
+                assertEquals(java.util.Map.of(), emptySnapshot.questionCounts());
+
+                var ownerSnapshot = liveQuestionBank.readCoverage(courseId, Set.of(skillId, emptySkill));
+                assertEquals(java.util.Map.of(skillId, 3L, emptySkill, 0L), ownerSnapshot.questionCounts());
+                assertThrows(UnsupportedOperationException.class, () -> ownerSnapshot.questionCounts().clear());
+                assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,
+                        () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId, foreignSkill)));
+
+                try (var probe = new QuizEventProbe()) {
+                    List<com.codemastery.modules.assessment.application.service.QuestionBankService.CoverageSnapshot> inExecution =
+                            new ArrayList<>();
+                    probe.onEvent = event -> {
+                        assertThrows(IllegalStateException.class,
+                                () -> liveQuestionBank.readCoverageForExecution(foreignCourse, Set.of(foreignSkill)));
+                        assertThrows(IllegalStateException.class,
+                                () -> liveQuestionBank.readCoverageForExecution(courseId, Set.of(foreignSkill)));
+                        assertEquals(java.util.Map.of(),
+                                liveQuestionBank.readCoverageForExecution(courseId, Set.of()).questionCounts());
+                        inExecution.add(liveQuestionBank.readCoverageForExecution(courseId, Set.of(skillId, emptySkill)));
+                    };
+                    asLearner();
+                    var attempt = at(now).start(courseId, quizId).attempt();
+                    at(now.plusSeconds(1)).submit(courseId, quizId, attempt.attemptId(), answers(true));
+                    assertEquals(1, inExecution.size());
+                    assertEquals(java.util.Map.of(skillId, 3L, emptySkill, 0L), inExecution.getFirst().questionCounts());
+                }
+
+                assertThrows(IllegalStateException.class,
+                        () -> liveQuestionBank.readCoverageForExecution(courseId, Set.of(skillId)));
+
+                jdbc.update("UPDATE public.questions SET options = ARRAY['   ', 'B'] WHERE id=?", unusedQ);
+                asOwner();
+                assertThrows(IllegalStateException.class,
+                        () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId)));
+            } finally {
+                jdbc.update("DELETE FROM questions WHERE id=?", unusedQ);
+                jdbc.update("DELETE FROM skills WHERE id=?", emptySkill);
+                jdbc.update("DELETE FROM skills WHERE id=?", foreignSkill);
+                jdbc.update("DELETE FROM courses WHERE id=?", foreignCourse);
+            }
+        }
+        /**
+         * AS18-IR-01: runs fixture setup or cleanup as one bounded physical transaction that commits before
+         * any worker needs its rows, so a failed statement rolls back every earlier fixture statement.
+         * AS18-IR-03: the outer {@code deleteAttemptFixtures} teardown uses the same bounds.
+         */
+        void fixtureTransaction(Runnable work) {
+            assertFalse(TransactionSynchronizationManager.isActualTransactionActive(),
+                    "Fixture setup or cleanup must own and commit its physical transaction");
+            TransactionTemplate tx = new TransactionTemplate(transactionManager);
+            tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+            tx.setTimeout(10);
+            tx.executeWithoutResult(status -> {
+                assertTrue(status.isNewTransaction());
+                // Cleanup can never become the unbounded DELETE courses wait of AS18-IR-02.
+                jdbc.execute("SET LOCAL lock_timeout='5000ms'");
+                jdbc.execute("SET LOCAL statement_timeout='8000ms'");
+                work.run();
+            });
+        }
+
+        /** AS18 fixture beyond the AS08 Course: every kind/difficulty, reuse, hidden and unused membership. */
+        final class CoverageFixture implements AutoCloseable {
+            final UUID emptySkill = UUID.randomUUID(), foreignCourse = UUID.randomUUID(), foreignSkill = UUID.randomUUID();
+            final UUID hiddenQuiz = UUID.randomUUID(), unusedTrueFalse = UUID.randomUUID(), hiddenOnlyMultiple = UUID.randomUUID();
+            final UUID unusedSingle = UUID.randomUUID(), foreignQuestion = UUID.randomUUID();
+
+            CoverageFixture() { this((fixture, milestone) -> {}); }
+
+            /** {@code afterMilestone} runs inside the setup transaction; only AS18-IR-01 regressions inject faults. */
+            CoverageFixture(java.util.function.BiConsumer<CoverageFixture, String> afterMilestone) {
+                fixtureTransaction(() -> {
+                    jdbc.update("INSERT INTO skills (id,course_id,name) VALUES (?,?,'Arrays')", emptySkill, courseId);
+                    afterMilestone.accept(this, "extraSkill");
+                    jdbc.update("INSERT INTO courses (id,instructor_id,title,description,publication_status,adaptive_enabled) "
+                            + "VALUES (?,?,'Foreign AS18','Fixture','published',false)", foreignCourse, owner);
+                    afterMilestone.accept(this, "foreignCourse");
+                    jdbc.update("INSERT INTO skills (id,course_id,name) VALUES (?,?,'Recursion')", foreignSkill, foreignCourse);
+                    afterMilestone.accept(this, "foreignSkill");
+                    jdbc.update("INSERT INTO questions VALUES (?,?,'Unused','true_false','hard',ARRAY['True','False'],ARRAY[false,true])",
+                            unusedTrueFalse, skillId);
+                    afterMilestone.accept(this, "question");
+                    jdbc.update("INSERT INTO questions VALUES (?,?,'Hidden only','multiple_choice','medium',ARRAY['A','B','C'],ARRAY[true,false,true])",
+                            hiddenOnlyMultiple, skillId);
+                    jdbc.update("INSERT INTO questions VALUES (?,?,'Unused single','single_choice','medium',ARRAY['A','B'],ARRAY[false,true])",
+                            unusedSingle, skillId);
+                    jdbc.update("INSERT INTO questions VALUES (?,?,'Foreign','single_choice','easy',ARRAY['A','B'],ARRAY[true,false])",
+                            foreignQuestion, foreignSkill);
+                    // q1 is reused by the published AS08 quiz and this hidden quiz; it must count once.
+                    jdbc.update("INSERT INTO quizzes VALUES (?,?,'Hidden AS18','test',60,'hidden')", hiddenQuiz, courseId);
+                    afterMilestone.accept(this, "hiddenQuiz");
+                    jdbc.update("INSERT INTO quiz_questions VALUES (?,?,?,1)", UUID.randomUUID(), hiddenQuiz, q1);
+                    afterMilestone.accept(this, "membership");
+                    jdbc.update("INSERT INTO quiz_questions VALUES (?,?,?,2)", UUID.randomUUID(), hiddenQuiz, hiddenOnlyMultiple);
+                });
+            }
+
+            /** q1, q2 (published), unusedTrueFalse, hiddenOnlyMultiple and unusedSingle. */
+            java.util.Map<UUID, Long> expected() { return java.util.Map.of(skillId, 5L, emptySkill, 0L); }
+
+            /** Every row this fixture owns, as seen by the caller's connection. */
+            int ownedRows() {
+                return jdbc.queryForObject("SELECT (SELECT count(*) FROM courses WHERE id=?)"
+                        + " + (SELECT count(*) FROM skills WHERE id IN (?,?) OR course_id=?)"
+                        + " + (SELECT count(*) FROM questions WHERE id IN (?,?,?,?) OR skill_id IN (?,?))"
+                        + " + (SELECT count(*) FROM quizzes WHERE id=? OR course_id=?)"
+                        + " + (SELECT count(*) FROM quiz_questions WHERE quiz_id=?)", Integer.class,
+                        foreignCourse, emptySkill, foreignSkill, foreignCourse,
+                        unusedTrueFalse, hiddenOnlyMultiple, unusedSingle, foreignQuestion, emptySkill, foreignSkill,
+                        hiddenQuiz, foreignCourse, hiddenQuiz);
+            }
+
+            /**
+             * Deletes every fixture-owned row, including Questions workers authored in its skills, FK-safely in one
+             * bounded transaction. Call it only after worker quiescence (see {@link CoverageWorkerRun}).
+             */
+            @Override public void close() {
+                fixtureTransaction(this::deleteOwnedRows);
+            }
+
+            /** The FK-safe deletes of {@link #close()}, for a caller that already owns the bounded transaction. */
+            void deleteOwnedRows() {
+                jdbc.update("DELETE FROM quiz_questions WHERE quiz_id=?", hiddenQuiz);
+                jdbc.update("DELETE FROM quizzes WHERE id=?", hiddenQuiz);
+                jdbc.update("DELETE FROM questions WHERE id IN (?,?,?,?) OR skill_id IN (?,?)",
+                        unusedTrueFalse, hiddenOnlyMultiple, unusedSingle, foreignQuestion, emptySkill, foreignSkill);
+                jdbc.update("DELETE FROM skills WHERE id IN (?,?)", emptySkill, foreignSkill);
+                jdbc.update("DELETE FROM courses WHERE id=?", foreignCourse);
+            }
+        }
+
+        /** A single bounded count on a fresh pooled connection, outside any caller transaction or snapshot. */
+        int independentCount(String sql, Object... arguments) throws SQLException {
+            try (var connection = dataSource.getConnection(); var statement = connection.prepareStatement(sql)) {
+                statement.setQueryTimeout(5);
+                for (int index = 0; index < arguments.length; index++) statement.setObject(index + 1, arguments[index]);
+                try (var row = statement.executeQuery()) {
+                    assertTrue(row.next());
+                    return row.getInt(1);
+                }
+            }
+        }
+
+        void execute(java.sql.Connection connection, String sql) throws SQLException {
+            try (var statement = connection.createStatement()) {
+                statement.setQueryTimeout(5);
+                statement.execute(sql);
+            }
+        }
+
+        /**
+         * AS18-IR-02: owns one {@link CoverageFixture} and its {@link AttemptWorkers}. {@link #close()} first runs
+         * {@code AttemptWorkers.close()} (stop admission, release the blocker, cancel, bounded termination and
+         * completion checks), then deletes fixture rows only once the executor has terminated, every started worker
+         * transaction has completed and no tracked backend has an open transaction, lock wait or lock. Ordering
+         * resources in try-with-resources is not enough: Java still closes the fixture after a worker cleanup failure.
+         * AS18-IR-03: the run registers with the enclosing test once its workers exist, and records its outcome in
+         * {@link #lifecycle}, which the outer {@code deleteAttemptFixtures} teardown obeys.
+         */
+        final class CoverageWorkerRun implements AutoCloseable {
+            final CoverageFixture fixture;
+            final AttemptWorkers workers;
+            final Set<Integer> recoveredPids = new java.util.concurrent.CopyOnWriteArraySet<>();
+            volatile boolean fixtureCleanupStarted;
+            volatile List<Integer> completionsAtGate;
+            volatile WorkerRunLifecycle lifecycle = WorkerRunLifecycle.OPEN;
+            /** AS18-IR-03 regression seam only: makes the real gate report unconfirmed quiescence. */
+            volatile boolean forceUnconfirmedQuiescence;
+            private boolean closed, interrupted;
+            private IllegalStateException cleanupFailure;
+
+            CoverageWorkerRun(int size) {
+                fixture = new CoverageFixture(); // Atomic: a failed setup leaves nothing to clean.
+                AttemptWorkers created;
+                try { created = new AttemptWorkers(size); }
+                catch (RuntimeException | Error failure) {
+                    try { fixture.close(); } catch (RuntimeException | Error cleanup) { failure.addSuppressed(cleanup); }
+                    throw failure;
+                }
+                workers = created;
+                // Registered before any worker can be submitted, so every later exit reaches the outer gate.
+                workerRuns.add(this);
+            }
+
+            @Override public synchronized void close() {
+                if (closed) {
+                    if (cleanupFailure != null) throw cleanupFailure;
+                    return;
+                }
+                closed = true;
+                lifecycle = WorkerRunLifecycle.CLOSING;
+                interrupted = Thread.interrupted();
+                List<Throwable> failures = new ArrayList<>();
+                try {
+                    try { workers.close(); } catch (Throwable failure) { failures.add(failure); }
+                    interrupted |= Thread.interrupted(); // AttemptWorkers.close() restores the caller's flag.
+                    if (!quiescent(failures)) recover(failures);
+                    if (quiescent(failures)) {
+                        completionsAtGate = workers.transactions.stream().map(outcome -> outcome.completion).toList();
+                        lifecycle = WorkerRunLifecycle.QUIESCENT;
+                        fixtureCleanupStarted = true;
+                        try {
+                            fixture.close();
+                            lifecycle = WorkerRunLifecycle.CLEANED;
+                        } catch (Throwable failure) { failures.add(failure); }
+                    } else {
+                        lifecycle = WorkerRunLifecycle.WITHHELD;
+                        failures.add(new IllegalStateException("AS18 fixture cleanup withheld: workers are not quiescent"));
+                    }
+                    if (!failures.isEmpty()) {
+                        cleanupFailure = new IllegalStateException("AS18 coverage cleanup failed", failures.getFirst());
+                        failures.stream().skip(1).forEach(cleanupFailure::addSuppressed);
+                        throw cleanupFailure;
+                    }
+                } finally {
+                    if (interrupted) Thread.currentThread().interrupt();
+                }
+            }
+
+            /**
+             * AS18-IR-03: settles this run for the outer teardown and reports whether destructive cleanup is safe.
+             * A run the test never closed is closed here (its failure is new and is reported). A run that did not
+             * reach the gate, or withheld its cleanup, is safe only if the real gate now confirms quiescence;
+             * otherwise its cleanup failure explains the withheld outer cleanup. Bounded: {@link #close()} is.
+             */
+            synchronized boolean settleForTeardown(List<Throwable> failures) {
+                if (lifecycle == WorkerRunLifecycle.OPEN) {
+                    try { close(); } catch (Throwable failure) { failures.add(failure); }
+                }
+                if (lifecycle == WorkerRunLifecycle.QUIESCENT || lifecycle == WorkerRunLifecycle.CLEANED) return true;
+                List<Throwable> recheck = new ArrayList<>();
+                if (quiescent(recheck)) return true;
+                failures.addAll(recheck);
+                if (cleanupFailure == null) failures.add(new IllegalStateException("AS18 worker run " + lifecycle + " is not quiescent"));
+                else if (!failures.contains(cleanupFailure)) failures.add(cleanupFailure);
+                return false;
+            }
+
+            /** Gate for destructive cleanup: actual termination and database quiescence, never Future cancellation. */
+            boolean quiescent(List<Throwable> failures) {
+                if (forceUnconfirmedQuiescence) return false;
+                if (!workers.executor.isTerminated()) return false;
+                if (workers.transactions.stream().anyMatch(outcome -> outcome.completion == null)) return false;
+                try {
+                    for (int pid : workers.backendPids) {
+                        if (independentCount("SELECT count(*) FROM pg_stat_activity WHERE pid=? AND pid<>pg_backend_pid() "
+                                + "AND (xact_start IS NOT NULL OR wait_event_type='Lock')", pid) != 0) return false;
+                        if (independentCount("SELECT count(*) FROM pg_locks WHERE pid=? AND pid<>pg_backend_pid() "
+                                + "AND locktype IN ('relation','tuple','transactionid','advisory')", pid) != 0) return false;
+                    }
+                    return true;
+                } catch (Throwable failure) {
+                    failures.add(failure);
+                    return false;
+                }
+            }
+
+            /**
+             * Bounded recovery in the disposable Testcontainers database: terminate only this run's tracked worker
+             * backends that still hold a transaction or wait on a lock, then wait for the executor once more.
+             * Recovery is always reported as a failure, so the test cannot pass through it.
+             */
+            void recover(List<Throwable> failures) {
+                try {
+                    for (int pid : workers.backendPids) {
+                        // CASE fixes the evaluation order: the predicate is checked before any termination.
+                        if (independentCount("SELECT (CASE WHEN EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid=? "
+                                + "AND pid<>pg_backend_pid() AND (xact_start IS NOT NULL OR wait_event_type='Lock')) "
+                                + "THEN pg_terminate_backend(?) ELSE false END)::int", pid, pid) == 1) recoveredPids.add(pid);
+                    }
+                } catch (Throwable failure) { failures.add(failure); }
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (!workers.executor.isTerminated() && System.nanoTime() < deadline) {
+                    try { workers.executor.awaitTermination(Math.max(1, deadline - System.nanoTime()), TimeUnit.NANOSECONDS); }
+                    catch (InterruptedException failure) { interrupted = true; }
+                }
+                failures.add(new IllegalStateException("AS18 recovery terminated worker backends " + recoveredPids));
+            }
+        }
+
+        /** A worker body that authors through the production {@code QuestionBankService.create} guard chain. */
+        java.util.concurrent.Callable<UUID> authoring(org.springframework.security.core.Authentication authentication,
+                UUID course, UUID skill, String prompt, Runnable afterCreate) {
+            return () -> {
+                // AttemptWorkers.submitWithoutTransaction clears the worker's context afterwards.
+                org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(authentication);
+                UUID id = liveQuestionBank.create(course, new com.codemastery.modules.assessment.application.service
+                        .QuestionBankService.QuestionInput(skill, prompt, "single_choice", "easy",
+                        List.of("A", "B"), List.of(true, false))).id();
+                afterCreate.run(); // The Course root and the uncommitted Question stay held until the worker completes.
+                return id;
+            };
+        }
+
+        /** A blocker owned by AttemptWorkers, whose close() rolls it back before cancelling any worker. */
+        void advisoryBlocker(AttemptWorkers workers, int key) throws SQLException {
+            workers.blocker = dataSource.getConnection();
+            workers.blocker.setAutoCommit(false);
+            execute(workers.blocker, "SELECT pg_advisory_xact_lock(318, " + key + ")");
+        }
+
+        /** Proves from an independent connection that another transaction holds this Course root row. */
+        void assertRootHeldElsewhere(UUID course) throws SQLException {
+            try (var connection = dataSource.getConnection();
+                 var statement = connection.prepareStatement("SELECT id FROM courses WHERE id=? FOR UPDATE NOWAIT")) {
+                statement.setQueryTimeout(5);
+                statement.setObject(1, course);
+                assertEquals("55P03", assertThrows(SQLException.class, statement::executeQuery).getSQLState());
+            }
+        }
+
+        /** The AS08 Course is untouched: one owned Course (no leaked foreign Course), its skill, q1/q2 and quiz. */
+        void assertPrimaryFixtureIntact() {
+            assertEquals(List.of(courseId), jdbc.queryForList("SELECT id FROM courses WHERE instructor_id=?", UUID.class, owner));
+            assertEquals(List.of(skillId), jdbc.queryForList("SELECT id FROM skills WHERE course_id=?", UUID.class, courseId));
+            assertEquals(Set.of(q1, q2), Set.copyOf(jdbc.queryForList("SELECT id FROM questions WHERE skill_id=?", UUID.class, skillId)));
+            assertEquals(List.of(quizId), jdbc.queryForList("SELECT id FROM quizzes WHERE course_id=?", UUID.class, courseId));
+            assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM quiz_questions WHERE quiz_id=?", Integer.class, quizId));
+        }
+
+        /** A later valid fixture, owner coverage read and guarded same-Course authoring all still work. */
+        void assertSubsequentCoverageFixtureAndAuthoringWork() {
+            try (var again = new CoverageFixture()) {
+                asOwner();
+                Set<UUID> readiness = Set.of(skillId, again.emptySkill);
+                assertEquals(again.expected(), liveQuestionBank.readCoverage(courseId, readiness).questionCounts());
+                UUID created = authoringNow(courseId, skillId, "Subsequent AS18");
+                assertEquals(java.util.Map.of(skillId, 6L, again.emptySkill, 0L),
+                        liveQuestionBank.readCoverage(courseId, readiness).questionCounts());
+                assertEquals(skillId, jdbc.queryForObject("SELECT skill_id FROM questions WHERE id=?", UUID.class, created));
+            }
+        }
+
+        UUID authoringNow(UUID course, UUID skill, String prompt) {
+            try {
+                return authoring(org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication(),
+                        course, skill, prompt, () -> {}).call();
+            } catch (Exception failure) { throw new IllegalStateException(failure); }
+        }
+
+        void assertNoForeignKeyFailure(Throwable failure) {
+            var seen = Collections.newSetFromMap(new java.util.IdentityHashMap<Throwable, Boolean>());
+            for (Throwable current = failure; current != null && seen.add(current); current = current.getCause()) {
+                if (current instanceof SQLException sql && "23503".equals(sql.getSQLState())) {
+                    throw new AssertionError("A worker wrote against deleted fixture rows", failure);
+                }
+            }
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(strings = {"extraSkill", "foreignCourse", "foreignSkill", "question", "hiddenQuiz", "membership"})
+        void as18FailedCoverageFixtureSetupRollsBackEveryFixtureRowAndKeepsTheCourseUsable(String milestone) {
+            var partial = new java.util.concurrent.atomic.AtomicReference<CoverageFixture>();
+            var visibleInSetup = new java.util.concurrent.atomic.AtomicInteger(-1);
+            List<String> reached = new ArrayList<>();
+            var failure = assertThrows(Throwable.class, () -> new CoverageFixture((fixture, current) -> {
+                partial.set(fixture);
+                reached.add(current);
+                if (current.equals(milestone)) {
+                    visibleInSetup.set(fixture.ownedRows()); // The setup transaction's own uncommitted rows.
+                    // A real PostgreSQL CHECK violation (SQLSTATE 23514) inside the same physical transaction.
+                    jdbc.update("INSERT INTO questions VALUES (?,?,'Injected AS18','as18_injected','easy',ARRAY['A','B'],ARRAY[true,false])",
+                            UUID.randomUUID(), skillId);
+                }
+            }));
+            requireExpectedFailure(org.springframework.dao.DataIntegrityViolationException.class, failure);
+            SQLException sql = null;
+            for (Throwable current = failure; current != null; current = current.getCause()) {
+                if (current instanceof SQLException found) sql = found;
+            }
+            org.junit.jupiter.api.Assertions.assertNotNull(sql, () -> "No SQL cause: " + failure);
+            assertEquals("23514", sql.getSQLState());
+            assertTrue(sql.getMessage().contains("ck_questions_kind"), sql::getMessage);
+            assertEquals(milestone, reached.getLast());
+            assertTrue(visibleInSetup.get() > 0, "the injected failure must follow at least one fixture insert");
+            // Independent autocommit reads: nothing the failed setup wrote survived.
+            assertEquals(0, partial.get().ownedRows());
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM questions WHERE prompt='Injected AS18'", Integer.class));
+            assertPrimaryFixtureIntact();
+            assertSubsequentCoverageFixtureAndAuthoringWork();
+            // deleteAttemptFixtures then removes the primary Course; any leaked row would fail it on an FK.
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(strings = {"timeout", "workerFailure", "assertion", "interruption", "cleanupFailure"})
+        void as18WorkerFailurePathsAreBoundedAndCleanFixturesOnlyAfterWorkerQuiescence(String path) throws Exception {
+            long started = System.nanoTime();
+            var run = new CoverageWorkerRun(2);
+            asOwner();
+            var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            UUID foreignCourse = run.fixture.foreignCourse, foreignSkill = run.fixture.foreignSkill;
+            try {
+                var failure = assertThrows(Throwable.class, () -> {
+                    try (run) {
+                        switch (path) {
+                            case "timeout" -> {
+                                // D1: the worker holds the foreign Course root and its uncommitted Question, then waits.
+                                advisoryBlocker(run.workers, 1);
+                                var task = run.workers.submit(authoring(authentication, foreignCourse, foreignSkill, "Late AS18",
+                                        () -> jdbc.execute("SELECT pg_advisory_xact_lock(318, 1)")));
+                                run.workers.awaitRootWait();
+                                assertRootHeldElsewhere(foreignCourse);
+                                awaitWorker(task, 200, TimeUnit.MILLISECONDS);
+                                throw new AssertionError("Worker did not hold the Course root");
+                            }
+                            case "workerFailure" -> {
+                                // D2: the action fails after the worker's transaction wrote a Question under the root.
+                                var task = run.workers.submit(authoring(authentication, foreignCourse, foreignSkill, "Failed AS18", () -> {
+                                    throw new IllegalStateException("Injected AS18 worker failure");
+                                }));
+                                awaitWorker(task, 10, TimeUnit.SECONDS);
+                                throw new AssertionError("Injected worker failure was lost");
+                            }
+                            default -> {
+                                // D3/D4/D6: the main thread fails while a same-Course worker waits for the root.
+                                run.workers.blockCourseRoot();
+                                if (path.equals("cleanupFailure")) run.workers.blocker = rollbackThenFail(run.workers.blocker, false);
+                                var task = run.workers.submit(authoring(authentication, courseId, skillId, "Late AS18", () -> {}));
+                                run.workers.awaitRootWait();
+                                assertFalse(task.isDone());
+                                if (path.equals("interruption")) {
+                                    Thread.currentThread().interrupt();
+                                    awaitWorker(task, 1, TimeUnit.SECONDS);
+                                    throw new AssertionError("Future ignored caller interruption");
+                                }
+                                org.junit.jupiter.api.Assertions.fail("Injected AS18 orchestration failure");
+                            }
+                        }
+                    }
+                });
+                boolean interrupted = Thread.currentThread().isInterrupted();
+                if (path.equals("cleanupFailure")) {
+                    // D6: the expected primary cannot conceal the blocker's rollback failure.
+                    var rejected = assertThrows(AssertionError.class,
+                            () -> requireExpectedFailure(org.opentest4j.AssertionFailedError.class, failure));
+                    assertTrue(rejected.getCause() == failure);
+                    assertEquals(1, failure.getSuppressed().length);
+                    var cleanup = failure.getSuppressed()[0];
+                    assertEquals("AS18 coverage cleanup failed", cleanup.getMessage());
+                    assertEquals("AS08 cleanup failed", cleanup.getCause().getMessage());
+                    assertEquals("IR296", ((SQLException) cleanup.getCause().getCause()).getSQLState());
+                    assertEquals(0, cleanup.getSuppressed().length, "only the injected rollback fault may surface");
+                } else {
+                    requireExpectedFailure(switch (path) {
+                        case "timeout" -> java.util.concurrent.TimeoutException.class;
+                        case "workerFailure" -> java.util.concurrent.ExecutionException.class;
+                        case "interruption" -> InterruptedException.class;
+                        default -> org.opentest4j.AssertionFailedError.class;
+                    }, failure);
+                    if (path.equals("workerFailure")) {
+                        assertTrue(failure.getCause() instanceof IllegalStateException);
+                        assertEquals("Injected AS18 worker failure", failure.getCause().getMessage());
+                    }
+                }
+                assertEquals(path.equals("interruption"), interrupted);
+            } finally {
+                Thread.interrupted(); // The runner must not inherit the deliberately injected interruption.
+            }
+            assertTrue(System.nanoTime() - started < TimeUnit.SECONDS.toNanos(20));
+            assertWorkerResourcesReleased(run.workers);
+            assertEquals(1, run.workers.transactions.size());
+            var outcome = run.workers.transactions.getFirst();
+            assertEquals(CommitAdmission.CANCELLED, outcome.admission);
+            assertEquals(TransactionSynchronization.STATUS_ROLLED_BACK, outcome.completion);
+            assertNoForeignKeyFailure(outcome.actionFailure);
+            assertTrue(run.recoveredPids.isEmpty());
+            assertTrue(run.fixtureCleanupStarted);
+            assertEquals(List.of(TransactionSynchronization.STATUS_ROLLED_BACK), run.completionsAtGate);
+            assertEquals(0, run.fixture.ownedRows());
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM questions WHERE prompt IN ('Late AS18','Failed AS18')", Integer.class));
+            assertPrimaryFixtureIntact();
+            assertSubsequentCoverageFixtureAndAuthoringWork();
+        }
+
+        @Test
+        void as18FixtureCleanupWaitsForAnAdmittedWorkerCommitBeforeDeletingFixtureRows() throws Exception {
+            long started = System.nanoTime();
+            var run = new CoverageWorkerRun(1);
+            asOwner();
+            var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            var admitted = new java.util.concurrent.CountDownLatch(1);
+            var cleanupFailure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            Thread closer = new Thread(() -> {
+                try { run.close(); } catch (Throwable failure) { cleanupFailure.set(failure); }
+            }, "as18-coverage-cleanup");
+            try (var holder = dataSource.getConnection()) {
+                execute(holder, "SELECT pg_advisory_lock(318, 5)");
+                Throwable primary = null;
+                try {
+                    // D5: admission wins, then the real commit waits on a PostgreSQL lock this test holds.
+                    run.workers.afterCommitAdmission = () -> {
+                        admitted.countDown();
+                        jdbc.execute("SELECT pg_advisory_xact_lock(318, 5)");
+                    };
+                    var task = run.workers.submit(authoring(authentication, run.fixture.foreignCourse, run.fixture.foreignSkill,
+                            "Admitted AS18", () -> {}));
+                    assertTrue(admitted.await(5, TimeUnit.SECONDS));
+                    run.workers.awaitRootWait();
+                    assertEquals(CommitAdmission.ADMITTED, run.workers.transactions.getFirst().admission);
+                    closer.start();
+                    org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(3))
+                            .until(() -> run.workers.stopping.get() && task.isCancelled());
+                    // A cancelled Future is not completion: the fixture must still be intact and untouched.
+                    assertTrue(closer.isAlive());
+                    assertFalse(run.fixtureCleanupStarted);
+                    assertNull(run.workers.transactions.getFirst().completion);
+                    assertEquals(1, independentCount("SELECT count(*) FROM courses WHERE id=?", run.fixture.foreignCourse));
+                    assertEquals(0, independentCount("SELECT count(*) FROM questions WHERE prompt='Admitted AS18'"));
+                    execute(holder, "SELECT pg_advisory_unlock(318, 5)");
+                    closer.join(15000);
+                    assertFalse(closer.isAlive(), "AS18 cleanup did not terminate");
+                    assertNull(cleanupFailure.get(), () -> "Cleanup failed: " + cleanupFailure.get());
+                    assertEquals(TransactionSynchronization.STATUS_COMMITTED, run.workers.transactions.getFirst().completion);
+                    assertTrue(run.fixtureCleanupStarted);
+                    assertEquals(List.of(TransactionSynchronization.STATUS_COMMITTED), run.completionsAtGate);
+                } catch (Exception | Error failure) {
+                    primary = failure;
+                    throw failure;
+                } finally {
+                    List<Throwable> secondary = new ArrayList<>();
+                    try { execute(holder, "SELECT pg_advisory_unlock_all()"); } catch (Throwable failure) { secondary.add(failure); }
+                    try {
+                        if (closer.getState() == Thread.State.NEW) run.close();
+                        else { closer.join(15000); assertFalse(closer.isAlive()); }
+                    } catch (Throwable failure) {
+                        if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
+                        secondary.add(failure);
+                    }
+                    if (primary != null) {
+                        if (cleanupFailure.get() != null) secondary.add(cleanupFailure.get());
+                        secondary.forEach(primary::addSuppressed);
+                    } else if (!secondary.isEmpty()) {
+                        var failure = new IllegalStateException("AS18 admitted-commit cleanup failed", secondary.getFirst());
+                        secondary.stream().skip(1).forEach(failure::addSuppressed);
+                        throw failure;
+                    }
+                }
+            }
+            assertTrue(System.nanoTime() - started < TimeUnit.SECONDS.toNanos(20));
+            assertWorkerResourcesReleased(run.workers);
+            // The committed worker Question belonged to the fixture's skill and was deleted with it, FK-safely.
+            assertEquals(0, run.fixture.ownedRows());
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM questions WHERE prompt='Admitted AS18'", Integer.class));
+            assertPrimaryFixtureIntact();
+            assertSubsequentCoverageFixtureAndAuthoringWork();
+        }
+
+        @Test
+        void as18NonCooperativeWorkerIsTerminatedBeforeFixtureCleanupAndCannotPass() throws Exception {
+            long started = System.nanoTime();
+            var run = new CoverageWorkerRun(1);
+            asOwner();
+            var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            Throwable primary;
+            try (var holder = dataSource.getConnection()) {
+                execute(holder, "SELECT pg_advisory_lock(318, 6)");
+                try {
+                    primary = assertThrows(org.opentest4j.AssertionFailedError.class, () -> {
+                        try (run) {
+                            run.workers.submit(authoring(authentication, run.fixture.foreignCourse, run.fixture.foreignSkill,
+                                    "Runaway AS18", () -> {
+                                // A runaway worker lifts its own bounds and waits beyond the AttemptWorkers deadline.
+                                var connection = org.springframework.jdbc.datasource.DataSourceUtils.getConnection(dataSource);
+                                try (var statement = connection.createStatement()) {
+                                    statement.execute("SET LOCAL statement_timeout=0");
+                                    statement.execute("SET LOCAL lock_timeout=0");
+                                    statement.execute("SELECT pg_advisory_xact_lock(318, 6)");
+                                } catch (SQLException failure) { throw new IllegalStateException(failure); }
+                            }));
+                            run.workers.awaitRootWait();
+                            org.junit.jupiter.api.Assertions.fail("Injected AS18 failure with a runaway worker");
+                        }
+                    });
+                } finally {
+                    execute(holder, "SELECT pg_advisory_unlock_all()");
+                }
+            }
+            assertTrue(System.nanoTime() - started < TimeUnit.SECONDS.toNanos(25));
+            assertEquals(1, primary.getSuppressed().length);
+            var cleanup = primary.getSuppressed()[0];
+            assertEquals("AS18 coverage cleanup failed", cleanup.getMessage());
+            assertEquals("AS08 cleanup failed", cleanup.getCause().getMessage());
+            assertEquals("AS08 workers exceeded the cleanup deadline", cleanup.getCause().getCause().getMessage());
+            assertTrue(java.util.Arrays.stream(cleanup.getSuppressed()).anyMatch(failure ->
+                    failure.getMessage().startsWith("AS18 recovery terminated worker backends")));
+            assertThrows(AssertionError.class, () -> requireExpectedFailure(org.opentest4j.AssertionFailedError.class, primary));
+            assertEquals(run.workers.backendPids, run.recoveredPids);
+            assertTrue(run.fixtureCleanupStarted);
+            var outcome = run.workers.transactions.getFirst();
+            assertEquals(CommitAdmission.CANCELLED, outcome.admission);
+            org.junit.jupiter.api.Assertions.assertNotEquals(TransactionSynchronization.STATUS_COMMITTED, outcome.completion);
+            assertWorkerResourcesReleased(run.workers);
+            assertEquals(0, run.fixture.ownedRows());
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM questions WHERE prompt='Runaway AS18'", Integer.class));
+            assertPrimaryFixtureIntact();
+            assertSubsequentCoverageFixtureAndAuthoringWork();
+        }
+
+        /** Every primary-fixture row, as an independent committed read. */
+        int primaryFixtureRows() throws SQLException {
+            return independentCount("SELECT (SELECT count(*) FROM courses WHERE id=?) + (SELECT count(*) FROM skills WHERE id=?)"
+                    + " + (SELECT count(*) FROM questions WHERE id IN (?,?)) + (SELECT count(*) FROM quizzes WHERE id=?)"
+                    + " + (SELECT count(*) FROM quiz_questions WHERE quiz_id=?) + (SELECT count(*) FROM enrollments WHERE course_id=?)"
+                    + " + (SELECT count(*) FROM users WHERE id IN (?,?,?,?))",
+                    courseId, skillId, q1, q2, quizId, quizId, courseId, owner, learner, foreignLearner, admin);
+        }
+
+        static final int PRIMARY_FIXTURE_ROWS = 1 + 1 + 2 + 1 + 2 + 2 + 4;
+
+        @Test
+        void as18Ir03OuterTeardownWithholdsCleanupAndFailsClosedWhileWorkerQuiescenceIsUnconfirmed() throws Exception {
+            assertNull(isolationLoss());
+            var run = new CoverageWorkerRun(1);
+            asOwner();
+            var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            var recorded = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            try {
+                // Simulated lifecycle state, not a stuck PostgreSQL worker: the real close(), gate and teardown run,
+                // but the gate reports unconfirmed quiescence. The worker itself really commits and terminates.
+                run.forceUnconfirmedQuiescence = true;
+                Throwable primary = assertThrows(org.opentest4j.AssertionFailedError.class, () -> {
+                    try (run) {
+                        awaitWorker(run.workers.submit(authoring(authentication, run.fixture.foreignCourse,
+                                run.fixture.foreignSkill, "Withheld AS18", () -> {})), 10, TimeUnit.SECONDS);
+                        org.junit.jupiter.api.Assertions.fail("Injected AS18-IR-03 primary failure");
+                    }
+                });
+                assertEquals(WorkerRunLifecycle.WITHHELD, run.lifecycle);
+                assertFalse(run.fixtureCleanupStarted);
+                assertEquals(1, primary.getSuppressed().length);
+                var runFailure = primary.getSuppressed()[0];
+                assertEquals("AS18 coverage cleanup failed", runFailure.getMessage());
+                assertTrue(java.util.Arrays.stream(runFailure.getSuppressed()).anyMatch(failure ->
+                        "AS18 fixture cleanup withheld: workers are not quiescent".equals(failure.getMessage())));
+                int fixtureRows = run.fixture.ownedRows();
+                assertTrue(fixtureRows > 0);
+
+                // The real JUnit teardown path, invoked directly: it must not bypass the run's withheld cleanup.
+                try { deleteAttemptFixtures(); } catch (Throwable failure) { recorded.set(failure); }
+                Throwable withheld = recorded.get();
+                org.junit.jupiter.api.Assertions.assertNotNull(withheld, "outer teardown ignored an unconfirmed worker run");
+                assertEquals(IllegalStateException.class, withheld.getClass());
+                assertTrue(withheld.getMessage().startsWith(
+                        "AS18 outer fixture cleanup withheld: worker quiescence was not established"), withheld::getMessage);
+                org.junit.jupiter.api.Assertions.assertSame(runFailure, withheld.getCause());
+                org.junit.jupiter.api.Assertions.assertNotSame(primary, withheld);
+                // The primary stays identifiable and still cannot conceal its own cleanup failure.
+                assertThrows(AssertionError.class,
+                        () -> requireExpectedFailure(org.opentest4j.AssertionFailedError.class, primary));
+                assertEquals("Injected AS18-IR-03 primary failure", primary.getMessage());
+
+                // Fail closed: the shared-database guard every later integration test runs now refuses.
+                org.junit.jupiter.api.Assertions.assertSame(withheld, isolationLoss());
+                var refused = assertThrows(IllegalStateException.class,
+                        AssessmentPersistenceIntegrationTest.this::requireSharedPostgresqlIsolation);
+                org.junit.jupiter.api.Assertions.assertSame(withheld, refused.getCause());
+
+                // Nothing destructive ran: independent committed reads still see every row, the worker's included.
+                assertEquals(PRIMARY_FIXTURE_ROWS, primaryFixtureRows());
+                assertEquals(fixtureRows, run.fixture.ownedRows());
+                assertEquals(1, independentCount("SELECT count(*) FROM questions WHERE prompt='Withheld AS18'"));
+                assertWorkerResourcesReleased(run.workers);
+                assertEquals(CommitAdmission.ADMITTED, run.workers.transactions.getFirst().admission);
+                assertEquals(TransactionSynchronization.STATUS_COMMITTED, run.workers.transactions.getFirst().completion);
+                assertTrue(run.recoveredPids.isEmpty());
+            } finally {
+                // Restore the simulated state; the JUnit teardown then re-checks the real gate and cleans every row.
+                run.forceUnconfirmedQuiescence = false;
+                clearSimulatedIsolationLoss(recorded.get());
+            }
+            assertNull(isolationLoss());
+        }
+
+        @Test
+        void as18Ir03OuterTeardownClosesAnUnclosedWorkerRunAndDeletesOnlyOwnedRowsAfterQuiescence() throws Exception {
+            UUID otherOwner = user("instructor"), otherCourse = UUID.randomUUID(), otherSkill = UUID.randomUUID();
+            fixtureTransaction(() -> {
+                jdbc.update("INSERT INTO courses (id,instructor_id,title,description,publication_status,adaptive_enabled) "
+                        + "VALUES (?,?,'Unrelated AS18','Fixture','published',false)", otherCourse, otherOwner);
+                jdbc.update("INSERT INTO skills (id,course_id,name) VALUES (?,?,'Unrelated')", otherSkill, otherCourse);
+            });
+            try {
+                var run = new CoverageWorkerRun(1);
+                asOwner();
+                var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+                UUID written = awaitWorker(run.workers.submit(authoring(authentication, courseId, skillId, "Settled AS18", () -> {})),
+                        10, TimeUnit.SECONDS);
+                // The test leaves without closing the run; registration still brings it to the outer gate.
+                assertEquals(List.of(run), workerRuns);
+                assertEquals(WorkerRunLifecycle.OPEN, run.lifecycle);
+                assertFalse(run.workers.executor.isShutdown());
+
+                deleteAttemptFixtures();
+
+                assertEquals(WorkerRunLifecycle.CLEANED, run.lifecycle);
+                assertEquals(List.of(TransactionSynchronization.STATUS_COMMITTED), run.completionsAtGate);
+                assertWorkerResourcesReleased(run.workers);
+                assertNull(isolationLoss());
+                // Independent committed reads: every owned row is gone, the worker's committed Question included ...
+                assertEquals(0, run.fixture.ownedRows());
+                assertEquals(0, primaryFixtureRows());
+                assertEquals(0, independentCount("SELECT count(*) FROM questions WHERE id=? OR skill_id=?", written, skillId));
+                // ... and another instructor's Course and Skill are untouched.
+                assertEquals(2, independentCount("SELECT (SELECT count(*) FROM courses WHERE id=?) + (SELECT count(*) FROM skills WHERE id=?)",
+                        otherCourse, otherSkill));
+            } finally {
+                fixtureTransaction(() -> {
+                    jdbc.update("DELETE FROM skills WHERE id=?", otherSkill);
+                    jdbc.update("DELETE FROM courses WHERE id=?", otherCourse);
+                    jdbc.update("DELETE FROM users WHERE id=?", otherOwner);
+                });
+            }
+        }
+
+        @Test
+        void as18Ir03FailedOuterCleanupRollsBackAtomicallyAndFailsLaterIntegrationTestsClosed() throws Exception {
+            assertNull(isolationLoss());
+            assertTrue(workerRuns.isEmpty()); // The ordinary teardown path, without any worker run.
+            // The shape of the reported failed-recovery probe: an unowned Skill still references the primary Course.
+            UUID stray = UUID.randomUUID();
+            jdbc.update("INSERT INTO skills (id,course_id,name) VALUES (?,?,'Unowned AS18')", stray, courseId);
+            var recorded = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            try {
+                try { deleteAttemptFixtures(); } catch (Throwable failure) { recorded.set(failure); }
+                Throwable failure = recorded.get();
+                org.junit.jupiter.api.Assertions.assertNotNull(failure, "a failed outer cleanup must not pass");
+                assertTrue(failure.getMessage().startsWith("Outer fixture cleanup failed and was rolled back"), failure::getMessage);
+                SQLException sql = null;
+                for (Throwable current = failure; current != null; current = current.getCause()) {
+                    if (current instanceof SQLException found) sql = found;
+                }
+                org.junit.jupiter.api.Assertions.assertNotNull(sql, () -> "No SQL cause: " + failure);
+                assertEquals("23503", sql.getSQLState());
+                assertTrue(sql.getMessage().contains("fk_skills_course_id"), sql::getMessage);
+
+                org.junit.jupiter.api.Assertions.assertSame(failure, isolationLoss());
+                var refused = assertThrows(IllegalStateException.class,
+                        AssessmentPersistenceIntegrationTest.this::requireSharedPostgresqlIsolation);
+                org.junit.jupiter.api.Assertions.assertSame(failure, refused.getCause());
+                // Atomic: the deletes before the failing DELETE courses (Quiz, memberships, Questions, Skill,
+                // enrollments) were rolled back with it, so no partially deleted fixture is left behind.
+                assertEquals(PRIMARY_FIXTURE_ROWS, primaryFixtureRows());
+                assertEquals(1, independentCount("SELECT count(*) FROM skills WHERE id=?", stray));
+            } finally {
+                jdbc.update("DELETE FROM skills WHERE id=?", stray);
+                clearSimulatedIsolationLoss(recorded.get());
+            }
+            assertNull(isolationLoss());
+        }
+
+        <T> T inTransaction(boolean readOnly, int isolation, java.util.function.Supplier<T> action) {
+            TransactionTemplate tx = new TransactionTemplate(transactionManager);
+            tx.setReadOnly(readOnly); tx.setIsolationLevel(isolation);
+            return tx.execute(status -> action.get());
+        }
+
+        <T> RuntimeException failureOnAnotherThread(java.util.function.Supplier<T> action) {
+            var result = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                try { action.get(); return null; }
+                catch (RuntimeException failure) { return failure; }
+            });
+            try { return result.get(10, TimeUnit.SECONDS); }
+            catch (Exception failure) { throw new IllegalStateException(failure); }
+        }
+
+        @Test
+        void as18OwnerCoverageCountsTheCompleteValidPopulationAndFailsClosedInPostgresql() {
+            try (var fixture = new CoverageFixture()) {
+                asLearner();
+                assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                        () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId)));
+                as(admin, com.codemastery.modules.auth.domain.model.Role.ADMIN);
+                assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                        () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId)));
+
+                asOwner();
+                var empty = liveQuestionBank.readCoverage(courseId, Set.of());
+                assertEquals(courseId, empty.courseId());
+                assertEquals(java.util.Map.of(), empty.questionCounts());
+                var owner = liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.emptySkill));
+                assertEquals(courseId, owner.courseId());
+                assertEquals(fixture.expected(), owner.questionCounts());
+                assertThrows(UnsupportedOperationException.class, () -> owner.questionCounts().clear());
+                assertEquals(java.util.Map.of(fixture.emptySkill, 0L),
+                        liveQuestionBank.readCoverage(courseId, Set.of(fixture.emptySkill)).questionCounts());
+                // Foreign and unknown skills are concealed after admission; the other Course is not visible.
+                assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,
+                        () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.foreignSkill)));
+                assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class,
+                        () -> liveQuestionBank.readCoverage(courseId, Set.of(UUID.randomUUID())));
+                assertEquals(java.util.Map.of(fixture.foreignSkill, 1L),
+                        liveQuestionBank.readCoverage(fixture.foreignCourse, Set.of(fixture.foreignSkill)).questionCounts());
+
+                // Joined contexts: an owner snapshot and the Course-root write unit are coherent; others are refused.
+                assertEquals(fixture.expected(), snapshot(() -> liveQuestionBank.readCoverage(courseId,
+                        Set.of(skillId, fixture.emptySkill))).questionCounts());
+                assertEquals(fixture.expected(), guard.withCourseConfigurationWrite(courseId, () -> {
+                    assertFalse(TransactionSynchronizationManager.isCurrentTransactionReadOnly());
+                    return liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.emptySkill));
+                }).questionCounts());
+                assertThrows(IllegalStateException.class, () -> inTransaction(true,
+                        TransactionDefinition.ISOLATION_READ_COMMITTED, () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId))));
+                assertThrows(IllegalStateException.class, () -> inTransaction(true,
+                        TransactionDefinition.ISOLATION_DEFAULT, () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId))));
+                assertThrows(IllegalStateException.class, () -> inTransaction(false,
+                        TransactionDefinition.ISOLATION_REPEATABLE_READ, () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId))));
+
+                // A definition PostgreSQL accepts (V004 has no option-text check) but data-model §11 rejects.
+                assertEquals(1, jdbc.update("UPDATE public.questions SET options=ARRAY['   ','B'] WHERE id=?", fixture.unusedSingle));
+                assertThrows(IllegalStateException.class,
+                        () -> liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.emptySkill)));
+                assertEquals(java.util.Map.of(fixture.emptySkill, 0L),
+                        liveQuestionBank.readCoverage(courseId, Set.of(fixture.emptySkill)).questionCounts());
+            }
+        }
+
+        @Test
+        void as18ExecutionCoverageRunsOnlyInsideSubmissionAndExpiryScopesInPostgresql() {
+            try (var fixture = new CoverageFixture(); var probe = new QuizEventProbe()) {
+                Set<UUID> readiness = Set.of(skillId, fixture.emptySkill);
+                // B6-V09 outside the callback: no transaction, owner snapshot, a held root without the marker.
+                assertThrows(IllegalStateException.class, () -> liveQuestionBank.readCoverageForExecution(courseId, readiness));
+                assertThrows(IllegalStateException.class,
+                        () -> snapshot(() -> liveQuestionBank.readCoverageForExecution(courseId, readiness)));
+                assertThrows(IllegalStateException.class, () -> inTransaction(false,
+                        TransactionDefinition.ISOLATION_READ_COMMITTED, () -> liveQuestionBank.readCoverageForExecution(courseId, readiness)));
+                asOwner();
+                guard.withCourseConfigurationWrite(courseId, () -> {
+                    assertThrows(IllegalStateException.class, () -> liveQuestionBank.readCoverageForExecution(courseId, readiness));
+                    return null;
+                });
+                asLearner();
+                guard.withLearnerAssessmentWrite(courseId, () -> {
+                    assertThrows(IllegalStateException.class, () -> liveQuestionBank.readCoverageForExecution(courseId, readiness));
+                    return null;
+                });
+
+                List<com.codemastery.modules.assessment.application.service.QuestionBankService.CoverageSnapshot> observed =
+                        new java.util.concurrent.CopyOnWriteArrayList<>();
+                probe.onEvent = event -> {
+                    assertThrows(IllegalStateException.class,
+                            () -> liveQuestionBank.readCoverageForExecution(fixture.foreignCourse, Set.of(fixture.foreignSkill)));
+                    assertThrows(IllegalStateException.class,
+                            () -> liveQuestionBank.readCoverageForExecution(courseId, Set.of(skillId, fixture.foreignSkill)));
+                    assertTrue(failureOnAnotherThread(() -> liveQuestionBank.readCoverageForExecution(courseId, readiness))
+                            instanceof IllegalStateException);
+                    TransactionTemplate requiresNew = new TransactionTemplate(transactionManager);
+                    requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                    requiresNew.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+                    assertThrows(IllegalStateException.class,
+                            () -> requiresNew.execute(status -> liveQuestionBank.readCoverageForExecution(courseId, readiness)));
+                    TransactionTemplate suspended = new TransactionTemplate(transactionManager);
+                    suspended.setPropagationBehavior(TransactionDefinition.PROPAGATION_NOT_SUPPORTED);
+                    assertThrows(IllegalStateException.class,
+                            () -> suspended.execute(status -> liveQuestionBank.readCoverageForExecution(courseId, readiness)));
+                    assertEquals(java.util.Map.of(), liveQuestionBank.readCoverageForExecution(courseId, Set.of()).questionCounts());
+                    observed.add(liveQuestionBank.readCoverageForExecution(courseId, readiness));
+                };
+
+                var manual = at(now).start(courseId, quizId).attempt();
+                at(now.plusSeconds(1)).submit(courseId, quizId, manual.attemptId(), answers(true));
+                assertEquals(1, observed.size());
+                assertEquals(courseId, observed.getFirst().courseId());
+                assertEquals(fixture.expected(), observed.getFirst().questionCounts());
+                assertThrows(IllegalStateException.class, () -> liveQuestionBank.readCoverageForExecution(courseId, readiness));
+
+                // Actorless expiry follows the same scope with no security context at all.
+                probe.onEvent = event -> observed.add(liveQuestionBank.readCoverageForExecution(courseId, readiness));
+                var expiring = at(now.plusSeconds(2)).start(courseId, quizId).attempt();
+                org.springframework.security.core.context.SecurityContextHolder.clearContext();
+                at(expiring.expiresAt().plusSeconds(1)).finalizeExpired(expiring.attemptId());
+                assertEquals(2, observed.size());
+                assertEquals(fixture.expected(), observed.getLast().questionCounts());
+                org.junit.jupiter.api.Assertions.assertNotNull(
+                        attemptRepository.findById(expiring.attemptId()).orElseThrow().submitted_at());
+
+                // A listener failure after a successful read rolls the unit back and leaves no scope behind.
+                asLearner();
+                probe.onEvent = event -> observed.add(liveQuestionBank.readCoverageForExecution(courseId, readiness));
+                probe.failWhen = event -> true;
+                var failing = at(now.plusSeconds(100)).start(courseId, quizId).attempt();
+                assertThrows(IllegalStateException.class,
+                        () -> at(now.plusSeconds(101)).submit(courseId, quizId, failing.attemptId(), answers(true)));
+                assertEquals(3, observed.size());
+                assertNull(jdbc.queryForObject("SELECT submitted_at FROM attempts WHERE id=?", java.sql.Timestamp.class,
+                        failing.attemptId()));
+                assertFalse(TransactionSynchronizationManager.isActualTransactionActive());
+                assertTrue(TransactionSynchronizationManager.getResourceMap().isEmpty());
+                assertThrows(IllegalStateException.class, () -> liveQuestionBank.readCoverageForExecution(courseId, readiness));
+
+                // A stored corrupt definition fails the execution read, so the submission commits nothing.
+                probe.failWhen = event -> false;
+                assertEquals(1, jdbc.update("UPDATE public.questions SET options=ARRAY['A','   '] WHERE id=?", fixture.unusedSingle));
+                assertThrows(IllegalStateException.class,
+                        () -> at(now.plusSeconds(102)).submit(courseId, quizId, failing.attemptId(), answers(true)));
+                assertNull(jdbc.queryForObject("SELECT submitted_at FROM attempts WHERE id=?", java.sql.Timestamp.class,
+                        failing.attemptId()));
+            }
+        }
+
+        @Test
+        void as18CoverageReadsUseTheQualifiedRuntimeRoleWithoutNewPrivileges() throws Exception {
+            String role = "as18_" + UUID.randomUUID().toString().replace("-", "");
+            jdbc.execute("CREATE ROLE " + role + " NOLOGIN");
+            try (var fixture = new CoverageFixture(); var probe = new QuizEventProbe()) {
+                jdbc.execute("GRANT USAGE ON SCHEMA public TO " + role);
+                String script = java.nio.file.Files.readString(java.nio.file.Path.of("..", "infrastructure", "vm", "deploy.sh"));
+                String matrix = script.split("RUNTIME_PRIVILEGE_MATRIX='\n", 2)[1].split("\n'", 2)[0];
+                for (String line : matrix.split("\n")) {
+                    String[] fields = line.trim().split("\\s+");
+                    if (!fields[1].equals("-")) jdbc.execute("GRANT " + fields[1] + " ON TABLE public." + fields[0] + " TO " + role);
+                    if (!fields[2].equals("-")) jdbc.execute("GRANT " + fields[2].replace('+', ',') + " ON TABLE public." + fields[0] + " TO " + role);
+                }
+                Set<UUID> readiness = Set.of(skillId, fixture.emptySkill);
+                asOwner();
+                assertEquals(fixture.expected(), snapshot(() -> {
+                    jdbc.execute("SET LOCAL ROLE " + role);
+                    assertEquals(role, jdbc.queryForObject("SELECT current_user", String.class));
+                    return liveQuestionBank.readCoverage(courseId, readiness);
+                }).questionCounts());
+
+                List<java.util.Map<UUID, Long>> observed = new java.util.concurrent.CopyOnWriteArrayList<>();
+                probe.onEvent = event -> {
+                    assertEquals(role, jdbc.queryForObject("SELECT current_user", String.class));
+                    observed.add(liveQuestionBank.readCoverageForExecution(courseId, readiness).questionCounts());
+                };
+                asLearner();
+                TransactionTemplate tx = new TransactionTemplate(transactionManager);
+                tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+                var attempt = tx.execute(status -> { jdbc.execute("SET LOCAL ROLE " + role); return at(now).start(courseId, quizId).attempt(); });
+                tx.execute(status -> { jdbc.execute("SET LOCAL ROLE " + role);
+                    return at(now.plusSeconds(1)).submit(courseId, quizId, attempt.attemptId(), answers(true)); });
+                assertEquals(List.of(fixture.expected()), observed);
+            } finally {
+                jdbc.execute("DROP OWNED BY " + role); jdbc.execute("DROP ROLE " + role);
+            }
+        }
+
+        @Test
+        void as18GuardedReadinessReadSerializesSameCourseAuthoringAndIsolatesOtherCourses() throws Exception {
+            // AS18-IR-02: workers own their physical transactions; fixture rows are deleted only after quiescence.
+            var run = new CoverageWorkerRun(2);
+            try (run) {
+                var fixture = run.fixture;
+                asOwner();
+                var authentication = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+                java.util.concurrent.atomic.AtomicReference<java.util.concurrent.Future<UUID>> sameCourse =
+                        new java.util.concurrent.atomic.AtomicReference<>();
+                java.util.concurrent.atomic.AtomicReference<UUID> otherCourseQuestion = new java.util.concurrent.atomic.AtomicReference<>();
+                var held = guard.withCourseConfigurationWrite(courseId, () -> {
+                    var before = liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.emptySkill));
+                    int holder = jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class);
+                    sameCourse.set(run.workers.submit(authoring(authentication, courseId, skillId, "Concurrent", () -> {})));
+                    // Poll from an independent connection: pg_stat_activity is snapshotted per transaction.
+                    org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(10)).until(() -> independentCount(
+                            "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type='Lock' AND ?=ANY(pg_blocking_pids(pid))",
+                            holder) == 1);
+                    assertFalse(sameCourse.get().isDone());
+                    try {
+                        otherCourseQuestion.set(awaitWorker(run.workers.submit(authoring(authentication, fixture.foreignCourse,
+                                fixture.foreignSkill, "Other Course", () -> {})), 10, TimeUnit.SECONDS));
+                    } catch (Exception failure) { throw new IllegalStateException(failure); }
+                    assertEquals(before, liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.emptySkill)));
+                    assertFalse(sameCourse.get().isDone());
+                    return before;
+                });
+                assertEquals(fixture.expected(), held.questionCounts());
+                UUID created = awaitWorker(sameCourse.get(), 10, TimeUnit.SECONDS);
+                assertEquals(java.util.Map.of(skillId, 6L, fixture.emptySkill, 0L),
+                        liveQuestionBank.readCoverage(courseId, Set.of(skillId, fixture.emptySkill)).questionCounts());
+                assertEquals(java.util.Map.of(fixture.foreignSkill, 2L),
+                        liveQuestionBank.readCoverage(fixture.foreignCourse, Set.of(fixture.foreignSkill)).questionCounts());
+                assertEquals(skillId, jdbc.queryForObject("SELECT skill_id FROM questions WHERE id=?", UUID.class, created));
+                assertEquals(fixture.foreignSkill, jdbc.queryForObject("SELECT skill_id FROM questions WHERE id=?", UUID.class,
+                        otherCourseQuestion.get()));
+            }
+            assertWorkerResourcesReleased(run.workers);
+            assertTrue(run.workers.transactions.stream().allMatch(outcome -> outcome.admission == CommitAdmission.ADMITTED));
+            assertEquals(List.of(TransactionSynchronization.STATUS_COMMITTED, TransactionSynchronization.STATUS_COMMITTED),
+                    run.completionsAtGate);
+            assertEquals(0, run.fixture.ownedRows());
+        }
+
+        @Test
+        void ct13QuizOutcomeAggregatesMultiLearnerLatestPairsHalfUpAndIgnoresUnsubmittedAndHiddenCourseFilter() {
+            UUID hiddenTestQuiz = UUID.randomUUID();
+            UUID diagnosticQuiz = UUID.randomUUID();
+            addQuiz(hiddenTestQuiz, "test");
+            addQuiz(diagnosticQuiz, "diagnostic");
+
+            // Learner 1: quizId latest is 50.00 (supersedes older 100.00); hiddenTestQuiz is 100.00; diagnostic 0.00 excluded.
+            terminal(quizId, 1, now, now.plusSeconds(10), true, true);
+            terminal(quizId, 2, now.plusSeconds(20), now.plusSeconds(30), true, false);
+            terminal(hiddenTestQuiz, 1, now, now.plusSeconds(10), true, true);
+            terminal(diagnosticQuiz, 1, now.plusSeconds(40), now.plusSeconds(50), false, false);
+
+            // Second joined learner: 50.00 on quizId, plus an unsubmitted attempt on hiddenTestQuiz (must not count).
+            jdbc.update("INSERT INTO attempts VALUES (?,?,?,?,?,?,?,?)",
+                    UUID.randomUUID(), foreignLearner, quizId, 1,
+                    java.time.OffsetDateTime.ofInstant(now, java.time.ZoneOffset.UTC),
+                    java.time.OffsetDateTime.ofInstant(now.plusSeconds(60), java.time.ZoneOffset.UTC),
+                    java.time.OffsetDateTime.ofInstant(now.plusSeconds(15), java.time.ZoneOffset.UTC),
+                    new BigDecimal("50.00"));
+            jdbc.update("INSERT INTO attempts VALUES (?,?,?,?,?,?,?,?)",
+                    UUID.randomUUID(), foreignLearner, hiddenTestQuiz, 1,
+                    java.time.OffsetDateTime.ofInstant(now, java.time.ZoneOffset.UTC),
+                    java.time.OffsetDateTime.ofInstant(now.plusSeconds(60), java.time.ZoneOffset.UTC),
+                    null, null);
+
+            jdbc.update("UPDATE quizzes SET publication_status='hidden' WHERE id=?", hiddenTestQuiz);
+            jdbc.update("UPDATE courses SET publication_status='hidden' WHERE id=?", courseId);
+
+            // (50.00 + 100.00 + 50.00) / 3 = 66.666... -> HALF_UP 66.67 over hidden Course and hidden test Quiz.
+            var combined = snapshot(() -> live.readQuizOutcome(courseId, Set.of(learner, foreignLearner)));
+            assertEquals(courseId, combined.courseId());
+            assertEquals(3L, combined.scoredLearnerQuizPairs());
+            assertEquals(new BigDecimal("66.67"), combined.averageQuizScore());
+
+            var singleLearner = snapshot(() -> live.readQuizOutcome(courseId, Set.of(foreignLearner)));
+            assertEquals(1L, singleLearner.scoredLearnerQuizPairs());
+            assertEquals(new BigDecimal("50.00"), singleLearner.averageQuizScore());
+
+            var emptyPopulation = snapshot(() -> live.readQuizOutcome(courseId, Set.of()));
+            assertEquals(0L, emptyPopulation.scoredLearnerQuizPairs());
+            assertNull(emptyPopulation.averageQuizScore());
+        }
+
+        /** AS17 fixture: one persisted Attempt row; a null {@code submitted} leaves it unsubmitted. */
+        void persistedAttempt(UUID user, UUID quiz, int number, Instant start, Instant submitted, String score) {
+            jdbc.update("INSERT INTO attempts VALUES (?,?,?,?,?,?,?,?)", UUID.randomUUID(), user, quiz, number,
+                    java.time.OffsetDateTime.ofInstant(start, java.time.ZoneOffset.UTC),
+                    java.time.OffsetDateTime.ofInstant(start.plusSeconds(60), java.time.ZoneOffset.UTC),
+                    submitted == null ? null : java.time.OffsetDateTime.ofInstant(submitted, java.time.ZoneOffset.UTC),
+                    submitted == null ? null : new BigDecimal(score));
+        }
+
+        @Test
+        void as17QuizOutcomeSelectsTheTupleLatestSubmittedPairScopesTheCourseAndRoundsAMidpointHalfUp() {
+            // Equal submitted_at: the later started_at (#1, 33.33) outranks the higher attempt_number
+            // and higher score (#2, 100.00); a later unsubmitted #3 cannot displace it (ADR005 §6.1).
+            persistedAttempt(learner, quizId, 1, now.plusSeconds(10), now.plusSeconds(30), "33.33");
+            persistedAttempt(learner, quizId, 2, now, now.plusSeconds(30), "100.00");
+            persistedAttempt(learner, quizId, 3, now.plusSeconds(40), null, null);
+            persistedAttempt(foreignLearner, quizId, 1, now, now.plusSeconds(20), "0.00");
+
+            UUID outsider = user("learner");
+            UUID otherCourse = UUID.randomUUID();
+            UUID otherQuiz = UUID.randomUUID();
+            jdbc.update("INSERT INTO courses (id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES (?,?,'Other AS17','Fixture','published',false)",
+                    otherCourse, owner);
+            jdbc.update("INSERT INTO quizzes VALUES (?,?,'Other quiz','practice',60,'published')", otherQuiz, otherCourse);
+            try {
+                persistedAttempt(learner, otherQuiz, 1, now, now.plusSeconds(50), "100.00");
+                persistedAttempt(outsider, otherQuiz, 1, now, now.plusSeconds(50), "100.00");
+                persistedAttempt(outsider, quizId, 1, now, null, null);
+
+                // (33.33 + 0.00) / 2 = 16.665 -> HALF_UP 16.67 (HALF_EVEN or truncation would give 16.66;
+                // number-first or highest-score selection 50.00; every submitted attempt 44.44).
+                assertEquals(new com.codemastery.modules.assessment.application.service.AttemptService.QuizOutcome(
+                                courseId, 2L, new BigDecimal("16.67")),
+                        snapshot(() -> live.readQuizOutcome(courseId, Set.of(learner, foreignLearner))));
+                // A populated learner whose only rows are another Course's or unsubmitted has no pair.
+                var noPair = snapshot(() -> live.readQuizOutcome(courseId, Set.of(outsider)));
+                assertEquals(0L, noPair.scoredLearnerQuizPairs());
+                assertNull(noPair.averageQuizScore());
+                // The other Course counts only its own Quiz; 100.00 is a valid upper bound.
+                assertEquals(new com.codemastery.modules.assessment.application.service.AttemptService.QuizOutcome(
+                                otherCourse, 2L, new BigDecimal("100.00")),
+                        snapshot(() -> live.readQuizOutcome(otherCourse, Set.of(learner, outsider, foreignLearner))));
+            } finally {
+                jdbc.update("DELETE FROM attempts WHERE user_id=? OR quiz_id=?", outsider, otherQuiz);
+                jdbc.update("DELETE FROM quizzes WHERE id=?", otherQuiz);
+                jdbc.update("DELETE FROM courses WHERE id=?", otherCourse);
+                jdbc.update("DELETE FROM users WHERE id=?", outsider);
+            }
+        }
+
+        @Test
+        void as17QuizOutcomeOnlyJoinsTheCallersReadOnlyRepeatableReadSnapshotAndKeepsItStable() {
+            persistedAttempt(learner, quizId, 1, now, now.plusSeconds(10), "50.00");
+            Set<UUID> population = Set.of(learner, foreignLearner);
+
+            // Real proxies: MANDATORY joins any outer transaction, so the snapshot guard must reject these.
+            TransactionTemplate readWrite = new TransactionTemplate(transactionManager);
+            readWrite.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
+            assertThrows(IllegalStateException.class,
+                    () -> readWrite.execute(status -> live.readQuizOutcome(courseId, population)));
+            TransactionTemplate readCommitted = new TransactionTemplate(transactionManager);
+            readCommitted.setReadOnly(true);
+            readCommitted.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+            assertThrows(IllegalStateException.class,
+                    () -> readCommitted.execute(status -> live.readQuizOutcome(courseId, population)));
+
+            var inSnapshot = snapshot(() -> {
+                assertEquals("on", jdbc.queryForObject("SHOW transaction_read_only", String.class));
+                var first = live.readQuizOutcome(courseId, population);
+                try { // Another connection commits a new pair while the caller's snapshot is open.
+                    java.util.concurrent.CompletableFuture.runAsync(() -> persistedAttempt(
+                            foreignLearner, quizId, 1, now, now.plusSeconds(20), "100.00")).get(10, TimeUnit.SECONDS);
+                } catch (Exception failure) {
+                    throw new IllegalStateException(failure);
+                }
+                assertEquals(first, live.readQuizOutcome(courseId, population));
+                return first;
+            });
+            assertEquals(new com.codemastery.modules.assessment.application.service.AttemptService.QuizOutcome(
+                    courseId, 1L, new BigDecimal("50.00")), inSnapshot);
+            assertEquals(new com.codemastery.modules.assessment.application.service.AttemptService.QuizOutcome(
+                    courseId, 2L, new BigDecimal("75.00")), snapshot(() -> live.readQuizOutcome(courseId, population)));
         }
     }
 

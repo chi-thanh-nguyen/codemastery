@@ -938,4 +938,57 @@ class CourseServiceTest {
         } finally { org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false); }
         assertThrows(IllegalStateException.class,()->producer.publishLessonPublished(COURSE,OTHER));
     }
+
+    @Test
+    void notificationContextIsActorlessClosedAndScopedToRequestedLessons() {
+        var content = mock(com.codemastery.modules.course.domain.repository.CourseContentRepository.class);
+        var catalogue = new CourseCatalogueService(repository, content, identity);
+        when(repository.findById(COURSE)).thenReturn(Optional.of(catalogueCourse(COURSE, HIDDEN)));
+        when(content.findLesson(COURSE, LESSON)).thenReturn(Optional.of(new com.codemastery.modules.course.domain.model.Lesson(
+                LESSON, OTHER, "Hidden title", "private body", 1, HIDDEN)));
+        when(content.findLesson(COURSE, MATERIAL)).thenReturn(Optional.empty());
+        var result = catalogue.readCourseContext(COURSE, Set.of(LESSON, MATERIAL)).orElseThrow();
+        assertEquals("hidden", result.coursePublicationStatus());
+        assertEquals(Set.of(LESSON), result.lessons().keySet());
+        assertEquals("Hidden title", result.lessons().get(LESSON).title());
+        assertThrows(UnsupportedOperationException.class, () -> result.lessons().clear());
+        verifyNoInteractions(identity);
+        assertThrows(IllegalArgumentException.class, () -> catalogue.readCourseContext(COURSE,
+                java.util.stream.IntStream.range(0, 101).mapToObj(n -> UUID.randomUUID()).collect(Collectors.toSet())));
+    }
+
+    @Test
+    void notificationContextHasOnlyTheApprovedProductionCallers() throws Exception {
+        var allowed = Set.of(
+                "com/codemastery/modules/course/application/service/CourseCatalogueService.java",
+                "com/codemastery/modules/interaction/application/service/NotificationEventListener.java",
+                "com/codemastery/modules/interaction/application/service/DeadlineReminderScheduler.java",
+                "com/codemastery/modules/interaction/application/service/DiscussionService.java",
+                "com/codemastery/modules/interaction/application/service/ContentReportService.java",
+                "com/codemastery/modules/admin/application/service/ContentModerationService.java");
+        java.nio.file.Path root = java.nio.file.Path.of("src/main/java");
+        try (var stream = java.nio.file.Files.walk(root);
+             var manager = javax.tools.ToolProvider.getSystemJavaCompiler().getStandardFileManager(null, null, null)) {
+            var files = stream.filter(path -> path.toString().endsWith(".java")).toList();
+            var task = (com.sun.source.util.JavacTask) javax.tools.ToolProvider.getSystemJavaCompiler().getTask(
+                    null, manager, null, List.of("-proc:none"), null, manager.getJavaFileObjectsFromPaths(files));
+            for (var unit : task.parse()) {
+                String path = root.toAbsolutePath().relativize(java.nio.file.Path.of(unit.getSourceFile().toUri()).toAbsolutePath()).toString();
+                new com.sun.source.util.TreeScanner<Void, Void>() {
+                    private void check(String name) {
+                        if (name.equals("readCourseContext") || name.equals("readLessonContext"))
+                            assertTrue(allowed.contains(path), () -> "Unapproved CT40 notification-context caller: " + path);
+                    }
+                    @Override public Void visitMethodInvocation(com.sun.source.tree.MethodInvocationTree node, Void unused) {
+                        String selector = node.getMethodSelect().toString();
+                        check(selector.substring(selector.lastIndexOf('.') + 1));
+                        return super.visitMethodInvocation(node, unused);
+                    }
+                    @Override public Void visitMemberReference(com.sun.source.tree.MemberReferenceTree node, Void unused) {
+                        check(node.getName().toString()); return super.visitMemberReference(node, unused);
+                    }
+                }.scan(unit, null);
+            }
+        }
+    }
 }

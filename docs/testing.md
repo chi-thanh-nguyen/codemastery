@@ -1,5 +1,732 @@
 # Testing
 
+## FE16-R-B01 causal refusal recovery — 27 November 2026
+
+Refs #201, PR #270. Reviewed baseline `d4867a38c82b9d4f071ee78e5cb90db29261181f`,
+tree `08b99e15c2dede59b9eb60f9672efbb3430bbc30`; main/merge-base
+`fe3160d535b33652587e14e2fc55ca267f6a5222`. All six published commits remain ancestors.
+Authority: the Project Leader's explicit R-B01 implementation, focused testing,
+verification-record update and direct incremental publication instruction.
+OpenAI Codex implemented and author-verified this correction. Git attribution to
+heizseung does not establish personal implementation, signing or independent review.
+The complete latest independent report and its original causal/26-case probes
+were recovered and read; none is claimed unavailable or independently superseded.
+
+### Negative control and correction
+
+Before production edits the **unmodified original causal probe** ran on the exact
+reviewed source: **2 PASS / 1 FAIL / 0 SKIP**. Actual UI Settings Save (PUT pending)
+→ Assessments → Leave → Assignments → New assignment → related-Lesson Create404
+→ Course403 → Lessons Try again (A pending). The late Settings PUT resolves outside
+act, schedules floor 4 through acknowledgeSettings/revalidateCourse, then a queued
+microtask resolves A while GET count=3 and A.isCurrent()=true. A is accepted with
+successfulRead=3, refusal disappears; B starts at 4 and fails503. Read-only=false,
+assignmentWritesBlocked=false, explicit Create produces **POST 2, expected 1**.
+The paired A-after-B-initiation and coalesced scheduling controls passed.
+
+The same unmodified probe after correction: **3 PASS / 0 FAIL / 0 SKIP**. In the
+pre-initiation render success=3/floor=4 now retains refusal403 and the write barrier;
+after B503 read-only=true and actual POST count remains **1**. The production delta
+adds only scheduled-floor eligibility to the existing denial-clear predicate.
+Identity, decoded-success, error/loading and owner-read currentness remain in force.
+No added GET, retry, mutation replay or parallel state owner is introduced.
+
+Nine durable regressions live in the existing assessmentAuthoring suite. They
+preserve the actual late Settings UI path and outside-act network settlement,
+assert accepted A **before** B initiation (a changed scheduling order cannot pass),
+and cover 403/404, B pending/network/protocol/503 versus eligible B success, actual
+Create/Save/Publish/Hide request counts, open confirmation handlers, grading
+availability, retained drafts, Stay/unload and repeated/coalesced scheduling.
+Eligible success4 clears refusal and Settings reconciliation, permits explicit
+Create, and sends nothing automatically. Coalesced reload/revalidate/reload all
+return floor3 and issue one GET; explicit success4 recovers without a permanent lock.
+Before the production fix these durable cases gave **7 FAIL / 2 PASS** at the
+in-gap refusal oracle. The original POST-count failing assertion is retained in
+external evidence. Existing regressions cover ordinary recovery, initial transient
+failures, direct-write refusal, missing/present Lesson, obsolete success,
+same-owner child remount/draft disposal, Course/session replacement and sign-out.
+
+### Executed verification and applicability
+
+Node 24.21.0, Vitest 5.0.5. Locked dependencies reused in an isolated clone after
+package-lock equality; no package/configuration changes. Commands from repository root:
+
+```sh
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx -t 'FE16-R-B01|FE16-R-A01|FE16-IR Course refusal|grading handoff' --maxWorkers=1 --testTimeout=15000
+# 45 PASS / 0 FAIL / 144 deliberately unselected; includes all nine new cases.
+
+npm --prefix frontend test -- src/features/instructor/course-management/pages/fe16CausalIndependent.probe.test.tsx src/features/instructor/course-management/pages/fe16DeltaIndependent.probe.test.tsx --maxWorkers=1 --testTimeout=15000 --reporter=verbose
+# 29 PASS / 0 FAIL / 0 SKIP: original causal3 plus unmodified prior26.
+# Temporary probe files were moved outside the checkout before publication.
+
+npm --prefix frontend test -- src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/routes/index.test.tsx -t 'owner list reads|U2:|D1-R1|D1-R2|FE14-IR-01|owner read|Course.*read|Settings|D1|N3|N4|N5|N6|grading|Assignment|assignment' --maxWorkers=1 --testTimeout=15000
+# 45 PASS / 0 FAIL / 231 deliberately unselected; files disjoint from above.
+
+npm --prefix frontend run build
+# Typecheck and production build PASS; existing chunk-size advisory only.
+```
+
+These final selections total 119 executed cases across disjoint files. Repeated
+runs/filters are not added. The source bytes are bound to the final commit in the
+external delivery manifest; documentation-only updates do not alter tested source.
+Early author test runs exposed incomplete fixtures for the successful Create's
+follow-up read (and an expected second 404 legitimately scheduling GET5); the final
+fixture returns an acknowledged creation and its route read, keeping the exact
+four-GET oracle. Typecheck required a typed test-only React act-environment flag.
+Neither correction changes production scheduling or weakens a refusal assertion.
+
+FE14/FE15 shared acknowledgment, mutation obligations, floors and owner-read source
+remain byte-identical. Both S19 Grade/Open grading handoffs pass in the selected
+committed tests. FE17 production and FE13 are untouched; AS12/backend remains equal
+to integrated main. Deadline API/parser, exact intent/editor/native fallback,
+formatter, E2E source, contracts, routes and browser matrix are byte-identical to
+reviewed HEAD. IR-01/IR-03/R-A02/R-A03 independent dispositions remain applicable.
+Historical independently inspected run [45998514619, job 140503896015](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45998514619/job/140503896015),
+at merge `8120bea9fd8209f35c7c6c4a801c5a921f63fc0e`, tree identical to reviewed
+HEAD: **149 PASS / 0 FAIL / 11 SKIP**, exact boundary scenario passed on Chromium
+desktop/mobile, Firefox desktop and WebKit desktop/mobile, no affected skip.
+This is reused historical evidence, not fresh execution on this incremental commit.
+
+The bounded self-audit traces every Course scheduler (reload, revalidate, Settings
+acknowledgment and shared mutation recovery). Scheduled floor closes the barrier
+synchronously; accepted older A cannot clear refusal, B transient cannot remove
+it, and eligible current B clears it. Coalescing never advances an unreachable
+floor; identity replacement discards refusal under existing owner lifetime rules.
+Default fsck encounters the inherited optional commit-graph cache inconsistency;
+full object fsck with core.commitGraph=false passes and reachable objects are present.
+No source/history cache repair or other session resource change was performed.
+
+Author outcome: **FIXED_AUTHOR_VERIFIED**. No remaining R-B01 defect was reproduced.
+Latest independent REQUEST_CHANGES, R-A01/IR-02 partial acceptance and AC1/4/6 /
+FE16.author dispositions are not independently updated here. Existing formal AC10
+AT/device/zoom/contrast qualification remains. Independent closure, exact-head
+hosted CI, CODEOWNER/QA, protected integration, release and deployment remain separate.
+No new browser/REST stack, five-project matrix, full 460-case selection, unrelated
+frontend/backend/FE17/AS12 suites, CI dispatch/wait, merge or Project/Issue write:
+the unchanged paths have applicable prior evidence; the new causal path is covered
+directly. All historical records below remain unchanged.
+
+## FE16-R-A01 / R-A02 / R-A03 targeted remediation — 27 November 2026
+
+Refs #201, PR #270. Reviewed/published baseline:
+`d8b021ba55738335a43f1bd2d5f0958ef8da2996` (tree
+`3cd876dd3988b056d1cc4f92e1713aa530ab72b7`); refreshed main and merge-base:
+`fe3160d535b33652587e14e2fc55ca267f6a5222`. The existing five commits include
+AS12. This is incremental author remediation, not a new independent acceptance.
+OpenAI Codex implemented and author-verified the change under the Leader's
+explicit instruction. All earlier FE16/FE17/AS12 records below remain historical.
+
+### Negative evidence and corrected invariants
+
+The complete final narrow independent report/archive and prior author remediation
+archive were accessible and inspected. Before production edits, its unmodified
+26-case component probe was run on exact baseline: **15 PASS / 11 FAIL / 0 SKIP**.
+Failures were six 403/404 × network/protocol/503 Create retries, three equivalent
+Save/Publish/Hide boundaries and two year-zero current-version presentations.
+After the production correction the same unmodified probe passed **26/26**.
+The probes use actual AppRouter → CourseEditorShell → useSharedCourseState →
+useOwnerRead → CourseAssignmentEditor → AssignmentEditor, with controlled feature
+responses and the real Lessons Try again control. They are not REST acceptance.
+
+Hosted run [45978295528, job 140435509480](https://github.com/chi-thanh-nguyen/codemastery/actions/runs/45978295528/job/140435509480)
+was inspected directly: **147 PASS / 2 FAIL / 11 SKIP** at baseline. Both
+`FE16-IR boundary deadlines retain exact UTC instants and allow deliberate native replacement`
+failures are WebKit desktop/mobile, missing the exact
+`9999-12-31T23:59:59.999999Z` fallback. The prior independent real WebKit and native
+engine evidence identifies whole-string fractional rounding into UTC year 10000.
+This is historical real-browser negative evidence, not a fresh local browser run.
+
+- R-A01: refusal lives in the existing Course/session owner, survives pending and
+  transient retries and same-owner editor remount, and clears only on a later
+  current decoded GET. A synchronous scheduling barrier guards stale callbacks
+  and open publication confirmations. Six original Create cases retain **one**
+  POST after the attempted retry; the three original existing-editor cases send
+  **zero** refused PUTs. Current success permits only a deliberate next write.
+  Additional cases cover repeated refusal, initial transient controls, obsolete
+  same-Course/Course/session success, direct-write refusal, sign-out, read-only
+  drafts, grading availability, Stay/Leave and unload protection.
+- R-A02: numeric calendar validation, fraction-free UTC seconds, offset arithmetic
+  and separate microseconds admit exact UTC 0000–9999 without native fractional
+  parsing. Tests exercise lower/upper controls, leap/early years, offset crossings,
+  invalid calendars/times/offsets/ranges, 1..6-digit response grammar and trailing
+  line-break rejection. Backend request parsing may admit zero digits below the
+  microsecond; strict frontend response admission still rejects those spellings.
+  Every owner response boundary preserves the original string and PUT payload.
+  A Date negative control throws if complete microsecond text reaches Date in
+  decoding, native-input or display paths. FE17 tests use the actual shared
+  HTTP/decoder for both current-page and bounded direct-read selector cases,
+  preserving Course/Assignment identity, pagination and no unintended grade write.
+- R-A03: authoritative current-version year 0000 and equivalent-offset forms use
+  unambiguous exact UTC. Local year-zero/negative/10000 crossings are covered;
+  positive year 0001 and ordinary localized/relative display remain distinct.
+  A different retained draft stays unsaved and sends its original exact deadline
+  on the next explicit Save. Shared Assignments-list rows remain usable with
+  grading identities. Native replacement assertions remain unchanged.
+
+The original IR-01 draft/persisted/sent state model is preserved. Existing tests
+cover `.123456Z` versus `.123999Z`, both New York fold occurrences, newer unsent
+edits, later deliberate changes, no obsolete precision, differing/failed recovery
+and dirty Publish/Hide. This rerun does not create a new independent IR-01 closure.
+
+### Executed author verification
+
+Node 24.21.0; locked packages and pinned Playwright 1.63.0 were reused only after
+lockfile equality. No dependency was changed. Commands below ran from repository
+root on the remediation working tree; published source/tree hashes are recorded
+in the external delivery manifest.
+
+```sh
+# Before/after: the same temporary independent probe, removed before commit.
+npm --prefix frontend test -- src/features/instructor/course-management/pages/fe16DeltaIndependent.probe.test.tsx --maxWorkers=1
+# Before 15 PASS / 11 FAIL; after 26 PASS / 0 FAIL; 0 SKIP in each.
+
+npm --prefix frontend test -- \
+  src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx \
+  src/features/instructor/course-management/api/assessmentAuthoringApi.test.ts \
+  src/features/instructor/grading/pages/grading.test.tsx \
+  --maxWorkers=1 --testTimeout=15000
+# 326 PASS / 0 FAIL / 0 SKIP, three affected suites; 69 new tests.
+
+npm --prefix frontend test -- \
+  src/features/instructor/course-management/hooks/assessmentHooks.test.tsx \
+  src/features/instructor/course-management/pages/fe14Authoring.test.tsx \
+  src/routes/index.test.tsx \
+  -t 'owner|Course|course|Settings|refresh|Assignment|assignment|grading|Instructor|session|FE16|N[1-6]|D1' --maxWorkers=2
+# 134 PASS / 0 FAIL / 142 deliberately unselected, three other suites.
+
+npm --prefix frontend run build
+# PASS: TypeScript and production build; existing >500 kB chunk advisory only.
+```
+
+The 326 and 134 selections use disjoint files. Filtered debugging selections and
+26 independent probes overlap their requirements and are not added to those
+counts. The prior 468/559/759 selections were not mechanically repeated. The
+unchanged production grading/route/backend/E2E blobs, FE13 remote head and
+historical documentation preservation are checked separately before publication.
+Impeccable context/harden guidance and the once-run detector (`[]`) were used;
+Graphify's old graph supplied no useful current relationships, so source was
+inspected directly. Neither tool is acceptance or browser evidence.
+
+Initial new-test failures exposed fixture assumptions: a failed Course shell has
+no New assignment button, upper UTC can require a local-year fallback, and grading
+query order is not identity. The tests now assert actual navigation, exact fallback
+and parsed query identities. The first actual-decoder FE17 fixture omitted the
+required public API origin; it now supplies/restores a test-only origin. One broad
+run used Vitest's default 5-second component timeout while other selections ran,
+timed out in an unchanged repeated-Settings-navigation case, and produced cascading
+act failures. That case and all new lifecycle cases passed in isolation; the final
+serial affected-suite run uses the same 15-second component timeout as the previous
+author evidence. No product assertion or E2E timeout was weakened.
+
+### Real-browser / REST execution limitation
+
+The unchanged boundary scenario and all five hosted projects remain intact. The
+requested local WebKit desktop/mobile invocation was attempted with external URL,
+image and account overrides unset. First, sandbox write denial stopped the runner
+before admission. After narrowly granting its required registry permission, run
+`cm-e2e-1a21cebc34c-b180fe` was admitted but setup failed before tests: Docker
+Buildx could not write its activity file. The narrow Buildx permission was then
+granted. However sandbox also denies `kern.boottime`; the unmodified lifecycle
+requires a non-null boot identity and correctly refuses to recover its inventory.
+`npm --prefix e2e run stack:down` was attempted and remains incomplete for that
+reason. Do not erase the record or bypass the guard. Exact run-label inspection
+finds zero containers, images, volumes or networks; its temporary build directory
+and incomplete inventory are preserved, not falsely reported as cleaned.
+
+Direct pinned WebKit, Chromium and Firefox launches were also attempted; all
+aborted in this sandbox. Chromium explicitly reports Mach bootstrap permission
+denied; WebKit/Firefox abort before a page opens. Thus **no new local real-browser
+or REST E2E test completed**: WebKit desktop, WebKit mobile, Chromium desktop and
+Firefox remain **UNVERIFIED**. Source-level rounding dependence is removed and
+controlled tests pass, but the same hosted failure is not claimed eliminated by
+fresh engine execution. The unchanged real REST test must still verify creation,
+read, exact fallback, PUT, reload, publication and replacement in a permissive
+approved disposable environment. Local success is never substituted for hosted CI.
+
+Author dispositions: **R-A01 FIXED_AUTHOR_VERIFIED; R-A02 FIXED_VERIFICATION_LIMITED;
+R-A03 FIXED_AUTHOR_VERIFIED**. Overall
+**FE16_TARGETED_REMEDIATION_COMPLETE_VERIFICATION_LIMITED**. Independent
+VERIFIED_FIXED, formal AT/device/zoom QA, exact-head required CI and protected
+integration remain separate. No backend/AS12 full suite, unrelated learner,
+release/infrastructure qualification, broad screenshot matrix, manual CI dispatch,
+merge, self-approval, Issue closure, Project state change, release, deployment or
+hosted-CI waiting.
+
+## FE16-IR-01/02/03 targeted remediation — 27 November 2026
+
+**FE16_TARGETED_REMEDIATION_COMPLETE_AUTHOR_VERIFIED.** Refs #201, PR #270.
+OpenAI Codex implemented and performed the bounded author self-audit under the
+Project Leader's explicit instruction. Each finding is **FIXED_AUTHOR_VERIFIED**;
+independent `VERIFIED_FIXED` remains reserved for the next reviewer. The earlier
+full-scope author assertions below are historical; the supplied independent
+review subsequently found two P2 and one P3 at `bd742f4` and requested changes.
+
+### Baseline and negative controls
+
+Reviewed HEAD `bd742f4c2774105675234ed2bbe250e3fd87fe26`; refreshed main and
+merge-base `e2106f68c612468f1d6e4eb5f86c086256010bc7`; PR open on main.
+The supplied complete report/archive, probes and all ten prior dispositions were
+inspected. Its eight independent probes were run on the unchanged reviewed source:
+**6 FAIL / 2 PASS / 0 SKIP**, reproducing all three findings. UTC lost `.123456`;
+New York's second fold occurrence changed from `06:30:00.123456Z` to
+`05:30:00.000Z`; both definitive Course refusals admitted a second POST; native
+year-zero deadlines rendered blank. Paired pre-confirmation payload controls
+passed. Original failure logs/probe source are retained outside tracked files.
+
+### Corrections and affected preservation
+
+| Finding | Root cause and bounded correction | Positive evidence |
+| --- | --- | --- |
+| IR-01 P2 | A mutable persisted baseline also interpreted the retained native draft. Keep draft-owned exact intent separate from persisted Assignment and immutable sent binding; capture deliberate edits against current persisted state | 14 new payload/recovery cases: original/changed/sent deadline, both fold occurrences, sub-millisecond differences, differing and failed GET. Existing PS-A01 cases prove later deliberate return does not resurrect old microseconds |
+| IR-02 P2 | FE16 discarded error classification at CourseLessonSource and blamed a selected Lesson before Course read settlement. Add optional error/loading visibility from the existing shared owner read; current 403/404 and pending reads guard actual mutation handlers and controls | 11 new actual AppRouter/shared-context cases: 403/404 read-only/POST count 1, successful missing/present Lesson, network/protocol/503 correction, pending repeated clicks/no replay, obsolete Course/session/sign-out response, Stay/Leave and unload |
+| IR-03 P3 | UTC representability exceeds positive four-digit local/native support. Exact labeled UTC fallback retains the draft binding; deliberate replacement focuses the native control and validates normally | 9 new component cases for year 0000/microseconds, lower/upper timezone crossings, years 0001/0050/9999, unrelated edits/Hide and empty/invalid replacement; two additional dirty Publish/Hide recovery and explicit Save cases |
+
+**36 new regressions** in the existing authoring suite. The six earlier A01–A06
+and PS-A01–A04 affected cases remain covered by the passing complete authoring
+suite: exact dirty-Hide payload, no false deletion/Saved, Preview validation/focus,
+calendar/DST-gap checks, unchanged no-Lesson refusal and departure protection.
+No automatic mutation replay, synchronization validator, private persistence,
+backend/public contract, shared decoder, dependency or route activation change.
+
+N7 keeps local validation/safe form-level fallback. FE14/shared-context and FE15
+consumers run in the focused selection; Course read bounds remain enforced.
+Accepted FE17 HEAD `b69e4acd` and main `e2106f68` share tree
+`27ca5f24e9f94ddcd123a8b19a84a83ad4d114cd`. Grading files, shared decoder,
+HTTP/operation hooks, production route registration and accepted browser harness
+remain unchanged. IR-01/02/03/R-A01 grading invariants retain the prior independent
+evidence; both S19 handoff scenarios were rerun. FE13 #271 remains exactly
+`c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2`; #288 remains merged and untouched.
+
+### Actual focused execution
+
+Run in the isolated remediation checkout based on `bd742f4`; the final delivery
+commit and published HEAD are identified in PR #270 rather than self-referentially
+embedded here. Existing lockfiles matched the prior review checkout before APFS
+copy of locked dependencies; no installation/manifest change. All test-local TZ
+changes restore the original environment in finally blocks.
+
+```sh
+npm --prefix frontend test -- src/features/instructor/course-management/pages/fe16Independent.probe.test.tsx --maxWorkers=1
+# Reviewed source: 6 FAIL / 2 PASS. Temporary probe moved outside source afterwards.
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/features/instructor/course-management/api/assessmentAuthoringApi.test.ts src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/routes/index.test.tsx --maxWorkers=2 --testTimeout=15000
+# 466 PASS / 0 FAIL / 0 SKIP, 5 files, including 34 newly added tests.
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx -t 'FE16-IR keeps a boundary' --maxWorkers=1
+# Two subsequently added recovery cases: 2 PASS / 146 intentionally unselected.
+# 468 distinct focused tests have applicable passing evidence, not a fresh 468-test run.
+npm --prefix frontend run build
+# Final source/test tree: typecheck and production build PASS; existing >500kB advisory.
+npm --prefix frontend run test:browser -- --fe17 --case S19 --engine chromium --out ../evidence/handoff
+# 2 PASS / 0 FAIL; 2 unrelated scenarios not exercised. CONTROLLED HTTP, not REST persistence.
+E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts --grep FE16-IR --project=chromium-desktop --workers=1
+# 1 PASS / 0 FAIL / 0 SKIP. Real disposable frontend/backend/PostgreSQL/MinIO; no HTTP interception.
+git diff --check
+git fsck --full --no-dangling
+```
+
+Real browser test runs three independent timezone contexts (UTC, America/New_York,
+Pacific/Kiritimati), actual year-zero/early-year/upper-boundary persistence, exact
+outgoing PUT, reload, Publish/dirty Hide, labeled fallback and focused empty/valid
+replacement including nonzero seconds. It rejects real out-of-UTC-range and
+sub-microsecond writes with 400. Six geometry observations at 360x600/1440x720,
+System light/dark, assert no overflow, accessible fallback and >=44px replacement
+action, and enabled Save center hit. Browser engine: Chromium 153.0.8010.12.
+Run `cm-e2e-1a21c548088-a81b4e` verified all seven owned Docker resources absent,
+plus preview/build/runner/finalizer cleanup. The first two runs also cleaned up.
+Separate isolated Playwright CLI Chrome native DOM evidence confirms year zero
+and negative local year sanitize blank, while 0001 and positive 10000 are accepted.
+
+Preserved harness failures: initial new component assertions assumed jsdom's
+seconds serialization omitted `.000`, and attempted to invoke a disabled MUI
+wrapper without its event. Fixtures were corrected to compare incidental native
+serialization and exercise actual pending-click/POST behavior; product was not
+changed for those assumptions. First E2E measured before the responsive header
+commit; use the existing header-mode wait and retain strict geometry. Second
+E2E used a label selector inconsistent with the actual accessible native textbox;
+use its role/name. Final real run passes; no product assertion was weakened.
+Impeccable context/hardening guidance and detector were used (detector `[]`);
+Graphify navigation was stale and source-verified, not correctness evidence.
+The local clone inherited a stale commit-graph cache: object-only full fsck passed;
+a reachable commit-graph rebuild restored ordinary full fsck, without changing
+objects, refs, source history or the original repository.
+
+### Bounded author self-audit and remaining gates
+
+Challenged draft reinterpretation, stale-precision resurrection, same-display
+instants, immutable recovery snapshots, pending/unknown/definitive Course reads,
+wrong-resource/session settlement, mutation eligibility, fallback blanks/range,
+validation/focus/navigation and shared consumers. No confirmed remediation defect
+remains. Existing historical 559/759-test, REST and broad geometry evidence was
+inspected/reused only for unchanged behavior, never counted as fresh execution.
+Omitted as disproportionate: full backend/frontend/history selections, complete
+FE14/15/17 browser matrices, unrelated learners, infrastructure/release tests and
+hosted-CI waiting. New native-boundary verification uses Chromium; WebKit/Firefox,
+human AT, physical devices and formal zoom/conformance acceptance were not rerun.
+Formal independent narrow review, CODEOWNER/QA, exact-head hosted gates, protected
+integration, release and deployment remain separate; no merge, self-approval,
+Issue/Project write, CI dispatch, release or deployment is performed.
+
+## FE16 post-squash completion and full-scope author verification — 27 November 2026
+
+**Disposition: FE16_IMPLEMENTATION_COMPLETE_RESTACKED_AUTHOR_VERIFIED.** Refs #201,
+PR #270. Explicit Leader authorization covers implementation completion, isolated
+restack, task-local decisions, direct remediation and publication. OpenAI Codex
+performed this implementation-author audit; it is not independent review or QA.
+The earlier stacked FE16 and FE17 records below retain their original revisions,
+counts and limitations. None is represented as a fresh execution here.
+
+### Baseline, recoverability and preserved scope
+
+Refreshed main `e2106f68c612468f1d6e4eb5f86c086256010bc7` and independently
+accepted FE17 `b69e4acd4713ce1750b941002d1607e2f4a92acd` have identical tree
+`27ca5f24e9f94ddcd123a8b19a84a83ad4d114cd`. Original FE16 remote HEAD is
+`28ad6ffa321c4772f93d7e594a15a497dd47d21d`; original effective FE16 range is
+`11ba8e49..28ad6ffa`. The obsolete displayed main comparison was not used to
+choose ownership. Its two commits transplant as `1f47061` and `b0ee5c4`.
+Initial effective delta is exactly seven files, +673/-18; range-diff changes only
+document insertion context and every non-document blob initially equals original
+FE16. Setup/testing conflicts preserve both complete FE16 and FE17 records.
+
+A new backup `refs/heads/backup/fe16-post-squash-20261127-pre-restack`, existing
+reconstruction backups, original metadata/history/binary patch and a verified
+complete Git bundle preserve recovery. FE13 #271 remains at
+`c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2`. No open PR consumes #270's branch.
+No FE13 source or #271/#288 metadata, main, contract, dependency, backend or
+migration is modified. Publication/final SHA are recorded in PR #270 to avoid a
+self-referential commit hash. The final effective scope is nine files.
+
+### Upstream assessment on integrated main
+
+| Owning Issue | Consumed implemented slice | New cumulative functional scope |
+|---|---|---|
+| AS09 #160 | Strict owner Assignment list/read/create/replace/publication and counts; ownership/row locks and safe errors | 0% |
+| CO06 #172 | Decoded owned Course/Chapter/Lesson tree in canonical order, hidden rows included | 0% |
+| FE14 #199 | Production Course shell, shared context, retained data and refresh/refusal lifecycle | 0% |
+| FE15 #200 | Shared Assessments route, view URL replacement, pagination and Assignments host; G7 confirmation in live #201 | 0% |
+| FE08 #193 | Existing approved CT37 AST renderer and dependency decision | 0% |
+| FE03 #56 | Shared authenticated HTTP/runtime decoding, safe errors, session generation and cancellation | 0% |
+| FE32 #224 | Instructor route registration, destination activation and workspace navigation | 0% |
+| FE34 #255 | Shared semantic Light/Dark/System foundation; no local theme state | 0% |
+| FE17 #202 | Accepted grading destinations, exact query names/identities and both S19 handoffs | 0% |
+
+These are consumed capabilities, not whole-Issue completion claims. No missing
+upstream implementation or approximately-20% authorization decision is needed.
+
+### Live #201 acceptance inventory and FE16.author
+
+The complete live Issue has **13 acceptance criteria**. Checkboxes are not used
+as implementation proof. All 13 are implemented/reachable in production bindings
+of this PR; independent acceptance remains separate.
+
+| AC | Current criterion | Implementation and evidence | Limit |
+|---|---|---|---|
+| 1 | Owner create/edit/publish with deadline | Strict CT10 client, Assignment editor, real 201/PUT/publication/hide/reload | Owner QA separate |
+| 2 | English; desktop/mobile responsive | English UI; five widths in two engines, long content and short-height Save geometry | No physical-device acceptance |
+| 3 | Approved REST through shared client | Operation URLs/statuses/identities and runtime decoders; client/HTTP tests, real REST | Guards do not replace server ownership |
+| 4 | Loading/empty/error conventions | Shared views, initial/refused/recovery cases, controlled failures and real empty/list | No production failure injection |
+| 5 | Ordered Assignments/S19 columns/counts/actions; G7 | API-order/pagination, canonical Lesson labels, literal new, count/activation gated Grade; final list and handoff evidence | G7's recorded confirmation retained, not re-invented |
+| 6 | Canonical grouped Lessons, hidden/unavailable/failed states | Owned tree/select, bounded reread, draft/lessonId retention; focused cases | No lesson deletion feature assumed |
+| 7 | URL replacement, full replacement/last-save-wins, unknown outcomes | Real new/reload; deferred recovery, retry, later draft and baseline regressions | No automatic replay; unknown creation needs deliberate list review |
+| 8 | No Assignment deletion | No UI/client deletion operation | Unchanged ADR010 exclusion |
+| 9 | Native deadline and explicit timezone | Native input/helper, past/microsecond real REST; normalization, early-year, UTC bounds and DST gap/fold tests | DST fold edits use native earlier-offset interpretation; unchanged instants remain exact |
+| 10 | Current DESIGN and prescribed responsive/keyboard behavior | Actual production editor/list in Light/Dark/System at 360/768/1024/1280/1440; validation, keyboard/Space, focus return; 62 action measurements | No human AT, physical devices or formal zoom QA |
+| 11 | Markdown Instructions/Preview | Shared renderer, unsaved draft, literal HTML, safe links, tables/code and no external image requests; component and real browser | Existing CT37 feature set only |
+| 12 | Semantic roles and shared theme | No local colours/state; real three-preference and live OS-change checks; detector [] | Formal contrast/AT conformance separate |
+| 13 | Decoded production reuse, preview isolation, activated routes | Registered Instructor guards, production REST, no fixture data imports; route tests and real direct/reload entry | No unsupported route activated |
+
+**Implementation completion: 13/13; FE16.author implemented and author verified.**
+This does not tick Issue criteria, close it, set Done or establish protected merge.
+
+### Distinct full-scope self-audit and direct remediation
+
+After the initial verification, the author audit reinspected all criteria and
+production journey, inherited list/API/hook/context/route/renderer boundaries,
+ADR010/CT21/CT16/CT18, N7, cancellation/identity, publication, exact deadlines,
+unknown outcomes, lesson recovery, navigation, rendered geometry and Git scope.
+Additional deferred tests challenge pending recovery locks, repeated failed Hide
+reads, departure into another Assignment, and a newer deliberate save after an
+unconfirmed read; these neither replay mutations nor add a synchronization rule.
+
+| Finding | Severity / requirement | Reproduced root cause | Correction and negative sensitivity |
+|---|---|---|---|
+| FE16-PS-A01 | P2; AC7/9, draft/deadline integrity | Confirmed recovery left the old persisted deadline baseline. After saving a different date, returning explicitly to the old displayed date resurrected its stale microseconds | Adopt confirmed body for unchanged draft, or advance the persisted baseline while retaining newer dirty edits. Two old-production assertions fail with `.123456Z` instead of newly selected `.000Z`; both pass corrected |
+| FE16-PS-A02 | P2; AC1/4/7 refusal | Create 404 without a Lesson only showed a generic error and stayed writable although the Course is definitively unavailable | Keep creation draft read-only, safe Course-unavailable notice and catalogue departure; old-production lock assertion fails, corrected passes |
+| FE16-PS-A03 | P3; AC3/9 strict decoding | Decoder checked the written year but not the UTC year after an offset | Enforce UTC 0000–9999; two out-of-range response negative controls resolve incorrectly before fix and reject after it. No backend contract expansion |
+| FE16-PS-A04 | P2; AC4/7, S19 navigation | noAccess disabled dirty navigation/unload protection; catalogue link bypassed the guard, silently discarding retained drafts | Retain existing Stay/Leave and unload protection after refusal; two 403/404 controls fail before fix and pass after. Fields/mutations stay locked; no persistent private draft |
+
+These are author corrections, not independent closure. All seven negative
+assertions failed on the relevant pre-fix production states. No confirmed
+remediable in-scope finding or contract/decision blocker remains after correction.
+No speculative concern, unrelated cleanup or optional enhancement is reported as
+a defect. Genuine limitations are stated below rather than deferred remediation.
+
+The **six previous findings** were explicitly reopened as audit questions and
+reinspected, not inferred closed from test names:
+
+| Previous finding | Final author disposition and evidence |
+|---|---|
+| A01 dirty deadline after Hide | Retained exact baseline on publication and unknown Hide recovery; direct and repeated-failure regressions pass |
+| A02 failed GET after Lesson refusal | Only definitive 404 establishes missing Assignment; network/5xx keeps draft; regression passes |
+| A03 old save marks newer draft Saved | Sent/current draft comparison retains newer dirty edits; stronger confirmed-baseline tests and deliberate-next-save case pass |
+| A04 invalid Instructions hidden by Preview | Reveal editor, summary, linked field error and first-invalid focus; component and short real viewport pass |
+| A05 inaccessible save below long content | One sticky semantic save region; both engines/three preferences/five widths/600–720px heights and long Preview; 62 visible/unobscured 48px action observations |
+| A06 native calendar/year normalization | Calendar roundtrip rejects invalid date/DST gap; early year padding, exact server precision and DST-fold baseline preservation pass |
+
+### Accepted FE17 preservation
+
+The final independent review report at accepted `b69e4acd` was read, including
+FE17-R-A01's exact repeated-reload readiness correction and negative control.
+All FE17 grading source/test blobs, accepted browser harness, shared HTTP,
+useAssessmentEditor, route registration and FE14/15 production consumers are
+unchanged from main unless explicitly listed as FE16 remediation above.
+FE17-IR-01 keeps reviewed evidence separate from authoritative/read/download
+state and enforces it at PUT; IR-02 keeps selected summaries beyond page windows;
+IR-03 keeps one native form-associated grading action; R-A01 increments each read
+identity. These accepted behaviors are not modified or independently reopened.
+The current 98 grading tests pass in the focused selection. Controlled browser
+S19 Grade/Open grading and IR02 handoff pass twice per engine (4 total); real
+protected download/409/grade/regrade pass once per engine. RT02's binary
+version-token limitation remains. Current final route/editor tests cover dirty
+handoff, identity, activation and role guards. No prior accepted FE17-owned
+implementation evidence is invalidated.
+
+### Actual verification, failures and limits
+
+Environment: macOS, Node 24.21.0, npm 11.19.0, Chromium 153.0.8010.12, WebKit 26.6.
+Existing locked dependency installations were cloned locally after exact lockfile
+comparison; no manifest, lock or package change. Commands ran in this isolated
+worktree; external logs/backup are excluded from tracked files.
+
+```sh
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/features/instructor/course-management/api/assessmentAuthoringApi.test.ts src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/grading src/shared/components/MarkdownRenderer.test.tsx src/shared/api/httpClient.test.ts src/routes/index.test.tsx src/app/preview/PreviewApp.test.tsx --maxWorkers=2 --testTimeout=15000
+# 753/753 PASS, 10 suites, after the first three corrections.
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/routes/index.test.tsx src/app/preview/PreviewApp.test.tsx --maxWorkers=2 --testTimeout=15000
+# Final affected rerun: 357/357 PASS, 3 suites (112 authoring, 201 routes, 44 preview).
+# The other 402 tests retain applicable passing evidence from this session;
+# 759 distinct selected tests have passing evidence. Not a new 10-suite rerun.
+npm --prefix frontend run build
+# Includes npm run typecheck: PASS at final production/test source.
+E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts instructor-grading.spec.ts --grep 'FE16 complete|FE17 protected' --project=chromium-desktop --project=webkit-desktop --workers=1
+# 4/4 PASS: real disposable backend/PostgreSQL/MinIO, no HTTP interception.
+E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts --grep 'FE16 complete' --project=chromium-desktop --project=webkit-desktop --workers=1
+# Final stronger FE16 case: 2/2 PASS, 0 skips; 62 short-height geometry observations.
+npm --prefix frontend run test:browser -- --fe17 --case S19 --engine chromium,webkit --out ../evidence/handoff-browser
+# Controlled HTTP only: 2/2 scenarios each engine. Output moved outside source.
+# Impeccable context and detect --json AssignmentEditorPage.tsx: detector [].
+git range-diff 11ba8e49..28ad6ffa origin/main..b0ee5c4
+git diff --check
+git bundle verify <external-evidence>/fe16-pre-restack.bundle
+```
+
+The final FE16 E2E run `cm-e2e-1a21c1bc64c-64efa8` verified all seven owned Docker
+resources, preview/build and runner absent after teardown. The initial combined
+run also cleaned up all seven resources. Long editor/list screenshot matrices
+cover 30 states per surface, plus 320px list reflow. Stronger final geometry adds
+600px heights at 360/768 and 720px at 1024/1280/1440 with long title/instructions,
+initial and scrolled Preview states, then invalid Instructions focus at 360×600.
+
+Failures are preserved: five initial pre-fix regressions failed; two later
+read-only-navigation regressions failed before correction. The first stronger
+geometry run failed only its disabled-button hit oracle in both engines: MUI uses
+pointer-events:none for disabled controls. Correct the oracle to admit the
+containing action region only for disabled buttons, and also exercise enabled
+unsaved actions; no enabled action assertion or product behavior was weakened.
+The next real run passes. Vite's existing >500kB advisory and jsdom document
+navigation notices remain. Initial sandbox networking/Docker access failed;
+authorized network/socket calls succeeded. No product failure is hidden.
+
+Unchanged backend suites, unrelated FE17/browser/E2E scenarios, infrastructure,
+security/release qualification and hosted-CI waiting were omitted by risk-based
+authority. The old 717-test evidence is historical, not this run's count. Human
+screen-reader, physical-device, Firefox and formal 200% zoom QA were not executed;
+component refusal/busy evidence and controlled fault tests are not production
+failure injection or a conformance claim. Protected integration, independent
+CODEOWNER review, formal QA, exact-head hosted CI, release and deployment remain
+separate. No self-approval, merge, Issue/Project write or deployment occurs here.
+
+## FE16 complete authoring and FE13 preservation — 27 November 2026
+
+**Authority and provenance.** Refs #201, #198; PR #270 is repurposed for FE16
+under the Project Leader's explicit consolidation, implementation, scoped
+technical-decision, author self-audit and publication instruction. OpenAI Codex
+authored these changes and performed this self-audit. It is not independent QA,
+CODEOWNER review, acceptance, merge readiness, release or deployment evidence.
+
+**Exact integration baseline:** FE17 #288 HEAD
+`11ba8e49be6af16f5114d264e8bb1cc16b8bdbd1`, which contains main
+`13d9ca7e58ead77ecc66efc8408199059d57588a`. FE16 #270 targets
+`feature/learning-progress-ui`; #288 must integrate first, with a subsequent
+FE16-only restack/retarget if squash merging. Refreshed main AS16 #301 changes
+no consumed Assignment-authoring/frontend contract. No FE17 or FE13 production
+file, route, dependency manifest, backend code or public API is modified here.
+The final commit is identified by Git and the PR; this record describes its
+working tree without a self-referential commit hash.
+
+### FE13 lossless preservation
+
+Original #270 `1e0953023c70982859087a4490d714dac8b6a4be` is an ancestor of
+retained #271 `c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2` (ahead 1, behind 0).
+Both have merge-base `e9d6da15b3fe4d581765d1c733abb70698dac779` with refreshed
+main. The API blob is `cdc63a3970bcef8df384cd06f54bdf3404a3a87c` and the hook
+blob `7e321c86c64b659d2da986bd3a5f039e67e1af13` at both HEADs. The types delta
+only adds the optional `mine` property; #271's additional UI commit is retained.
+No cherry-pick, duplicate merge, FE13 remediation or independent FE13 audit is
+performed. PR #271's description consolidates API/types/hooks/UI and uses
+`Refs #198`, preserving dated historical evidence without claiming completion.
+
+Durable refs `refs/heads/backup/fe16-20261127-pr270-original`,
+`refs/heads/backup/fe16-20261127-pr271-original` and
+`refs/heads/backup/fe16-20261127-pr288-original` resolve to those original HEADs.
+A complete-history bundle passed `git bundle verify`; original PR JSON,
+authorship/commit lists and binary effective patches are retained outside Git.
+The nine-open-PR inventory found only #271 consuming old #270 and #288 consuming
+its own HEAD, besides each branch itself. Remote heads/consumers and backup refs
+are checked again before explicit-SHA force-with-lease publication of #270.
+
+### Consumed upstream inventory
+
+Incomplete whole Issues do not block available consumed slices. Every row below
+has actual production code on the verified baseline. **Required upstream
+functional additions: none; cumulative relative scope 0% for each Issue.**
+No approximately-20% exception is needed and no upstream completion is claimed.
+
+| Upstream | Available consumed capability and inspected evidence | Verification / remaining boundary |
+|---|---|---|
+| AS09 #160 | `AssignmentController`, `AssignmentRequests`, `AssignmentService`, `AssignmentRepositoryImpl`: owner list/read/create/replace/publication; coherent counts; backend ownership and C-collation title/UUID order | Real owner REST and browser save/publication; no AS09 reimplementation |
+| CO06 #172 | `instructorCourseApi.getOwnedCourse`, backend owner-course read: canonical Chapters/Lessons, including hidden Lessons | Strict client, course-context and stale-tree regressions; actual Course read |
+| FE14 #199 | `CourseEditorShell`, `useSharedCourseState`, `CourseRefreshAlert`: shared owned Course, generation isolation and refresh retention | FE14 and assessment hook/component regressions; no new shell behavior |
+| FE15 #200 | `AssessmentsPage`/`AssignmentsView` in `QuestionBankPage.tsx`: query selection, paging, columns, API order, resource actions | G7 is Leader-reported owner confirmation in live #201 (25 November); component and real list evidence |
+| FE08 #193 | Shared `MarkdownRenderer`, approved dependency selection in setup, CT37 link policy and CodeBlock | Renderer security suite plus actual Instructions Preview; broader FE08 unclaimed |
+| FE03 #56 | Shared `httpClient`, `AuthProvider`, route guards: authenticated transport, no replay, generation/cancellation isolation | Transport/hook/route tests; actual cookie restore and deep-link reload. Test-only route fixture supplies browser APIs for lazy landing illustration |
+| FE32 #224 | `WORKSPACE_ROUTES`, Dashboard Instructor navigation/guard | Route tests, real grading destination; unauthorized roles in FE17 harness |
+| FE34 #255 | Root theme preference, semantic roles and Theme control | Real Light/Dark/System geometry; live System OS switch; no local theme state |
+| FE17 #202 | `gradingPath`, registered grading pages, `useSubmissions`, `gradingApi`, existing Grade/Open grading handoffs | G4's existing delegated selection of both query names is preserved; real FE17 regression and controlled handoff tests |
+
+### Explicit completion denominator
+
+Live Issue #201 contains **13 acceptance criteria**, plus the `FE16.author`
+checkpoint. Final production implementation is **13/13**, checkpoint implemented.
+Author verification covers each row below; independent acceptance is **not
+established for any row by this session**. The denominator is Issue criteria,
+not LOC, test count or entire-upstream completion. Human assistive-technology,
+physical-device, full WCAG and release QA remain separate.
+
+| # | Current criterion | Final implementation and author evidence |
+|---|---|---|
+| 1 | Owned-course Assignment create/edit/publish/deadline | Existing approved owner client/editor completed; real REST create/full replace/publish/hide |
+| 2 | English and desktop/mobile responsiveness | English labels/statuses, semantic sticky save; two-engine geometry and screenshots |
+| 3 | Approved REST via CT16; backend authorization | Unchanged strict clients/transport/backend ownership; client/route tests and real requests |
+| 4 | Loading/empty/error presentation | Shared status views, safe form fallback, field summary/focus, draft-visible refusals; components/empty real list |
+| 5 | Assignments columns/order/actions, Grade gating, G7 | Existing AssignmentsView and FE17 handoff preserved; component list, controlled Grade identity/count conditions, real list |
+| 6 | Canonical grouped optional Lesson, hidden/stale/failure rules | Existing course-tree selector; new missing-tree single-read and load-failure preservation regressions |
+| 7 | Creation URL replacement, full replace/last-save-wins, unknown recovery/no replay | Real creation/reload; exact microsecond save; unknown create/save and later reconciliation regressions |
+| 8 | No Assignment deletion | No operation/control added; source inventory and production journey |
+| 9 | Native date-time, timezone, no picker dependency | Existing native input; unchanged precise server deadline, padded years, invalid-calendar refusal, past real deadline |
+| 10 | Current DESIGN shared/S19 screen and QA rules | Preview, form recovery, sticky action, dialog focus/keyboard; prescribed-width/theme evidence below. No human conformance claim |
+| 11 | Markdown Instructions and CT37 Preview | Shared renderer; CommonMark/table/code, literal HTML, safe links, no image loads/scripts; exact draft retained across modes |
+| 12 | Semantic Light/Dark/System | Consumes FE34 and shared roles; five widths in each preference, live OS change |
+| 13 | Preview isolation and production activation | Real registered authoring routes consume decoded REST; existing separate fixture preview and route/preview regression suites |
+
+### Separate implementation-author self-audit and remediation
+
+After initial implementation and the passing 712-test consumer selection, one
+full-scope author audit inspected the 13 criteria, checkpoint, effective
+ADR010/CT21/CT37/CT16/CT18/ADR014 slices, upstream producers/callers, strict
+decoding, route/session generations, single-flight/cancellation, refused/unknown
+mutations, exact deadlines, Markdown, drafts, responsive/theme/keyboard states,
+preview isolation, documentation, FE13 preservation and stacked Git attribution.
+Confirmed issues below were corrected within FE16; test-harness issues are
+classified separately. No confirmed remediable in-scope production defect remains
+after the regression checks. This statement is author verification only.
+
+| ID | Severity / trigger | Root cause and correction | Verification |
+|---|---|---|---|
+| FE16-A01 | P2: dirty Assignment, Hide returns a concurrently changed deadline | `applyLoaded(false)` replaced the retained draft's exact precision baseline; now only an overwritten draft receives a new baseline | Hide/concurrent-deadline regression asserts original `.123456Z` PUT |
+| FE16-A02 | P2: save with changed Lesson gets 404, then owner GET fails | Failed refresh was treated as missing Assignment; now retain editable draft and report the refusal/failed refresh | 404→network regression, no fabricated unavailable state |
+| FE16-A03 | P2: unknown save, failed reread, newer edit, later retry confirms old write | Old confirmation cleared dirty state for the newer draft; compare sent/current snapshot and keep newer edits explicitly unsaved | Exact interleaving component regression; one mutation only |
+| FE16-A04 | P2: invalid Instructions while Preview is selected | Field could remain hidden and submit lacked summary/focus; reveal Instructions, show summary and focus first invalid field | Blank Preview submit asserts focus and aria-invalid/description |
+| FE16-A05 | P3: long form on a short viewport | Save action only after long content; reuse Lesson editor semantic sticky save pattern | Real responsive screenshots and keyboard controls |
+| FE16-A06 | P3: four-digit early year or normalized invalid native date | Local helper omitted year padding and accepted Date normalization; pad year, reject normalized calendar/UTC-range overflow, retain untouched exact server instant | Helper regression and real past/microsecond journey |
+
+A final keyboard probe initially assumed arrow navigation automatically selected
+the new mode. Inspection and browser evidence showed MUI already implements
+roving focus with explicit Space activation; that assumption was a test defect,
+not a confirmed production finding. A trial extra handler conflicted with MUI
+and was removed before publication. Final component and real-browser checks
+exercise Arrow focus followed by explicit activation and retained draft bytes.
+
+N7 is a **resolved FE16 contract/presentation mismatch**, not an unimplemented
+server-error API. Actual backend 400 evidence has safe detail and no field errors;
+the transport intentionally replaces diagnostics. `FE16-N7-2026-11-27-r1`
+selects local field validation plus the safe F14 form-level fallback and keeps
+drafts. Its authority, alternatives, security compatibility and exclusions are
+in setup; the narrowly scoped S19 clarification changes neither CT18 nor any
+broader FE15/S20 disposition.
+
+### Executed verification and limitations
+
+Commands run in this isolated worktree based on the exact FE17 HEAD above:
+
+```bash
+npm --prefix frontend ci --ignore-scripts
+npm --prefix e2e ci --ignore-scripts
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
+npm --prefix frontend test -- src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx src/features/instructor/course-management/pages/fe14Authoring.test.tsx src/features/instructor/course-management/api/assessmentAuthoringApi.test.ts src/features/instructor/course-management/hooks/assessmentHooks.test.tsx src/features/instructor/grading src/shared/components/MarkdownRenderer.test.tsx src/shared/api/httpClient.test.ts src/routes/index.test.tsx src/app/preview/PreviewApp.test.tsx --maxWorkers=2 --testTimeout=15000
+npm --prefix frontend test -- src/routes/index.test.tsx src/features/instructor/course-management/pages/assessmentAuthoring.test.tsx --maxWorkers=1 --testTimeout=15000
+npm --prefix frontend run test:browser -- --fe17 --engine chromium,webkit --playwright <this-worktree>/e2e/node_modules/@playwright/test --out <external-evidence>/fe17-browser
+E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts instructor-grading.spec.ts --grep 'FE16 complete|FE17 protected' --project=chromium-desktop --project=webkit-desktop --workers=1
+E2E_WORKERS=1 npm --prefix e2e test -- instructor-authoring.spec.ts --grep 'FE16 complete' --project=chromium-desktop --project=webkit-desktop --workers=1
+git diff --check
+git bundle verify <external-evidence>/original-heads.bundle
+```
+
+- Locked installs passed without manifest changes. Typecheck and production
+  build passed after correcting a test element's `HTMLButtonElement` annotation.
+  Vite's existing >500 kB advisory remains; no performance claim is invented.
+- Initial consumer selection: **712/712, 10 files**. After four further FE16
+  regressions, the selection was **715 passed/1 failed of 716**: unrelated lazy
+  landing illustration timing exposed missing `ResizeObserver` in root route
+  fixtures. Supply the same browser API doubles already used by the landing
+  test at suite setup; no route or product behavior/assertion is weakened.
+  Before the additional keyboard regression, the affected-suite rerun passed
+  **303/303, 2 files** (201 route + 102 authoring). The final rerun passed
+  **304/304** (201 route + 103 authoring).
+  The other **413** unchanged consumer tests passed in the preceding selection.
+  Thus all **717 distinct selected tests** have passing final applicable
+  evidence; the rerun is not falsely described as a new 10-suite execution.
+- Controlled browser harness: **24/24 Chromium 153.0.8010.12 and 24/24 WebKit
+  26.6**, no failed scenario. `page.route` doubles cover Grade/Open grading
+  identity/count/route checks, roles, unknown outcomes and grading lifecycle;
+  they do not establish real backend integration. Two explicit unexercised
+  categories per engine: real backend/storage, and VoiceOver/NVDA/physical devices.
+- Real REST/browser FE17 regression: **2/2**, Chromium/WebKit, no interceptions.
+  Real FE16 final journey: **2/2**, same engines, no interceptions: empty/list,
+  `/new`/201 URL replacement, exact instructions, safe Preview, reload/session
+  restore, past and microsecond deadlines, PUT, publish/hide, dirty grading
+  guard and actual destination. Actual invalid Assignment REST returns 400
+  `The request is invalid.` with no field errors. Synthetic credentials are
+  generated by the disposable fixture and are never committed.
+- FE16 editor: **5 widths × 3 preferences × 2 engines = 30 screenshot states**,
+  Preview and Instructions geometry, table/code/link safety, keyboard Space,
+  confirmation focus, live System preference change. List: the same 30 geometry
+  states plus 320 px. A stronger geometry probe initially flagged intentionally
+  scrollable segmented navigation; it now proves each control can be revealed
+  inside its permitted scroll surface, while retaining failure for hidden
+  clipping. Snapshot scroll-to-top prevents sticky headers obscuring titles.
+- Initial E2E failures were test setup defects: sending `displayName` to the
+  closed login DTO and using an exact native date-time label locator. Correct
+  request shape/native-input targeting; keep all feature assertions. All
+  disposable runs verified their owned resources absent after teardown.
+- No backend source changed, so unrelated backend suites, infrastructure/release
+  qualification, unrelated E2E, redundant full frontend reruns and hosted-CI
+  waiting were omitted under the explicit focused-verification authority.
+  Human screen-reader, physical-device and formal 200% browser-zoom conformance
+  were not executed; responsive widths do not substitute for those checks.
+
+Independent CODEOWNER review/QA, exact-head hosted CI, protected integration,
+release and deployment gates remain. No Issue is closed, no Project item is
+marked Done, no approval or merge is issued, and no deployment is performed.
+
 ## FE17 targeted independent-finding remediation and author delta verification — 27 November 2026
 
 **Disposition: REMEDIATION_COMPLETE_AUTHOR_VERIFIED.** Explicit Project Leader
@@ -11115,6 +11842,29 @@ authorized protected squash integration remain gates. No GitHub approval, merge,
 Issue closure, Project update, grant expansion, release or deployment is performed.
 Downstream owner Enrollment admission and complete adaptive acceptance stay open.
 
+## IN06.report initial intake checkpoint (#181) — 27 November 2026
+
+**Historical incoming revision `a8eea307`.** The coverage and limitations below
+describe the original PR, superseded by the IN06 completion record later in this document.
+
+IN06 (`Refs #181`) checkpoint `IN06.report` implements CT30 report intake
+([ADR012 §6.3, §6.5](decisions/012-batch-07-contract-approvals.md)): `POST /api/lessons/{lessonId}/reports`
+and `POST /api/lessons/{lessonId}/discussion/{postId}/reports`, through `ContentReportController`,
+`ContentReportService`, `InteractionRequests`, `InteractionResponses` and the `SecurityConfig` rule. This record
+lists the suites added and what they do and do not cover. It claims no execution result; the pull request
+records the executed `./mvnw verify`.
+
+| Suite | Kind | Covers |
+|---|---|---|
+| `modules/interaction/application/service/ContentReportServiceTest` | Unit (Mockito, fixed `Clock`) | Lesson and post targets, open status, verbatim reason, microsecond `createdAt`, concealment of missing, hidden, other-Lesson and hidden-question replies, CT03 admission before any lookup or body read, body rules after admission, blank-reason rejection |
+| `modules/interaction/InteractionRequestsTest` | Unit | Strict path UUID text; the closed one-property report body returned verbatim |
+| `integration/InteractionReportIntakeIntegrationTest` | PostgreSQL Testcontainer, MockMvc | 401 for anonymous callers, 403 for an Administrator, concealed 404 for non-members, other Instructors and hidden Lessons, 201 receipt with `Cache-Control: no-store`, the stored Lesson and post report rows, owner preview of a hidden Lesson, duplicates, concealed posts writing nothing, 400 for malformed paths before admission and for invalid bodies after admission, 415 for a non-JSON media type |
+
+Not covered by these suites: Q&A posting, replies and reading, reply notifications, moderation resolution and the
+moderation queue (the other `IN06` checkpoints), the §19.2 runtime-privilege matrix for these tables, and
+`InteractionAdminIntegrationTest`. A request body that is not parseable JSON, or is absent, is rejected as 400 by
+the framework before CT03 admission runs; bodies that parse are checked after admission. The placement of these
+suites is for review.
 ## AS12 completion and producer self-audit — 27 November 2026
 
 **Authority and disposition.** The Project Leader's explicit AS12 completion task
@@ -11472,3 +12222,1468 @@ separate gates. No Issue closure, Project synchronization, formal GitHub approva
 protection change, merge or deployment is performed. Next: eligible CODEOWNER review
 and protected gates for this unchanged producer, with downstream implementation/QA
 handled in its own authorized scope.
+
+
+## IN06 complete code scope and implementation-side audit — 27 November 2026
+
+**Authority and provenance.** The Project Leader's explicit “Comprehensive IN06
+Completion, Bounded Upstream Implementation, Technical Decision Reconciliation and
+Post-Implementation Audit on Existing PR #303” instruction authorizes implementation,
+small upstream provider additions, bounded technical/test-placement decisions,
+main synchronization, task commits/push and PR title/body maintenance. OpenAI Codex
+performed the additional implementation, integration, review and remediation; this
+is author-side verification, not independent acceptance. The original verified Git
+identity `tihh647-ui <tihh647@gmail.com>` is used for author and committer metadata
+only, under the Leader's explicit task-specific arrangement. It is not evidence
+that the original contributor personally implemented or approved the additions.
+The authenticated GitHub account was checked as `chi-thanh-nguyen`; identity metadata
+and authenticated account names do not prove legal identity.
+
+**Baselines.** Incoming PR `a8eea307b274466b2b4f4cea9fdb80883e84d9d9`, main
+`fe3160d535b33652587e14e2fc55ca267f6a5222`, merge-base
+`daddc507f1bb109f66c988537c00cab7bc08f256`. Normal merge `3aab3f90` integrated
+main without rewriting original commits. Concurrent remote merge `fe7e24eec078c49df686256e03f1c45c4b1f9d37`
+was then preserved by normal merge `339fcf84`; its only tree difference from the local
+integration was one blank line in this document. No existing worktree was changed.
+The delivered immutable SHA and remote readback are recorded in PR #303.
+
+| Checkpoint | Incoming implementation | Delivered implementation and verification boundary |
+|---|---|---|
+| IN06.repo | Original PR #250 adapters in main; insufficient for full CT30/CT32 | Preserved targeted saves; added root-only question paging/counting, visible replies, parent SHARE/post UPDATE locks, status queue and ordered report locks. PostgreSQL and restricted-role tests cover actual rows and writes. |
+| IN06.qa | Empty Discussion service/controller | CT03-admitted question/reply REST, trusted identity, verbatim plain text, depth one, hidden ancestry concealment, author summaries in batches of 100, deterministic ordering and microsecond clocks. Direct CT11.create notification shares the reply transaction. |
+| IN06.report | Working Lesson/post intake with premature MVC body parsing | Preserved receipts, duplicate reports and target integrity; deferred strict JSON parsing until admission; duplicate fields, trailing values, invalid UTF-8 and closed body shapes are rejected. |
+| IN06.resolve | No Interaction moderation boundary | Four ADR012 §11.1 methods; active-admin identity boundary, content-first deterministic locks, refresh after lock waits, terminal decisions, targeted writes and participation in the Admin caller's transaction. IN21 still owns Admin REST, Course hiding and audit orchestration. |
+| IN06.rest | Only report intake bound | All four CT30 operations, stage ordering and no-store, synchronized OpenAPI and frontend contract types. No IN21 public route is enabled. |
+
+### Upstream assessment and bounded decisions
+
+Already available on main: CT03 Lesson admission; CT01 trusted identity and
+`userSummaries`; CT11/IN07 deterministic notification creation and r13 privileges;
+Course ancestry/content repositories. Reuse is verified against current source.
+
+Implemented `CT40-NOTIFICATION-CONTEXT-2026-11-15-r1` (ADR012 §3.1, CT40 #46;
+Course provider in the CO03/CO05 area, #55) as two actorless projections in the existing
+`CourseCatalogueService` plus one private Course ancestry repository query. The
+existing reads supply titles/publication state; no membership, owner, material,
+body or progress field crosses the boundary. Requested IDs are capped at 100,
+foreign/missing descendants are omitted and missing resources return empty.
+This is estimated at 10–15% of the owning Course provider/use-case scope by functional
+complexity, not LOC: no new public REST, policy, schema, Course authoring or full
+CT40 feature is implemented. Tests prove the exact allowed production caller paths.
+No large upstream implementation was necessary; other CT40 providers and IN21 are
+not required additions to this IN06 delivery.
+
+No new product/API/module contract was selected. Bounded implementation decisions
+under the task delegation are recorded as `IN06-IMPLEMENTATION-2026-11-27-r1`:
+
+- Preserve ADR012 §12 by reading strict UTF-8 JSON through a deferred supplier after
+  CT03 and path-target admission. Reject duplicate fields and trailing values; for
+  a usable body-supplied parent, conceal/admit that parent before other body field
+  rules. Framework `@RequestBody Map` could not preserve those stages.
+- Use database `LIMIT/OFFSET` with a long offset and a separate snapshot count for
+  question/queue pages; JPA's integer first-result API cannot represent every valid
+  CT18 page. SQL fixes both timestamp and UUID tie ordering.
+- CT32 mutations use MANDATORY propagation and reject read-only/explicit non-READ-COMMITTED
+  callers, so Interaction cannot commit before Admin's required hide/audit transaction.
+  Locked entities are refreshed to prevent pre-lock JPA identity-map state from reopening
+  a terminal report. Course-root/lesson hiding and audit rows are IN21's caller obligations.
+- Extend the existing BusinessRuleException with an optional code-owned field identifier
+  for CT18 errors (`parentPostId`, `content`, `reason`); legacy constructors and response
+  behavior remain unchanged. No new exception file/status, diagnostic disclosure or
+  rejected value is introduced.
+- `CT14-IN06-COMPLETION-PLACEMENT-2026-11-27-r1`: add
+  `modules/interaction/application/service/DiscussionServiceTest.java`, extend the
+  existing `CourseServiceTest` and `InteractionReportIntakeIntegrationTest` for focused
+  provider/Q&A/CT32/PostgreSQL cases. The latter reuses the original PR's committed
+  fixtures, real filter chain and shared AbstractIntegrationTest lifecycle. Existing
+  InteractionAdminIntegrationTest remains intact and is rerun for audit transaction
+  compatibility. This additive placement avoids restructuring existing suites.
+- CT17-P6 r17 ships only the ADR012 §19.2 discussion/report ceiling rows with script,
+  matrix-contract, containment and real-backend consumer probes; no deployed grant.
+
+Frontend compatibility was checked against concurrent FE13 PR #271 at
+`c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2`. Only its matching CT30 field definitions
+were mirrored into the existing interaction types file, retaining main's preview
+models and notification contract. No FE13/FE16 UI, route or hook is implemented here.
+
+### Post-implementation audit dispositions
+
+Confirmed and remediated: premature MVC body parsing; genuine incoming SecurityConfig
+regressions (notification/timed-attempt/material/Assignment bindings, no-store header
+writer, upload transport and form-filter protection, CORS Content-Disposition exposure);
+missing Q&A/context/moderation; large-page offset overflow; missing parent field-error
+projection; stale pre-lock report state and caller transaction enforcement.
+`SecurityConfig` now differs from current main only by the four exact CT30 method/path
+bindings. Existing refresh/session policies, uploads, default-deny and shared DTOs remain.
+
+The audit verified actual notification insert failure rollback and pre-commit
+invisibility; hidden-parent and cross-Lesson concealment; active/completed/left/locked
+actors; both parent-lock race orders; two competing hides and dismiss/hide ordering;
+terminal revalidation; report target isolation; restricted JPA writes; PostgreSQL UUID
+tie ordering and long pages; API field shape, safe errors, no-store, caller allowlists
+and the absence of new migrations/dependencies. Rejected hypotheses: direct Course
+persistence access by Interaction (none); duplicate notification service/event needed
+(existing IN07 suffices); IN21 public orchestration being IN06-owned (ADR012 assigns it
+to Admin). Report admission retains the approved statement-snapshot visibility; no
+additional report-intake serialization guarantee is invented. No known actionable
+IN06-owned finding remains; independent acceptance is not claimed.
+
+### Executed verification and limits
+
+Final commands, results and exact tested source revision are recorded below after
+execution. Hosted CI was not awaited or dispatched. No full frontend/E2E, entire
+backend suite, production grant, release, deployment or independent IN21 acceptance
+is claimed: there is no UI change, unrelated suites are outside the focused risk
+surface, and public Admin orchestration remains downstream. The graphify query used
+an older local graph only for navigation; source and contracts determined every edit.
+
+
+| Execution | Result |
+|---|---|
+| `cd backend && ./mvnw -q -Dtest='InteractionMapperTest,InteractionRequestsTest,ContentReportServiceTest,DiscussionServiceTest,CourseServiceTest,CourseContentRepositoryImplTest,NotificationServiceTest,AppConfigTest,PageResponseTest' -Dit.test='InteractionReportIntakeIntegrationTest,InteractionAdminIntegrationTest,InteractionRepositoryIntegrationTest,AuthorizationIntegrationTest,CourseCatalogueIntegrationTest,NotificationRepositoryIntegrationTest,SharedRestInfrastructureIntegrationTest' verify` | PASS: 192 unit tests and 210 integration tests; zero failures/errors/skips. This includes 117 existing authorization cases, 21 shared REST cases and all 42 AppConfigTest cases. |
+| `cd backend && ./mvnw -q -Dtest='InteractionRequestsTest,DiscussionServiceTest,ContentReportServiceTest' -Dit.test='InteractionReportIntakeIntegrationTest' verify` | PASS after the final body-parent precedence and stale-dismiss regression changes: 15 unit and 27 PostgreSQL integration tests; zero failures/errors/skips. Unchanged provider/shared/security suites retain the immediately preceding passing evidence. |
+| `bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh` | PASS: all 27 relations match the cumulative dated matrix through r17; malformed inputs rejected. |
+| `bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh` | PASS: 138 SQL probes, 36 expected rejection checks, idempotency/drift/escalation checks, V006/V008 upgrades and failure containment. New r17 probes assert real row values and rollback, plus immutable-column/DELETE/TRUNCATE denials. |
+| `BUILDX_CONFIG=<task scratch> docker build -t codemastery-in06:pr303 backend` | PASS using the existing Dockerfile and pinned dependencies. Final tested image ID: `sha256:5ad6a57707497cd4a262dead6f8888cdc45206e5000a89ec14c352c36cb6b47c`. No image was published or deployed. |
+| `BACKEND_IMAGE=sha256:5ad6a57707497cd4a262dead6f8888cdc45206e5000a89ec14c352c36cb6b47c BACKEND_PORT=18086 bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh` | PASS: 205 consumer/upgrade assertions; real backend under the exact r17 runtime matrix, all preserved consumers plus Q&A/report intake and reply notification, zero permission-denied/42501 log entries; real Flyway V008-to-V009 upgrade checks pass. |
+| `cd frontend && npm ci && npm run typecheck` | PASS. All seven new CT30 TypeScript contract property sets also match their OpenAPI schemas. No UI behavior is claimed. |
+| `git diff --check`, staged diff inspection and SecurityConfig comparison with main | PASS; no migration, dependency, secret, local configuration or generated artifact is included; shared SecurityConfig changes relative to main are only the exact CT30 bindings. |
+
+**Tested revision.** These commands ran on the isolated candidate based on integration
+commit `339fcf848465b4beefc2dc0dc375f2ec169f7e3a`; the final targeted rerun includes
+all delivered backend source and test changes. The immutable implementation commit
+and remote final HEAD are recorded in PR #303. Later evidence-only documentation/PR
+changes do not change the tested production sources. Earlier passing image
+`sha256:9d2bde863af75570ac1048d13b6b4b35d09851b6ae4f7671cbdd60c15b7d78f7`
+was superseded by the final immutable-image runtime run above.
+
+**Non-green exploratory execution.** An expanded selector
+`-Dtest='Interaction*Test,ContentReportServiceTest,DiscussionServiceTest,CourseServiceTest,CourseContentRepositoryImplTest,AuthServiceTest,NotificationServiceTest,AppConfigTest'`
+also selected Interaction integration classes in Surefire. That execution stopped
+before Failsafe: 448 tests, 61 failures, zero errors/skips. Every failure's first
+project frame was `AuthServiceTest.MailLogCapture.assertNoRecoveryInformation:988`
+(the missing application-log control assertion after Spring initialized logging),
+not an IN06 assertion or demonstrated sensitive-data disclosure. A disposable,
+unmodified main `fe3160d535b33652587e14e2fc55ca267f6a5222` reproduced the representative
+failure with:
+
+```sh
+cd backend
+./mvnw -q '-Dtest=InteractionAdminIntegrationTest,AuthServiceTest$SmtpSubmissionPolicy#nonListeningLoopbackEndpointFailsWithoutDisclosingCredentials' test
+```
+
+Baseline result: 10 tests, one identical log-control failure, nine passing audit
+integration tests. The other 60 same-frame failures were not independently replayed
+on main. This is baseline/order-sensitive test evidence, not a green full-suite
+claim. No assertion, logging/security control or SMTP production code was weakened.
+The initial documented AppConfigTest concern did not reproduce: its 42 cases passed.
+
+**Environment notes.** A first Docker build was blocked by sandbox write access to
+the user's buildx activity directory; a task-local BUILDX_CONFIG allowed the normal
+build without changing personal Docker configuration. The first added containment
+probe had a shell dollar-quoting error; the corrected script passed in full. The
+first new real-backend reply probe used a Learner fixture intentionally left by an
+earlier membership test and correctly got 404; using the existing active fixture
+made the complete consumer/upgrade run pass. These were tooling/fixture corrections,
+not production-policy changes. No hosted workflow was dispatched or awaited.
+
+
+## IN06 independent incoming review and direct remediation — 27 November 2026
+
+### A. Executive verdict and provenance
+
+**Incoming independent verdict: REQUEST_CHANGES** at
+`3ab9ee28cc267169f80f2f34e49041c4e102554c`. All five retained checkpoints have
+executable implementations; three confirmed defects prevent accepting the incoming
+Q&A/report/REST boundaries. No missing necessary upstream implementation was found.
+The approved CT40 notification-context addition is bounded and sufficient for IN06.
+
+OpenAI Codex performed this fresh review and subsequent remediation under the
+Project Leader's explicit focused full-scope review/remediation instruction. Phase A
+left tracked production, tests and documentation unchanged. Reproductions ran in a
+separate disposable checkout of the incoming production revision. Findings were
+recorded before Phase B edits (local Phase-A record SHA-256
+`8b4aa1742a2ba09c64d647850f0cbdb669e8e73af975f984f8961beea929f99d`). Later probes
+of unchanged incoming production strengthened concurrency evidence. Phase C is
+verification of this session's own remediation, **not independent acceptance**.
+
+The actual isolated checkout has no tracked root `CLAUDE.md`; `AGENTS.md`,
+`CONTRIBUTING.md`, scoped instruction discovery and CODEOWNERS were the authoritative
+fallback. The local primary checkout's `CLAUDE.md` was also read. No nested
+instruction or relevant graph was present in the reviewed checkout; the graphify
+skill was consulted, but no graph was built or treated as current evidence.
+
+### B. Verified Git baseline
+
+- Incoming HEAD: `3ab9ee28cc267169f80f2f34e49041c4e102554c`.
+- Remote main and merge-base: `fe3160d535b33652587e14e2fc55ca267f6a5222`.
+- Incoming comparison: eight commits ahead, zero behind; 32 changed files.
+- Main integration `3aab3f90`, concurrent merge `fe7e24ee` and preservation merge
+  `339fcf84` remain ancestors. No additional main integration was needed.
+- The incoming branch and main were fetched again before delivery. The final
+  immutable delivery commit and remote readback are recorded in PR #303. Tests
+  below identify incoming production versus the remediation candidate; this
+  evidence section does not claim its own commit SHA was already tested.
+
+### C. Independent checkpoint assessment
+
+| Checkpoint | Effective oracle and implementation examined | Independent incoming evidence and disposition |
+|---|---|---|
+| IN06.repo | ADR012 §§6, 11, 19.2; both repository interfaces/JPA adapters, root/reply queries, targeted saves, row refresh and ordered locks | Real PostgreSQL repository suite (14 cases), restricted-role JPA consumer and matrix/containment checks pass. Repository query conceals malformed descendants; intake did not consistently reuse that visibility boundary (IR-01). |
+| IN06.qa | CT30.access/posts/notify, CT03 U04, CT01 summaries, CT11.create; DiscussionService/controller/DTOs | Admission, root paging, PostgreSQL UUID ties, author batching/current roles, plain text, atomic notification and both parent-lock orders examined. IR-02 blocks incoming verbatim text acceptance; IR-01 affects malformed parent concealment. |
+| IN06.report | CT30.reports and V006 exclusive target/status constraints; ContentReportService/controller | Trusted reporter, duplicates, exclusive targets, receipts, microsecond timestamps and ordinary hidden/cross-Lesson cases pass. IR-01 and IR-02 require correction. |
+| IN06.resolve | CT32.queue/hide, CT31 caller transaction; all four Interaction methods | Target isolation, ordered content/report locks, terminal revalidation, stale entity refresh, rollback and restricted writes pass. Additional probes observe actual PostgreSQL lock waits. IN21 public orchestration/audit remains downstream. |
+| IN06.rest | CT30.rest, ADR012 §12, CT18 and four OpenAPI bindings | Strict closed shapes, invalid UTF-8, duplicate/trailing JSON, competing errors and no-store examined through the real filter chain. IR-02/03 require correction. Seven frontend contract property sets match OpenAPI and current FE13 #271 at `c982ac00ba4b1c24c1d6ff29caddc31db75eb0b2`. |
+
+### D. Incoming findings
+
+All references in this subsection are to incoming `3ab9ee28`; severity is P2.
+
+**IN06-IR-01 — report intake admits malformed hidden ancestry.**
+`ContentReportService.java:89–91` checks only whether the immediate parent is visible
+and in the Lesson; it does not require a root question. V006 permits deeper chains
+and multi-row cycles. A synthetic post below `REPLY_UNDER_HIDDEN` receives 201 and
+a persisted report even though Q&A's query correctly excludes it. This violates
+CT30's visible-target/depth boundary (§§6.1–6.3), discloses existence and admits an
+invisible report target. The adjacent check in `DiscussionService.java:90–93` also
+returns a body-field 400 for malformed deeper ancestry instead of concealment.
+The normal supported reply-to-reply case remains a 400.
+
+**IN06-IR-02 — escaped lone surrogates silently lose verbatim content.**
+`DiscussionService.java:96–100` and `ContentReportService.java:199–204` only check
+non-whitespace text. Strict UTF-8 wire decoding in `InteractionRequests.java:19–28`
+does not reject JSON-escaped unpaired UTF-16 surrogates. A real POST with
+`{"content":"x\ud800"}` returns 201; an independent committed JDBC read finds
+second code unit 63 (`?`), versus incoming 55296. The PostgreSQL driver replaced
+unencodable text, violating CT30 verbatim storage. The same unchecked String path
+applies to report reasons. This is actual data corruption, not a stylistic Unicode
+policy. NUL also cannot be stored by PostgreSQL and is covered by the corrected
+field validation; valid surrogate pairs and combining text must remain verbatim.
+
+**IN06-IR-03 — whole-body allocation precedes syntax and parser constraints.**
+`InteractionRequests.java:19–26` reads all bytes, decodes another whole-body buffer
+and only then invokes Jackson. A synthetic stream invalid at its first byte, with
+1 MiB of remaining padding, is consumed completely (1,048,577 read attempts) before
+400. The supported direct backend binding has no configured JSON body cap; multipart
+upload limits do not bound this servlet JSON read. Jackson constraints therefore
+cannot protect the preceding allocations. An admitted actor can impose avoidable
+memory/resource pressure. No production OOM was induced, and this is not a claim
+that every deployed ingress accepts arbitrarily large bodies. The finding rests
+on reproduced eager consumption plus the actual supported direct-backend path,
+not merely the presence of `readAllBytes()`.
+
+Rejected hypotheses: no lost main SecurityConfig protections remain; CT40's
+unlocked multi-statement Course/Lesson publication snapshots are permitted by
+ADR012 §§3.1/4.1 and do not require a root lock; IN21 REST/audit is not missing
+IN06-owned code; timestamp/clock or genuine database-integrity failures retain
+§12's safe 500/rollback behavior. No unrelated Auth defect is remediated here.
+
+### E. Direct remediation
+
+- IR-01: require the immediate ancestor to be a visible same-Lesson **root** in
+  report visibility and supplied-reply ancestry. This bounds inspection at depth
+  one and conceals deeper/cyclic persisted state without traversing arbitrary
+  chains or changing valid reply-to-reply errors. PostgreSQL regressions cover
+  hidden ancestry, a synthetic cycle, 404-before-body precedence and zero reports.
+- IR-02: `InteractionRequests.isRepresentableText` rejects NUL and unpaired UTF-16
+  surrogates; both services apply it at the existing content/reason field stage,
+  after actor/Lesson/parent admission. Regressions assert safe field 400/no-store,
+  no post/report/notification writes, unchanged 403/404 precedence and actual
+  committed verbatim supplementary/combining text. The two OpenAPI request-field
+  descriptions explain the representation rule; property sets/types are unchanged.
+- IR-03: strict UTF-8 `InputStreamReader` feeds Jackson directly, preserving
+  duplicate/trailing-token rejection and existing parser constraints while removing
+  whole-wire-body buffering. A synthetic stream asserts early syntax rejection;
+  another case accepts 1.1 million text characters and rejects malformed UTF-8
+  after a buffer boundary. No arbitrary product text-length limit was added.
+
+Supporting verification changes replace three scheduling-timeout assumptions with
+PID publication and `pg_blocking_pids()` observation, retain both parent-lock race
+orders, force two distinct-report hides to contend, and add dismissal-first
+terminal revalidation and CT40 caller-snapshot coverage. These passed as incoming
+production probes before being retained. No stronger production serialization,
+new transaction propagation or Course-root lock is introduced.
+
+### F. Transaction, concurrency and security assessment
+
+The real PostgreSQL tests establish that reply and derived-ID notification rows
+are invisible to an independent connection before commit, roll back together, and
+a notification insert trigger failure rolls back the reply. Recipient, exact
+message, self-reply exclusion and publication skips use the existing IN07 service.
+The committed-read evidence is not a mock-only atomicity claim.
+
+Parent SHARE versus moderation UPDATE is observed in both race orders. Competing
+hides wait on content first; report rows lock by PostgreSQL UUID order. Both
+dismissal/hide orders and preloaded stale report revalidation are exercised, with
+terminal 409 and rollback instead of reopening. Mutations join the caller's
+transaction and reject absent/read-only/explicit non-READ-COMMITTED callers.
+IN21 must still hide Lessons under the Course root and append the required audit
+rows in its transaction; the Interaction handoff does not claim those end-to-end
+Admin guarantees.
+
+CT40 returns only requested/scoped titles and V002 publication literals, handles
+missing resources and the 100-ID cap, has no public Course REST binding and uses
+the approved caller set. A real REPEATABLE READ caller probe proves participation
+in its snapshot. Outside an active transaction its methods run read-only READ
+COMMITTED; the contract permits distinct unlocked statement snapshots and a hide
+after admission. It does not promise publication remains unchanged until commit.
+
+CT17-P6 r17 changes only SELECT/INSERT and UPDATE(is_hidden) on discussion_posts,
+and SELECT/INSERT and UPDATE(status,resolved_at) on content_reports. Restricted
+JPA execution, row locks, immutable-column/DELETE/TRUNCATE rejection, cumulative
+27-relation matrix equivalence, upgrades and idempotency are tested. No applied
+migration, shared/staging/production grant or operational provisioning was changed.
+
+### G. Executed verification and limits
+
+Commands below ran from `backend/` unless marked repository root. Scratch probes
+use the same incoming production files with only isolated test additions.
+
+```sh
+# Incoming 3ab9ee28: PASS 114 unit + 71 integration; zero failures/errors/skips.
+./mvnw -q -Dtest='InteractionRequestsTest,ContentReportServiceTest,DiscussionServiceTest,CourseServiceTest,NotificationServiceTest' -Dit.test='InteractionReportIntakeIntegrationTest,InteractionRepositoryIntegrationTest,InteractionAdminIntegrationTest,SharedRestInfrastructureIntegrationTest' verify
+
+# Incoming scratch: expected failures for eager consumption and two HTTP defects.
+./mvnw -q -Dtest='InteractionRequestsTest#independentProbeRejectsInvalidPrefixWithoutBufferingTheWholeBody' -Dit.test='InteractionReportIntakeIntegrationTest#independentProbe*' -Dmaven.test.failure.ignore=true verify
+# Three decisive incoming probes: Unicode committed-storage assertion FAILS;
+# dismissal-first database lock wait and CT40 caller-snapshot probes PASS.
+./mvnw -q clean -Dtest='InteractionRequestsTest#parseIdAcceptsCanonicalUuidTextInAnyCase' -Dit.test='InteractionReportIntakeIntegrationTest#independentProbeChecksActualStoredUnicode+independentProbeDismissFirstRevalidatesSelectedReportAfterLockWait+independentProbeContextParticipatesInCallerSnapshot' -Dmaven.test.failure.ignore=true verify
+# Incoming scratch: PASS 1 unit + 3 PID/lock-observed integration cases.
+./mvnw -q -Dtest='InteractionRequestsTest#parseIdAcceptsCanonicalUuidTextInAnyCase' -Dit.test='InteractionReportIntakeIntegrationTest#concurrentHideSerializesReplyAndDismissalWithoutDeadlock+replyShareLockCommitsBeforeAWaitingHideAndBothRowsRemainAtomic+simultaneousHidesOnDifferentReportsOfOneTargetResolveOnce' verify
+
+# Remediation candidate: PASS 17 unit + 32 PostgreSQL integration;
+# zero failures/errors/skips, including final retained lock/context probes.
+./mvnw -q -Dtest='InteractionRequestsTest,ContentReportServiceTest,DiscussionServiceTest' -Dit.test=InteractionReportIntakeIntegrationTest verify
+
+# Repository root: PASS matrix synchronization and PostgreSQL containment/upgrade.
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+bash infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+# Final production build with task-local BUILDX_CONFIG: PASS.
+# Image sha256:7fb9222317af2ab34598523846d59a3da2128115929b3bb1e0bb76283b1f4720
+BUILDX_CONFIG=<task-scratch>/buildx docker build --iidfile <task-scratch>/backend.iid -t codemastery-in06-review:pr303 backend
+# PASS: 205 real-backend consumer/upgrade assertions; zero permission-denied/42501 entries.
+BACKEND_IMAGE=sha256:7fb9222317af2ab34598523846d59a3da2128115929b3bb1e0bb76283b1f4720 BACKEND_PORT=18087 bash infrastructure/vm/tests/test-runtime-real-backend-privileges.sh
+```
+
+Expected-failure probe invocations use `maven.test.failure.ignore=true` to collect
+all evidence; their process success is **not** a passing-test claim. An intermediate
+scratch-only run was invalidated by overlapping Maven rebuild/test activity in
+that scratch checkout (missing compiled class); it was excluded and replaced by
+the clean, serialized decisive run above. An initial remediation run passed
+17 unit/30 integration cases before the final retained concurrency/context changes.
+Do not aggregate stale Surefire XML from later selections into new execution totals.
+
+**SMTP differential.** The following identical selection was run separately on
+unmodified main `fe3160d5` and incoming `3ab9ee28`:
+
+```sh
+./mvnw -q '-Dtest=InteractionAdminIntegrationTest,AuthServiceTest$SmtpSubmissionPolicy#nonListeningLoopbackEndpointFailsWithoutDisclosingCredentials' test
+./mvnw -q '-Dtest=AuthServiceTest$SmtpSubmissionPolicy#nonListeningLoopbackEndpointFailsWithoutDisclosingCredentials' test
+```
+
+On **both** revisions: the first command runs 10 tests, with nine audit integration
+cases passing and one SMTP assertion failing at `AuthServiceTest.java:988`; the
+second command passes the one SMTP case in a fresh JVM. Spring configuration sets
+`com.codemastery` to INFO, but MailLogCapture only raises the root logger; its
+DEBUG application-log-control probe remains disabled after Spring initialization.
+Surefire's explicit `-Dtest` selection includes integration classes despite the
+normal package exclusion, exposing this existing lifecycle dependency. Auth SMTP
+production/tests, logging configuration and Maven selection configuration are
+byte-identical between main and incoming. This supports **baseline/order-sensitive
+capture failure for the reproduced case**, not a security-disclosure finding or a
+green full-suite claim. The other 60 author-reported failures were not individually
+replayed/adjudicated; an identical frame alone does not clear them. No SMTP control
+or assertion was weakened.
+
+The earlier 192/210 and 15/27 results remain historical author-side evidence in
+the preceding section, not this review's test totals. Hosted incoming checks were
+read independently: Backend, Frontend, CodeQL, SonarCloud and the runtime privilege
+job passed; open CodeQL alerts for the PR ref were empty. Other jobs were still
+running at the initial snapshot. Final-head hosted gates are refreshed in PR #303
+and are not inferred from incoming success; no hosted job is dispatched or awaited.
+Sonar's successful check is not an independent issue-by-issue Sonar audit.
+
+The entire backend suite, all 61 SMTP cases, frontend builds/browser/E2E and deployed
+acceptance were skipped proportionately: focused changed-path tests and real
+PostgreSQL/runtime evidence cover the backend delta; frontend types are unchanged
+and independently compared with OpenAPI/FE13; unchanged shared error behavior has
+21 incoming integration tests. No UI or IN21 end-to-end acceptance is claimed.
+
+### H. Main and integration preservation
+
+The complete 32-file PR diff, original report-intake history, preserved main merges
+and remediation delta were inspected. Against current main, SecurityConfig differs
+only by the four CT30 binding lines (GET and three POST operations). Notification,
+timed-attempt, Assignment, material/upload/form protections, default-deny, cache
+writer, session/token rules and exposed Content-Disposition remain.
+BusinessRuleException's legacy constructors/public details are retained; only the
+code-owned optional validation-field projection is added, with fixed safe messages.
+Shared exception files and notification response DTOs are unchanged by this
+remediation. Other OpenAPI declarations, migrations, dependencies and historical
+contributions remain intact. The two additional schema descriptions change no
+request/response property, enum, required/nullable field or timestamp representation.
+
+### I. Git delivery and attribution
+
+The existing branch/PR #303 is retained. New task commit author and committer use
+the original exact `tihh647-ui <tihh647@gmail.com>` metadata verified from
+`79fb206bf900702538ba566799cd0638422d4b82`, under the Leader's explicit task-specific
+arrangement. Codex performed the review/remediation; metadata does not establish
+that the contributor personally performed or approved this work. The authenticated
+GitHub API login is `chi-thanh-nguyen`; neither metadata nor login proves legal
+identity. Command-scoped metadata is used; no global identity setting or signature
+is fabricated. PR #303 records the final commit, normal push/readback and concise
+review summary while preserving prior implementation evidence and attribution.
+
+### J. Remaining gates and recommendation
+
+All three findings are fixed in the remediation candidate and focused checks pass.
+This is **REMEDIATED / AUTHOR_VERIFIED**, not APPROVE_AFTER_GATES for newly written
+production/tests. A subsequent **narrow independent review** should cover the three
+changed Interaction production files, their five behavioral areas (ancestry,
+Unicode/NUL, streaming, error precedence, retained test synchronization), two test
+files and two OpenAPI field descriptions. Another full-scope review is not required
+by the evidence unless that review identifies a new cross-cutting issue.
+
+No known remaining IN06-owned implementation gap or necessary upstream code blocker
+was found. IN21 Admin orchestration/audit and FE13 consumer/browser acceptance remain
+separate downstream work. Eligible independent CODEOWNER approval, required final-head
+CI/scanning, resolved threads, an up-to-date branch and protected integration remain
+mandatory. No GitHub approval, merge, Issue closure, Project-field mutation, release,
+deployment or operational grant is performed by this review.
+
+
+## IN06 final narrow independent review — 27 November 2026
+
+### A. Executive verdict
+
+**APPROVE_AFTER_GATES** for independently reviewed code revision
+`b6887e239c72970a642de7c923fabeb3ec88c700`. IN06-IR-01, IN06-IR-02 and
+IN06-IR-03 are independently **VERIFIED_FIXED**. No new actionable defect was
+established within the remediation delta. Previously supported IN06 behavior is
+preserved; no further production or meaningful test remediation is required.
+The automated technical review–remediation cycle can conclude. Another automated
+technical review is not warranted for this reviewed code revision.
+
+OpenAI Codex performed this final acceptance review under the Project Leader's
+explicit narrow-review instruction. No production, committed test, OpenAPI or
+implementation decision was modified to obtain this verdict. Additional probes
+were compiled outside the delivered source tree against its compiled classes;
+the actual Tomcat servlet/filter/controller/service/JPA/PostgreSQL path was used.
+This review does not assert the original contributor performed or approved it.
+
+The reviewed checkout has no tracked root CLAUDE.md. The primary local checkout's
+CLAUDE.md was read, with the reviewed AGENTS.md, CONTRIBUTING.md and CODEOWNERS as
+the authoritative applicable fallback. No nested instruction or graph was present
+in this isolated checkout. The graphify skill was consulted; source inspection
+was used without building a graph. The unrelated primary checkout was preserved.
+
+### B. Verified Git baseline
+
+- Previous reviewed baseline: `3ab9ee28cc267169f80f2f34e49041c4e102554c`.
+- Incoming and independently tested remediation: `b6887e239c72970a642de7c923fabeb3ec88c700`.
+- Refreshed main and merge-base: `fe3160d535b33652587e14e2fc55ca267f6a5222`.
+- Exactly one remediation commit, seven changed files: three Interaction production
+  files, two test files, docs/api/openapi.yaml and this historical evidence record.
+  No intervening production delta or main advance was present on final pre-delivery
+  fetch. The branch was nine commits ahead, zero behind main. Original contribution
+  and integration/preservation commits remain ancestors; no integration was needed.
+- Any following evidence-only commit is distinct from the reviewed code SHA.
+  Its immutable SHA, normal push, final remote HEAD and PR-body readback are recorded
+  in PR #303; its only changed file must be docs/testing.md.
+
+Effective oracles: ADR012 authority/approval inventory and CT30.access/posts/reports/
+rest (§§6.1–6.5), CT32 (§11), error ordering (§12), CT40 notification context
+(§3.1), notification atomicity (§6.4), and runtime privilege ceiling (§19.2).
+CT03 Lesson admission, CT18 safe errors and unchanged V006 constraints support them.
+Prior records at baseline docs/testing.md:11500 and remediation :11664 were read;
+their historical author-side and independent-incoming evidence remains separately
+attributed. No material delta-related evidence discrepancy was established.
+
+### C. Independent finding closure matrix
+
+| Finding | Original defect and remediation | Independent evidence and preservation | Disposition |
+|---|---|---|---|
+| IN06-IR-01 (P2) | Report intake admitted a descendant whose immediate parent was itself a reply. Both intake visibility and new-parent validation now require a visible same-Lesson root ancestor (ContentReportService:82–92; DiscussionService:84–100). | Committed PostgreSQL/HTTP tests and external Tomcat probes cover visible roots/replies, hidden parents/replies, foreign targets, missing supplied parents, deeper ancestry and a two-row cycle. Valid visible reply as parent retains field parentPostId/400; concealed ancestry retains 404 before other body rules. Baseline deep target receives 201; remediated target receives 404. Rejected operations leave post/report/notification counts unchanged. | VERIFIED_FIXED |
+| IN06-IR-02 (P2) | JSON-escaped lone surrogates were accepted but JDBC stored a replacement. isRepresentableText rejects NUL and unpaired surrogates before persistence, at the existing content/reason stage (InteractionRequests:34–43; DiscussionService:98–100; ContentReportService:199–204). | Actual Tomcat/JPA/PostgreSQL reads verify exact text for new questions, replies, Lesson reports and visible-post reports: supplementary characters, escaped/direct Unicode, NFC and NFD, U+FFFD, whitespace and CR/LF. High/low surrogates, repeated/reversed/interrupted sequences and NUL yield safe field 400/no-store without rejected-value/diagnostic disclosure or writes. Baseline x\ud800 receives 201 and stores second code unit 63; remediation gives 400. | VERIFIED_FIXED |
+| IN06-IR-03 (P2) | readAllBytes buffered the entire wire body before parsing. A strict UTF-8 InputStreamReader now directly feeds Jackson and closes in try-with-resources (InteractionRequests:15–30). | Identical external invalid-prefix stream records 1,048,577 read attempts on baseline versus 8,192 and stream closure on remediation. Seventy-seven decoder/JSON cases over chunk sizes 1,2,3,7,8191,8192,8193 pass, plus an existing nesting-constraint rejection. Malformed UTF-8, including a tail beyond 8192 bytes, duplicate fields, trailing tokens and empty/non-object JSON reject safely. Real Tomcat accepts and PostgreSQL preserves a reason exceeding 1.1 million characters; admission precedence is retained. | VERIFIED_FIXED |
+
+Ancestry checks add a predicate to an existing parent read, not another query,
+recursive traversal or a new lock. V006's FK prevents a persisted missing parent;
+its not-self constraint prevents persisted self-reference. Missing parent IDs and
+multi-row cycles are covered without weakening these constraints. Approved
+statement-snapshot report visibility remains; no additional serialization is required.
+Representability enforces verbatim storage in PostgreSQL UTF-8 and does not impose
+an unauthorized product restriction or normalize/trim valid Unicode.
+
+### D. Regression and test quality
+
+The changed tests were inspected and independently executed. The invalid-prefix
+test fails the original eager implementation; external differential probes also
+reproduce the actual old persistence and visibility failures. Existing integration
+cases retain CT03/CT30 precedence, trusted identities, root-only paging and hidden
+reads, notification recipient/message/derived ID, pre-commit invisibility, rollback
+and synthetic notification-insert failure atomicity.
+
+The PID is published through JdbcTemplate inside the same TransactionTemplate and
+transaction manager as the production proxy call. JpaTransactionManager-bound JDBC
+and JPA therefore use the intended transactional connection. The winner's barrier
+keeps its row locks open until pg_blocking_pids observes a database-blocked waiter;
+both reply/hide orders, competing hides and dismissal-first terminal revalidation
+complete with the required committed result/409. Polling is bounded and is evidence
+of a real lock wait, not a fixed scheduling delay. The helper does not name the
+blocker or lock relation; isolated fixtures, held winner locks and inspected lock
+paths exclude an evidenced competing unrelated wait in these executions. This is
+sufficient regression evidence, not a general-purpose lock-graph assertion.
+
+Wrappers join READ COMMITTED production transactions and preserve MANDATORY
+moderation participation; no service method is replaced or mocked. Barrier release
+and executor interruption run in finally blocks; normal completion joins futures
+before fixture cleanup. The synthetic cycle is removed by restoration and the
+fixture's set-wise descendant deletion. No timeout or cleanup failure occurred.
+The CT40 REPEATABLE READ test observes published context across an independent hide
+and hidden context after caller completion, supporting caller-transaction/snapshot
+participation. No broader CT32/CT40 review was reopened.
+
+Reader delivery eliminates eager whole-wire buffering and applies existing parser
+constraints during consumption. A valid JSON tree and subsequent Map are still
+materialized; this is not constant-memory arbitrary-JSON processing. Servlet or
+proxy draining/buffering and transport/container limits are separate. The real
+backend probe establishes supported synchronous servlet behavior, not every ingress
+or a universal wire-size guarantee. No arbitrary length cap or resource redesign
+was introduced; no stress/OOM test was needed.
+
+### E. Independently executed verification
+
+On exact remediation b6887e239c72970a642de7c923fabeb3ec88c700, from backend/:
+
+```sh
+./mvnw -q -Dtest='InteractionRequestsTest,ContentReportServiceTest,DiscussionServiceTest' -Dit.test=InteractionReportIntakeIntegrationTest verify
+./mvnw -q dependency:build-classpath -Dmdep.outputFile=../../classpath.txt
+```
+
+- PASS: 17 unit tests (6 request, 8 report-service, 3 discussion-service) and
+  32 PostgreSQL integration tests, zero failures/errors/skips, Maven exit 0.
+- External javac probes use target/test-classes, target/classes, the resolved test
+  classpath and the already cached JUnit Platform launcher 6.0.3. No dependency
+  or build configuration changed. IndependentParserProbe passes 77 boundary cases
+  plus nesting-constraint rejection and the measured prefix-consumption assertion.
+- ProbeRunner selects only four external methods: unicodeWritesAndSafeRejections,
+  ancestryConcealmentAndValidReplyParentDistinction, realServletStreamingAndAdmission,
+  differentialStoredSurrogateAndAncestry. PASS 4/4 on embedded Tomcat 11.0.27 and
+  real PostgreSQL 17.11, zero skips/failures. Inherited fixture/test infrastructure
+  is reused; the original 32 tests are not rerun or added to this count.
+- The three changed baseline production files were extracted verbatim with git show
+  3ab9ee28:<path>, javac-compiled outside the checkout and placed first on the probe
+  classpath. Runtime CodeSource confirmed all three loaded from baseline-classes.
+  IndependentParserProbe baseline passes its expected full-consumption oracle;
+  ProbeRunner differentialStoredSurrogateAndAncestry passes 1/1 expected-defect
+  assertions: old 201/corruption and 201/invisible-target behavior reproduced.
+  These expected-defect assertions do not mean the original contract passed.
+- git diff --check passes. Parsed OpenAPI leaf comparison finds exactly the two
+  request-field descriptions changed, with no other schema/API declaration change.
+
+An initial external compilation omitted the launcher-only jar and was corrected
+using its existing cached 6.0.3 artifact. After a session interruption, an external
+HTTP attempt could not access the Docker socket (Operation not permitted); its four
+initialization failures are excluded as application evidence. Network permission
+was restored and the complete four-method retry passed. No application change was
+made in response to these tooling failures. Probe sources, invocation/compilation
+script, logs, selected test XML and baseline metadata are retained in the local
+evidence archive delivered with this review, outside the Git tree.
+
+The preceding 114/71 incoming, 17/32 remediation and 205 runtime assertions remain
+historical evidence from the previous session; only the executions listed above
+are this final review's independent results. The unchanged full backend suite,
+frontend/browser/E2E, runtime-image upgrade/containment campaigns, all 61 SMTP cases
+and unrelated Batch 7 oracles were skipped: exact-blob preservation, focused real
+PostgreSQL tests (including restricted-role JPA) and real servlet probes sufficiently
+cover this delta. No expensive unchanged deployment campaign adds material closure
+evidence. The prior sampled baseline/order-sensitive SMTP capture failure remains
+qualified: the other 60 cases were not individually adjudicated, and no green full
+backend suite or SMTP production/security clearance is claimed.
+
+### F. Scope and preservation
+
+Compared with 3ab9ee28, SecurityConfig, repository adapters, Course notification
+context providers, notification service/persistence, shared exception handling,
+runtime privilege tooling/r17 matrix, Flyway migrations, dependencies and frontend
+are byte-identical. The two OpenAPI descriptions accurately describe representable
+text errors after admission; no length policy or unrelated API leaf changed.
+Against current main, SecurityConfig still adds only the exact four CT30 bindings.
+No main advance invalidated prior evidence. Earlier supported full-scope IN06
+conclusions remain applicable within their recorded limits; five checkpoints and
+IN21/FE13 boundaries are preserved. Historical records are retained unchanged.
+
+### G. New findings
+
+No new actionable finding was established within the reviewed delta. No production
+or meaningful test remediation remains necessary for these three findings.
+
+### H. Delivery and remaining gates
+
+Only this appended docs/testing.md record is delivered. The task-specific metadata
+arrangement is explicitly retained: original author/committer fields were verified
+from 79fb206bf900702538ba566799cd0638422d4b82 as tihh647-ui <tihh647@gmail.com>;
+Codex performed the independent review. Command-scoped Git identity preserves those
+fields without changing global configuration or asserting contributor performance,
+approval, legal identity or a signature. Authenticated CLI and connected GitHub
+profile identify chi-thanh-nguyen. PR #303 records the evidence-only delivery SHA
+and remote/body readback, with production/tests/API byte equality to b6887e23.
+
+Immediately before evidence-only delivery, PR #303 was OPEN, MERGEABLE and BLOCKED
+with REVIEW_REQUIRED; no submitted reviews or review threads existed. Required
+checks on b6887e23, including Backend, Frontend, E2E, all required VM jobs and CodeQL,
+were successful; SonarCloud's check was successful. Open CodeQL alerts queried for
+the PR merge ref were empty. Sonar success is a hosted check, not an independent
+issue-by-issue Sonar audit. Live main-quality-gates and main-merge-authority were
+read. These results do not transfer automatically to a later documentation commit;
+required current-HEAD checks/scanning remain a separate integration gate.
+
+Eligible independent CODEOWNER approval, required final-HEAD CI/scanning, resolved
+threads and protected up-to-date squash integration remain. IN21 Admin orchestration/
+audit and FE13 consumer/browser acceptance remain downstream; operational/release/
+deployment grants remain separate. No workflow was dispatched or awaited, formal
+GitHub approval submitted, Issue closed, Project field changed, merge performed,
+release published, deployment run or operational grant executed. The automated
+technical review cycle is closed for the reviewed code; those gates do not justify
+another precautionary code-review cycle.
+
+## FE11 comprehensive completion and author self-audit — 27 November 2026
+
+Task authority, effective contracts, two ordinary main integrations, bounded FE10
+scope and substantial FE08 exclusion are recorded in [setup](setup.md#fe11-learner-assignment-completion-and-bounded-composition--27-november-2026).
+The exact tested source is the FE11 working tree over integration
+`3d0415903867bc61c8defa92747db07b1716a691` (main `99abc407`); the publication follow-up
+below identifies the implementation commit. These are Codex **author executions**,
+not independent review, QA acceptance, hosted CI or production qualification.
+
+### Incoming-to-final implementation coverage
+
+Trace: ADR010/CT16/CT37 + OpenAPI → AssignmentController → AssignmentService /
+SubmissionService → assignmentApi request/decoder → useAssignment → S10/S13 →
+WORKSPACE_ROUTES/AppRouter/role navigation → named unit/component and real E2E tests.
+Owner-grading output comes from FE17 and AS09; storage from SH05. The consumed
+backend and OpenAPI are inherited unchanged. Each row is a reporting checkpoint,
+not a replacement for official Project fields.
+
+| Checkpoint | Incoming `2c5aa49` | Final disposition / evidence |
+| --- | --- | --- |
+| C1 raw multipart PDF/ZIP and filename | DEFECTIVE: FormData constructed, body undefined | IMPLEMENTED_VERIFIED_BY_INSPECTION; actual native Request multipart serialization, one `file`, no caller boundary; real 201/bytes |
+| C2 first/replacement status | DEFECTIVE: only 200 | IMPLEMENTED_VERIFIED_BY_INSPECTION; `[200,201]`, no replay, 202/203/204/206 negative controls |
+| C3 own protected download | MISSING | IMPLEMENTED_VERIFIED_BY_INSPECTION; exact own endpoint, binary shared transport, authoritative name, revoked URL; PDF and ZIP, closed/graded |
+| C4 detail/submission decoding | PARTIALLY_IMPLEMENTED: strings instead of instants, no lifecycle/grade consistency or request identity | IMPLEMENTED_VERIFIED_BY_INSPECTION; exact fields, UUID scope, valid UTC microseconds, safe filename, grade 0–100 / two decimals / grouped nullability, graded time order |
+| C4 list decoding | MISSING | IMPLEMENTED_VERIFIED_BY_INSPECTION; exact course/page/size/counts/status and duplicate identities; independent server paging |
+| C5 first submission / replacement | DEFECTIVE: stale auth closure, mutation pending only React state | IMPLEMENTED_VERIFIED_BY_INSPECTION; synchronous one-flight reservation, invocation admission and confirmed current timestamp |
+| C5 uncertainty / failed reconciliation | MISSING | IMPLEMENTED_VERIFIED_BY_INSPECTION; later authoritative GET, locked failure, deliberate read retry, no mutation replay |
+| C5 ordering/cancellation | DEFECTIVE: un-aborted mutations and stale settlement | IMPLEMENTED_VERIFIED_BY_INSPECTION; generation/resource identity, signals, read initiation sequence; route/session/logout/unmount suppression |
+| C5 deadline/grading/replacement race | PARTIALLY_IMPLEMENTED | IMPLEMENTED_VERIFIED_BY_INSPECTION; server open authoritative, confirmation withdrawn by refresh, 409 from current state, later read wins over upload result |
+| C5 known 400/403/404/409/413/415 | PARTIALLY_IMPLEMENTED | IMPLEMENTED_VERIFIED_BY_INSPECTION; safe rejection/access/closed/graded/size paths, independent backend admission |
+| C6 instructions / feedback / grade | DEFECTIVE: paragraph splitter and unsupported aggregation/mastery copy | IMPLEMENTED_VERIFIED_BY_INSPECTION; actual shared Markdown, plain feedback with preserved lines, Grade /100 and graded time; no unsupported claims |
+| C6 deadline and file presentation | PARTIALLY_IMPLEMENTED | IMPLEMENTED_VERIFIED_BY_INSPECTION; timezone/relative date, butter ≤48h / neutral / server Closed, progress/current row and confirmation |
+| C6 loading/empty/error/recovery | PARTIALLY_IMPLEMENTED | IMPLEMENTED_VERIFIED_BY_INSPECTION; shared states; failed reads never admit mutation; exact rejoin message |
+| C6 responsive/theme/keyboard | PARTIALLY_IMPLEMENTED, no execution | IMPLEMENTED_VERIFIED_BY_INSPECTION with scoped browser evidence below; native zoom/screen-reader acceptance remains unexecuted |
+| C7 S10 Assignment list/Open | MISSING | IMPLEMENTED_VERIFIED_BY_INSPECTION; separately paginated Assignment list with none/submitted/graded/closed, all read states, production Open |
+| C7 shared Quiz summary seam | BLOCKED_BY_UPSTREAM initially | Bounded FE10 read/table/paging delivered; full quiz journey remains FE10, not absorbed |
+| C8 S13 production route | MISSING | IMPLEMENTED_VERIFIED_BY_INSPECTION; Learner only, direct entry/reload, identity, My courses context and no fixture data |
+| C8 Course → S10 navigation | MISSING | IMPLEMENTED_VERIFIED_BY_INSPECTION; current membership action and shared destination gates |
+| C8 Related Lesson destination | BLOCKED_BY_UPSTREAM | FE11 canonical guarded handoff implemented; FE08 #193/#286 production S8 remains unavailable; no dead link or route activation |
+| C9 shared consumers/preview | No regression tests | Existing numeric transport/auth/FE14/FE16/FE17/Markdown/preview consumers exercised; no backend, CI or dependency changes |
+
+Issue #196 currently has **12 acceptance criteria** (8 behavior, 4 presentation).
+They are covered by the rows above; this task does not tick Issue checkboxes or
+change Project fields. Full design/QA acceptance is not inferred from code or
+unit counts. The full Related Lesson journey remains blocked by FE08; full Quiz
+attempt integration remains FE10. IN15 delivery is separate from grade visibility.
+
+### Focused commands and observed results
+
+Commands run from `frontend/`, unless stated otherwise:
+
+```bash
+npm ci --ignore-scripts --offline
+npm run test -- src/features/assessment/api/assignmentApi.test.ts src/shared/api/httpClient.test.ts
+npm run test -- src/features/assessment/pages/assignment.test.tsx src/routes/index.test.tsx src/features/learning/pages/MyCoursesPage.test.tsx src/shared/components/presentation.test.tsx
+npm run test -- src/routes/index.test.tsx src/features/assessment src/shared/api/httpClient.test.ts src/shared/components/MarkdownRenderer.test.tsx src/features/instructor/grading src/features/instructor/course-management src/features/auth src/features/learning src/features/catalogue src/shared/components/presentation.test.tsx src/app/preview
+npm run test -- src/features/instructor/course-management src/features/instructor/grading src/routes/index.test.tsx src/features/assessment
+npm run test -- src/features/assessment/pages/assignment.test.tsx src/shared/components/presentation.test.tsx
+npm run test -- src/features/assessment/pages/assignment.test.tsx
+npm run test -- src/features/assessment/api/assignmentApi.test.ts
+npm run typecheck
+npm run build
+```
+
+- Offline installs: frontend 230 packages / E2E 5 packages, both exit 0, no dependency/lock change.
+- Initial operation/transport run: **182 PASS / 2 files** after correcting the API
+  test environment from jsdom to Node for native File/FormData/Request serialization.
+  The mixed environments initially lost the test filename/bytes and lacked Blob.text;
+  real browsers and production transport were not changed to fit the test.
+- Component/route/membership/presentation run: **340 PASS / 4 files**.
+- Broad affected-consumer run before FE16 main advance: **1,085 PASS / 21 files**.
+- Post-FE16 integration affected-owner/route/assessment run: **799 PASS / 12 files**.
+- After the Download viewport correction: **119 PASS / 2 files**.
+- Final added concurrent grading/replacement reconciliation case: **32 PASS** in
+  assignment.test.tsx; API boundary suite including invalid explicit status sets:
+  **65 PASS**. Those cases overlap the earlier runs and are not additive evidence.
+- Final corrected affected API/component/route/preview/transport/Markdown run:
+  **621 PASS / 7 files**, exit 0; counts overlap prior executions.
+- Final type-only reuse of existing AS09 wire types and explicit empty-file
+  component coverage: **97 PASS / 2 files**; production bundle remains
+  `index-BGDGgHqa.js` (no runtime change after the final real E2E).
+- Typecheck and production build: **PASS**, including after integrating main.
+  Vite reports the existing >500 kB chunk warning; no assertion or build is suppressed.
+- Test authoring corrections: timezone assertion now uses the actual explicit
+  display timezone; route denial expects the actual shared access-denied copy;
+  Vitest array cases are wrapped so the invalid status-set array is not expanded
+  into unrelated numeric arguments. None changes an implementation oracle to
+  accept defective behavior. A combined final run containing the last two
+  misbound table cases is recorded as failed, with the corrected 65-case suite
+  then passing separately. jsdom also emits existing unsupported document-navigation
+  diagnostics; the tests still complete and their assertions are retained.
+
+### Real disposable backend/PostgreSQL/MinIO verification
+
+From `e2e/` (the repository lifecycle acquires isolated ownership before execution):
+
+```bash
+npm ci --ignore-scripts --offline
+npm test -- tests/learner-assignment.spec.ts --project=chromium-desktop --project=chromium-mobile --project=webkit-desktop --workers=1
+```
+
+Final run **`cm-e2e-1a21de75c70-825dc5`**, **3 PASS, 0 SKIP, exit 0**, 51.5 seconds:
+Chromium desktop, Chromium mobile emulation, WebKit desktop. Actual production
+Course membership navigation → separately read Assignments → Open → Markdown →
+raw first PDF (201) → protected download with exact bytes → replacement Cancel
+without mutation → confirmed ZIP replacement (200) → exact ZIP download → separate
+Instructor browser context with FE17 protected download and grade-confirmation UI →
+retained exact submittedAt and numeric grade in server read → learner Refresh /
+plain feedback / 85.25 out of 100 → closed Assignment still downloadable → full
+browser reload/session restoration → other enrolled learner cannot download this
+learner's submission (404) → leaving revokes current access (403/rejoin UI).
+Both Choose a file and graded Download bounds are asserted within the initial
+**1280×720 and 390×844** viewport, with no horizontal page overflow.
+No HTTP interception, mocked persistence or substitute storage is used by this test.
+The fixture builds this checkout; real PostgreSQL and initialized private MinIO
+supply committed data and bytes. The lifecycle verified all seven run-owned
+resources absent, temporary build removed and run complete.
+
+Earlier same-command runs: the first run failed all three at the newly authored
+login helper (it sent an extra displayName; the strict API correctly returned 400).
+The helper was corrected to send only email/password. The next run
+`cm-e2e-1a21de1c5bf-2bc5ff` passed 3/3 using the owner grading API. The final run
+above adds the actual FE17 grading UI and viewport regression after main integration.
+These superseded runs are not counted again. Every run used normal lifecycle
+cleanup; no hosted workflow was dispatched, retried, waited on or polled.
+
+### Rendered evidence and self-audit remediation
+
+Playwright CLI task-owned Chrome session `fe11`, isolated local Vite URL printed
+by the process (`http://127.0.0.1:52236`), production S10/S13 with **controlled
+synthetic REST responses**. These observations establish browser presentation
+and interactions, separately from the real fixture test above. Impeccable's context
+engine is not installed; its documented fallback used current DESIGN directly,
+Operate/harden guidance and source/browser inspection. No engine download, skill
+hook, DESIGN rewrite or tool dependency was introduced. No graph exists in the
+checkout, so graphify's documented source-inspection fallback was used.
+
+- S13: widths 320, 360, 390, 768, 1024, 1280, 1440 in Light, Dark and System
+  (21 combinations): no horizontal overflow. Actual shared Theme menu selection;
+  System follows an emulated OS light→dark change (canvas rgb(246,246,247)→rgb(21,23,28)).
+- Keyboard: Tab/Enter opened the native chooser; a synthetic PDF was submitted
+  and reconciled; replacement opened with Cancel focused. The CLI yielded at each
+  native chooser and handled it through `upload`. Escape re-enabled the file control;
+  the immediate DOM-count probe still saw the dialog during its exit transition,
+  so that probe is not reported as a passed dialog-removal assertion.
+- S10: the same seven widths, responsive stacked rows, production Open and route
+  h1 focus. No raw score/grade inferred from summary payloads.
+- No-submission Choose a file: y607.36 / height48 at 390×844;
+  y625.78 / height48 at 1280×720; visible without scrolling even with long instructions.
+- **SA-01 (P2), confirmed and fixed:** graded content originally preceded the
+  current file action. Download was y892.05 at 1280×720 and y852.83 at 390×844,
+  outside both viewports. Move the submission action before grade/instructions;
+  remove the nested stat tile. Final y537.69 / height48 and y527.27 / height48,
+  respectively. Component order regression and real E2E viewport assertions pass.
+- CSS `zoom:2` at 1280 gives document scroll width1675, traced to inherited shared
+  header elements; **main content itself does not overflow**. CSS zoom leaves media
+  queries at the unzoomed width and is not native browser zoom. This failed
+  emulation is retained as a limitation; it is not a passed 200% browser-zoom
+  check or proof of a new production FE11 defect. Native toolbar zoom and screen
+  reader verification remain unexecuted. Normal 320 px reflow passes.
+
+The final author audit re-read the current Issue criteria, consumed contracts,
+current-main DESIGN, complete effective PR and integrated consumers. The incoming
+upload/status/decoder/download/lifecycle/Markdown/route/list findings are remediated.
+No confirmed actionable FE11-owned implementation defect remains after the focused
+corrections. The FE08 production destination and FE10 full quiz flow are explicitly
+excluded upstream integration work, not silently marked complete.
+
+### Evidence limits and remaining gates
+
+Backend implementation is unchanged, so unrelated backend/Adaptive/Admin/deployment/
+recovery suites are omitted. Existing consumed AS09/SH05 behavior is exercised by
+the narrowly scoped real browser/storage test instead of rerunning the full backend
+matrix. Firefox, physical phones, VoiceOver/NVDA, native browser zoom, load/race
+matrices against real storage and full CT19/QA08 are unexecuted; component doubles
+cover deterministic uncertainty/ordering races and do not prove their real database
+interleavings. The inherited CT19 fixture policy discrepancy documented in FE14's
+record is not changed or accepted here. No claim of notification delivery, operational
+acceptance, protected merge readiness, release or deployment is made.
+
+The new test files' structural authority and task-specific purpose are recorded
+in `docs/repository-structure.md`. All other modified files serve the consumed
+Assignment client/lifecycle/presentation, bounded FE10 summary seam, production
+route/navigation or traceable test/decision evidence. No backend/API/CI/dependency,
+Issue checklist, Project field or unrelated PR branch is modified. The required
+independent CODEOWNER/QA review, live hosted checks and protected integration remain.
+
+### FE11 implementation revision and handoff anchor
+
+Implementation commit: **`98c6fd14f57922df5d4c04faf6e620e084d3b1bc`**.
+The working tree exercised by the final focused runs/build is identical to this
+commit's production and test files. Final changes after the real E2E were type-only
+aliases to main's existing AS09 wire types and an additional empty-file component
+assertion; 97 tests and build passed afterwards, with the identical production
+bundle hash. This follow-up changes documentation only; prior results are not
+represented as another execution. The effective PR remains based on main `99abc407`.
+
+Final task verdict: **FE11_OWNED_CODE_COMPLETE_UPSTREAM_INTEGRATION_BLOCKED**.
+FE11-owned implementation is code complete under the explicit task; complete
+production integration including Related Lesson still requires FE08 #193 / #286.
+S10 Assignments, S13, shared transport compatibility and the real submission/
+Instructor grading/result/download journey have author evidence. Full FE10 Quiz
+attempt integration, independent review/QA, hosted checks and protected merge are
+separate. Review should concentrate on the operation-specific status set, strict
+runtime decoding, mutation/reconciliation/session ordering, S10 shared ownership
+and retained upstream destination gates. No self-approval, merge, release or
+application deployment is authorized or performed.
+
+## FE11 targeted IR-01/IR-02 remediation — 28 November 2026
+
+Authority: the Project Leader's explicit “Targeted Remediation — FE11-IR-01 &
+FE11-IR-02” task, including implementation, regression tests, author self-audit,
+documentation, commit and ordinary fast-forward publication to PR #305. Refs #196;
+the existing bounded FE10 #195 handoff is retained. Codex performed this work.
+
+### Baseline and independent history
+
+Incoming/reviewed HEAD: `75b6db7f6c2ed21182806c2f859264e581088908`; live main and
+merge-base: `99abc4072b9893971d7cf15fe3174b25b3da63b9`, six ahead/zero behind.
+A fresh isolated clone preserved existing checkouts. No incoming delta or main
+integration was necessary. Both findings remained reproducible. The independent
+**REQUEST_CHANGES** verdict on that revision remains historical evidence; the
+27 November author code-complete claim above was superseded by that review.
+Author remediation does not independently close it.
+
+The complete prior independent report was recovered from its Codex chat. The
+reviewer's `fe11-review-evidence.zip` and `review-integrity.json` were accessible;
+original `probes/lifecycle-required.test.tsx`, observational sources and logs were
+inspected. The unmodified desired-invariant source (only import paths adapted to
+the isolated clone) reproduced **7 failures / 2 passing controls** before changes,
+and passed **9/9** afterwards. These are recovered probes, not reconstructed cases.
+The observational suite asserts obsolete admission as its expected result; it was
+inspected, not misreported as a post-fix success suite.
+
+### Corrections and author dispositions
+
+- **FE11-IR-01 — FIXED_AUTHOR_VERIFIED.** The old render-written `snapshot` could
+  remain eligible after GET settlement released the read reservation. Every hook
+  transition now synchronously publishes one authoritative State object before
+  calling `setState`. Read initiation installs loading/checking; accepted success
+  installs current data; failure clears data and installs error before release.
+  Controller/sequence/resource/session checks still reject obsolete settlements.
+  Rendering never writes authority. A layout-effect acknowledgement records only
+  a matching committed publication; invocation additionally requires the callback's
+  State object to match that publication. Thus even fast PUT/GET settlement cannot
+  admit an action before the reloaded file and uncertainty notice are presented.
+- The production file-change handler uses the same invocation guard. Replacement
+  selection captures filename and the exact opaque submitted-time string; dialog
+  copy uses that captured evidence. Current eligibility and matching evidence gate
+  the dialog, and refresh/closure/grading/error withdraws it. Old confirmation
+  callbacks fail at the hook; repeated confirmation cannot obtain another mutation
+  reservation. No `Date` conversion is applied to the token.
+- **FE11-IR-02 — FIXED_AUTHOR_VERIFIED.** Remove feature 400/415 explanations and
+  consume the shared safe `ApiError.message`: 400 without admitted fields is
+  `Please check the supplied information.`; 415 is
+  `The request could not be completed.`. Preserve exact 413 copy and 409 wording
+  derived from reloaded graded/open state, including neutral eligible-state
+  conflict recovery. No shared transport/error allowlist was changed.
+- **Adjacent author finding SA-R1 — FIXED_AUTHOR_VERIFIED.** A captured Cancel
+  callback read the current mutation ref and could abort a later upload, including
+  after resource replacement in a reused hook. Two deterministic tests reproduced
+  it before correction. Cancel now checks current identity and the exact controller
+  captured for its rendered operation. This is bounded to the same hook.
+
+### Deterministic regression and transition matrix
+
+All committed cases live in the existing `assignment.test.tsx`. Deferred promises,
+React `act` scopes and the existing deadline scheduler preserve settlement before
+commit; no arbitrary delay, early forced render or weakened dispatch assertion is
+used. The production deadline cases drain the original probe's eight promise
+microtasks while the old file input/confirmation button is still displayed.
+
+| Ordering / protected invariant | Incoming execution | Remediated execution |
+| --- | --- | --- |
+| Reviewer refresh success closed / failure / newly existing submission, old callback before commit | 3 failures: actual PUT dispatched | 3 pass: zero PUT; deliberate successful read recovers legitimate submission |
+| Reviewer first PUT + reconciliation complete, old null-token callback before commit | Failure: second unconfirmed PUT | Pass: exactly one PUT; new confirmed replacement still works |
+| Reviewer production deadline GET then file-change before closed/replacement/failure commits | 3 failures: actual PUT dispatched | 3 pass: zero PUT and no replacement dialog from obsolete selection |
+| Reviewer controls: committed closure; pending server work after cancelled response | Both pass | Both pass; cancellation still does not promise rollback or cause replay |
+| Stale hook confirmation after closed/graded/error/changed/same read evidence | 5 failures | 5 pass; new callback required even if token unchanged; adjacent microseconds remain distinct |
+| Uncertain network/unusable-success/cancelled settlement then GET before presentation | 3 failures | 3 pass: no second PUT until committed evidence and deliberate action |
+| Obsolete production confirmation event after closed/graded/changed/error/same read | 5 failures | 5 pass: zero PUT; no silent filename substitution |
+| Shared safe 400/415 fallback | 2 failures | 2 pass |
+| Obsolete Cancel against newer same-resource/different-resource upload | 2 failures | 2 pass; newer signal remains un-aborted |
+| Active/superseded read cleanup; older read failure versus newer ready data; StrictMode read cleanup; old-route mutation cleanup; logout/unmount; exact 413; neutral 409; duplicate production confirmation | Pass | Pass |
+
+The committed **66-case** suite (32 existing + 34 added) ran against the baseline
+production source in another isolated clone: **24 failed / 42 passed, no unhandled
+errors**. The same test file on the final implementation: **66 passed**. The 24
+failures comprise 7 original invariants, 5 stale hook confirmations, 3 uncertainty
+publication cases, 5 production confirmation events, 2 fallback cases and 2 Cancel
+cases. The 42 passing controls include all 32 original tests. An initial baseline
+harness version awaited a deliberately never-settling erroneous PUT and timed out,
+contaminating later cases; it was corrected to assert the dispatch count before
+awaiting rejection. Those initial 25 failures/3 errors are not regression evidence.
+The final baseline log above is the valid sensitivity result.
+
+### Executed checks and evidence boundaries
+
+Commands from `frontend/` unless stated otherwise; logs retained with the task's
+external evidence bundle. Node 24.21.0 / npm 11.19.0. Existing node_modules were
+copied only after lockfile byte equality; `npm ls --depth=0` passed. No dependency
+installation or manifest/lockfile change.
+
+```text
+npm run test -- src/features/assessment/pages/assignment.test.tsx --reporter=verbose
+# 66 passed, final code including operation-bound Cancel
+npm run test -- src/features/assessment/api/assignmentApi.test.ts src/shared/api/httpClient.test.ts src/routes/index.test.tsx
+# 393 passed / 3 files; API/transport unchanged by subsequent Cancel correction
+npm run test -- src/routes/index.test.tsx
+# 207 passed on final code after Cancel correction (overlaps the prior 393)
+npm run typecheck
+npm run build
+# Pass on final code; existing >500 kB Vite warning remains
+
+# External recovered probe, work/ directory:
+./remediation/frontend/node_modules/.bin/vitest run --config probes/vitest.config.ts probes/lifecycle-required.test.tsx --reporter=verbose
+# 9 passed on final code; 7 failed / 2 controls passed on incoming code
+
+# e2e/, lifecycle-owned disposable fixture, never an external/production environment:
+npm test -- tests/learner-assignment.spec.ts --project=chromium-desktop --workers=1
+```
+
+An initial real smoke on the admission/dialog correction passed **1/1, 0 skipped**,
+run `cm-e2e-1a21e1e83c1-d940ea`, 28.7 seconds. PostgreSQL/MinIO-backed production
+navigation, PDF 201, Cancel without replacement, explicit ZIP replacement 200,
+reloaded current file, exact binary download, Instructor grading, graded/closed
+exclusion, reload, other-learner denial and left-course 403 passed. All seven owned
+resources, preview process and temporary build were verified absent. A final-code
+smoke after SA-R1 is recorded in the publication anchor below.
+
+The final self-audit inspected every authority write, reservation/sequence update,
+settlement guard, publication acknowledgement and confirmation transition. It
+covered before-render read initiation, success and failure, mutation-to-GET
+handoff (synchronous, with authority still uploading until checking is installed),
+GET settlement before presentation, stale cleanup and withdrawn confirmation.
+No related actionable defect remains in author verification. Unknown outcomes
+still require reloading and a deliberate action; a successful GET is not a barrier
+for an earlier server transaction whose response was lost. The frontend token is
+not a backend CAS condition. No unsupported guarantee against another session's
+replacement, automatic retry, flushSync, arbitrary waiting, persistent File, API
+extension or permanent lockout was introduced.
+
+Only `useAssignment.ts`, `AssignmentDetailPage.tsx`, `assignment.test.tsx`,
+`docs/testing.md` and `docs/setup.md` change relative to the reviewed baseline.
+The other 12 previously reviewed changed files remain byte-identical, including
+shared transport, Assignment client/decoder, bounded FE10 summary client/types/S10,
+S10/S13 routes/navigation, real E2E and structure authority. Protected-file transport,
+Markdown, theme and SA-01 Download placement remain intact. FE14/FE16/FE17 source,
+backend/OpenAPI/storage policy, dependencies and CI/protections are unchanged.
+
+Full backend, unrelated feature suites, all browser projects and the seven-width /
+three-theme matrix were omitted because those source/presentation areas are
+unchanged and the focused real production journey covers the affected seam.
+Previous independent protected-byte/Unicode, shared-consumer and theme evidence
+remains **previous evidence**, not new execution. Screen readers, native zoom,
+physical devices and complete QA08/CT19 remain unqualified. Hosted CI is not waited
+on or polled. FE08 Related Lesson remains upstream-blocked; FE10 retains its full
+attempt integration and three-file consolidation handoff. Independent narrow
+rereview, eligible CODEOWNER approval, required protected CI, QA and protected
+integration remain separate; no merge, release or deployment was performed.
+
+Final-code real smoke: **1 passed / 0 skipped**, 26.6 seconds, run
+`cm-e2e-1a21e204563-d1bbfe`. The same production journey above passed after SA-R1;
+all seven owned resources were verified absent, the preview exited and the temporary
+build was removed. No browser-specific risk justified repeating the other projects.
+
+### Remediation revision and narrow-review handoff
+
+Implementation revision: **`78e2697e1432260281a332e69ee04ee633b06bcc`**. Its production
+and test files are byte-identical to the working tree used by the final 66-case
+assignment run, 207-route run and typecheck. The recovered 9-case probe, build and
+final real smoke used the same production files; one additional duplicate-confirm
+control was appended afterwards and passed with the final 66-case suite/typecheck.
+This publication anchor changes documentation only; it is not another test run.
+
+Final author verdict: **FE11_TARGETED_REMEDIATION_COMPLETE_AUTHOR_VERIFIED**.
+FE11-IR-01 and FE11-IR-02: **FIXED_AUTHOR_VERIFIED**. No independent `VERIFIED_FIXED`
+claim is made. FE11-owned code completeness is restored under author verification;
+whole-Issue/upstream delivery and the previous independent REQUEST_CHANGES still
+require their separate gates. Recommended next step: **Final Narrow Delta-focused
+Independent Review — FE11-IR-01 & FE11-IR-02, Synchronous Mutation Admission,
+Replacement Confirmation Integrity and Contract-Compliant Error Recovery
+Preservation**, including SA-R1's operation-bound Cancel regressions.
+
+## AS17 platform reporting outcome read completion and author self-audit — 28 November 2026
+
+**Authority and provenance.** The Project Leader's explicit “AS17 Full-Scope
+Completion, Bounded Upstream Remediation and Final Technical Self-Audit” instruction
+(28 November 2026) authorizes AS17 implementation and test completion, bounded
+upstream slices, delegated technical decisions, documentation, self-audit and
+commit/push to PR #306. It excludes merge, Issue closure, deployment and independent
+approval. Claude Code (Anthropic) performed the audit, the additional tests and this
+record; this is author-side verification, not independent CODEOWNER review or QA
+acceptance. Follow-up commits carry the verified Git identity of the original
+contributor `minhtan29042006` as author and committer metadata only, under the
+Leader's task-specific arrangement; it is not evidence that the contributor
+personally wrote or approved the additions. The pusher is `chi-thanh-nguyen`.
+
+**Baselines.** Incoming PR HEAD `3bfc55cfe965f242249c7b8e817e34ede31bfda2`; main and
+merge-base `4ae384bd632bf4c6920b049cc155bc4a68576905` (the branch already contained
+main, so no integration merge was needed). The two contributor commits are preserved.
+The delivered SHA is recorded by Git and the PR, not self-referentially here.
+
+**Consumed contracts.** `CT13-METRICS-2026-11-15-r1` (ADR012 §13.1, CP-074) and
+`CT13-READS-2026-11-15-r1` (ADR012 §13.2, CP-089), both DELEGATED_APPROVED and not
+amended by ADR012 §§20–21 or ADR013; F7-11 (§20) is already reflected in the field
+name and hidden-Quiz scope. Latest-attempt tuple: ADR005 §6.1. Runtime role:
+`CT17-P6-PRIVILEGES-2026-11-26-r15` (`attempts` and `quizzes` SELECT already granted).
+No migration, privilege, REST, OpenAPI, frontend or new-file change is needed.
+
+**Upstream and delegated decisions.** AS08 (#159, PR #296) already delivers
+`AttemptService.readQuizOutcome` → `AttemptRepository.readQuizOutcome` →
+`AttemptRepositoryImpl.readQuizOutcome` (one PostgreSQL `row_number()` aggregate
+over Assessment-owned `attempts` and `quizzes`). No upstream slice was missing and no
+technical decision was open, so none was implemented or recorded.
+
+| Requirement (CT13) | Incoming | Final | Implementation | Evidence |
+|---|---|---|---|---|
+| Course scope; caller-supplied population only | COMPLETE (inherited) | COMPLETE | AS08 SQL `q.course_id`, `a.user_id IN (:learners)`; no Course table read | PR test (population subset); new cross-Course test both ways; outsider with only foreign/unsubmitted rows → `(0, null)` |
+| `practice`/`test` only; hidden Courses/Quizzes counted; unsubmitted excluded | COMPLETE (inherited) | COMPLETE | AS08 SQL | inherited tuple test; PR test (hidden Course and hidden `test` Quiz) |
+| One latest submitted attempt per (learner, Quiz) by ADR005 tuple | COMPLETE (inherited) | COMPLETE | `PARTITION BY user_id, quiz_id ORDER BY submitted_at, started_at, quiz text, attempt_number DESC` | inherited equal-time `attempt_number` case; new equal-`submitted_at` `started_at` case that beats a higher number and score; new later-unsubmitted case |
+| Pair count; exact mean HALF_UP to 2 digits; null when no pair | COMPLETE (inherited), midpoint unproven | COMPLETE | `round(avg(numeric), 2)` (half away from zero = HALF_UP for scores ≥ 0) | new `(33.33 + 0.00) / 2 = 16.665 → 16.67`; 0.00 (inherited) and 100.00 (new) bounds; empty population (inherited/PR) |
+| Corrupt projection fails closed; inputs validated and copied | PARTIAL → PR | COMPLETE | PR range/scale checks, `Objects.requireNonNull` before `Set.copyOf` (mirrors `readOwnedLatestSkillEvidence`) | PR unit tests; snapshot guard now proven to precede input validation |
+| Joins only the caller's read-only REPEATABLE READ snapshot | COMPLETE; real-proxy evidence only for “no transaction” | COMPLETE | `@Transactional(MANDATORY, readOnly, REPEATABLE_READ)` + `requireReportingSnapshot` | new real-proxy rejection of read-write RR and read-only READ COMMITTED callers; `transaction_read_only = on`; a concurrent committed pair is invisible inside the snapshot and visible after it |
+| Actorless; three aggregate fields; only `PlatformMetricsService` may call; no `api/` exposure | COMPLETE (inherited allowlist) + PR | COMPLETE | record shape; caller allowlist; `api/` identifier guard | PR unit tests and existing allowlist test |
+| Runtime role compatibility | Not executed for this read | COMPLETE | r15 matrix | existing AS08 restricted-role test now also runs the read under `SET LOCAL ROLE` |
+
+**Findings and remediation (all test-side; no production defect found).**
+AS17-F01 (P2) no oracle separated HALF_UP from HALF_EVEN/truncation (66.67, 50.00,
+25.00 and 0.00 are equal under each) — fixed by the 16.665 case. AS17-F02 (P3) the
+`started_at` tuple key was unexercised with differing scores — fixed. AS17-F03 (P2) a
+later unsubmitted attempt displacing the latest submitted one was untested — fixed.
+AS17-F04 (P2) cross-Course exclusion was untested for this read — fixed. AS17-F05 (P3)
+100.00 upper bound — fixed. AS17-F06 (P2) read-write and non-RR outer transactions
+were rejected only in a unit test with hand-set synchronization flags — fixed with
+real proxies. AS17-F07 (P2) snapshot stability under a concurrent commit — fixed.
+AS17-F08 (P2) the read had not run under the restricted runtime role — fixed. AS17-F09
+(P3) the unit test named “before validation” passed only valid inputs — fixed.
+AS17-F10 (P3, documentation) the PR body called the PR's integration fixture
+“tie-breaking” although its timestamps differ; tie-break evidence is inherited — PR
+body corrected. Observation (not remediated): the population binds one parameter per
+learner, so a single Course above the PostgreSQL bind limit (about 65,000 joined
+learners) would fail closed rather than return a wrong figure; this is far beyond
+project scale and CT13 sets no bound.
+
+**Executed commands (macOS, Docker 29.8.1, Testcontainers PostgreSQL).**
+
+```bash
+cd backend
+# Incoming HEAD 3bfc55c in a detached scratch worktree
+./mvnw -B '-Dtest=AttemptServiceTest' '-Dit.test=AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#ct13QuizOutcomeAggregatesMultiLearnerLatestPairsHalfUpAndIgnoresUnsubmittedAndHiddenCourseFilter+tupleTieBreakersHiddenQuizzesDiagnosticsAndPairAveragesKeepTheirDistinctSemantics+latestEvidenceAndReportingUseAuthoritativeTupleCountsAndLatestPairMean+incompatibleOuterTransactionsAndStartOrSaveDoNotGrantEvidenceExecution+realRuntimeMatrixPermitsOnlyTheImplementedAttemptOperations' verify
+# -> unit 78/0/0/0, PostgreSQL 5/0/0/0, BUILD SUCCESS
+# Final test files, same selectors plus 'as17*'
+# -> unit 78/0/0/0, PostgreSQL 7/0/0/0, BUILD SUCCESS (244 main, 67 test sources compiled)
+# Mutants (scratch worktree only; reverted):
+#   trunc() instead of round() + read-only clause removed from the snapshot guard
+#   -> both as17* tests FAIL (16.66; read-write caller admitted)
+#   started_at removed from the tuple -> as17 tuple test FAILS (50.00)
+```
+
+Counts are run/failures/errors/skipped. Not run, by risk: the full backend unit and
+integration suites, E2E, frontend, VM and release suites; only test files changed
+after the incoming baseline, and the caller-allowlist/`api/` guard ran inside
+`AttemptServiceTest`. Hosted CI was not awaited.
+
+**Self-audit and remaining gates.** A fresh pass over the final SQL, service guard,
+schema constraints (`ck_attempts_submission`, `uq_attempts_user_quiz_number`,
+`numeric(5,2)`), r15 matrix and the final diff found no further actionable AS17
+defect. Verdict: **AS17_CODE_COMPLETE_AUTHOR_VERIFIED** (Assessment producer code and
+tests). Separate and still open: CO16/AD16 producers, IN12 `PlatformMetricsService`
+composition and REST, FE23 UI, QA06 execution of B7-O11 end to end, independent
+CODEOWNER review, required hosted CI, protected squash merge, release and deployment.
+
+## AS18 conditional tagged-question coverage completion and author self-audit — 28 November 2026
+
+Scope: AS18 #164 in PR #307, under the Project Leader's “AS18 Full Implementation
+Completion, Bounded Upstream Remediation, and Final Self-Audit of PR #307”
+instruction. Author self-audit with AI assistance (Claude Code), not independent
+CODEOWNER review. Incoming PR HEAD `afc6731` (a concurrent contributor fix `0d23575`
+landed during the work and is kept unchanged); integrated with `main` `6c9c193`.
+Production/test revision for every result below: `e6b2c6a`.
+
+**Effective contracts.** `CT40-COVERAGE-2026-11-08-r1` (ADR005 §3.3),
+`CT40-SKILL-TAG-2026-11-08-r1` (§3.2), ADR005 §5/§13.3 guard semantics, ADR011 §4
+step 6 and §12 execution scope (B6-V09), `AS08-ANCESTRY-2026-11-26-r1` (ADR007 §16)
+and the one bounded new decision **`AS18-EXEC-COVERAGE-2026-11-28-r1`** (ADR007 §17,
+`DELEGATED_APPROVED`): `QuestionBankService.readCoverageForExecution` is the second
+and last direct caller of `SkillGraphService.requireAssessmentSkillsInCourse`, only
+after the execution scope is verified, because Course-wide readiness asks for skills
+no frozen Quiz captured.
+
+**Implemented boundaries** (existing `QuestionBankService`, no REST, no migration):
+
+| Boundary | Behavior |
+|---|---|
+| `CoverageSnapshot(UUID courseId, Map<UUID, Long> questionCounts)` | Nested, deeply immutable, no null key/value, nonnegative counts, no answer keys |
+| `readCoverage(courseId, skillIds)` | Null Course → `IllegalArgumentException`; only an owner REPEATABLE READ snapshot (its own or joined) or the Course-root READ COMMITTED write unit is accepted, else safe 500 before any query; then CT03 ownership, null set/element rejection, empty → empty map, CT40 `readSkillIds` scope with the same safe 404 for foreign/unknown skills, exact requested keys with explicit zeros |
+| `readCoverageForExecution(courseId, skillIds)` | `AttemptService.requireExecutionScope` first (actual read-write READ COMMITTED transaction, Assessment-private marker for this Course on this thread and physical transaction); no actor; empty → empty map without queries; ancestry through the §17 caller, a foreign skill is safe 500 |
+| Population (both) | Every stored Question of each requested skill, all kinds and difficulties, used or unused, hidden or published membership, counted once by ID; a row failing V004/data-model §11, a null provider result, a row of an unrequested skill or a repeated ID is an integrity failure, never a zero |
+| `QuestionRepository.findAllInSkills` | Assessment-private JPQL over its own `questions` table; materializes rows because a count-only query cannot detect malformed definitions |
+
+**Upstream dependencies.** AS01/AS05 question persistence and validation, AD07
+`readSkillIds` and the AS08 ancestry assertion, CO14 `withCourseConfigurationWrite`,
+AS08 execution marker and AS12 synchronous publication were sufficient; no upstream
+code was added. The AD07-owned change is the §17 caller and one Javadoc line in
+`SkillGraphService` (about 1% of AD07's scope).
+
+**Findings and dispositions.** AS18-R01 (P2) confirmed: the incoming PostgreSQL test
+updated a `true_false` row in violation of `ck_questions_true_false` and leaked its
+extra skill (reproduced at `afc6731`: `DataIntegrityViolationException`, suppressed FK
+cleanup failure); fixed by the contributor in `0d23575` and by new cases that corrupt a
+`single_choice` option to blank, which V004 stores and data-model §11 rejects. AS18-R02
+(P2) confirmed: the package-private `AttemptService` bridge satisfied the file
+allowlist without authorizing Course-wide input provenance; replaced by the §17
+decision and a direct call, removing the bridge. AS18-R03 (P2) confirmed: the
+annotation could silently join a read-only READ COMMITTED or read-write REPEATABLE
+READ context and read a mixed view; fixed by the context check (proven with the real
+`JpaTransactionManager`). AS18-R04 (P3) confirmed: the 5-argument constructor plus a
+compatibility constructor left `attemptService` null in reachable code; removed with
+the bridge (no dependency remains, the bean graph is acyclic). AS18-R05 (P3)
+confirmed: the incoming allowlist used string search and bare file names; replaced by
+the existing AST scanner with exact paths (`requireAssessmentSkillsInCourse`,
+`requireExecutionScope`, `readCoverageForExecution`, API-package bans). AS18-R06:
+covered by the PostgreSQL cases below; no privilege change was needed. New nit, not
+changed: the shared assertion's internal message still says “Quiz evidence” for a
+foreign coverage skill (safe 500, never exposed).
+
+**Executed commands (macOS, Docker 29.8.1, Testcontainers PostgreSQL, JDK 25).**
+
+```bash
+cd backend
+# Incoming HEAD afc6731: the incoming AS18 PostgreSQL test
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false \
+  '-Dit.test=AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#as18CoverageReadsEnforceCt40ScopeExecutionMarkerIntegrityAndZeroCountsInPostgresql'
+# -> 1/0/1/0 (ck_questions_true_false), BUILD FAILURE
+# Final revision e6b2c6a
+./mvnw -B verify '-Dtest=QuestionBankServiceTest*,AttemptServiceTest*' '-Dit.test=AssessmentPersistenceIntegrationTest*'
+# -> unit 191/0/0/0 (QuestionBankServiceTest 111 incl. 23 AS18, AttemptServiceTest 80),
+#    PostgreSQL 84/0/0/0 (5 as18* cases), BUILD SUCCESS
+# Pre-merge tree 1f95aaf: AuthorizationIntegrationTest$QuestionBankEndpoints 9/0/0/0
+# Mutants (reverted): context check removed; execution-scope check removed;
+#   stored-row validation removed; ancestry call removed -> each fails the AS18 unit
+#   suite and at least one as18* PostgreSQL case; an extra readCoverageForExecution
+#   caller in SkillGraphService fails the AST allowlist
+```
+
+Counts are run/failures/errors/skipped. PostgreSQL oracles: B1-O05 (reuse counted
+once, unused and hidden-only members count, requested zero-count skill present,
+foreign skill 404, corrupt row fails closed); the AS18 part of B1-O04 (a guarded
+readiness read holds the Course root, a same-Course `create` waits on it — observed in
+`pg_stat_activity` from an independent connection — and lands after commit, while
+another Course's `create` commits meanwhile); B6-V09 (no transaction, owner snapshot,
+plain read-write READ COMMITTED, Course configuration guard and learner write guard
+without the marker, wrong-Course marker, another thread, `REQUIRES_NEW`,
+`NOT_SUPPORTED`, after return, after a listener failure with the Attempt still
+unsubmitted; unit probes inside `start` and answer-save callbacks); positive reads in
+manual submission and actorless `finalizeExpired`; a corrupt stored row makes the
+execution read fail the whole submission; both reads run under a role granted only
+the `infrastructure/vm/deploy.sh` runtime matrix. Not run, by risk: the full backend
+suites, E2E, frontend, VM and release suites; hosted CI was not awaited.
+
+**Self-audit and remaining gates.** A fresh pass over the final diff against `main`
+found no further actionable AS18 defect. Limitation: a read-write READ COMMITTED
+caller cannot prove from Assessment that it holds the Course root, so AD08 must call
+`readCoverage` inside `withCourseConfigurationWrite` for a readiness decision (ADR005
+§5). Verdict: **AS18_CODE_COMPLETE_AUTHOR_VERIFIED** (Assessment provider code and
+tests). Separate and still open: AD08 settings/enablement consumer, AD13 execution
+consumer, QA03/QA04 whole-flow evidence, independent CODEOWNER review, required
+hosted CI, protected squash merge, release and deployment.
+
+## AS18 targeted test remediation (AS18-IR-01, AS18-IR-02) and author self-audit — 28 November 2026
+
+Scope: AS18 #164 in PR #307, under the Project Leader's “Targeted Test Remediation —
+AS18-IR-01 & AS18-IR-02” instruction. Test-only: one file,
+`AssessmentPersistenceIntegrationTest.java`. This is an author self-audit with AI
+assistance (Claude Code), not an independent review. The independent review of
+`c03bf2d` (`6fce59d` after the metadata normalization below) returned
+`REQUEST_CHANGES` for the two P2 findings. Its other dispositions are unchanged and
+remain the reviewer's: AS18-R01 to R05 `VERIFIED_FIXED`, and R06 `PARTIALLY_FIXED`
+because of these two findings.
+
+| Finding | Root cause | Remediation |
+|---|---|---|
+| AS18-IR-01 (P2) | The `CoverageFixture` constructor ran each insert in its own autocommit statement under `NOT_SUPPORTED`. When a statement failed, the earlier rows stayed committed, and try-with-resources never called `close()` on the unconstructed object. The reviewer reproduced this with a `23514` failure on `Hidden only`: an extra Skill and the foreign Course remained, and teardown then failed on `fk_skills_course_id`. | `fixtureTransaction` runs setup in one bounded physical transaction: `READ COMMITTED`, 10 s timeout, `SET LOCAL lock_timeout`/`statement_timeout`. It asserts that it owns that transaction and commits before any worker starts. Cleanup deletes every row the fixture owns, FK-safely, in one bounded transaction, including Questions that workers authored in the fixture's skills. The first AS18 case's extra rows use the same transaction. |
+| AS18-IR-02 (P2) | `as18GuardedReadiness…` closed the fixture before shutting down the executor. A worker that timed out while holding a Course root therefore left `DELETE courses` waiting without a bound, and a later Question insert hit `fk_questions_skill_id`. | The authors now run through the existing `AttemptWorkers`, unchanged, which provides physical transaction ownership, PID tracking, `PENDING`/`CANCELLED`/`ADMITTED` commit admission and bounded termination. `CoverageWorkerRun.close()` calls `AttemptWorkers.close()` first: stop admission, release the blocker, cancel, then wait at most 10 s. Fixture rows are deleted only after the executor has terminated, every started worker transaction has completed, and no tracked backend has an open transaction, a lock wait or a lock. The decision depends on this gate, not on whether close succeeded or a Future was cancelled. If quiescence cannot be established, a bounded recovery terminates only this run's tracked worker backends that still hold a transaction or lock wait, then waits up to 5 s. The recovery is always reported as a failure, and fixture cleanup is withheld if the workers are still not quiescent. |
+
+The shared AS08 `assertWorkerResourcesReleased` helper now excludes its own backend
+(`pid<>pg_backend_pid()`). The connection pool can hand the probe a worker's
+returned connection, and the probe then reported its own statement as a leaked
+transaction. This was observed once during this work. A worker connection that is
+still in use cannot be handed out, so the exclusion does not weaken the check.
+
+**Regression oracles (real PostgreSQL).**
+`as18FailedCoverageFixtureSetupRollsBackEveryFixtureRowAndKeepsTheCourseUsable`
+injects a real `ck_questions_kind` (`23514`) failure inside the setup transaction
+after each of six milestones: extra Skill, foreign Course, foreign Skill, first
+Question, hidden Quiz and first membership. Each case first observes that the
+fixture's rows are visible inside the transaction. It then checks, through
+independent reads, that none survives, that the AS08 Course is intact (exactly one
+owned Course, its Skill, q1/q2 and its Quiz), that a new fixture, an owner coverage
+read and a guarded authoring call succeed, and that the outer teardown passes.
+`as18WorkerFailurePathsAreBoundedAndCleanFixturesOnlyAfterWorkerQuiescence` covers:
+
+- D1: a timeout while a worker holds the foreign Course root (`FOR UPDATE NOWAIT` → `55P03`) and an uncommitted Question.
+- D2: a worker action failure after a write.
+- D3: a main-thread failure while a same-Course worker waits for the root.
+- D4: interruption, with the flag preserved.
+- D6: a blocker rollback fault that the expected primary cannot conceal (`IR296` under `AS18 coverage cleanup failed`).
+
+Each D case requires a bound under 20 s, `CANCELLED`/`STATUS_ROLLED_BACK`, no FK
+failure in the worker, rolled-back completions recorded at the gate, no worker
+Question, no fixture row, released resources (`assertWorkerResourcesReleased`) and
+a later usable Course.
+
+`as18FixtureCleanupWaitsForAnAdmittedWorkerCommitBeforeDeletingFixtureRows` (D5) has
+a worker admitted before cancellation and holds its real commit on an advisory
+lock. While that commit is held, the cancelled Future, the alive closer, the intact
+foreign Course and the absent row prove that cleanup has not started. After
+release, the commit completes (`STATUS_COMMITTED` at the gate) before the committed
+Question is deleted with its fixture Skill.
+
+`as18NonCooperativeWorkerIsTerminatedBeforeFixtureCleanupAndCannotPass` has a worker
+that removes its own timeouts. The test shows that recovery terminates only its
+tracked PID, that the primary carries `AS08 workers exceeded the cleanup deadline`
+plus the recovery failure, and that cleanup runs only afterwards. The success-path
+oracle is unchanged: the same-Course `create` waits on the holder (observed from an
+independent connection), the other Course commits meanwhile, the snapshot is stable
+while the root is held, and coverage is fresh afterwards. Both workers end
+`ADMITTED`/`STATUS_COMMITTED`.
+
+**Executed commands (macOS, Docker 29.8.1, Testcontainers PostgreSQL, JDK 25;
+`-Djacoco.skip=true` for focused runs).** Tested revision: `26389e7`, tree
+`862225a`. Its metadata-normalized successor `5e22a57` has the identical tree,
+so the results apply to it unchanged.
+
+```bash
+cd backend
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true \
+  '-Dit.test=AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#as18*+failureBeforeBlockerCommit*+cleanupFailureCannotQualify*+rollbackAndCloseFailures*+jdbcCompletionWait*'
+# -> 32/0/0/0: 18 as18* (5 existing + 13 new) and 14 AS08 AttemptWorkers qualification cases
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true \
+  '-Dit.test=AssessmentPersistenceIntegrationTest*'
+# -> 97/0/0/0 (84 previous + 13 new), BUILD SUCCESS
+# as18* repeated twice more -> 18/0/0/0 each; runaway case about 10.2 s by design, others under 0.4 s
+# Mutants (temporary, restored byte-identically):
+#   M1 setup without the transaction -> all 6 setup-failure cases fail (1 to 9 leaked rows)
+#   M2 fixture cleanup before worker quiescence (pre-remediation order) -> D1 fails
+#      (5 s lock timeout surfaces as a concealed cleanup failure) and D5 fails
+#      (cleanup never reaches the worker gate); both runs stayed bounded
+```
+
+Counts are run/failures/errors/skipped. The production source, migrations,
+OpenAPI and decisions are byte-identical to `c03bf2d`. This includes
+`QuestionBankService`, `CoverageSnapshot`, ADR007 §17, CT40 semantics, runtime
+privileges, and the AS08, AS12 and AS17 code. Not run, by risk: the 191 unit tests,
+because no production or unit-test file changed; the full backend, frontend, E2E,
+VM and release suites; hosted CI was not awaited. The pre-remediation failures
+were not re-run on `c03bf2d`. M1 and M2 rebuild that behavior under the new
+oracles instead.
+
+**Metadata normalization.** The Project Leader confirmed mutual consent with
+`minhtan29042006`. On that basis, the Git author and committer of every
+PR-exclusive commit now carry that contributor's existing commit identity. Only
+the identity fields, and the parent links that follow from them, changed: trees,
+messages, dates, parent order and the main-side merge parent `6c9c193` are
+preserved. No commit was signed before or after. The two contributor commits are
+byte-identical. Provenance remains as before: `afc6731` and `0d23575` are the
+contributor's own work. The other commits, including this remediation, were made
+by the Project Leader with AI assistance (Claude Code) and carry the contributor
+identity only by this agreement. Pushed by `chi-thanh-nguyen`.
+
+| Before | After | Before | After |
+|---|---|---|---|
+| `afc6731` | `afc6731` | `2888cb2` | `8df2f81` |
+| `0d23575` | `0d23575` | `e6b2c6a` | `4dcb2ae` |
+| `1936891` | `d0461e3` | `c03bf2d` | `6fce59d` |
+| `54c8db2` | `875416a` | `26389e7` | `5e22a57` |
+| `1f95aaf` | `d9ce39a` | | |
+
+**Self-audit and remaining gates.** A fresh pass over the final delta found no
+remaining actionable instance of either finding and no new regression. One
+residual is accepted rather than fixed: a fixture leaks only if the worker pool
+itself cannot be created, or if the D5 or runaway test cannot obtain its holder
+connection. Both are infrastructure failures, and the outer teardown then fails
+visibly on an FK instead of passing. Verdict:
+**AS18_TARGETED_TEST_REMEDIATION_COMPLETE_AUTHOR_VERIFIED**. AS18-IR-01 and
+AS18-IR-02 are `FIXED_AUTHOR_VERIFIED`, not independently verified. Still open: a
+narrow independent delta review, Assessment/Adaptive CODEOWNER review, required
+hosted CI and CodeQL, protected squash merge, the AD08/AD13 consumers, QA03/QA04,
+release and deployment.
+
+## AS18 targeted test remediation (AS18-IR-03) and author self-audit — 28 November 2026
+
+Scope: AS18 #164 in PR #307, under the Project Leader's “Targeted Test Remediation —
+AS18-IR-03” instruction. Test-only: `AssessmentPersistenceIntegrationTest.java` and
+the shared `AbstractIntegrationTest.java`. This is an author self-audit with AI
+assistance (Claude Code), not an independent review.
+
+**Review baseline.** Two independent reviews of `0feaddd` disagreed. Codex returned
+`REQUEST_CHANGES`: AS18-IR-01 `VERIFIED_FIXED`, AS18-IR-02 and AS18-R06
+`PARTIALLY_FIXED`, and a new P2, AS18-IR-03. It ran 31 PostgreSQL cases, excluding the
+non-cooperative worker case, and found no production defect. Claude Code returned
+`APPROVE_AFTER_GATES` with IR-01, IR-02 and R06 `VERIFIED_FIXED` (32/0, then 18/0).
+Its failed-recovery probe finished in about 15.4 s, but the outer teardown then
+failed on `fk_skills_course_id`. The Project Leader decided to remediate AS18-IR-03:
+a bounded probe does not prove isolation when cleanup stays incomplete. AS18-IR-01
+stays independently `VERIFIED_FIXED` and AS18-R01 to R05 stay closed. Final closure
+of AS18-IR-02 and AS18-R06 depends on this remediation. No unbounded outer-teardown
+hang was reproduced.
+
+**AS18-IR-03 (P2) root cause.** The AS18-IR-02 gate covered only part of the
+cleanup. `CoverageWorkerRun.close()` withheld its own fixture cleanup when workers
+were not quiescent. JUnit then ran `TimedAttemptRuntime.deleteAttemptFixtures()`,
+which did not know the run's outcome. It deleted the primary Course's attempts,
+quizzes, questions, Skill, enrollments, Course, sessions and users in separate
+autocommit statements. Those deletes could race a live worker or wait on its locks.
+They could also stop at an FK, because the withheld fixture's Skill and hidden Quiz
+belong to the primary Course. The rows deleted before the FK stayed deleted. The
+per-JVM shared database was then partly deleted, and later classes could still use
+it.
+
+**Remediation.**
+
+- Registration: `CoverageWorkerRun` registers with the enclosing test as soon as its
+  workers exist, before any worker can be submitted. It records a `lifecycle`:
+  `OPEN`, `CLOSING`, `QUIESCENT` (gate passed), `CLEANED` (fixture deleted) or
+  `WITHHELD`. Only `QUIESCENT` and `CLEANED` permit cleanup.
+- Gated teardown: `deleteAttemptFixtures()` first settles every registered run. It
+  closes a run the test never closed and reports that failure as new. For a run
+  that withheld its cleanup or never reached the gate, it re-checks the same real
+  gate: executor terminated, every transaction completed, and no tracked backend
+  transaction, lock wait or lock. A cancelled Future never counts. If quiescence
+  is still not confirmed, the teardown deletes nothing and throws a distinct
+  `AS18 outer fixture cleanup withheld` failure caused by the run's own cleanup
+  failure.
+- Bounded and atomic: otherwise the teardown runs one `fixtureTransaction`
+  (10 s, `lock_timeout` 5 s, `statement_timeout` 8 s). In it, the same FK-ordered
+  deletes remove the rows of any run fixture not yet `CLEANED`, then the primary
+  fixture. A failure rolls the whole transaction back, so no partly deleted fixture
+  remains. Tests without worker runs keep the same deletes, now atomic and bounded.
+- Fail closed: both a withheld and a rolled-back outer cleanup record the failure
+  through `AbstractIntegrationTest.recordIsolationLoss`. The container is shared per
+  JVM, so the base class's `@BeforeEach requireSharedPostgresqlIsolation` then fails
+  every later integration test in that JVM, in any class. Each such failure carries
+  the original failure as its cause, so the run cannot pass. Nothing truncates,
+  resets the context or stops the JVM. Only a qualification test that simulated a
+  loss clears it, and only that exact failure (`clearSimulatedIsolationLoss`).
+- Unchanged: `AttemptWorkers`, the AS18-IR-02 gate and recovery, the
+  `STATUS_UNKNOWN` handling and all existing oracles.
+
+**Regression oracles (real PostgreSQL).** Each new case calls the real JUnit methods,
+`deleteAttemptFixtures()` and `requireSharedPostgresqlIsolation()`, directly.
+
+- `as18Ir03OuterTeardownWithholdsCleanupAndFailsClosedWhileWorkerQuiescenceIsUnconfirmed`
+  uses a test-only seam (`forceUnconfirmedQuiescence`) so the real gate reports
+  unconfirmed quiescence. The worker is not actually blocked: it really commits a
+  Question and terminates. The run withholds its cleanup (`WITHHELD`). The outer
+  teardown then deletes nothing: independent reads still see all 13 primary rows,
+  every fixture row and the worker's Question. Its failure is distinct from the
+  primary, is caused by the run's cleanup failure and is recorded as the isolation
+  loss, and the guard refuses with it as cause. The primary
+  (`Injected AS18-IR-03 primary failure`) still cannot conceal its cleanup failure.
+  The seam and the recorded loss are then restored. The JUnit teardown re-checks the
+  real gate and removes every row.
+- `as18Ir03OuterTeardownClosesAnUnclosedWorkerRunAndDeletesOnlyOwnedRowsAfterQuiescence`:
+  a run is left unclosed after a committed same-Course worker write. The teardown
+  closes it (`CLEANED`, `STATUS_COMMITTED` at the gate, resources released). It
+  removes every primary and fixture row and the worker's Question, records no loss,
+  and leaves another instructor's Course and Skill untouched.
+- `as18Ir03FailedOuterCleanupRollsBackAtomicallyAndFailsLaterIntegrationTestsClosed`
+  takes the ordinary path, with no worker run. An unowned Skill in the primary
+  Course makes `DELETE courses` fail (`23503`, `fk_skills_course_id`), the failed
+  probe's shape. All 13 primary rows survive, including those deleted earlier in the
+  same transaction. The failure is recorded and the guard refuses with it as cause.
+
+**Executed commands (macOS, Docker 29.8.1, Testcontainers PostgreSQL, JDK 25.0.4.1;
+`-Djacoco.skip=true`).** Tested working tree: `0feaddd` plus this remediation, the
+tree committed as the remediation commit.
+
+```bash
+cd backend
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true \
+  '-Dit.test=AssessmentPersistenceIntegrationTest$TimedAttemptRuntime#as18*+failureBeforeBlockerCommit*+cleanupFailureCannotQualify*+rollbackAndCloseFailures*+jdbcCompletionWait*'
+# -> 35/0/0/0: 21 as18* (18 existing incl. the non-cooperative worker case, 3 new)
+#    and 14 AS08 AttemptWorkers qualification cases
+./mvnw -B verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true
+# -> 757/0/0/0 across all integration classes (TimedAttemptRuntime 100/0/0/0), BUILD SUCCESS, 3 min 24 s
+# Mutants (temporary, restored byte-identically by checksum), '#as18Ir03*' only:
+#   M3 previous unconditional autocommit teardown -> 3/3 detected; the withheld case
+#      reproduces the reported fk_skills_course_id teardown failure
+#   M4 outer teardown ignores the run outcome -> withheld case fails
+#   M5 no isolation-loss recording -> withheld and rolled-back cases fail
+```
+
+Counts are run/failures/errors/skipped. The production source, unit tests
+(`QuestionBankServiceTest`, `AttemptServiceTest`), migrations, OpenAPI, decisions
+including ADR007 §17, the runtime privilege matrix and all other non-test files are
+byte-identical to `0feaddd`. Not run, by risk: the 191 unit tests, because no
+production or unit-test file changed; the frontend, E2E, VM and release suites;
+hosted CI was not awaited.
+
+**Self-audit.**
+
+1. The outer teardown deletes nothing unless every registered run is confirmed
+   quiescent.
+2. No exit can bypass registration. A run registers before its first submission, and
+   an unclosed run is closed by the teardown.
+3. A cancelled Future never authorizes cleanup.
+4. No cleanup failure is lost. A withheld or rolled-back cleanup throws and is
+   recorded. A run that the teardown closed throws after a safe cleanup.
+5. After a loss, every later integration test in the JVM errors.
+6. Every outer cleanup step is bounded.
+7. Successful and ordinary cleanup pass across the full integration suite.
+8. `AttemptWorkers` and the 14 AS08 cases are unchanged and pass.
+
+Residuals, accepted:
+
+- AS08 cases that use `AttemptWorkers` without a `CoverageWorkerRun` are not
+  quiescence-gated, which is outside AS18-IR-03. Their outer cleanup is now bounded
+  and atomic and fails closed.
+- Teardown failures in other integration classes do not record a loss. Only the
+  guard is shared.
+- The fail-closed guard covers the classes that extend `AbstractIntegrationTest`.
+  `SharedRestInfrastructureIntegrationTest` uses no database.
+
+Provenance: this remediation was made by the Project Leader with AI assistance
+(Claude Code). Under the recorded agreement, it carries the contributor identity
+used by every PR-exclusive commit. Verdict:
+**AS18_IR03_TARGETED_TEST_REMEDIATION_COMPLETE_AUTHOR_VERIFIED**. AS18-IR-03 is
+`FIXED_AUTHOR_VERIFIED`, not independently verified. AS18-IR-02 and AS18-R06 are
+remediated within author verification, and their independent closure is pending.
+Still open:
+
+- a final micro-delta independent review;
+- Assessment/Adaptive CODEOWNER review, plus Leader review of the
+  `AbstractIntegrationTest` change;
+- required hosted CI and CodeQL, and the protected squash merge;
+- AD08/AD13, QA03/QA04, release and deployment.

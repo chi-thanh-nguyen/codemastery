@@ -68,6 +68,7 @@ import com.codemastery.modules.assessment.application.service.AttemptService.Att
 import com.codemastery.modules.assessment.application.service.AttemptService.AttemptView;
 import com.codemastery.modules.assessment.application.service.AttemptService.LatestSkillEvidence;
 import com.codemastery.modules.assessment.application.service.AttemptService.LearnerAttemptSummary;
+import com.codemastery.modules.assessment.application.service.AttemptService.QuizOutcome;
 import com.codemastery.modules.assessment.application.service.AttemptService.SkillEvidence;
 import com.codemastery.modules.assessment.application.service.AttemptService.StartOutcome;
 import com.codemastery.modules.assessment.application.service.QuizGradingService;
@@ -75,6 +76,7 @@ import com.codemastery.modules.assessment.domain.model.Attempt;
 import com.codemastery.modules.assessment.domain.model.AttemptAnswer;
 import com.codemastery.modules.assessment.domain.repository.AttemptRepository;
 import com.codemastery.modules.assessment.domain.repository.AttemptRepository.EvidenceCandidate;
+import com.codemastery.modules.assessment.domain.repository.AttemptRepository.Outcome;
 import com.codemastery.modules.assessment.domain.repository.AttemptRepository.OwnedLearnerAttemptRow;
 import com.codemastery.modules.auth.application.service.UserAccountService;
 import com.codemastery.modules.auth.application.service.UserAccountService.CurrentIdentity;
@@ -904,7 +906,12 @@ class TimedAttempts {
         String assessment = "com/codemastery/modules/assessment/";
         String adaptive = "com/codemastery/modules/adaptive/application/";
         java.util.Map<String,java.util.Set<String>> allowed = java.util.Map.ofEntries(
-                java.util.Map.entry("requireAssessmentSkillsInCourse", java.util.Set.of(assessment + "application/service/AttemptService.java")),
+                java.util.Map.entry("requireAssessmentSkillsInCourse", java.util.Set.of(assessment + "application/service/AttemptService.java",
+                        assessment + "application/service/QuestionBankService.java")),
+                java.util.Map.entry("requireExecutionScope", java.util.Set.of(assessment + "application/service/AttemptService.java",
+                        assessment + "application/service/QuestionBankService.java")),
+                java.util.Map.entry("readCoverageForExecution", java.util.Set.of(adaptive + "mastery/MasteryUpdateService.java",
+                        adaptive + "decision/AdaptiveDecisionService.java")),
                 java.util.Map.entry("withLearnerAssessmentWrite", java.util.Set.of(assessment + "application/service/AttemptService.java")),
                 java.util.Map.entry("withAssessmentExpiryWrite", java.util.Set.of(assessment + "application/service/AttemptService.java")),
                 java.util.Map.entry("finalizeExpired", java.util.Set.of(assessment + "application/scheduler/AttemptAutoSubmitScheduler.java")),
@@ -927,8 +934,9 @@ class TimedAttempts {
                 }
                 if (relative.startsWith(assessment + "api/")) {
                     for (String forbidden : List.of("LatestSkillEvidence", "SkillEvidence", "LearnerAttemptSummary",
-                            "QuizSubmittedEvent", "readLatestSkillEvidence", "readMyLatestSkillEvidence",
-                            "readOwnedLatestSkillEvidence", "listLearnerAttemptsForOwner")) {
+                            "QuizOutcome", "QuizSubmittedEvent", "readLatestSkillEvidence", "readMyLatestSkillEvidence",
+                            "readOwnedLatestSkillEvidence", "listLearnerAttemptsForOwner", "readQuizOutcome",
+                            "CoverageSnapshot", "readCoverage", "readCoverageForExecution")) {
                         assertFalse(scan.identifiers().contains(forbidden), file + " exposes " + forbidden);
                     }
                 }
@@ -948,7 +956,8 @@ class TimedAttempts {
 
     @ParameterizedTest
     @ValueSource(strings = {"readLatestSkillEvidence", "readMyLatestSkillEvidence",
-            "readOwnedLatestSkillEvidence", "listLearnerAttemptsForOwner"})
+            "readOwnedLatestSkillEvidence", "listLearnerAttemptsForOwner", "readCoverageForExecution",
+            "requireAssessmentSkillsInCourse"})
     void evidenceAllowlistDetectsSpacedCallsUnqualifiedCallsAndMethodReferences(String method) throws Exception {
         for (String statement : List.of("service . " + method + " (null);", method + " (null);",
                 "Object callback = service :: " + method + ";")) {
@@ -1594,6 +1603,127 @@ class TimedAttempts {
                 when(attemptRepo.findSubmittedForLearnerInCourse(COURSE, targetLearner, 0, 20)).thenReturn(corrupt);
                 assertThrows(IllegalStateException.class,
                         () -> attemptService.listLearnerAttemptsForOwner(COURSE, targetLearner, 0, 20));
+            }
+        }
+    }
+
+    @Nested
+    class As17ReportingOutcomeReads {
+
+        private AttemptRepository attemptRepo;
+        private QuizRepository quizRepo;
+        private CourseAccessService access;
+        private UserAccountService identities;
+        private AttemptService attemptService;
+
+        @BeforeEach
+        void setUpReportingReads() {
+            attemptRepo = mock(AttemptRepository.class);
+            quizRepo = mock(QuizRepository.class);
+            access = mock(CourseAccessService.class);
+            identities = mock(UserAccountService.class);
+            attemptService = new AttemptService(
+                    attemptRepo, quizRepo, new QuizGradingService(), access, identities,
+                    mock(CourseManagementService.class), mock(SkillGraphService.class),
+                    mock(ApplicationEventPublisher.class));
+        }
+
+        @org.junit.jupiter.api.AfterEach
+        void clearSnapshot() {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(false);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(null);
+        }
+
+        private void enterSnapshot() {
+            org.springframework.transaction.support.TransactionSynchronizationManager.setActualTransactionActive(true);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
+                    org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        }
+
+        @Test
+        void declaresMandatoryRepeatableReadOnlyTransactionAndAnonymizedQuizOutcomeShape() throws Exception {
+            var method = AttemptService.class.getMethod("readQuizOutcome", UUID.class, java.util.Set.class);
+            var tx = method.getAnnotation(org.springframework.transaction.annotation.Transactional.class);
+            assertTrue(tx != null);
+            assertEquals(org.springframework.transaction.annotation.Propagation.MANDATORY, tx.propagation());
+            assertTrue(tx.readOnly());
+            assertEquals(org.springframework.transaction.annotation.Isolation.REPEATABLE_READ, tx.isolation());
+
+            assertEquals(List.of("UUID courseId", "long scoredLearnerQuizPairs", "BigDecimal averageQuizScore"),
+                    Arrays.stream(QuizOutcome.class.getRecordComponents())
+                            .map(c -> c.getType().getSimpleName() + " " + c.getName())
+                            .toList());
+        }
+
+        @Test
+        void rejectsMissingReadWriteOrNonRepeatableReadSnapshotsBeforeValidationOrQueries() {
+            var learners = java.util.Set.of(UUID.randomUUID());
+            // The snapshot guard precedes input validation: invalid inputs still report the snapshot.
+            assertThrows(IllegalStateException.class, () -> attemptService.readQuizOutcome(null, null));
+            assertThrows(IllegalStateException.class, () -> attemptService.readQuizOutcome(COURSE, learners));
+
+            enterSnapshot();
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+            assertThrows(IllegalStateException.class, () -> attemptService.readQuizOutcome(COURSE, learners));
+
+            enterSnapshot();
+            org.springframework.transaction.support.TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(
+                    org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+            assertThrows(IllegalStateException.class, () -> attemptService.readQuizOutcome(COURSE, learners));
+
+            verifyNoInteractions(attemptRepo, quizRepo, access, identities);
+        }
+
+        @Test
+        void validatesInputsCopiesLearnersAtomicallyAndReturnsActorlessOutcomes() {
+            enterSnapshot();
+            assertThrows(IllegalArgumentException.class,
+                    () -> attemptService.readQuizOutcome(null, java.util.Set.of()));
+            assertThrows(NullPointerException.class,
+                    () -> attemptService.readQuizOutcome(COURSE, null));
+            java.util.Set<UUID> withNull = new java.util.HashSet<>();
+            withNull.add(UUID.randomUUID());
+            withNull.add(null);
+            assertThrows(NullPointerException.class,
+                    () -> attemptService.readQuizOutcome(COURSE, withNull));
+            verifyNoInteractions(attemptRepo, access, identities);
+
+            when(attemptRepo.readQuizOutcome(COURSE, java.util.Set.of())).thenReturn(new Outcome(0L, null));
+            assertEquals(new QuizOutcome(COURSE, 0L, null),
+                    attemptService.readQuizOutcome(COURSE, java.util.Set.of()));
+
+            UUID learnerA = UUID.fromString("00000000-0000-0000-0000-00000000e001");
+            UUID learnerB = UUID.fromString("00000000-0000-0000-0000-00000000e002");
+            java.util.Set<UUID> callerLearners = new java.util.HashSet<>(List.of(learnerA, learnerB));
+            when(attemptRepo.readQuizOutcome(eq(COURSE), any())).thenAnswer(inv -> {
+                java.util.Set<UUID> passed = inv.getArgument(1);
+                assertThrows(UnsupportedOperationException.class, () -> passed.add(UUID.randomUUID()));
+                assertEquals(java.util.Set.of(learnerA, learnerB), passed);
+                return new Outcome(3L, new BigDecimal("66.67"));
+            });
+
+            QuizOutcome result = attemptService.readQuizOutcome(COURSE, callerLearners);
+            assertEquals(new QuizOutcome(COURSE, 3L, new BigDecimal("66.67")), result);
+            verifyNoInteractions(access, identities);
+        }
+
+        @Test
+        void rejectsCorruptRepositoryOutcomeProjections() {
+            enterSnapshot();
+            java.util.Set<UUID> learners = java.util.Set.of(UUID.randomUUID());
+            for (Outcome corrupt : Arrays.asList(
+                    null,
+                    new Outcome(-1L, null),
+                    new Outcome(0L, new BigDecimal("0.00")),
+                    new Outcome(1L, null),
+                    new Outcome(1L, new BigDecimal("-0.01")),
+                    new Outcome(1L, new BigDecimal("100.01")),
+                    new Outcome(1L, new BigDecimal("50.0")),
+                    new Outcome(1L, new BigDecimal("50.005")))) {
+                when(attemptRepo.readQuizOutcome(COURSE, learners)).thenReturn(corrupt);
+                assertThrows(IllegalStateException.class, () -> attemptService.readQuizOutcome(COURSE, learners));
             }
         }
     }

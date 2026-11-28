@@ -207,6 +207,10 @@ public class SecurityConfig {
                         .requestMatchers(ASSIGNMENT_OPERATIONS).authenticated()
                         // CT09/CT21 material operations: exact paths only; stage 2 precedes application role checks.
                         .requestMatchers(MATERIAL_OPERATIONS).authenticated()
+                        // ADR012 §12: authentication precedes media/path/query, then application CT03 admission.
+                        .requestMatchers(HttpMethod.GET, "/api/lessons/{lessonId}/discussion").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/lessons/{lessonId}/discussion",
+                                "/api/lessons/{lessonId}/reports", "/api/lessons/{lessonId}/discussion/{postId}/reports").authenticated()
                         // Other protected bindings retain default-deny.
                         .anyRequest().denyAll())
                 .addFilterBefore(new RefreshCookieSecurity.TrustedOriginFilter(refreshCookies, restSecurityErrorHandler),

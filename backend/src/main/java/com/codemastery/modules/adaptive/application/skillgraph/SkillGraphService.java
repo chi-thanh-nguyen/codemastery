@@ -97,7 +97,9 @@ public class SkillGraphService {
 
     /**
      * ADR007 §16: assertion-only companion for AttemptService after Course admission or inside its
-     * Course-root callback. No graph data, actor parameter or replacement for owner-only reads.
+     * Course-root callback. ADR007 §17 adds exactly one caller, Assessment's execution-only
+     * {@code QuestionBankService.readCoverageForExecution}, after its execution scope is verified.
+     * No graph data, actor parameter or replacement for owner-only reads.
      */
     public void requireAssessmentSkillsInCourse(UUID courseId, java.util.Set<UUID> skillIds) {
         requireId(courseId);

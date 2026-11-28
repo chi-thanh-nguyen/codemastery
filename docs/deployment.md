@@ -5813,3 +5813,27 @@ The optional cache argument is conditional in the release and ingress shell
 consumers. It uses no empty array expansion under nounset, preserving the
 operator's Bash 3.2 path when the CI-only input is absent. A regression executes
 the actual consumer shell for absent, empty and spaced paths on native Bash.
+
+
+### CT17-P6-PRIVILEGES-2026-11-27-r17 — IN06 discussion and reports (27 November 2026)
+
+**Authority.** The Project Leader's explicit IN06 completion instruction delegates this
+consumer revision within ADR012 §19.2. OpenAI Codex implemented it in PR #303. This
+replaces only the two deferred r1 rows below and preserves r2–r16, all 27 relations,
+all reviewed columns and immutable/Flyway history. It authorizes tooling, not grants
+on a shared or deployed database. No migration is added or edited.
+
+| Relation | Privileges | Consumer and rationale |
+|---|---|---|
+| `discussion_posts` (interaction) | SELECT, INSERT; UPDATE (is_hidden) | CT30 question/reply reads and inserts; parent FOR SHARE; CT32 FOR UPDATE and targeted hiding |
+| `content_reports` (interaction) | SELECT, INSERT; UPDATE (status, resolved_at) | CT30 intake; CT32 queue, deterministic report FOR UPDATE and terminal resolution/dismissal |
+
+No DELETE, immutable-column UPDATE, table-wide UPDATE, DDL, TRUNCATE, REFERENCES,
+TRIGGER, MAINTAIN or grant option is permitted. Existing r13 notifications cover the
+reply notification in the same transaction. `deploy.sh`, matrix-contract and
+containment probes and real-backend runtime-role consumer tests ship together.
+The focused PostgreSQL suite additionally invokes real JPA adapters under a local
+restricted role to prove parent locks and targeted moderation writes. IN21's Admin
+REST/orchestration/audit remains a downstream responsibility. Provisioning on actual
+hosts, independent infrastructure/CODEOWNER review, hosted CI and protected integration
+remain separate gates. Execution results are recorded in `docs/testing.md`.

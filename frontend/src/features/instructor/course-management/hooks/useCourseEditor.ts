@@ -13,7 +13,7 @@ import type { SkillSource } from '../components/QuestionForm';
 import { ApiError, cancelled } from '../../../../shared/types/apiTypes';
 import type { AuthoringRequestOptions } from '../api/assessmentAuthoringApi';
 import type { AuthoringOperationOwner } from './useAssessmentEditor';
-import { isCancelled, outcomeUnknown, useAuthoringOperation, useOwnerRead } from './useAssessmentEditor';
+import { failureStatus, isCancelled, outcomeUnknown, useAuthoringOperation, useOwnerRead } from './useAssessmentEditor';
 import type { OwnerRead } from './useAssessmentEditor';
 import { useOwnedSkillGraph } from '../../skill-graph-editor/hooks/useSkillGraph';
 import type { OwnedSkillGraphRead } from '../../skill-graph-editor/hooks/useSkillGraph';
@@ -73,6 +73,11 @@ export interface SharedCourseContextState {
         status: 'loading' | 'ready' | 'error';
         data: OwnedCourse | null;
         error: unknown;
+        /** Pending owner read, including refresh of a retained tree; optional for legacy overrides. */
+        loading?: boolean;
+        /** FE16-specific authority; other Course consumers keep their existing policies. */
+        assignmentRefusal?: 403 | 404;
+        assignmentWritesBlocked?: () => boolean;
         /** Sequence of the GET that supplied data; retained bodies keep their old sequence. */
         successfulRead: number;
         /** Schedules the shared read and returns its minimum eligible initiation sequence. */
@@ -110,6 +115,8 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
     // Count actual GET initiations, not renders, reload scheduling or response arrival. The existing owner-read
     // lifecycle accepts only current, non-superseded results and retains this envelope unchanged on read failure.
     const readSequence = useRef(0);
+    const scheduledRead = useRef(0);
+    const assignmentBarrier = useRef(true);
     const courseRead = useOwnerRead(`owned-course|${courseId}`, async (options) => {
         const sequence = ++readSequence.current;
         const body = await getOwnedCourse(courseId, options);
@@ -117,6 +124,8 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
     });
     const reloadCourse = useCallback(() => {
         const minimumRead = readSequence.current + 1;
+        scheduledRead.current = minimumRead;
+        assignmentBarrier.current = true;
         courseRead.reload();
         return minimumRead;
     }, [courseRead.reload]);
@@ -165,6 +174,30 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
 
     const courseData = courseRead.data?.body ?? null;
     const successfulRead = courseRead.data?.sequence ?? 0;
+    // The shell owns this evidence so incidental Assignment editor unmounts do not erase a refusal.
+    // Recovery must also satisfy any read already scheduled, even before its lifecycle starts.
+    const [assignmentDenial, setAssignmentDenial] = useState<{
+        identity: string; status: 403 | 404; read: number;
+    } | null>(null);
+    const currentStatus = failureStatus(courseRead.error);
+    let denial = assignmentDenial?.identity === identity ? assignmentDenial : null;
+    if (identity !== null && (currentStatus === 403 || currentStatus === 404)) {
+        if (!denial || denial.status !== currentStatus || denial.read !== readSequence.current) {
+            denial = { identity, status: currentStatus, read: readSequence.current };
+            setAssignmentDenial(denial);
+        }
+    } else if (denial && !courseRead.loading && !courseRead.error && courseData
+        && successfulRead > denial.read && successfulRead >= scheduledRead.current) {
+        denial = null;
+        setAssignmentDenial(null);
+    } else if (assignmentDenial && assignmentDenial.identity !== identity) {
+        setAssignmentDenial(null);
+    }
+    const assignmentRefusal = denial?.status;
+    assignmentBarrier.current = identity === null || !!assignmentRefusal || courseRead.loading
+        || readSequence.current < scheduledRead.current;
+    const assignmentWritesBlocked = useCallback(() => assignmentBarrier.current || !auth.isCurrent(auth.generation),
+        [auth.isCurrent, auth.generation]);
     // The provider outlives Settings. Retain only confirmed metadata while its read is unresolved, so a remounted
     // form cannot use the pre-save body for another full replacement. Resolve here even with Settings absent.
     // A refusal drops courseData; erase the acknowledgment before recovery can make it visible again.
@@ -252,11 +285,14 @@ export function useSharedCourseState(courseId: string): SharedCourseContextState
         status: courseStatus,
         data: courseData,
         error: courseRead.error,
+        loading: courseRead.loading,
+        assignmentRefusal,
+        assignmentWritesBlocked,
         successfulRead,
         reload: reloadCourse,
         revalidate: revalidateCourse,
         revalidating,
-    }), [courseStatus, courseData, courseRead.error, successfulRead, reloadCourse, revalidateCourse, revalidating]);
+    }), [courseStatus, courseData, courseRead.error, courseRead.loading, assignmentRefusal, assignmentWritesBlocked, successfulRead, reloadCourse, revalidateCourse, revalidating]);
 
     const skills = useMemo<SkillSource>(() => ({
         status: skillGraph.error ? 'error' : skillGraph.graph ? 'ready' : 'loading',

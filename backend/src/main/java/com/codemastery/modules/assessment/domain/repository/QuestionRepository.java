@@ -26,6 +26,9 @@ public interface QuestionRepository {
 
     long countInSkills(Collection<UUID> skillIds);
 
+    /** Returns every stored question tagged to any of {@code skillIds} in UUID order. */
+    List<Question> findAllInSkills(Collection<UUID> skillIds);
+
     /** One page of the skill set's questions in UUID ascending order. */
     List<Question> findPageInSkills(Collection<UUID> skillIds, int page, int size);
 

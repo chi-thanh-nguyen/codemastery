@@ -2455,3 +2455,23 @@ CT14 amendment or CODEOWNER acceptance:
 
 The existing frontend and e2e CODEOWNERS rules apply unchanged. See the FE14 decision record in
 `docs/setup.md` and the executed evidence in `docs/testing.md`.
+
+## Bounded FE11 verification inventory — 27 November 2026
+
+The Leader's “FE11 — Comprehensive Code-Completeness Audit, Authorized Implementation
+Completion, Bounded Upstream Remediation and Final Self-Audit” §§3.1/3.4/9/11
+explicitly authorizes the necessary focused tests in existing frontend/E2E locations:
+
+- `frontend/src/features/assessment/api/assignmentApi.test.ts` — consumed Assignment
+  decoders, multipart serialization/statuses and protected-file/quiz-summary seam.
+- `frontend/src/features/assessment/pages/assignment.test.tsx` — S10/S13 presentation,
+  authoritative mutation/reconciliation, session/route/concurrency regressions.
+- `e2e/tests/learner-assignment.spec.ts` — real disposable PostgreSQL/MinIO/REST,
+  Learner submission/replacement/download and Instructor grading journey.
+
+Existing assessment API/hook/page/type modules, route modules, membership action
+and shared transport are extended only for FE11 and its bounded FE10 summary seam.
+No directory/module/dependency, immutable original, CI or ownership rule changes.
+The existing frontend and E2E CODEOWNERS apply. Authority, exclusions and remaining
+FE08/FE10 handoffs are recorded in `docs/setup.md`; executed evidence is in
+`docs/testing.md`. This inventory record does not confer independent acceptance.

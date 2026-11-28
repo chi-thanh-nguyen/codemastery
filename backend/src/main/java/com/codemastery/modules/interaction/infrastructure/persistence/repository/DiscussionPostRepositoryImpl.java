@@ -36,6 +36,31 @@ public class DiscussionPostRepositoryImpl implements DiscussionPostRepository {
         return jpaRepository.findById(id).map(mapper::toDomain);
     }
 
+    @Override
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public Optional<DiscussionPost> lockById(UUID id, boolean exclusive) {
+        var rows = entityManager.createNativeQuery("SELECT * FROM public.discussion_posts WHERE id=:id FOR "
+                        + (exclusive ? "UPDATE" : "SHARE"), DiscussionPostEntity.class)
+                .setParameter("id", id).getResultList();
+        if (rows.isEmpty()) return Optional.empty();
+        var row = (DiscussionPostEntity) rows.getFirst();
+        entityManager.refresh(row); // A pre-lock identity-map entry must not hide committed moderation.
+        return Optional.of(mapper.toDomain(row));
+    }
+
+    @Override
+    public Page<DiscussionPost> findVisibleQuestions(UUID lessonId, Pageable pageable) {
+        long total = jpaRepository.countVisibleQuestions(lessonId);
+        java.util.List<DiscussionPost> rows = pageable.getOffset() >= total ? java.util.List.of()
+                : jpaRepository.findVisibleQuestions(lessonId, pageable.getPageSize(), pageable.getOffset()).stream().map(mapper::toDomain).toList();
+        return new org.springframework.data.domain.PageImpl<>(rows, pageable, total);
+    }
+
+    @Override
+    public java.util.List<DiscussionPost> findVisibleReplies(java.util.Set<UUID> ids) {
+        return ids.isEmpty() ? java.util.List.of() : jpaRepository.findVisibleReplies(ids).stream().map(mapper::toDomain).toList();
+    }
+
     /**
      * Inserts a new post, or updates only {@code is_hidden} of an existing one. ADR012 §19.2
      * grants no UPDATE on any other column, so a full-row update is never issued and a change
