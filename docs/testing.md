@@ -13782,10 +13782,12 @@ This is a functional/complexity estimate, not a line-count calculation, and belo
 additional production capability. Security activation is directly authorized IN20
 integration. CT17's existing r17 matrix suffices: no redundant revision or wider grant.
 
-The readiness application service is still an empty scaffold on this main baseline;
-this task does not implement the whole AD08 readiness/settings consumer or AS18
-coverage provider. Their eventual full readiness/coverage race acceptance remains
-with those consumers and QA06. IN20's root participation is verified against the
+The AD08 #166 readiness/settings application service is still an empty scaffold on
+this main baseline; completing that consumer would be approximately 100% of AD08
+and is outside this bounded upstream authorization. AS18 #164 is already implemented
+on main in `QuestionBankService.readCoverage`/`readCoverageForExecution`; it needs no
+IN20 production change. Full readiness-consumer race acceptance remains with AD08
+and QA06, rather than requiring IN20 to implement the whole settings Issue. IN20's root participation is verified against the
 actual shared guard, actual graph mapping/authoring and progress writers; no claim
 of executing a missing readiness service is made. This leaves no missing IN20
 production-code checkpoint, and does not prove whole Batch 7 acceptance.
