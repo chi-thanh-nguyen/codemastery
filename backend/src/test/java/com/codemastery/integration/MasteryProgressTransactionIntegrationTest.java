@@ -5,14 +5,18 @@ import com.codemastery.modules.adaptive.domain.model.AdaptiveDecision.Recommenda
 import com.codemastery.modules.adaptive.domain.model.MasteryState;
 import com.codemastery.modules.adaptive.domain.model.RecommendationType;
 import com.codemastery.modules.adaptive.domain.repository.LearnerSkillMasteryRepository;
+import com.codemastery.modules.auth.domain.model.Role;
+import com.codemastery.modules.auth.infrastructure.security.AuthenticatedUser;
+import com.codemastery.modules.course.application.service.CourseManagementService;
 import com.codemastery.modules.course.application.service.LessonProgressService;
-import com.codemastery.modules.course.domain.repository.CourseRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -51,14 +55,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Faults are real participant failures (foreign-key violations, the Course participant's own
  * rejection), not mocks.
  *
- * <p><b>What is a stand-in.</b> The orchestration is not implemented on {@code main}: Assessment's
- * submission and {@code QuizSubmittedEvent} (AS08/AS12) and Adaptive's {@code QuizSubmittedEventListener}
- * / {@code MasteryUpdateService} (AD13) are empty, and the learner-submission guard entry
- * {@code withLearnerAssessmentWrite} (ADR007 §3.1) does not exist. {@link #inSubmissionUnit} therefore
- * opens the READ COMMITTED unit and takes the Course root with the same repository calls the guard
- * makes, as the CO15 suites do. These cases are participant-composition evidence only. They do not
- * establish QA04.commit/QA04.rollback acceptance, which still needs a real manual and scheduler
- * submission driving AD13 (B6-V01–V05, V12) once those producers land.
+ * <p><b>The unit.</b> {@link #inSubmissionUnit} runs the participants inside the production
+ * learner-submission guard {@code CourseManagementService.withLearnerAssessmentWrite} (ADR007 §3.1)
+ * as an admitted Learner: the READ COMMITTED unit, CT03 admission and the held Course root are
+ * the ones {@code AttemptService.submit} uses.
+ *
+ * <p><b>What is a stand-in.</b> Adaptive's {@code QuizSubmittedEventListener} /
+ * {@code MasteryUpdateService} (AD13) are empty, so nothing consumes the {@code QuizSubmittedEvent}
+ * that AS08/AS12 publish; the test calls AD13's steps directly. These cases are
+ * participant-composition evidence only. They do not establish QA04.commit/QA04.rollback
+ * acceptance, which still needs a real manual and scheduler submission driving AD13
+ * (B6-V01–V05, V12) once it lands.
  */
 @DirtiesContext
 class MasteryProgressTransactionIntegrationTest extends AbstractIntegrationTest {
@@ -70,7 +77,7 @@ class MasteryProgressTransactionIntegrationTest extends AbstractIntegrationTest 
     @Autowired private LearnerSkillMasteryRepository masteries;
     @Autowired private LessonProgressService progress;
     @Autowired private RecommendationService recommendations;
-    @Autowired private CourseRepository courses;
+    @Autowired private CourseManagementService guard;
     @Autowired private PlatformTransactionManager transactionManager;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private DataSource dataSource;
@@ -108,6 +115,7 @@ class MasteryProgressTransactionIntegrationTest extends AbstractIntegrationTest 
 
     @AfterEach
     void cleanup() {
+        SecurityContextHolder.clearContext();
         jdbc.update("DELETE FROM public.path_recommendations WHERE enrollment_id = ?", enrollment);
         jdbc.update("DELETE FROM public.lesson_progress WHERE enrollment_id = ?", enrollment);
         jdbc.update("DELETE FROM public.enrollments WHERE course_id = ?", COURSE);
@@ -216,15 +224,14 @@ class MasteryProgressTransactionIntegrationTest extends AbstractIntegrationTest 
         recommendations.appendSelected(enrollment, RUN_AT, List.of(skip(l1), skip(l2)));
     }
 
-    /**
-     * Stand-in for the absent submission guard entry: a READ COMMITTED read-write unit that locks
-     * the Course root first and records it, exactly as {@code CourseManagementService}'s guard does.
-     */
+    /** The production learner-submission unit {@code AttemptService.submit} runs in, entered as the Learner. */
     private void inSubmissionUnit(Runnable work) {
-        readCommittedUnit().executeWithoutResult(status -> {
-            assertTrue(courses.lockCourseRoot(COURSE));
-            courses.markCourseRootHeld(COURSE);
+        var principal = new AuthenticatedUser(LEARNER, Role.LEARNER);
+        SecurityContextHolder.getContext().setAuthentication(
+                UsernamePasswordAuthenticationToken.authenticated(principal, null, principal.getAuthorities()));
+        guard.withLearnerAssessmentWrite(COURSE, () -> {
             work.run();
+            return null;
         });
     }
 
