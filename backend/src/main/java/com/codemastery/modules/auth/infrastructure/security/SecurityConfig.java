@@ -81,6 +81,10 @@ public class SecurityConfig {
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/me/notifications/{notificationId}/read"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/me/notifications/read-all"));
 
+    private static final RequestMatcher ADMIN_COURSE_OPERATIONS = new OrRequestMatcher(
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/admin/courses"),
+            PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.PUT, "/api/admin/courses/{courseId}/publication"));
+
     private static final RequestMatcher ATTEMPT_OPERATIONS = new OrRequestMatcher(
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/api/courses/{courseId}/quizzes/{quizId}/attempts"),
             PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.POST, "/api/courses/{courseId}/quizzes/{quizId}/attempts"),
@@ -129,7 +133,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .cors(cors -> cors.configurationSource(corsConfigurationSource(corsSettings)))
                 .headers(headers -> headers.addHeaderWriter(new DelegatingRequestMatcherHeaderWriter(
-                        new OrRequestMatcher(NOTIFICATION_OPERATIONS, ATTEMPT_OPERATIONS), (request, response) -> response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store"))))
+                        new OrRequestMatcher(NOTIFICATION_OPERATIONS, ATTEMPT_OPERATIONS, ADMIN_COURSE_OPERATIONS), (request, response) -> response.setHeader(HttpHeaders.CACHE_CONTROL, "no-store"))))
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(restSecurityErrorHandler)
                         .accessDeniedHandler(restSecurityErrorHandler))
@@ -152,6 +156,8 @@ public class SecurityConfig {
                         // authentication here: malformed query values are 400 (stage 2) before the role 403
                         // (stage 3), which AuditLogService decides before any lookup. Other methods stay denied.
                         .requestMatchers(HttpMethod.GET, "/api/admin/audit-logs").authenticated()
+                        // ADR012 §12: authentication before input validation; Admin owns stage-3 role checks.
+                        .requestMatchers(ADMIN_COURSE_OPERATIONS).authenticated()
                         // CT21.authoring (ADR006 §5): self Instructor; the Learner Lesson read is self Learner.
                         // Material, file and learner-monitoring routes under the same prefix stay denied.
                         .requestMatchers(HttpMethod.GET, "/api/instructor/courses", "/api/instructor/courses/{courseId}",
@@ -249,7 +255,8 @@ public class SecurityConfig {
     org.springframework.boot.servlet.filter.OrderedFormContentFilter formContentFilter() {
         return new org.springframework.boot.servlet.filter.OrderedFormContentFilter() {
             @Override protected boolean shouldNotFilter(jakarta.servlet.http.HttpServletRequest request) {
-                return MATERIAL_OPERATIONS.matches(request) || ASSIGNMENT_OPERATIONS.matches(request);
+                return MATERIAL_OPERATIONS.matches(request) || ASSIGNMENT_OPERATIONS.matches(request)
+                        || ADMIN_COURSE_OPERATIONS.matches(request);
             }
         };
     }

@@ -338,6 +338,16 @@ public class CourseManagementService {
                 courses.findForAdministration(title, status, PageRequest.of(page, size)).map(AdminCourseView::of)));
     }
 
+    /**
+     * CT12.rest stage-3 admission, before body validation. Plain Course-owned existence read only:
+     * no mutation or row lock. The hide operation still re-reads authoritative state under the root.
+     */
+    public void requireCourseForAdministration(UUID courseId) {
+        requireId(courseId);
+        actor(IdentityRole.ADMINISTRATOR);
+        snapshotRead.executeWithoutResult(status -> courses.findById(courseId).orElseThrow(CourseManagementService::unavailable));
+    }
+
     /** Idempotent; a real change reconciles joined completion exactly as the Instructor hidden change does. */
     public CourseChange hideCourseAsAdministrator(UUID courseId) {
         requireId(courseId);

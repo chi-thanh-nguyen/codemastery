@@ -2475,3 +2475,27 @@ No directory/module/dependency, immutable original, CI or ownership rule changes
 The existing frontend and E2E CODEOWNERS apply. Authority, exclusions and remaining
 FE08/FE10 handoffs are recorded in `docs/setup.md`; executed evidence is in
 `docs/testing.md`. This inventory record does not confer independent acceptance.
+
+### IN20 test placement — 28 November 2026
+
+**`CT14-IN20-PLACEMENT-2026-11-28-r1` — DELEGATED_APPROVED.** The Project Leader's
+instruction “CodeMastery — PR #312: IN20 Full Implementation Completion, Bounded
+Upstream Remediation and Comprehensive Final Self-Audit” explicitly delegates the
+smallest justified structural addition and resolution of all three original test paths.
+Exactly one addition is selected:
+
+- `backend/src/test/java/com/codemastery/modules/admin/application/service/AdminCourseServiceTest.java`:
+  Mockito service tests of IN20 orchestration, role and resource admission, page-local
+  Auth IDs, former/missing names and actual-change-only audit calls. It uses IN10's
+  existing `application/service/` test directory. Mixing Course orchestration into
+  `UserManagementServiceTest` or `AuditLogServiceTest` would obscure their responsibilities.
+
+The original `AdminCourseRequestsTest.java` is consolidated into the approved
+`modules/admin/AdminRequestsTest.java`; the original `AdminCourseIntegrationTest.java`
+is consolidated and strengthened in ADR012 §19.3's `InteractionAdminIntegrationTest`.
+No meaningful case is dropped: the real hide, no-op, denial, missing, rollback and
+list cases remain, with committed reads, actual audit INSERT fault, root contention,
+snapshot and runtime-role checks. HTTP/filter-chain matrices belong to existing
+`AuthorizationIntegrationTest`. No additional integration suite or directory is added.
+The existing Admin CODEOWNERS rule covers the one unit-test addition; protected review
+and independent acceptance remain separate. Immutable reference artifacts are unchanged.

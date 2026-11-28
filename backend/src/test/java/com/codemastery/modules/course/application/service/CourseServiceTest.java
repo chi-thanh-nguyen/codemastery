@@ -791,6 +791,14 @@ class CourseServiceTest {
         verifyNoInteractions(repository);
     }
 
+    @ParameterizedTest @EnumSource(value = IdentityRole.class, names = {"LEARNER", "INSTRUCTOR"})
+    void courseAdmissionRefusesOtherRolesBeforeAnyPersistenceAccess(IdentityRole role) {
+        var management = management(mock(org.springframework.transaction.PlatformTransactionManager.class));
+        actor(role);
+        assertThrows(AccessDeniedException.class, () -> management.requireCourseForAdministration(COURSE));
+        verifyNoInteractions(repository);
+    }
+
     @Test void administratorListRejectsAnUnknownPublicationStatus() {
         var management = management(mock(org.springframework.transaction.PlatformTransactionManager.class));
         actor(IdentityRole.ADMINISTRATOR);
@@ -966,18 +974,60 @@ class CourseServiceTest {
                 "com/codemastery/modules/interaction/application/service/DiscussionService.java",
                 "com/codemastery/modules/interaction/application/service/ContentReportService.java",
                 "com/codemastery/modules/admin/application/service/ContentModerationService.java");
-        java.nio.file.Path root = java.nio.file.Path.of("src/main/java");
+        assertApprovedSourceCalls(java.nio.file.Path.of("src/main/java"),
+                Set.of("readCourseContext", "readLessonContext"), allowed, false);
+    }
+
+    @Test
+    void administrationAdmissionHasOnlyItsApprovedProductionCaller() throws Exception {
+        assertApprovedSourceCalls(java.nio.file.Path.of("src/main/java"), Set.of("requireCourseForAdministration"),
+                Set.of("com/codemastery/modules/admin/application/service/AdminCourseService.java#requireCourseForHiding"), true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"readCourseContext", "readLessonContext", "requireCourseForAdministration"})
+    void callerAllowlistRejectsOtherFilesAndMethodsWithNativePathsAndCrlf(
+            String method, @org.junit.jupiter.api.io.TempDir java.nio.file.Path root) throws Exception {
+        var admitted = root.resolve(java.nio.file.Path.of("approved", "Caller.java"));
+        java.nio.file.Files.createDirectories(admitted.getParent());
+        var allowed = Set.of("approved/Caller.java#run");
+        for (String call : List.of("service." + method + "(id);", "Object reference = service::" + method + ";")) {
+            String source = "class Caller { void run() { " + call + " } }\r\n";
+            java.nio.file.Files.writeString(admitted, source);
+            assertApprovedSourceCalls(root, Set.of(method), allowed, true);
+            java.nio.file.Files.writeString(admitted, source.replace("void run()", "void unapproved()"));
+            assertThrows(AssertionError.class, () -> assertApprovedSourceCalls(root, Set.of(method), allowed, true));
+            java.nio.file.Files.writeString(admitted, source);
+            var forbidden = root.resolve(java.nio.file.Path.of("other", "Caller.java"));
+            java.nio.file.Files.createDirectories(forbidden.getParent());
+            java.nio.file.Files.writeString(forbidden, source);
+            assertThrows(AssertionError.class, () -> assertApprovedSourceCalls(root, Set.of(method), allowed, true));
+            java.nio.file.Files.delete(forbidden);
+        }
+    }
+
+    private static void assertApprovedSourceCalls(java.nio.file.Path root, Set<String> methods,
+            Set<String> allowed, boolean checkMethod) throws Exception {
         try (var stream = java.nio.file.Files.walk(root);
              var manager = javax.tools.ToolProvider.getSystemJavaCompiler().getStandardFileManager(null, null, null)) {
             var files = stream.filter(path -> path.toString().endsWith(".java")).toList();
             var task = (com.sun.source.util.JavacTask) javax.tools.ToolProvider.getSystemJavaCompiler().getTask(
                     null, manager, null, List.of("-proc:none"), null, manager.getJavaFileObjectsFromPaths(files));
             for (var unit : task.parse()) {
-                String path = root.toAbsolutePath().relativize(java.nio.file.Path.of(unit.getSourceFile().toUri()).toAbsolutePath()).toString();
+                String path = root.toAbsolutePath().relativize(java.nio.file.Path.of(unit.getSourceFile().toUri()).toAbsolutePath()).toString().replace(java.io.File.separatorChar, '/');
                 new com.sun.source.util.TreeScanner<Void, Void>() {
+                    private String enclosingMethod;
+                    @Override public Void visitMethod(com.sun.source.tree.MethodTree node, Void unused) {
+                        String previous = enclosingMethod;
+                        enclosingMethod = node.getName().toString();
+                        try { return super.visitMethod(node, unused); }
+                        finally { enclosingMethod = previous; }
+                    }
                     private void check(String name) {
-                        if (name.equals("readCourseContext") || name.equals("readLessonContext"))
-                            assertTrue(allowed.contains(path), () -> "Unapproved CT40 notification-context caller: " + path);
+                        if (methods.contains(name)) {
+                            String location = checkMethod ? path + "#" + enclosingMethod : path;
+                            assertTrue(allowed.contains(location), () -> "Unapproved " + name + " caller: " + location);
+                        }
                     }
                     @Override public Void visitMethodInvocation(com.sun.source.tree.MethodInvocationTree node, Void unused) {
                         String selector = node.getMethodSelect().toString();

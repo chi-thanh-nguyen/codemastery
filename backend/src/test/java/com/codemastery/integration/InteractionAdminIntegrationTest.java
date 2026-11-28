@@ -101,13 +101,11 @@ class InteractionAdminIntegrationTest extends AbstractIntegrationTest {
     @AfterEach
     void removeFixtures() {
         SecurityContextHolder.clearContext();
-        for (UUID id : users) {
-            jdbc.update("DELETE FROM public.audit_logs WHERE actor_id = ?", id);
-        }
-        for (UUID id : users) {
-            jdbc.update("DELETE FROM public.users WHERE id = ?", id);
-        }
-        users.clear();
+        cleanupSharedPostgresql(() -> {
+            for (UUID id : users) jdbc.update("DELETE FROM public.audit_logs WHERE actor_id = ?", id);
+            for (UUID id : users) jdbc.update("DELETE FROM public.users WHERE id = ?", id);
+            users.clear();
+        });
     }
 
     @Test
@@ -250,7 +248,9 @@ class InteractionAdminIntegrationTest extends AbstractIntegrationTest {
     // ---------------------------------------------------------------- helpers
 
     private TransactionTemplate writable() {
-        return new TransactionTemplate(transactionManager);
+        var unit = new TransactionTemplate(transactionManager);
+        unit.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+        return unit;
     }
 
     private UUID user(String role, String displayName) {
@@ -382,4 +382,421 @@ class InteractionAdminIntegrationTest extends AbstractIntegrationTest {
             assertTrue(contentProbe.events.isEmpty());
         }
     }
+    /** IN20's B7-O07/O09/O17 cases share the approved PostgreSQL lifecycle. */
+    @org.junit.jupiter.api.Nested
+    class AdminCourses {
+        @Autowired com.codemastery.modules.admin.application.service.AdminCourseService service;
+        @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+        com.codemastery.modules.auth.application.service.UserAccountService identities;
+        @Autowired com.codemastery.modules.course.application.service.LessonProgressService progress;
+        @Autowired com.codemastery.modules.adaptive.application.skillgraph.SkillGraphService graph;
+        @Autowired com.codemastery.modules.assessment.application.service.QuestionBankService questions;
+
+        private final List<UUID> courses = new ArrayList<>();
+        private UUID instructor;
+        private String tag;
+
+        @BeforeEach void courseFixtures() {
+            instructor = user("instructor", "IN20 Instructor");
+            tag = "IN20-" + UUID.randomUUID();
+        }
+
+        @AfterEach void cleanCourses() {
+            SecurityContextHolder.clearContext();
+            cleanupSharedPostgresql(() -> {
+                for (UUID id : courses) {
+                    jdbc.update("DELETE FROM public.lesson_progress WHERE enrollment_id IN (SELECT id FROM public.enrollments WHERE course_id=?)", id);
+                    jdbc.update("DELETE FROM public.enrollments WHERE course_id=?", id);
+                    jdbc.update("DELETE FROM public.lesson_skills WHERE skill_id IN (SELECT id FROM public.skills WHERE course_id=?)", id);
+                    jdbc.update("DELETE FROM public.skill_prerequisites WHERE course_id=?", id);
+                    jdbc.update("DELETE FROM public.questions WHERE skill_id IN (SELECT id FROM public.skills WHERE course_id=?)", id);
+                    jdbc.update("DELETE FROM public.skills WHERE course_id=?", id);
+                    jdbc.update("DELETE FROM public.lessons WHERE chapter_id IN (SELECT id FROM public.chapters WHERE course_id=?)", id);
+                    jdbc.update("DELETE FROM public.chapters WHERE course_id=?", id);
+                    jdbc.update("DELETE FROM public.courses WHERE id=?", id);
+                }
+                courses.clear();
+            });
+        }
+
+        private UUID course(String status, String suffix) {
+            UUID id = UUID.randomUUID(); courses.add(id);
+            jdbc.update("INSERT INTO public.courses(id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES(?,?,?,'IN20 fixture',?,false)",
+                    id, instructor, tag + " " + suffix, status);
+            return id;
+        }
+
+        private String storedStatus(UUID id) {
+            return independentRead("SELECT publication_status FROM public.courses WHERE id=?", id).getFirst();
+        }
+
+        private UUID enrollment(UUID course) {
+            UUID id = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.enrollments(id,user_id,course_id,status) VALUES(?,?,?,'completed')", id, fixtureTarget, course);
+            return id;
+        }
+
+        @Test void hideCommitsExactlyOneCanonicalAuditRowAndNoOpDoesNotAudit() {
+            UUID id = course("published", "Hide");
+            UUID joined = enrollment(id);
+            signIn(admin, Role.ADMIN);
+            var before = java.time.Instant.now();
+            var first = service.hideCourse(id);
+            var again = service.hideCourse(id);
+            assertTrue(first.changed()); assertFalse(again.changed());
+            assertEquals("IN20 Instructor", first.course().instructorDisplayName());
+            assertEquals("hidden", storedStatus(id));
+            assertEquals("active", independentRead("SELECT status FROM public.enrollments WHERE id=?", joined).getFirst());
+            assertEquals(List.of(admin + "|course_hidden|course|" + id), independentRead(
+                    "SELECT actor_id||'|'||action||'|'||target_type||'|'||target_reference FROM public.audit_logs WHERE actor_id=?", admin));
+            var at = jdbc.queryForObject("SELECT occurred_at FROM public.audit_logs WHERE actor_id=?", java.time.OffsetDateTime.class, admin).toInstant();
+            assertFalse(at.isBefore(before.minusMillis(1))); assertFalse(at.isAfter(java.time.Instant.now()));
+            assertEquals(0, at.getNano() % 1000);
+            assertEquals(1, service.list(tag, null, 0, 20).totalElements());
+            assertEquals(1, committedAuditRows(admin), "reads never audit");
+        }
+
+        @Test void aRealAuditInsertFaultAfterCourseAndReconciliationWritesRollsEverythingBack() {
+            UUID id = course("published", "Rollback"); UUID joined = enrollment(id);
+            String fault = "in20_fault_" + id.toString().replace("-", "");
+            // The trigger runs at the real audit INSERT, under a valid Administrator. Its distinct
+            // SQLSTATE proves both prior changes were visible in the SAME transaction before failure.
+            try {
+                jdbc.execute("CREATE FUNCTION public." + fault + "() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                        + "IF NEW.target_reference='" + id + "' THEN "
+                        + "IF (SELECT publication_status FROM public.courses WHERE id='" + id + "')='hidden' "
+                        + "AND (SELECT status FROM public.enrollments WHERE id='" + joined + "')='active' THEN "
+                        + "RAISE EXCEPTION 'controlled audit insert fault' USING ERRCODE='P2001'; "
+                        + "ELSE RAISE EXCEPTION 'mutation did not precede audit' USING ERRCODE='P2002'; END IF; END IF; RETURN NEW; END $$");
+                jdbc.execute("CREATE TRIGGER " + fault + " BEFORE INSERT ON public.audit_logs FOR EACH ROW EXECUTE FUNCTION public." + fault + "()");
+                signIn(admin, Role.ADMIN);
+                RuntimeException failure = assertThrows(RuntimeException.class, () -> service.hideCourse(id));
+                assertEquals("P2001", sqlState(failure));
+                assertEquals("published", storedStatus(id));
+                assertEquals("completed", independentRead("SELECT status FROM public.enrollments WHERE id=?", joined).getFirst());
+                assertEquals(0, committedAuditRows(admin));
+            } finally {
+                cleanupSharedPostgresql(
+                        () -> jdbc.execute("DROP TRIGGER IF EXISTS " + fault + " ON public.audit_logs"),
+                        () -> jdbc.execute("DROP FUNCTION IF EXISTS public." + fault + "()"));
+            }
+        }
+
+        @Test void denialMissingAndAdmissionDoNotWriteOrAudit() {
+            UUID id = course("published", "Admission"); signIn(instructor, Role.INSTRUCTOR);
+            assertThrows(org.springframework.security.access.AccessDeniedException.class, () -> service.hideCourse(id));
+            assertThrows(org.springframework.security.access.AccessDeniedException.class, () -> service.list(tag, null, 0, 20));
+            signIn(admin, Role.ADMIN);
+            assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class, () -> service.requireCourseForHiding(UUID.randomUUID()));
+            service.requireCourseForHiding(id);
+            assertEquals("published", storedStatus(id)); assertEquals(0, committedAuditRows(admin));
+        }
+
+        @Test void listingUsesLiteralSubstringCOrderingPagingAndFormerInstructorNames() {
+            UUID upper = course("published", "Alpha"); UUID lower = course("hidden", "alpha");
+            UUID tie = course("hidden", "alpha"); UUID literal = course("hidden", "%_");
+            jdbc.update("UPDATE public.users SET role='learner' WHERE id=?", instructor);
+            signIn(admin, Role.ADMIN);
+            var expected = new ArrayList<>(List.of(lower, tie));
+            expected.sort(java.util.Comparator.comparing(UUID::toString));
+            expected.addFirst(upper); expected.addFirst(literal);
+            var all = service.list(tag.toLowerCase(), null, 0, 100);
+            assertEquals(expected, all.content().stream().map(com.codemastery.modules.admin.application.service.AdminCourseService.AdminCourseItem::courseId).toList());
+            assertTrue(all.content().stream().allMatch(row -> "IN20 Instructor".equals(row.instructorDisplayName())));
+            var exactLiteral = service.list(tag + " %_", "hidden", 0, 100);
+            assertEquals(1, exactLiteral.totalElements());
+            assertEquals(List.of(literal), exactLiteral.content().stream()
+                    .map(com.codemastery.modules.admin.application.service.AdminCourseService.AdminCourseItem::courseId).toList());
+            assertEquals(upper, service.list(tag, null, 1, 1).content().getFirst().courseId());
+            var beyond = service.list(tag, null, 20, 1);
+            assertEquals(4, beyond.totalElements()); assertTrue(beyond.content().isEmpty());
+            assertEquals("IN20 Instructor", service.hideCourse(lower).course().instructorDisplayName());
+            org.mockito.Mockito.verify(identities, org.mockito.Mockito.never()).instructorDisplayNames(org.mockito.ArgumentMatchers.any());
+        }
+
+        @Test void aNameProviderFailureAfterAuditInsertAlsoRollsBackTheWholeHide() {
+            UUID id = course("published", "Name failure"); UUID joined = enrollment(id);
+            var reached = new AtomicBoolean();
+            org.mockito.Mockito.doAnswer(call -> {
+                assertEquals("hidden", jdbc.queryForObject("SELECT publication_status FROM courses WHERE id=?", String.class, id));
+                assertEquals("active", jdbc.queryForObject("SELECT status FROM enrollments WHERE id=?", String.class, joined));
+                assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE actor_id=? AND target_reference=?", Integer.class, admin, id.toString()));
+                assertEquals("published", storedStatus(id));
+                assertEquals("completed", independentRead("SELECT status FROM enrollments WHERE id=?", joined).getFirst());
+                assertEquals(0, committedAuditRows(admin));
+                reached.set(true);
+                throw new IllegalStateException("controlled summary failure after audit");
+            })
+                    .when(identities).userSummaries(java.util.Set.of(instructor));
+            signIn(admin, Role.ADMIN);
+            var failure = assertThrows(IllegalStateException.class, () -> service.hideCourse(id));
+            assertEquals("controlled summary failure after audit", failure.getMessage());
+            assertTrue(reached.get(), "must reach the post-audit provider fault");
+            assertEquals("published", storedStatus(id)); assertEquals(0, committedAuditRows(admin));
+            assertEquals("completed", independentRead("SELECT status FROM enrollments WHERE id=?", joined).getFirst());
+        }
+
+        @Test void courseRowsAndAuthNamesShareOneReadOnlyRepeatableReadSnapshot() {
+            UUID id = course("hidden", "Snapshot");
+            org.mockito.Mockito.doAnswer(call -> {
+                assertEquals("repeatable read", jdbc.queryForObject("SHOW transaction_isolation", String.class));
+                assertEquals("on", jdbc.queryForObject("SHOW transaction_read_only", String.class));
+                // A separately committed writer changes BOTH projections after Course read, before Auth read.
+                try (var db = dataSource.getConnection(); var stmt = db.prepareStatement("UPDATE public.users SET display_name='New name' WHERE id=?")) {
+                    db.setAutoCommit(false); stmt.setObject(1, instructor); stmt.executeUpdate();
+                    try (var title = db.prepareStatement("UPDATE public.courses SET title=? WHERE id=?")) {
+                        title.setString(1, tag + " New title"); title.setObject(2, id); title.executeUpdate();
+                    }
+                    db.commit();
+                }
+                return call.callRealMethod();
+            }).when(identities).userSummaries(java.util.Set.of(instructor));
+            signIn(admin, Role.ADMIN);
+            var row = service.list(tag, null, 0, 20).content().getFirst();
+            assertEquals(tag + " Snapshot", row.title()); assertEquals("IN20 Instructor", row.instructorDisplayName());
+            assertEquals("New name", independentRead("SELECT display_name FROM public.users WHERE id=?", instructor).getFirst());
+            org.mockito.Mockito.verify(identities).userSummaries(java.util.Set.of(instructor));
+        }
+
+        @Test void ownerCanRepublishAndHideHasNoLessonCascade() {
+            UUID id = course("published", "Republish");
+            signIn(instructor, Role.INSTRUCTOR);
+            var chapter = contentStructure.createCourseChapter(id, "Chapter");
+            var lesson = contentStructure.createCourseLesson(id, chapter.id(), "Lesson", null);
+            contentStructure.setCourseLessonPublication(id, lesson.id(), com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED);
+            signIn(admin, Role.ADMIN); service.hideCourse(id);
+            assertEquals("published", independentRead("SELECT publication_status FROM public.lessons WHERE id=?", lesson.id()).getFirst());
+            signIn(fixtureTarget, Role.LEARNER);
+            assertThrows(com.codemastery.common.exception.ResourceNotFoundException.class, () -> contentStructure.getLearnerLesson(id, lesson.id()));
+            signIn(instructor, Role.INSTRUCTOR);
+            contentManagement.setOwnedCoursePublication(id, com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED);
+            assertEquals("published", storedStatus(id)); assertEquals(1, committedAuditRows(admin));
+            signIn(admin, Role.ADMIN);
+            assertTrue(service.hideCourse(id).changed());
+            assertFalse(service.hideCourse(id).changed());
+            assertEquals("hidden", storedStatus(id)); assertEquals(2, committedAuditRows(admin));
+        }
+
+        @Test void simultaneousHidesSerializeAndAuditExactlyOnce() throws Exception {
+            UUID id = course("published", "Race");
+            var start = new java.util.concurrent.CountDownLatch(1);
+            var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+            try {
+                java.util.concurrent.Callable<Boolean> task = () -> {
+                    signIn(admin, Role.ADMIN);
+                    try { assertTrue(start.await(5, java.util.concurrent.TimeUnit.SECONDS)); return service.hideCourse(id).changed(); }
+                    finally { SecurityContextHolder.clearContext(); }
+                };
+                var first = pool.submit(task); var second = pool.submit(task); start.countDown();
+                assertTrue(first.get(10, java.util.concurrent.TimeUnit.SECONDS) ^ second.get(10, java.util.concurrent.TimeUnit.SECONDS));
+                assertEquals(1, committedAuditRows(admin));
+            } finally { start.countDown(); shutdown(pool); }
+        }
+
+        @org.junit.jupiter.params.ParameterizedTest
+        @org.junit.jupiter.params.provider.ValueSource(strings={"guard", "authoring", "mapping", "coverage", "progress"})
+        void hideWaitsForTheActualRootParticipantAndReReadsItsCommittedState(String operation) throws Exception {
+            UUID id = course("published", "Before");
+            signIn(instructor, Role.INSTRUCTOR);
+            var chapter = contentStructure.createCourseChapter(id, "Chapter");
+            var lesson = contentStructure.createCourseLesson(id, chapter.id(), "Lesson", null);
+            contentStructure.setCourseLessonPublication(id, lesson.id(), com.codemastery.modules.course.domain.model.PublishStatus.PUBLISHED);
+            enrollment(id);
+            var held = new java.util.concurrent.CountDownLatch(1); var release = new java.util.concurrent.CountDownLatch(1);
+            var pid = new java.util.concurrent.atomic.AtomicInteger();
+            var holderPid = new java.util.concurrent.atomic.AtomicInteger();
+            var pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+            try {
+                var holder = pool.submit(() -> {
+                    signIn(operation.equals("progress") ? fixtureTarget : instructor, operation.equals("progress") ? Role.LEARNER : Role.INSTRUCTOR);
+                    try {
+                        writable().executeWithoutResult(tx -> {
+                            jdbc.execute("SET LOCAL statement_timeout='8s'");
+                            holderPid.set(jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                            if (operation.equals("progress")) progress.complete(id, lesson.id());
+                            else contentManagement.withCourseConfigurationWrite(id, () -> {
+                                if (operation.equals("authoring")) contentManagement.updateOwnedCourse(id, tag + " After", "Changed", null);
+                                if (operation.equals("mapping") || operation.equals("coverage")) {
+                                    var skill = graph.createSkill(id, "IN20 coverage", null);
+                                    graph.mapLesson(id, lesson.id(), skill.id());
+                                    if (operation.equals("coverage")) {
+                                        questions.create(id, new com.codemastery.modules.assessment.application.service.QuestionBankService.QuestionInput(
+                                                skill.id(), "Coverage question", "single_choice", "easy", List.of("A", "B"), List.of(true, false)));
+                                        assertEquals(1L, questions.readCoverage(id, java.util.Set.of(skill.id())).questionCounts().get(skill.id()));
+                                    }
+                                }
+                                return null;
+                            });
+                            held.countDown(); await(release);
+                        });
+                    } finally { SecurityContextHolder.clearContext(); }
+                });
+                assertTrue(held.await(5, java.util.concurrent.TimeUnit.SECONDS));
+                signIn(admin, Role.ADMIN);
+                var admission = new TransactionTemplate(transactionManager);
+                admission.setReadOnly(true);
+                admission.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+                admission.executeWithoutResult(tx -> {
+                    jdbc.execute("SET LOCAL statement_timeout='1s'");
+                    service.requireCourseForHiding(id); // succeeds while another transaction holds the root
+                });
+                assertEquals(0, committedAuditRows(admin));
+                var hide = pool.submit(() -> {
+                    signIn(admin, Role.ADMIN);
+                    try { return writable().execute(tx -> {
+                        jdbc.execute("SET LOCAL statement_timeout='8s'");
+                        pid.set(jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                        return service.hideCourse(id);
+                    }); } finally { SecurityContextHolder.clearContext(); }
+                });
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                boolean blocked = false;
+                while (System.nanoTime() < deadline && !hide.isDone()) {
+                    if (pid.get() != 0 && Boolean.TRUE.equals(jdbc.queryForObject("SELECT ?=ANY(pg_blocking_pids(?))", Boolean.class, holderPid.get(), pid.get()))) { blocked = true; break; }
+                    Thread.sleep(10);
+                }
+                assertTrue(blocked, "hide must be observed waiting on this participant's Course root");
+                String waitingSql = jdbc.queryForObject("SELECT query FROM pg_stat_activity WHERE pid=?", String.class, pid.get());
+                assertTrue(waitingSql.contains("public.courses") && waitingSql.contains("FOR UPDATE"), waitingSql);
+                release.countDown(); holder.get(10, java.util.concurrent.TimeUnit.SECONDS);
+                var result = hide.get(10, java.util.concurrent.TimeUnit.SECONDS);
+                assertTrue(result.changed()); assertEquals("hidden", storedStatus(id)); assertEquals(1, committedAuditRows(admin));
+                if (operation.equals("authoring")) assertEquals(tag + " After", result.course().title());
+            } finally { release.countDown(); shutdown(pool); }
+        }
+
+        private void await(java.util.concurrent.CountDownLatch latch) {
+            try { if (!latch.await(8, java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("IN20 barrier timed out"); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new IllegalStateException(interrupted); }
+        }
+
+        private void shutdown(java.util.concurrent.ExecutorService pool) {
+            shutdown(pool, java.time.Duration.ofSeconds(12));
+        }
+
+        private void shutdown(java.util.concurrent.ExecutorService pool, java.time.Duration budget) {
+            boolean interrupted = Thread.interrupted();
+            try {
+                pool.shutdownNow();
+                long deadline = System.nanoTime() + budget.toNanos();
+                while (!pool.isTerminated()) {
+                    long remaining = deadline - System.nanoTime();
+                    if (remaining <= 0) throw new IllegalStateException("IN20 workers did not stop; cleanup is unsafe");
+                    try { pool.awaitTermination(remaining, java.util.concurrent.TimeUnit.NANOSECONDS); }
+                    catch (InterruptedException signal) { interrupted = true; }
+                }
+            } catch (RuntimeException | Error failure) {
+                recordIsolationLoss(failure);
+                throw failure;
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
+            }
+        }
+
+        @Test void teardownFailureAttemptsRemainingStepsAndFencesLaterTests() {
+            var first = new IllegalStateException("simulated trigger teardown failure");
+            var second = new IllegalStateException("simulated function teardown failure");
+            var attempted = new AtomicBoolean();
+            try {
+                assertEquals(first, assertThrows(IllegalStateException.class, () -> cleanupSharedPostgresql(
+                        () -> { throw first; }, () -> { attempted.set(true); throw second; })));
+                assertTrue(attempted.get());
+                assertEquals(List.of(second), List.of(first.getSuppressed()));
+                assertEquals(first, isolationLoss());
+                assertThrows(IllegalStateException.class, () -> requireSharedPostgresqlIsolation());
+                assertThrows(IllegalStateException.class, () -> cleanupSharedPostgresql(() -> {
+                    throw new AssertionError("unsafe fixture deletion must not execute");
+                }));
+            } finally {
+                assertTrue(clearSimulatedIsolationLoss(first));
+            }
+        }
+
+        @Test void interruptedShutdownStillFencesAnUnterminatedWorkerAndPreservesInterrupt() throws Exception {
+            var pool = java.util.concurrent.Executors.newSingleThreadExecutor();
+            var started = new java.util.concurrent.CountDownLatch(1);
+            var release = new java.util.concurrent.CountDownLatch(1);
+            var worker = pool.submit(() -> {
+                started.countDown();
+                while (release.getCount() != 0) {
+                    try { release.await(); }
+                    catch (InterruptedException ignored) { /* model a JDBC worker that has not quiesced */ }
+                }
+            });
+            Throwable simulated = null;
+            try {
+                assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS));
+                Thread.currentThread().interrupt();
+                simulated = assertThrows(IllegalStateException.class, () -> shutdown(pool, java.time.Duration.ofMillis(30)));
+                assertTrue(Thread.currentThread().isInterrupted());
+                assertEquals(simulated, isolationLoss());
+                assertThrows(IllegalStateException.class, () -> requireSharedPostgresqlIsolation());
+            } finally {
+                Thread.interrupted();
+                release.countDown();
+                worker.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                pool.shutdownNow();
+                assertTrue(pool.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS));
+                if (simulated != null) assertTrue(clearSimulatedIsolationLoss(simulated));
+            }
+        }
+
+        private void assertRuntimeIdentity(String role) {
+            assertEquals(role, jdbc.queryForObject("SELECT current_user", String.class));
+            assertFalse(jdbc.queryForObject("SELECT rolsuper OR rolcreaterole OR rolcreatedb OR rolinherit FROM pg_roles WHERE rolname=current_user", Boolean.class));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                    + "WHERE n.nspname='public' AND c.relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user)", Integer.class));
+        }
+
+        @Test void executableRuntimeMatrixSupportsListRootHideReconciliationAuditAndPreservesContainment() throws Exception {
+            UUID id = course("published", "Runtime"); enrollment(id);
+            String role = "in20_" + UUID.randomUUID().toString().replace("-", "");
+            try {
+                jdbc.execute("CREATE ROLE " + role + " NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT");
+                jdbc.execute("GRANT USAGE ON SCHEMA public TO " + role);
+                String deployment = java.nio.file.Files.readString(java.nio.file.Path.of("..", "infrastructure", "vm", "deploy.sh"));
+                String matrix = deployment.split("RUNTIME_PRIVILEGE_MATRIX='\n", 2)[1].split("\n'", 2)[0];
+                for (String line : matrix.split("\n")) {
+                    String[] fields = line.trim().split("\\s+");
+                    if (!fields[1].equals("-")) jdbc.execute("GRANT " + fields[1] + " ON public." + fields[0] + " TO " + role);
+                    if (!fields[2].equals("-")) for (String columns : fields[2].split("\\+"))
+                        jdbc.execute("GRANT " + columns + " ON public." + fields[0] + " TO " + role);
+                }
+                signIn(admin, Role.ADMIN);
+                String sessionRole = jdbc.queryForObject("SELECT current_user", String.class);
+                var read = new TransactionTemplate(transactionManager);
+                read.setReadOnly(true); read.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+                int rows = read.execute(tx -> {
+                    jdbc.execute("SET LOCAL ROLE " + role);
+                    assertRuntimeIdentity(role);
+                    return service.list(tag, null, 0, 20).content().size();
+                });
+                assertEquals(1, rows);
+                writable().executeWithoutResult(tx -> {
+                    jdbc.execute("SET LOCAL ROLE " + role); assertRuntimeIdentity(role);
+                    service.requireCourseForHiding(id); assertTrue(service.hideCourse(id).changed());
+                });
+                assertEquals(sessionRole, jdbc.queryForObject("SELECT current_user", String.class), "SET LOCAL ROLE must not escape its transaction");
+                read.executeWithoutResult(tx -> {
+                    jdbc.execute("SET LOCAL ROLE " + role); assertRuntimeIdentity(role);
+                    var rowsRead = audit.search(admin, "course_hidden", "course", id, null, null, 0, 20);
+                    assertEquals(1, rowsRead.totalElements());
+                    assertEquals(id.toString(), rowsRead.content().getFirst().targetReference());
+                });
+                assertEquals("hidden", storedStatus(id)); assertEquals(1, committedAuditRows(admin));
+                for (String sql : List.of("UPDATE audit_logs SET action=action WHERE false", "DELETE FROM audit_logs WHERE false",
+                        "UPDATE courses SET instructor_id=instructor_id WHERE false", "UPDATE enrollments SET user_id=user_id WHERE false",
+                        "UPDATE users SET role=role WHERE false", "TRUNCATE audit_logs", "CREATE TABLE public.in20_forbidden(id integer)")) {
+                    RuntimeException denied = assertThrows(RuntimeException.class, () -> writable().executeWithoutResult(tx -> {
+                        jdbc.execute("SET LOCAL ROLE " + role); assertRuntimeIdentity(role); jdbc.execute(sql);
+                    }));
+                    assertEquals("42501", sqlState(denied), sql);
+                }
+            } finally {
+                cleanupSharedPostgresql(() -> jdbc.execute("DROP OWNED BY " + role),
+                        () -> jdbc.execute("DROP ROLE " + role));
+            }
+        }
+    }
+
 }

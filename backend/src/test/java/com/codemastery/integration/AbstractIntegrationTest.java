@@ -75,6 +75,26 @@ public abstract class AbstractIntegrationTest {
         return ISOLATION_LOSS.get();
     }
 
+    /** Attempt every teardown step, but never let an unproved cleanup validate later suites. */
+    protected static void cleanupSharedPostgresql(Runnable... steps) {
+        Throwable loss = isolationLoss();
+        if (loss != null) throw new IllegalStateException("Unsafe shared PostgreSQL cleanup", loss);
+        Throwable failure = null;
+        for (Runnable step : steps) {
+            try {
+                step.run();
+            } catch (RuntimeException | Error thrown) {
+                if (failure == null) failure = thrown;
+                else if (failure != thrown) failure.addSuppressed(thrown);
+            }
+        }
+        if (failure != null) {
+            recordIsolationLoss(failure);
+            if (failure instanceof Error error) throw error;
+            throw (RuntimeException) failure;
+        }
+    }
+
     @BeforeEach
     protected void requireSharedPostgresqlIsolation() {
         Throwable loss = ISOLATION_LOSS.get();
