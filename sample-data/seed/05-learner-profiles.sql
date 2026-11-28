@@ -3,8 +3,9 @@
 -- Local/test-only: never run against a shared, staging or production database.
 -- The target must be a disposable database attested as described in
 -- sample-data/README.md; otherwise this script stops before any lock or write.
--- Load first 02-course-python-fundamentals.sql and the three final-v1 profile
--- Learners, which ADR013 §3 places in 01-users.sql (SD01 extension).
+-- Load first 01-users.sql and 02-course-python-fundamentals.sql with
+-- seed_dataset final-v1: the three final-v1 profile Learners come from the SD01
+-- extension (ADR013 §3) and course/python from SD02.
 --
 -- Input, as a psql variable or, when unset, an environment variable:
 --   seed_target_system_identifier   CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER
@@ -132,7 +133,7 @@ BEGIN
          AND account.display_name = profile.display_name
          AND account.role = 'learner'
          AND account.account_status = 'active') <> 3 THEN
-        RAISE EXCEPTION 'SD05 requires the three final-v1 profile Learners of 01-users.sql (SD01 extension)';
+        RAISE EXCEPTION 'SD05 requires the three final-v1 profile Learners; load 01-users.sql with seed_dataset final-v1 first';
     END IF;
 
     FOR expected_enrollment IN SELECT * FROM sd05_enrollment_seed ORDER BY id LOOP

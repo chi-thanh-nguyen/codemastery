@@ -1,32 +1,36 @@
--- CodeMastery interim-v1 synthetic Course seed (SD02).
+-- CodeMastery synthetic Course seed (SD02): dataset interim-v1 and the final-v1
+-- Course course/python (ADR013 §4.2, CT15.F-adaptive).
 --
 -- Local/test-only: never run against a shared, staging or production database.
 -- The target must be a disposable database attested as described in
 -- sample-data/README.md; otherwise this script stops before any lock or write.
 -- Load 01-users.sql first: every Course references its synthetic Instructor.
 --
--- Input, as a psql variable or, when unset, an environment variable:
+-- Inputs, as psql variables or, when unset, environment variables:
 --   seed_target_system_identifier   CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER
+--   seed_dataset                    CODEMASTERY_SEED_DATASET (optional)
+-- With seed_dataset unset or interim-v1, the file loads exactly the interim-v1
+-- rows below, as before. With seed_dataset final-v1 it also loads course/python
+-- and requires its adaptive policy (ADR013 §16.1 approved demonstration values
+-- 1/2, 4/5 and 6), which carries no committed number:
+--   adaptive_weak                          CODEMASTERY_SEED_ADAPTIVE_WEAK
+--   adaptive_mastered                      CODEMASTERY_SEED_ADAPTIVE_MASTERED
+--   adaptive_minimum_questions_per_skill   CODEMASTERY_SEED_ADAPTIVE_MINIMUM_QUESTIONS_PER_SKILL
+-- weak and mastered are "numerator/denominator" with positive decimal integers.
+-- The policy is validated against ADR005 §6.2 before any lock or write. A policy
+-- input supplied without seed_dataset final-v1 is rejected.
 --
--- IDs are UUIDv5 values in the standard URL namespace for the name
+-- interim-v1 IDs are UUIDv5 values in the standard URL namespace for the name
 -- https://codemastery.test/interim-v1/<logical-key>; each row names its key.
 -- Course, Chapter and Lesson rows are the ADR002 CT15.I-data records. The text
 -- LearningMaterial rows are the SD02 material addition recorded in ADR002
 -- (CT15.SD02-materials); their English text is original synthetic content.
 -- No file or external-video material is seeded: see sample-data/README.md.
 --
--- The file also carries the final-v1 Course course/python of ADR013 §4.2
--- (CT15.F-adaptive, SD03): IDs are UUIDv5 values for
--- https://codemastery.test/final-v1/<logical-key>, owned by the reused interim-v1
--- Instructor. Lesson Lk of the canonical order L01-L20 is titled after skill Sk.
--- Its adaptive policy carries no committed number: it is supplied at load time and
--- validated against ADR005 §6.2 before any lock or write. Inputs, as psql variables
--- or, when unset, environment variables (approved demonstration values, ADR013
--- §16.1: 1/2, 4/5 and 6):
---   adaptive_weak                          CODEMASTERY_SEED_ADAPTIVE_WEAK
---   adaptive_mastered                      CODEMASTERY_SEED_ADAPTIVE_MASTERED
---   adaptive_minimum_questions_per_skill   CODEMASTERY_SEED_ADAPTIVE_MINIMUM_QUESTIONS_PER_SKILL
--- weak and mastered are "numerator/denominator" with positive decimal integers.
+-- course/python IDs are UUIDv5 values for https://codemastery.test/final-v1/<logical-key>;
+-- the Course is owned by the reused interim-v1 Instructor. Lesson Lk of the
+-- canonical order L01-L20 is titled after skill Sk. L01's PDF file material is
+-- provisioned after loading through the CT09 upload operation, never by this seed.
 
 \set ON_ERROR_STOP on
 \set VERBOSITY terse
@@ -45,11 +49,39 @@ END;
 $sd02_input$;
 \endif
 
+\if :{?seed_dataset}
+\else
+\getenv seed_dataset CODEMASTERY_SEED_DATASET
+\endif
 \if :{?adaptive_weak}
 \else
 \getenv adaptive_weak CODEMASTERY_SEED_ADAPTIVE_WEAK
 \endif
+\if :{?adaptive_mastered}
+\else
+\getenv adaptive_mastered CODEMASTERY_SEED_ADAPTIVE_MASTERED
+\endif
+\if :{?adaptive_minimum_questions_per_skill}
+\else
+\getenv adaptive_minimum_questions_per_skill CODEMASTERY_SEED_ADAPTIVE_MINIMUM_QUESTIONS_PER_SKILL
+\endif
 
+-- Dataset selection. This literal comparison reads no table and takes no lock.
+\if :{?seed_dataset}
+\else
+\set seed_dataset interim-v1
+\endif
+SELECT :'seed_dataset' IN ('interim-v1', 'final-v1') AS sd02_known_dataset,
+       :'seed_dataset' = 'final-v1' AS sd02_final_dataset \gset
+\if :sd02_known_dataset
+\else
+DO $sd02_input$
+BEGIN
+    RAISE EXCEPTION 'SD02 requires seed_dataset interim-v1 or final-v1.';
+END;
+$sd02_input$;
+\endif
+\if :sd02_final_dataset
 \if :{?adaptive_weak}
 \else
 DO $sd02_input$
@@ -58,12 +90,6 @@ BEGIN
 END;
 $sd02_input$;
 \endif
-
-\if :{?adaptive_mastered}
-\else
-\getenv adaptive_mastered CODEMASTERY_SEED_ADAPTIVE_MASTERED
-\endif
-
 \if :{?adaptive_mastered}
 \else
 DO $sd02_input$
@@ -72,17 +98,30 @@ BEGIN
 END;
 $sd02_input$;
 \endif
-
-\if :{?adaptive_minimum_questions_per_skill}
-\else
-\getenv adaptive_minimum_questions_per_skill CODEMASTERY_SEED_ADAPTIVE_MINIMUM_QUESTIONS_PER_SKILL
-\endif
-
 \if :{?adaptive_minimum_questions_per_skill}
 \else
 DO $sd02_input$
 BEGIN
     RAISE EXCEPTION 'Required input adaptive_minimum_questions_per_skill is missing.';
+END;
+$sd02_input$;
+\endif
+\elif :{?adaptive_weak}
+DO $sd02_input$
+BEGIN
+    RAISE EXCEPTION 'SD02 adaptive policy inputs require seed_dataset final-v1.';
+END;
+$sd02_input$;
+\elif :{?adaptive_mastered}
+DO $sd02_input$
+BEGIN
+    RAISE EXCEPTION 'SD02 adaptive policy inputs require seed_dataset final-v1.';
+END;
+$sd02_input$;
+\elif :{?adaptive_minimum_questions_per_skill}
+DO $sd02_input$
+BEGIN
+    RAISE EXCEPTION 'SD02 adaptive policy inputs require seed_dataset final-v1.';
 END;
 $sd02_input$;
 \endif
@@ -135,6 +174,7 @@ BEGIN
 END
 $sd02_target$;
 
+\if :sd02_final_dataset
 -- ADR005 §6.2 policy schema, checked before any lock or write: every integer in
 -- 1..2147483647, numerator <= denominator and exactly 0 < weak < mastered <= 1.
 SET LOCAL codemastery.seed_adaptive_weak = :'adaptive_weak';
@@ -166,6 +206,7 @@ BEGIN
     END IF;
 END
 $sd02_policy$;
+\endif
 
 -- Keep the referenced Instructor stable, then serialize loaders and other
 -- Course-content writers before taking a data snapshot. Lock order matches SD01.
@@ -191,6 +232,7 @@ VALUES
     ('824937a6-f333-580a-96af-7b9b2c57453b', '1eacfb14-e494-596c-bb53-3d012e7caf72', 'Programming Practice', 'Demo course for the Interim catalogue', 'No prerequisites', 'published', false, NULL),
     ('34ea40e0-54fd-5fb6-a402-5df72e49c45a', '1eacfb14-e494-596c-bb53-3d012e7caf72', 'Instructor Draft', 'Demo course for the Interim catalogue', 'No prerequisites', 'hidden', false, NULL);
 
+\if :sd02_final_dataset
 -- course/python (final-v1, ADR013 §4.2 CT15.F-adaptive): adaptive policy from the validated inputs,
 -- each rational pair stored reduced by its greatest common divisor (ADR005 §6.2).
 INSERT INTO sd02_course_seed (id, instructor_id, title, description, prerequisite_description, publication_status, adaptive_enabled, adaptive_settings)
@@ -207,6 +249,7 @@ FROM (
            split_part(current_setting('codemastery.seed_adaptive_mastered'), '/', 2)::bigint AS md,
            current_setting('codemastery.seed_adaptive_minimum_questions_per_skill')::bigint AS minimum
 ) policy;
+\endif
 
 CREATE TEMP TABLE sd02_chapter_seed (
     id uuid NOT NULL,
@@ -221,6 +264,7 @@ VALUES
     ('b87c15db-8ae8-5458-ac5d-ab347cdc70aa', 'bd8ce62d-90d6-525b-ae6c-652c53ccfe6a', 'Getting Started', 1),
     ('49fe9687-cf8a-5397-b704-fb6b2f3d5930', '824937a6-f333-580a-96af-7b9b2c57453b', 'Getting Started', 1);
 
+\if :sd02_final_dataset
 -- course/python/chapter/1..6 (final-v1)
 INSERT INTO sd02_chapter_seed (id, course_id, title, position)
 VALUES
@@ -230,6 +274,7 @@ VALUES
     ('4a95963f-e6af-52b9-8236-33ba960b1474', '68ea4540-e9da-5605-9054-28b29afa0992', 'Collections', 4),
     ('8712c346-d667-58c5-9ea8-e3d5d5a9a93e', '68ea4540-e9da-5605-9054-28b29afa0992', 'Functions', 5),
     ('b18b2d05-06fe-5e92-b59a-aa384320819e', '68ea4540-e9da-5605-9054-28b29afa0992', 'Text, errors and files', 6);
+\endif
 
 CREATE TEMP TABLE sd02_lesson_seed (
     id uuid NOT NULL,
@@ -248,6 +293,7 @@ VALUES
     ('417c19ff-5c93-5aaa-a4d8-883f20574b55', '49fe9687-cf8a-5397-b704-fb6b2f3d5930', 'Concepts', NULL, 1, 'published'),
     ('bb0e05c9-ba94-5cb8-a861-39a999266373', '49fe9687-cf8a-5397-b704-fb6b2f3d5930', 'Practice', NULL, 2, 'published');
 
+\if :sd02_final_dataset
 -- course/python Lessons L01-L20 (final-v1), one per skill Sk of 03-skill-graph-and-lesson-mapping.sql
 INSERT INTO sd02_lesson_seed (id, chapter_id, title, content_markdown, position, publication_status)
 VALUES
@@ -291,6 +337,7 @@ VALUES
     ('d12de280-e91d-5536-b384-34575ed8cb20', 'b18b2d05-06fe-5e92-b59a-aa384320819e', 'Exceptions', NULL, 2, 'published'),
     -- course/python/chapter/6/lesson/3 (L20)
     ('7cdc242d-2dc4-51fa-abaa-852d131818bd', 'b18b2d05-06fe-5e92-b59a-aa384320819e', 'File Input and Output', NULL, 3, 'published');
+\endif
 
 CREATE TEMP TABLE sd02_material_seed (
     id uuid NOT NULL,
@@ -368,6 +415,7 @@ Check your answers: exercise 1 displays 5 6. In exercise 2, division happens bef
 
 Let learners attempt each tracing exercise individually, then compare traces in pairs before revealing the answers. Learners who confuse assignment with equality usually benefit from rewriting a line such as count = count + 1 in words: "calculate count plus one, then make count refer to the result."$sd02_text$, NULL, NULL, NULL);
 
+\if :sd02_final_dataset
 -- course/python text materials (final-v1): original synthetic English text, one published material per Lesson.
 -- L01's PDF file material is provisioned after loading through the CT09 upload operation, never by this seed.
 INSERT INTO sd02_material_seed (id, lesson_id, title, material_type, publication_status, text_content, object_key, original_filename, external_video_url)
@@ -752,6 +800,7 @@ Read a file line by line with a for loop:
 strip removes the line break at the end of each line. Opening a file that does not exist for reading raises FileNotFoundError, which you can handle with try and except.
 
 Quick check: a program opens an existing file with mode "w" and writes nothing. What does the file contain afterwards? Answer: nothing; mode "w" empties it.$sd02_text$, NULL, NULL, NULL);
+\endif
 
 DO $sd02$
 DECLARE
