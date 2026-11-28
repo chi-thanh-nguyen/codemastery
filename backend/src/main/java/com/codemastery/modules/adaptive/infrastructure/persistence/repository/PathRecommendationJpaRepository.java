@@ -8,16 +8,24 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.List;
 
 /**
  * Spring Data access to {@code path_recommendations} for the AD06 append-only write path
- * ({@code AD06-PERSISTENCE-2026-11-23-r1}). Reads belong to AD16.
+ * ({@code AD06-PERSISTENCE-2026-11-23-r1}) and the bounded AD16 current-guidance read.
  *
  * <p>ADR011 §9 makes history append-only, so only a plain {@code INSERT} is declared: no
  * {@code save} (whose merge path would overwrite a row with the same identifier), no update and
  * no delete.
  */
 public interface PathRecommendationJpaRepository extends Repository<PathRecommendationEntity, UUID> {
+
+    // Two rows suffice to detect an invalid tie at the greatest guidance instant. Skip rows
+    // never determine the current continue/remedial; no random-UUID tie breaker is permitted.
+    @Query(value = "SELECT * FROM public.path_recommendations WHERE enrollment_id = :enrollmentId "
+            + "AND recommendation_type IN ('continue','remedial') ORDER BY recommended_at DESC LIMIT 2",
+            nativeQuery = true)
+    List<PathRecommendationEntity> findLatestGuidance(@Param("enrollmentId") UUID enrollmentId);
 
     /**
      * Inserts one history row. An identifier that already exists fails with the V005

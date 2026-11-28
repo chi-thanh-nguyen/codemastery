@@ -6427,7 +6427,7 @@
         "tags": [
           "Batch 6 contracts"
         ],
-        "description": "Self Learner. Placement offer with the server-chosen diagnostic Quiz to start or resume (ADR011 §11), the visible current recommendation (ADR011 §15): null unless the Course's stored adaptiveEnabled is true, the target is a currently published Lesson and re-evaluating the routing rules on current data still yields that row; no older row is substituted, and per-Lesson prerequisite warnings (empty when adaptiveEnabled is false). Guidance only; never blocks access. Completing every Lesson does not suppress a still-selected remedial review; only a changed/absent draft fails validity. A rename matters only if the selected draft/reason changes. ADR011 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Self Learner. Placement offer with the server-chosen diagnostic Quiz to start or resume (ADR011 §11), the visible current recommendation (ADR011 §15): null unless the Course's stored adaptiveEnabled is true, the target is a currently published Lesson and re-evaluating the routing rules on current data still yields that row; no older row is substituted, and per-Lesson prerequisite warnings (empty when adaptiveEnabled is false). Guidance only; never blocks access. Completing every Lesson does not suppress a still-selected remedial review; only a changed/absent draft fails validity. A rename matters only if the selected draft/reason changes. ADR011 is normative. Implemented in PR #304 as a bounded AD16 slice: one admitted read-only REPEATABLE READ snapshot, real CT07 engine, latest stored guidance and CT25 placement offer. CT25 submission initialization remains blocked on AD13. Frontend delivery, independent acceptance, protected integration and deployment are separate.",
         "security": [
           {
             "bearerAuth": []
@@ -6446,7 +6446,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Implemented admitted read-only REPEATABLE READ guidance snapshot. CT25 initialization remains blocked on AD13; frontend delivery, independent acceptance, protected integration and deployment remain separate.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -6476,7 +6476,7 @@
             "$ref": "#/components/responses/B6Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED",
         "x-approval-reference": "../decisions/011-batch-06-contract-approvals.md"
       }
     },

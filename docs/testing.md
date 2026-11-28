@@ -13687,3 +13687,333 @@ Still open:
   `AbstractIntegrationTest` change;
 - required hosted CI and CodeQL, and the protected squash merge;
 - AD08/AD13, QA03/QA04, release and deployment.
+
+## PR #304 AD10 completion audit and bounded AD16 guidance — 28 November 2026
+
+**Verdict: AD10_OWNED_SCOPE_COMPLETE_WITH_EXPLICIT_INTEGRATION_BLOCKERS.** This is
+OpenAI Codex author-side implementation, audit and verification, not independent
+acceptance. Refs #167. CT25 offer/binding/skip and the complete course-guidance
+read are delivered. CT25.init is still blocked by the substantial AD13 execution
+implementation; diagnostic submission does not yet persist initial mastery through
+that path. No Issue is declared complete and no release/deployment is authorized.
+
+### Baseline, authority and effective contracts
+
+The Project Leader explicitly authorized PR #304 implementation/remediation,
+normal commit/push, documentation and PR metadata updates, and cumulative upstream
+additions below approximately 40% of each owning Issue. Larger or uncertain slices
+must be deferred. Initial HEAD `463145ac23d6b1f1e1a4ddb2a1cddd6b72be3550`, latest main
+`e76b375caf10603c0e121b1eb3ba028b001e4610`, incoming merge base
+`fe3160d535b33652587e14e2fc55ca267f6a5222`; divergence 1 PR-only / 5 main-only commits.
+A separate clean clone preserved all pre-existing worktrees. Normal synchronization
+commit `30ef07c` retains both histories; the incoming contributor commit is an
+ancestor. No published history was rewritten. The original Git author and committer
+fields are exactly `Tên của bạn <thanhtran.3112006@gmail.com>`; the Leader expressly
+authorized their reuse. These fields are declared attribution, not legal-identity,
+account-authentication, personal implementation, signature or review evidence.
+OpenAI Codex produced the remediation, tests and documentation. No signature or
+review record is forged. Publication uses the authenticated Leader account.
+
+Root CLAUDE.md available in the original checkout was read in full, together with
+AGENTS.md, CONTRIBUTING.md and CODEOWNERS. No nested backend/docs instruction was
+found. Requirements §5.3, architecture US-03/06/07 and module flow, repository tree,
+adaptive-learning and data-model ownership, OpenAPI and the relevant testing
+allocation were checked against production. The original local Graphify graph dates
+from 5 November and predates this placement code; source inspection is the evidence,
+not that stale graph. No graph generation or semantic extraction was performed.
+Cross-session archive retrieval was unnecessary.
+
+The effective decisions are ADR005 CT06-PRODUCTION-2026-11-08-r1 and
+CT24-CALCULATION-2026-11-08-r2; CT06-ENABLEMENT-2026-11-08-r2 with N1 and R1,
+its retained R2/R3 transport/traceability corrections; ADR007 CT04/CT08 evidence
+with §§16–17 ancestry companions; ADR011 §§3–7,9,11–16,19–21 (including all
+pre-integration corrections within the same r1 revisions); ADR013 §19's practice
+boundary; and ADR016 categorical persistence. No former Interim-only restriction,
+obsolete unconditional settings replacement or pending pre-Batch-6 event mechanism
+is treated as effective. Live CT25 #141, CT06 #24 and CT24 #25 histories confirm
+integration of ADR005 via `81806fc` and ADR011 via `c80fda9`, plus the Leader's
+15 November review/approval attestation. That attestation is distinct from a GitHub
+APPROVED review. Operational-risk acceptance, CODEOWNER/protected integration and
+runtime acceptance are not inferred.
+
+Live PR #304 had no submitted review or review thread. Open PRs were inspected:
+#299 changes only MasteryProgressTransactionIntegrationTest (QA04), #298 adaptive
+E2E, #308 Mastery Map frontend, #294 learner quiz frontend and #310 sample data.
+No competing production AD13/AD08/AD16 implementation was imported. Those other
+PRs were not changed, reviewed or accepted here.
+
+### Completeness inventory
+
+The status labels below use the task's classification vocabulary. Existing pure
+calculators and producer seams are distinguished from their missing orchestration.
+
+| Requirement | Incoming status | Final status and evidence |
+|---|---|---|
+| CT25.scope, captured-question skills | BLOCKED_BY_UPSTREAM | BLOCKED_BY_UPSTREAM for initialization; existing Attempt capture and QuizSubmittedEvent.AnswerEvidence carry skill IDs, but AD13 does not consume them |
+| CT25.init, exactly assessed skills persisted | MISSING_IMPLEMENTATION | BLOCKED_BY_UPSTREAM: MasteryUpdateService and QuizSubmittedEventListener remain zero-byte scaffolds; no alternative diagnostic writer added |
+| Course-configured exact classification | IMPLEMENTED_BUT_INSUFFICIENTLY_VERIFIED | IMPLEMENTED_AND_VERIFIED for the existing AD09 pure calculator/classifier; integration remains BLOCKED_BY_UPSTREAM on AD08 parsing and AD13 invocation |
+| Out-of-scope mastery preservation | BLOCKED_BY_UPSTREAM | BLOCKED_BY_UPSTREAM for submission initialization; offer/guidance issue no writes and isolation is verified |
+| Duplicate/reordered diagnostic evidence | BLOCKED_BY_UPSTREAM | BLOCKED_BY_UPSTREAM for mastery effects; Assessment's existing one-time terminal/event and latest tuple remain unchanged and targeted producer tests run |
+| CT25.skip | IMPLEMENTED_BUT_INSUFFICIENTLY_VERIFIED | IMPLEMENTED_AND_VERIFIED for backend no-effect semantics and canonical nextLessonId/revisit; actual frontend navigation is outside this backend delivery |
+| CT25.binding, authoritative Quiz | IMPLEMENTED_BUT_INSUFFICIENTLY_VERIFIED | IMPLEMENTED_AND_VERIFIED: current membership/flag/policy-presence/skills/stored-row absence and Assessment ID; real start/resume/expiry/one-time gate tests |
+| Explicit Unknown versus absent row | IMPLEMENTED_BUT_INSUFFICIENTLY_VERIFIED | IMPLEMENTED_AND_VERIFIED: all four stored states suppress the offer, absent rows do not |
+| Trusted learner/Course and admission | PARTIALLY_IMPLEMENTED | IMPLEMENTED_AND_VERIFIED: public-state re-admission and full-state equality before Adaptive reads; foreign learner, stale settings and refused admission tested |
+| Both placement entry transactions | IMPLEMENTED_BUT_INSUFFICIENTLY_VERIFIED | IMPLEMENTED_AND_VERIFIED: real Spring proxies, MANDATORY/no caller, wrong isolation/read-only refusal, same-snapshot writer interleaving and PostgreSQL transaction facts |
+| GET adaptive-guidance | MISSING_IMPLEMENTATION | IMPLEMENTED_AND_VERIFIED: complete B6 wire response, no-store, authentication/syntax/CT03, actual warnings, newest visible history, no fallback and no writes |
+| Recommendation validity | MISSING_IMPLEMENTATION | IMPLEMENTED_AND_VERIFIED for course guidance: real CT07 engine; completed remedial stays visible; hidden/stale/changed selected draft hidden; unrelated rename retained; newest-instant tie fails 500 |
+| REST/frontend mastery map | BLOCKED_BY_UPSTREAM | BLOCKED_BY_UPSTREAM: AD16 map/insights/Home and frontend consumers are not delivered |
+| Atomic submission/mastery/progress/history | MISSING_IMPLEMENTATION | BLOCKED_BY_UPSTREAM: requires the complete AD13 unit and QA04 qualification; passing read tests is not atomic initialization evidence |
+| Local deterministic coverage | PARTIALLY_IMPLEMENTED | IMPLEMENTED_AND_VERIFIED for delivered offer/guidance slice; missing initialization scenarios are explicitly blocked, not counted as passing |
+
+`PlacementDiagnosticServiceTest`, the `ad10*` cases of
+`AdaptiveLearningFlowIntegrationTest`, the existing `b8*` cases and targeted
+Assessment/Adaptive persistence suites supply the executable evidence. The
+initialization, replay and atomicity rows above are not declared implemented by
+Mockito tests, pure arithmetic or stored fixtures.
+
+### Cumulative upstream accounting
+
+Percentages are behavioral estimates of the whole owning Issue, not line/file
+counts. They are not project completion percentages.
+
+| Issue | Necessary capability and estimate | Disposition / AD10 impact |
+|---|---|---|
+| AD06 #42 | 0% new: categorical upsert and append-only history already merged | Reused; no write mechanism changed; read addition belongs to AD16 |
+| AD07 #165 | 0% new: Course skills, prerequisites and Lesson mappings already merged | Reused own-module repositories; no owner-only cross-module projection exposed |
+| AD08 #166 | About 15–25% for a standalone policy parser, but the settings/readiness/ETag/enablement use case remains largely absent | No standalone unused parser added: offer/guidance consume presence only, not threshold values; AD13 must consume validated policy, and actual Instructor configuration remains blocked |
+| AD09 #58 | 0% new: exact calculator/classifier already implemented | Reused as evidence of arithmetic only; no defaults or minimum-attempt rule introduced |
+| AD11 #168 | 0% new: decision and warning engine already implemented | Reused unchanged for read-only draft validity/warnings |
+| AD13 #169 | About 80–100%: listener, policy/evidence validation, latest-evidence classification/persistence, readiness, Course skips, history effects and rollback/duplicate/reorder verification | Above 40%; deferred as one cumulative unit. A diagnostic-only subset would violate ADR011's ordinary eligible-evidence path; CT25.init/atomic/replay effects remain blocked |
+| AD14 #170 | 0% new: history insert and recommendation event already implemented | Existing writes untouched; current history SELECT is accounted under AD16 |
+| AD16 #171 | About 25–35%: one complete course-guidance read/REST of the broader map/owner-insights/history/Home/reporting read inventory, plus its newest-history query and runtime SELECT | Within 40%; implemented together, including authorization, engine validity, warnings, cache policy, persistence privilege and real PostgreSQL tests. Map/latest score, owner detail/list/history/attempts, Home paging and reporting remain separate |
+| AS08 #159 | 0% new: diagnostic start/resume/one-time lifecycle and selection already merged | Reused without duplicating Quiz selection or expiry ordering |
+| AS12 #161 | 0% new: immutable event and submit/finalize publication already merged in `fe3160d` | Existing ordinary event preserved; no second subscriber or direct Adaptive call |
+| AS16 #162 | 0% new: admitted result/evidence reads already present | Not needed by this guidance response; no execution-only evidence read called |
+| AS18 #164 | 0% new: owner/execution coverage already merged via #307 at latest main | Not a missing producer here; AD13 readiness remains the missing consumer |
+| CO14 #177 | 0% new: stored configuration and Course-root guard already present | Reused through CT33; Adaptive does not write Course storage |
+| CO15 #178 | 0% new: learner snapshot and execution/progress participants already present | Reused read path; AD13 must still call write participants in the approved transaction |
+
+AD16 accounting includes all new production/query/DTO/security/privilege/test
+responsibilities in this PR, not separate artificially small sub-slices. No
+upstream Issue is closed or marked complete.
+
+### Technical decisions and author audit
+
+D1 (existing approved obligation, implementation choice): a public LearnerCourseState
+record is not an admission capability. Re-read Course's approved admitted projection
+in the caller's same snapshot, compare the whole record, then use it. This rejects
+foreign/stale/unadmitted data before mastery reads, costs one additional admission
+read and introduces no token, cache, new port or Course-exported internal marker.
+An allowlist alone cannot establish identity or same-snapshot provenance.
+
+D2 (bounded AD16 implementation choice): implement the full existing guidance
+contract using MasteryQueryService, MasteryController and MasteryResponses; use
+existing AdaptiveDecisionEngine rather than a second routing/visibility algorithm.
+Select the newest continue/remedial before filtering; fetch at most two rows to
+reject equal greatest instants. Do not fabricate guidance when no valid stored row
+exists. Nested immutable application/DTO records stay in approved existing files.
+No new endpoint shape, migration, file location or contract amendment is selected.
+
+D3 (delegated missing consumer privilege): r18 adds only path_recommendations
+SELECT to existing INSERT within ADR012 §19.2. The exact rationale/authority and
+unexecuted production grants are in deployment.md. No history rewrite is allowed.
+
+D4 (scope/contract reconciliation): retain CT25.init in AD13's one ordinary
+QuizSubmittedEvent path. Do not implement a diagnostic-only listener or a parallel
+persistence path to evade the upstream ceiling. Null policy initializes nothing
+under that future path; malformed consumed policy must fail integrity validation.
+This read consumes only policy presence and never classifies, validates numeric
+thresholds or asserts a valid settings API exists.
+
+| Finding | Severity | Remediation and final author disposition |
+|---|---|---|
+| F01 public-state overload trusts arbitrary learner/configuration before mastery read | P2 | Same-snapshot Course re-admission + full equality, negative unit/real PostgreSQL tests and exact caller allowlist; FIXED_AUTHOR_VERIFIED |
+| F02 UUID entry has no local guard when joining an incompatible caller (its real Course provider already refuses) | P3, defense/contract enforcement | Explicit transaction guard before providers; real proxy tests cover both entries; FIXED_AUTHOR_VERIFIED |
+| F03 AD16 course-guidance binding absent | P2 scope omission | Complete approved composition and REST, actual warning/history semantics, no-store and minimal SELECT; FIXED_AUTHOR_VERIFIED within bounded upstream scope |
+| F04 AD10 initialization/replay/atomic tests absent because AD13 is unimplemented | P1 functional incompleteness | Explicit integration blocker, above upstream ceiling; no false completion, no alternative path; UNRESOLVED_UPSTREAM |
+| F05 PR placeholder/verification inventory omits real boundaries | P3 | Refs #167, accurate scope/title/description and documentation synchronized; FIXED_AUTHOR_VERIFIED on publication |
+
+The final self-audit covers the whole main-relative diff: eligibility, actor/Course
+isolation, complete DTOs, failure confidentiality, transaction joining and snapshot
+coherence, no read writes, newest guidance uniqueness, exact engine validity,
+immutable history, ordinary event architecture and directly affected consumers.
+No other known actionable in-scope defect remains after remediation. No independent
+review/acceptance or protected merge readiness is claimed. Remaining AD13 scope is
+functional incompleteness, not a passing exception to US-03.
+
+### Commands and executed evidence
+
+Environment: Java Temurin 25.0.4.1, Maven Wrapper 3.9.16, macOS arm64,
+Docker Desktop 29.8.1, repository-built disposable PostgreSQL 17.11. Final source
+was restored after the negative control; final targeted runs are sequential.
+
+```sh
+# From backend/: production and all test sources compile, then 255 unit cases pass.
+./mvnw -B -q -Dtest=PlacementDiagnosticServiceTest,AttemptServiceTest,LessonProgressServiceTest,MasteryCalculatorTest,MasteryStateClassifierTest,AdaptiveDecisionEngineTest,PracticeDifficultySelectorTest,PracticeQuizProfilesTest test
+# 255 tests, 0 failures/errors/skips. PlacementDiagnosticServiceTest: 17 cases.
+
+./mvnw -B -q test-compile failsafe:integration-test failsafe:verify '-Dit.test=AdaptiveLearningFlowIntegrationTest#ad10*+b8*,AssessmentPersistenceIntegrationTest*,AdaptivePersistenceIntegrationTest'
+# 147 tests, 0 failures/errors/skips: flow23 (AD10=17, practice=6), Assessment100,
+# Adaptive persistence24. The wildcard explicitly includes nested Assessment runtime.
+
+# Original placement production source from 463145ac, final regressions, backend/:
+./mvnw -B -q '-Dtest=PlacementDiagnosticServiceTest#publicStateCannotReadAnotherLearnerOrStaleConfiguration+publicStateRechecksAdmissionEvenWhenSuppliedStateWouldSuppressOffer+courseEntryRefusesAnIncompatibleExistingTransactionBeforeAnyProviderRead' test
+# Negative control: 3 tests, 3 expected failures, no errors/skips, exit1.
+# A finally block restored the final production bytes before the passing 255-case run.
+
+# From repository root:
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+# PASS: all 27 relations and r1–r18 documentation/matrix match; malformed inputs refused.
+bash -n infrastructure/vm/deploy.sh infrastructure/vm/tests/test-runtime-real-backend-privileges.sh infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+# PASS.
+git diff --check
+# PASS.
+```
+
+OpenAPI was parsed with duplicate-key rejection; all 946 references resolve.
+Semantic comparison with origin/main confirms that every schema and operation
+shape is unchanged; only guidance's description/implementation-status changes.
+The final commit is identified by the delivery report and evidence manifest;
+production/test blob identity is checked against that commit before publication.
+
+Intermediate failures are retained as limitations, not passing evidence: the
+sandbox prevented Mockito JVM attachment (rerun with authorized environment access);
+adding a second repository method required adapting two append-only test doubles;
+one overlapping compile/test run lost an anonymous test class artifact (final
+builds run sequentially). The first restricted-role fixture omitted Course
+admission's learning_materials column SELECT; the fixture was corrected to the
+already-approved columns, then the full 147-case run passed. No production grant
+was expanded for that fixture correction. The initial 15-case AD10 pass and
+intermediate 76-case run are superseded and not added to the final totals.
+
+No full repository verify, unrelated frontend/browser/E2E, deployment, migration,
+production operation or CI dispatch/poll was run. Linux VM runtime/containment
+scripts were syntax-checked and their consumer probes synchronized; their full
+runtime execution is deliberately not claimed on this macOS host. The new read's
+actual Spring/JPA/PostgreSQL restricted-role test and revoked-history-SELECT
+negative control are local evidence; they do not replace Linux qualification.
+
+### Remaining handoffs
+
+AD13 must implement every ordinary quiz kind under the existing synchronous,
+held-Course-root, read-write READ COMMITTED publication/listener/mastery/progress/
+history transaction. AD08 must provide closed-schema policy parsing and the
+approved settings/enablement behavior, without defaults. AD16 retains map/latest
+scores, Home and owner insight/history operations; FE09 and later consumers must
+implement actual navigation/display. QA03/QA04, independent CODEOWNER review,
+current-head protected checks, any operational-risk acceptance required by ADR011
+§5 and authorized runtime grants/deployment remain separate gates. No CI result
+is awaited or asserted for this delivery.
+
+## PR #304 targeted AD10-IR-01/02 remediation — 28 November 2026
+
+### Authority, baseline and dispositions
+
+The Project Leader's "Targeted Remediation — AD10-IR-01 & AD10-IR-02, Course
+Mapping Integrity and Contract Consistency" instruction supersedes the preceding
+read-only restriction and authorizes implementation, bounded necessary technical
+decisions, tests, documentation, commit/push and the PR-description update.
+Incoming reviewed HEAD is `2b4ae3d2f591bdb9568a3857757bf407ec668e5a`; refreshed main
+is `e76b375caf10603c0e121b1eb3ba028b001e4610`, already its ancestor, so no new
+synchronization merge is needed. Existing user worktrees are preserved; work and
+temporary controls use the isolated review clone.
+
+Both findings are **FIXED_AUTHOR_VERIFIED**, not independent closure. OpenAI Codex
+now acts as remediation author. No full AD10 acceptance, GitHub approval, protected
+integration, CI success, release, runtime grant or deployment is implied.
+
+| Finding | Change and discriminating evidence |
+|---|---|
+| AD10-IR-01 (P2) | `MasteryQueryService` validates every stored mapping target through Course before publication filtering. ADR011 §22 records `CT33-MAPPING-ANCESTRY-2026-11-28-r1`, a void assertion in existing `CourseStructureService`, with MANDATORY read-only REPEATABLE READ and its explicit guard, current-Learner CT03 re-admission, and the sole allowlisted guidance caller. Foreign published/hidden targets both return safe no-store 500; valid hidden same-Course mappings remain accepted and excluded from guidance. |
+| AD10-IR-02 (P3) | Guidance's OpenAPI response-200 description now states the implemented read and retains the explicit AD13, frontend, independent-acceptance, protected-integration and deployment limits. All approved operation/schema shapes remain identical. |
+
+Course reuses its existing internal scalar Lesson → Chapter → Course query. No
+hidden projection, Instructor impersonation or cross-module repository access is
+introduced. An empty target set still requires admission. Incompatible outer
+transactions fail before admission or ancestry reads; missing targets fail
+integrity validation inside the admitted snapshot. Existing owner and learner
+structural projections retain their audiences. CT17 r18 and every grant,
+column inventory, ownership rule and infrastructure script are unchanged: existing
+SELECT covers the query's Lesson/Chapter ancestry columns.
+
+### PostgreSQL controls and snapshot evidence
+
+Five new PostgreSQL invocations in `AdaptiveLearningFlowIntegrationTest` cover:
+
+- Foreign-Course targets with each publication status: safe 500, no-store, no
+  foreign identifiers/exception text and unchanged persisted state (two cases).
+- Valid hidden same-Course mapping: 200, canonical published population and valid
+  stored current guidance unchanged; removing only the hidden mapping leaves the
+  complete response identical. GET writes nothing.
+- The real Course proxy: no caller transaction, wrong isolation/read-only state,
+  non-Learner and non-member refusal, missing target integrity failure, and actual
+  PostgreSQL repeatable-read/read-only facts with no assigned write transaction ID.
+- An already established snapshot while another connection commits a deliberately
+  corrupt hidden-Lesson move to a foreign Chapter. The bounded writer statement
+  commits before the reader continues; the existing snapshot accepts the old
+  ancestry, an independent committed read sees the move, and a fresh HTTP read
+  fails 500. No sleep or scheduling assumption is used.
+
+Negative controls use the same final regression tests in the disposable checkout:
+
+1. Restore only incoming `MasteryQueryService` production bytes: the two foreign
+   mapping cases fail **2/2**, actual 200 instead of required 500 (exit 1, no
+   errors/skips).
+2. Mutate the fixed composition to reject any non-published mapping: the valid
+   hidden-mapping positive control fails **1/1** (exit 1, no errors/skips).
+
+Each control restores the exact fixed production bytes in a `finally` block.
+The final passing verification below runs after restoration. A first test-compile
+attempt passed the suite's long wait constant to JDBC's int query-timeout argument;
+it ran no tests and is not a negative-control result. The test-only conversion was
+corrected with `Math.toIntExact`; only freshly generated reports are counted.
+
+### Executed focused verification and limits
+
+Environment: macOS arm64, Java Temurin 25.0.4.1, Maven Wrapper 3.9.16,
+Docker Desktop 29.8.1 and repository-built disposable PostgreSQL 17.11.
+
+```sh
+# backend/: final fixed production/test bytes, sequential runs
+./mvnw -B -q -Dtest=PlacementDiagnosticServiceTest test
+# PASS: 17 tests, 0 failures/errors/skips; AST allowlist includes the new assertion.
+
+./mvnw -B -q test-compile failsafe:integration-test failsafe:verify '-Dit.test=AdaptiveLearningFlowIntegrationTest#ad10*+b8*'
+# PASS: 28 PostgreSQL tests, 0 failures/errors/skips.
+# Existing 17 AD10 + 6 practice cases, plus 5 targeted mapping-remediation cases.
+
+# repository root
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+# PASS: 27 relations, unchanged r1-r18 matrix, malformed inputs rejected.
+bash -n infrastructure/vm/deploy.sh infrastructure/vm/tests/test-runtime-real-backend-privileges.sh infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+# PASS; no infrastructure source changed.
+git diff --check
+# PASS.
+```
+
+The selected flow cases retain placement admission and diagnostic semantics,
+latest-history visibility/tie handling, exact reasons, non-mutation, coherent
+snapshots and practice behavior. The existing restricted-role case executes the
+complete guidance including its valid hidden mapping under SET LOCAL ROLE with
+only the approved reads; revoking history SELECT still fails. This verifies the
+new assertion without widening runtime privileges. OpenAPI duplicate-key checking
+passes and all 946 references resolve; comparison with incoming HEAD proves that
+only the guidance response-200 description changed.
+
+The focused post-remediation author audit found no remaining actionable defect in
+this delta. Production/test hashes are checked against the final remediation
+commit and retained with logs/reports in the delivery evidence. Earlier independent
+255-unit/147-PostgreSQL and real-backend results apply to their reviewed SHA and
+are not re-counted as new remediation evidence. No unrelated suite, full repository
+verify, browser/E2E run or CI dispatch/query/wait was performed. The complete Linux
+qualification scripts and backend image were not rerun for unchanged grants/SQL;
+local restricted-role proof does not establish VM-host acceptance or real grants.
+
+`Refs #167` remains: CT25.init and the ordinary synchronous AD13 mastery/progress/
+history execution are still blocked, as are full AD10 completion and diagnostic
+activation. AD08 settings/policy parsing, remaining AD16 functionality, frontend,
+QA03/QA04, independent delta review and CODEOWNER/protected gates remain separate.
+Git author and committer retain the exact task-authorized original contributor
+fields; authenticated pusher is `chi-thanh-nguyen`. AI-assisted implementation,
+tests and this author audit are attributed to OpenAI Codex. Declared Git fields
+are not legal-identity or personal-implementation proof.

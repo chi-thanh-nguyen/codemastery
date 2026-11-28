@@ -300,7 +300,7 @@ probe "assignments/submissions: TRUNCATE"                     42501 "TRUNCATE pu
 probe "learner_skill_masteries: re-key or re-target a row"     42501 "UPDATE public.learner_skill_masteries SET id=id, user_id=user_id, skill_id=skill_id;"
 probe "learner_skill_masteries: read row identifiers"          42501 "SELECT id FROM public.learner_skill_masteries;"
 probe "learner_skill_masteries: delete"                        42501 "DELETE FROM public.learner_skill_masteries;"
-probe "path_recommendations: read (r8 grants INSERT only)"    42501 "SELECT 1 FROM public.path_recommendations;"
+probe "path_recommendations: read current guidance (r18)"    ok "SELECT 1 FROM public.path_recommendations;"
 probe "path_recommendations: rewrite history"                 42501 "UPDATE public.path_recommendations SET reason=reason, recommended_at=recommended_at;"
 probe "path_recommendations: erase history"                   42501 "DELETE FROM public.path_recommendations;"
 probe "learner_skill_masteries/path_recommendations: TRUNCATE" 42501 "TRUNCATE public.path_recommendations, public.learner_skill_masteries;"

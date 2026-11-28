@@ -1,6 +1,8 @@
 package com.codemastery.modules.adaptive.domain.repository;
 
 import com.codemastery.modules.adaptive.domain.model.PathRecommendation;
+import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Adaptive-owned append-only recommendation history (table {@code path_recommendations}, V005;
@@ -9,7 +11,7 @@ import com.codemastery.modules.adaptive.domain.model.PathRecommendation;
  * <p>ADR011 §9 requires every row to keep the type, target Lesson, reason and instant supplied by
  * the caller, and history is never collapsed, rewritten or deleted. Whether a new row is needed
  * at all, the reason text and the strictly-later instant are the caller's obligations under
- * ADR011 §§7 and 9. Reads for the current recommendation and the Instructor log belong to AD16.
+ * ADR011 §§7 and 9. The AD16 current-guidance read is implemented below; Instructor history remains separate.
  *
  * <p>The caller owns the transaction (ADR011 §§4–5). The append requires an active transaction,
  * joins it, and never starts, commits or retries one; any failure propagates. This interface
@@ -26,4 +28,7 @@ public interface PathRecommendationRepository {
      * @throws NullPointerException if the recommendation or any of its fields is {@code null}
      */
     void append(PathRecommendation recommendation);
+
+    /** ADR011 §§7,15: unique newest continue/remedial, never an older visible fallback. */
+    Optional<PathRecommendation> findCurrentGuidance(UUID enrollmentId);
 }

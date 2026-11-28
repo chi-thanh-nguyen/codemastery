@@ -969,3 +969,58 @@ application service or database. OpenAPI duplicate-key/reference checks and exac
 semantic comparison passed: all 751 reference occurrences resolve, all 87
 operations remain, and only five Batch 6 descriptions change beyond the inherited
 Batch 5 correction. Real PostgreSQL and quiz-client integration remain NOT_RUN.
+
+## 22. CT33 mapping ancestry assertion — 28 November 2026
+
+**CT33-MAPPING-ANCESTRY-2026-11-28-r1; DELEGATED_APPROVED.** The Project Leader's
+"Targeted Remediation — AD10-IR-01 & AD10-IR-02, Course Mapping Integrity and
+Contract Consistency" instruction explicitly authorizes this smallest necessary
+compatible extension for PR #304. OpenAI Codex selected and implemented it as
+remediation author; this is not independent finding closure or GitHub approval.
+
+AD10-IR-01 reproduced a foreign-Course persisted Lesson mapping returning 200 from
+guidance. ADR005 §§4.1/4.3 and §7 above require integrity failure. The existing
+learner projections deliberately expose published Lessons only, so absence there
+cannot distinguish a valid hidden same-Course target from a foreign or missing one.
+Changing `readStructure` or `LearnerCourseState` to expose hidden identities would
+widen a settled read boundary. Instructor impersonation and cross-module repository
+access remain prohibited.
+
+Add only this assertion in the existing Course application `CourseStructureService`:
+
+```java
+public void requireLearnerMappedLessonsInCourse(UUID courseId, Set<UUID> lessonIds);
+```
+
+Its only production caller is `MasteryQueryService.readAdaptiveGuidance`, after
+`readLearnerState` admission and validation of Adaptive's stored mappings, and
+**before** filtering their targets to published Lessons. IDs come from Adaptive's
+Course-scoped persisted mappings, never a REST selector. The assertion first
+requires the caller's actual read-only REPEATABLE READ transaction (MANDATORY,
+explicit guard; no new transaction), then applies unchanged CT03 current-Learner
+Course admission, including for an empty target set. It internally proves every
+requested Lesson → Chapter → Course path, regardless of publication. Missing or
+foreign ancestry is an integrity failure (safe 500); valid hidden same-Course
+mappings succeed but remain excluded by the caller's published projection.
+Null identifiers are internal argument errors. The method returns no data, hidden
+identity, body, title, role or permission capability; no arbitrary actor is accepted.
+Existing owner/learner projections and their audiences are unchanged.
+
+Reuse Course's existing internal scalar `findLessonCourseId` query; all reads join
+the admitted snapshot and take no write lock. Existing CT17 SELECT on `lessons`
+and `chapters` covers its `lessons.id/chapter_id` and `chapters.id/course_id` columns.
+No repository interface, schema, migration, grant, default privilege, event or
+runtime configuration change is needed. This is one integrity assertion, not
+additional AD08/AD13 or unfinished AD16 functionality.
+
+Verification obligations: foreign published and hidden targets both fail safely;
+valid hidden same-Course targets are accepted without appearing in guidance;
+missing targets, absent/incompatible transactions and unauthorized actors are
+refused; a committed corrupt ancestry change is invisible to an established
+snapshot and fails a fresh read; the restricted-role guidance composition and
+AST caller allowlist remain valid. Source-baseline negative controls must fail.
+Executed evidence is recorded separately in `docs/testing.md`.
+
+CT25.init/AD13, frontend and QA03/QA04 acceptance, eligible Course/Adaptive and
+infrastructure CODEOWNER review, protected checks, actual runtime grants and
+deployment remain separate. This extension accepts no operational risk.
