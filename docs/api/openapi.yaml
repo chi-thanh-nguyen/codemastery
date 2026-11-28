@@ -7889,7 +7889,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Administrator only (any other role 403 before resource lookup). Hidden and published Courses; optional case-insensitive title substring and publicationStatus filter; ordered by title (C collation), then id. instructorDisplayName comes from Auth user summaries for the page's instructor IDs (null for a missing account), never from the published-catalogue name lookup. CT12-COURSE-2026-11-15-r2, CT12-REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Administrator only (any other role 403 before resource lookup). Hidden and published Courses; optional case-insensitive title substring and publicationStatus filter; ordered by title (C collation), then id. instructorDisplayName comes from Auth user summaries for the page's instructor IDs (null for a missing account), never from the published-catalogue name lookup. CT12-COURSE-2026-11-15-r2, CT12-REST-2026-11-15-r1. ADR012 is normative. Implemented in PR #312. Author-side local verification is recorded in docs/testing.md; independent owner review, QA acceptance and protected integration remain separate.",
         "security": [
           {
             "bearerAuth": []
@@ -7936,7 +7936,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Implemented JSON outcome; no-store.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -7963,7 +7963,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_312",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md"
       }
     },
@@ -7973,7 +7973,7 @@
         "tags": [
           "Batch 7 contracts"
         ],
-        "description": "Administrator only (any other role 403 before resource lookup). Only hidden is accepted (published is 400). Same effects as the Instructor hidden publication change, under the Course root lock taken first; already hidden is changed=false and not audited; otherwise audited as course_hidden in the same transaction. The owner may republish. CT12-COURSE-2026-11-15-r2, CT12-REST-2026-11-15-r1. ADR012 is normative. No runtime implementation, owner review or protected integration is claimed.",
+        "description": "Administrator only (any other role 403 before resource lookup). Authentication precedes malformed media type/path/query, then role and Course existence, then body validation. A missing Course is 404 even with an invalid body. Only hidden is accepted (published is 400). Same effects as the Instructor hidden publication change, under the Course root lock taken first; already hidden is changed=false and not audited; otherwise audited as course_hidden in the same transaction. The owner may republish. CT12-COURSE-2026-11-15-r2, CT12-REST-2026-11-15-r1. ADR012 is normative. Implemented in PR #312. Author-side local verification is recorded in docs/testing.md; independent owner review, QA acceptance and protected integration remain separate.",
         "security": [
           {
             "bearerAuth": []
@@ -7992,7 +7992,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Committed JSON outcome; specification only, NOT IMPLEMENTED.",
+            "description": "Implemented JSON outcome; no-store.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"
@@ -8025,7 +8025,7 @@
             "$ref": "#/components/responses/B7Failure"
           }
         },
-        "x-implementation-status": "APPROVED_NOT_IMPLEMENTED",
+        "x-implementation-status": "IMPLEMENTED_IN_PR_312",
         "x-approval-reference": "../decisions/012-batch-07-contract-approvals.md",
         "requestBody": {
           "required": true,

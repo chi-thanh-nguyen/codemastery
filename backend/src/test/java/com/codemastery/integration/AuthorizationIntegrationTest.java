@@ -2972,4 +2972,159 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
             jdbc.update("DELETE FROM lessons WHERE id=?",lesson);jdbc.update("DELETE FROM chapters WHERE id=?",chapter);jdbc.update("DELETE FROM courses WHERE id=?",course);
         }
     }
+    /** CT12.rest IN20 authorization, stage order, representation and cache policy. */
+    @Nested
+    class AdminCourseEndpoints {
+        private static final String PATH = "/api/admin/courses";
+        @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+        com.codemastery.modules.admin.application.service.AdminCourseService adminCourses;
+        private UUID admin;
+        private UUID owner;
+        private UUID course;
+
+        @BeforeEach void fixtures() {
+            admin = insertUser("admin", "active"); owner = insertUser("instructor", "active");
+            course = UUID.randomUUID();
+            jdbc.update("INSERT INTO public.courses(id,instructor_id,title,description,publication_status,adaptive_enabled) VALUES(?,?,'IN20 HTTP','Fixture','published',false)", course, owner);
+        }
+
+        @AfterEach void removeFixtures() {
+            jdbc.update("DELETE FROM public.audit_logs WHERE actor_id=?", admin);
+            jdbc.update("DELETE FROM public.courses WHERE id=?", course);
+        }
+
+        private String path(Object id) { return PATH + "/" + id + "/publication"; }
+        private String bearer(UUID user) { return "Bearer " + sessionToken(user); }
+        private static final String HIDDEN = "{\"publicationStatus\":\"hidden\"}";
+
+        @Test void authenticationAlwaysPrecedesMediaPathQueryAndBodyValidation() throws Exception {
+            for (String token : List.of("", "Bearer invalid", bearer(insertUser("admin", "locked")))) {
+                mvc.perform(get(PATH).param("size", "0").header("Authorization", token))
+                        .andExpect(status().isUnauthorized()).andExpect(header().string("Cache-Control", "no-store"));
+                mvc.perform(put(path("bad")).contentType("text/plain").content("invalid").header("Authorization", token))
+                        .andExpect(status().isUnauthorized()).andExpect(header().string("Cache-Control", "no-store"));
+            }
+            String revoked = bearer(admin);
+            jdbc.update("UPDATE public.refresh_sessions SET revoked_at=clock_timestamp() WHERE user_id=?", admin);
+            mvc.perform(put(path(course)).contentType("application/json").content(HIDDEN).header("Authorization", revoked))
+                    .andExpect(status().isUnauthorized()).andExpect(header().string("Cache-Control", "no-store"));
+        }
+
+        @Test void productionFormFilterDoesNotParseAdministratorPutBeforeAuthentication() throws Exception {
+            var transport = webAppContextSetup(context)
+                    .addFilters(context.getBean("formContentFilter", jakarta.servlet.Filter.class),
+                            new DelegatingFilterProxy("springSecurityFilterChain", context)).build();
+            transport.perform(put(path("bad")).contentType("application/x-www-form-urlencoded").content("bad=%Q"))
+                    .andExpect(status().isUnauthorized()).andExpect(header().string("Cache-Control", "no-store"));
+            transport.perform(put(path(course)).header("Authorization", bearer(admin))
+                            .contentType("application/x-www-form-urlencoded").content("bad=%Q"))
+                    .andExpect(status().isUnsupportedMediaType()).andExpect(header().string("Cache-Control", "no-store"));
+        }
+
+        @ParameterizedTest @ValueSource(strings={"learner", "instructor"})
+        void roleHasNoInheritanceAndPrecedesResourceLookupAndBodyRules(String role) throws Exception {
+            String auth = bearer(insertUser(role, "active"));
+            mvc.perform(get(PATH).header("Authorization", auth)).andExpect(status().isForbidden());
+            for (Object id : List.of(course, UUID.randomUUID())) {
+                mvc.perform(put(path(id)).header("Authorization", auth).contentType("application/json").content("not json"))
+                        .andExpect(status().isForbidden()).andExpect(header().string("Cache-Control", "no-store"));
+            }
+            mvc.perform(put(path("1-1-1-1-1")).header("Authorization", auth).contentType("application/json").content(HIDDEN))
+                    .andExpect(status().isBadRequest());
+            mvc.perform(put(path(course)).param("unknown", "1").header("Authorization", auth).contentType("application/json").content(HIDDEN))
+                    .andExpect(status().isBadRequest());
+            mvc.perform(put(path(course)).header("Authorization", auth).contentType("text/plain"))
+                    .andExpect(status().isUnsupportedMediaType());
+            mvc.perform(get(PATH).param("query", "nul" + (char) 0).header("Authorization", auth))
+                    .andExpect(status().isBadRequest());
+            assertEquals("published", jdbc.queryForObject("SELECT publication_status FROM courses WHERE id=?", String.class, course));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE target_reference=?", Integer.class, course.toString()));
+        }
+
+        @ParameterizedTest @ValueSource(strings={"size=0", "size=101", "page=-1", "page=1.1", "page=2147483648", "page=", "size=+1",
+                "publicationStatus=", "publicationStatus=Published", "publicationStatus=draft", "sort=id", "size=1&size=2", "query=a&query=b"})
+        void malformedQueriesAre400BeforeRoleRefusal(String query) throws Exception {
+            mvc.perform(get(PATH + "?" + query).header("Authorization", bearer(owner)))
+                    .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+        }
+
+        @Test void missingCourseWinsOverAllInvalidBodiesAndAdmissionNeverMutates() throws Exception {
+            String auth = bearer(admin); UUID missing = UUID.randomUUID();
+            for (String body : List.of("", "not json", "{}", "{\"publicationStatus\":\"published\"}", "{\"publicationStatus\":null}")) {
+                mvc.perform(put(path(missing)).header("Authorization", auth).contentType("application/json").content(body))
+                        .andExpect(status().isNotFound()).andExpect(header().string("Cache-Control", "no-store"));
+                mvc.perform(put(path(course)).header("Authorization", auth).contentType("application/json").content(body))
+                        .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
+            }
+            assertEquals("published", jdbc.queryForObject("SELECT publication_status FROM courses WHERE id=?", String.class, course));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE actor_id=?", Integer.class, admin));
+        }
+
+        @ParameterizedTest @ValueSource(strings={"{}", "[]", "null", "{\"publicationStatus\":1}", "{\"publicationStatus\":true}",
+                "{\"publicationStatus\":[\"hidden\"]}", "{\"publicationStatus\":\"Hidden\"}", "{\"publicationStatus\":\"published\"}",
+                "{\"publicationStatus\":\"hidden\",\"extra\":1}", "{\"publicationStatus\":\"hidden\",\"publicationStatus\":\"hidden\"}",
+                "{\"publicationStatus\":\"hidden\"} {}", "{\"publicationStatus\":\"hidden\"} trailing"})
+        void invalidBodyShapesAndValuesNeverWrite(String body) throws Exception {
+            mvc.perform(put(path(course)).header("Authorization", bearer(admin)).contentType("application/json").content(body))
+                    .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
+            assertEquals("published", jdbc.queryForObject("SELECT publication_status FROM courses WHERE id=?", String.class, course));
+        }
+
+        @Test void jsonMediaTypeIsRequiredEvenWithNoBodyAndMalformedPathsAre400() throws Exception {
+            String auth = bearer(admin);
+            for (String type : List.of("text/plain", "application/x-www-form-urlencoded", "application/problem+json")) {
+                mvc.perform(put(path(course)).header("Authorization", auth).contentType(type))
+                        .andExpect(status().isUnsupportedMediaType()).andExpect(header().string("Cache-Control", "no-store"));
+            }
+            mvc.perform(put(path(course)).header("Authorization", auth)).andExpect(status().isUnsupportedMediaType());
+            for (String id : List.of("not-a-uuid", "1-1-1-1-1", "00000000-0000-0000-0000-00000000000z")) {
+                mvc.perform(put(path(id)).header("Authorization", auth).contentType("application/json").content(HIDDEN))
+                        .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
+            }
+        }
+
+        @Test void successUsesExactOpenApiShapesJsonEscapesAndOneAuditForRepeatedHide() throws Exception {
+            String auth = bearer(admin);
+            String body = mvc.perform(get(PATH).param("query", "IN20 HTTP").header("Authorization", auth))
+                    .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andReturn().getResponse().getContentAsString();
+            var page = JSON.readTree(body);
+            assertEquals(Set.of("content", "page", "size", "totalElements", "totalPages"), Set.copyOf(page.propertyNames()));
+            assertEquals(Set.of("courseId", "title", "publicationStatus", "instructorId", "instructorDisplayName"), Set.copyOf(page.get("content").get(0).propertyNames()));
+            for (boolean changed : List.of(true, false)) {
+                body = mvc.perform(put(path(course.toString().toUpperCase())).header("Authorization", auth)
+                                .contentType("application/json; charset=UTF-8").content("{\"publicationStatus\":\"hid\\u0064en\"}"))
+                        .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                        .andExpect(jsonPath("$.changed").value(changed)).andExpect(jsonPath("$.course.publicationStatus").value("hidden"))
+                        .andReturn().getResponse().getContentAsString();
+                assertEquals(Set.of("course", "changed"), Set.copyOf(JSON.readTree(body).propertyNames()));
+                assertFalse(body.contains("email")); assertFalse(body.contains("accountStatus"));
+            }
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE actor_id=?", Integer.class, admin));
+            jdbc.update("UPDATE users SET role='learner' WHERE id=?", admin);
+            mvc.perform(get(PATH).header("Authorization", auth)).andExpect(status().isForbidden());
+        }
+
+        @Test void providerFailureIsSafe500WithNoStore() throws Exception {
+            org.mockito.Mockito.doThrow(new IllegalStateException("synthetic SQL password=must-not-leak"))
+                    .when(adminCourses).hideCourse(course);
+            String body = mvc.perform(put(path(course)).header("Authorization", bearer(admin)).contentType("application/json").content(HIDDEN))
+                    .andExpect(status().isInternalServerError()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                    .andReturn().getResponse().getContentAsString();
+            assertFalse(body.contains("SQL")); assertFalse(body.contains("password")); assertFalse(body.contains("Exception"));
+            assertEquals("An unexpected error occurred.", JSON.readTree(body).get("detail").asString());
+        }
+
+        @Test void unimplementedAdministratorOperationsRetainDefaultDeny() throws Exception {
+            String auth = bearer(admin);
+            for (var req : List.of(post(PATH), request(HttpMethod.DELETE, PATH + "/" + course),
+                    get(PATH + "/" + course), put(PATH + "/" + course), get("/api/admin/users"),
+                    post(path(course)), request(HttpMethod.DELETE, path(course)), request(HttpMethod.HEAD, PATH))) {
+                mvc.perform(req.header("Authorization", auth)).andExpect(status().isForbidden());
+            }
+        }
+    }
+
 }

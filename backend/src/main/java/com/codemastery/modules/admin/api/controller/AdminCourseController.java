@@ -1,6 +1,8 @@
 package com.codemastery.modules.admin.api.controller;
 
 import com.codemastery.common.api.PageResponse;
+import com.codemastery.common.exception.BusinessRuleException;
+import com.codemastery.modules.admin.api.dto.AdminRequests;
 import com.codemastery.modules.admin.api.dto.AdminRequests.AdminCourseSearch;
 import com.codemastery.modules.admin.api.dto.AdminRequests.CoursePublicationWrite;
 import com.codemastery.modules.admin.api.dto.AdminResponses.AdminCourse;
@@ -14,6 +16,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -46,9 +49,14 @@ public class AdminCourseController {
     }
 
     @PutMapping(path = "/{courseId}/publication", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<AdminCourseChange> hide(@PathVariable("courseId") UUID courseId,
-                                                  @RequestBody(required = false) String json) {
-        courses.requireAdministrator();
+    public ResponseEntity<AdminCourseChange> hide(@PathVariable("courseId") String courseIdText,
+            @RequestHeader(value = "Content-Type", required = false) String contentType,
+            @RequestParam MultiValueMap<String, String> params,
+            @RequestBody(required = false) String json) throws org.springframework.web.HttpMediaTypeNotSupportedException {
+        AdminRequests.requireCourseJson(contentType);
+        UUID courseId = AdminRequests.courseId(courseIdText);
+        if (!params.isEmpty()) throw new BusinessRuleException("Invalid query");
+        courses.requireCourseForHiding(courseId);
         CoursePublicationWrite.parse(json).requireHidden();
         return noStore(AdminCourseChange.from(courses.hideCourse(courseId)));
     }

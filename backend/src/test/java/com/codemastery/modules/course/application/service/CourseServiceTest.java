@@ -973,7 +973,7 @@ class CourseServiceTest {
             var task = (com.sun.source.util.JavacTask) javax.tools.ToolProvider.getSystemJavaCompiler().getTask(
                     null, manager, null, List.of("-proc:none"), null, manager.getJavaFileObjectsFromPaths(files));
             for (var unit : task.parse()) {
-                String path = root.toAbsolutePath().relativize(java.nio.file.Path.of(unit.getSourceFile().toUri()).toAbsolutePath()).toString();
+                String path = root.toAbsolutePath().relativize(java.nio.file.Path.of(unit.getSourceFile().toUri()).toAbsolutePath()).toString().replace(java.io.File.separatorChar, '/');
                 new com.sun.source.util.TreeScanner<Void, Void>() {
                     private void check(String name) {
                         if (name.equals("readCourseContext") || name.equals("readLessonContext"))

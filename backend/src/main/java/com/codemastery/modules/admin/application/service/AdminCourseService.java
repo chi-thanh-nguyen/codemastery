@@ -59,6 +59,12 @@ public class AdminCourseService {
         }
     }
 
+    /** Resource admission before parsing the hide body, without changing or locking Course state. */
+    public void requireCourseForHiding(UUID courseId) {
+        requireAdministrator();
+        courses.requireCourseForAdministration(courseId);
+    }
+
     /**
      * Hidden and published Courses, title substring and status filters, title order. Malformed values are
      * 400 (stage 2) before the role 403 (stage 3). One read-only REPEATABLE READ snapshot covers Course's
@@ -69,6 +75,7 @@ public class AdminCourseService {
         int pageNumber = page == null ? PageResponse.DEFAULT_PAGE : page;
         int pageSize = size == null ? PageResponse.DEFAULT_SIZE : size;
         PageResponse.validateRequest(pageNumber, pageSize);
+        validateQuery(query);
         if (publicationStatus != null && !PUBLICATION_STATUSES.contains(publicationStatus)) {
             throw new BusinessRuleException("Invalid publication status");
         }
@@ -79,6 +86,21 @@ public class AdminCourseService {
         Map<UUID, UserSummary> names = instructorNames(result.content());
         List<AdminCourseItem> items = result.content().stream().map(view -> item(view, names)).toList();
         return new PageResponse<>(items, result.page(), result.size(), result.totalElements());
+    }
+
+    /** Reject only text PostgreSQL cannot represent faithfully, before the stage-3 role decision. */
+    private static void validateQuery(String query) {
+        if (query == null) return;
+        for (int i = 0; i < query.length(); i++) {
+            char value = query.charAt(i);
+            if (value == 0 || Character.isLowSurrogate(value)) {
+                throw new BusinessRuleException("Invalid query");
+            }
+            if (Character.isHighSurrogate(value)
+                    && (++i == query.length() || !Character.isLowSurrogate(query.charAt(i)))) {
+                throw new BusinessRuleException("Invalid query");
+            }
+        }
     }
 
     /**

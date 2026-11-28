@@ -68,6 +68,39 @@ class AdminCourseServiceTest {
         return new AdminCourseView(COURSE, "Python", status, INSTRUCTOR);
     }
 
+    @Test
+    void admissionChecksRoleBeforeCourseExistenceAndNeverMutates() {
+        signedInAs(IdentityRole.ADMINISTRATOR);
+        service.requireCourseForHiding(COURSE);
+        verify(courses).requireCourseForAdministration(COURSE);
+        verifyNoInteractions(audit);
+        verify(courses, never()).hideCourseAsAdministrator(any());
+    }
+
+    @Test
+    void invalidDatabaseTextIs400BeforeRoleLookupAndValidUnicodeIsPreserved() {
+        for (String query : List.of("nul" + (char) 0, "bad" + (char) 0xd800, "bad" + (char) 0xdc00)) {
+            assertThrows(BusinessRuleException.class, () -> service.list(query, null, 0, 20));
+        }
+        verifyNoInteractions(identities, courses);
+    }
+
+    @Test
+    void namesAreBoundedToTheHundredDistinctPageInstructorIdsIncludingFormerInstructors() {
+        signedInAs(IdentityRole.ADMINISTRATOR);
+        var rows = java.util.stream.IntStream.range(0, 100).mapToObj(i ->
+                new AdminCourseView(UUID.randomUUID(), "Row " + i, "hidden", UUID.randomUUID())).toList();
+        Set<UUID> ids = rows.stream().map(AdminCourseView::instructorId).collect(java.util.stream.Collectors.toSet());
+        when(courses.listCoursesForAdministration(null, null, 0, 100)).thenReturn(new PageResponse<>(rows, 0, 100, 100));
+        when(identities.userSummaries(ids)).thenReturn(Map.of(rows.getFirst().instructorId(),
+                new UserSummary(rows.getFirst().instructorId(), "Former instructor", "learner")));
+        var result = service.list(null, null, 0, 100);
+        assertEquals("Former instructor", result.content().getFirst().instructorDisplayName());
+        assertNull(result.content().get(1).instructorDisplayName());
+        verify(identities).userSummaries(ids);
+        verify(identities, never()).instructorDisplayNames(any());
+    }
+
     // ------------------------------------------------------------------------------- hide
 
     @Test

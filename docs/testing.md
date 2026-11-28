@@ -13687,3 +13687,115 @@ Still open:
   `AbstractIntegrationTest` change;
 - required hosted CI and CodeQL, and the protected squash merge;
 - AD08/AD13, QA03/QA04, release and deployment.
+
+## IN20 PR #312 author verification — 28 November 2026
+
+Authority: the Project Leader's “IN20 Full Implementation Completion, Bounded
+Upstream Remediation and Comprehensive Final Self-Audit” instruction. Starting PR
+HEAD `0843fff73b39d1fcf7a1548fe6a9294f393db7ce`; main and merge base
+`e76b375caf10603c0e121b1eb3ba028b001e4610`. The following commands ran locally on
+that HEAD plus the remediation recorded by PR #312. The final commit contains the
+same tested Java sources and tests; subsequent changes record evidence only.
+No hosted CI was queried, triggered manually, rerun or monitored.
+
+### Requirement, source and test matrix
+
+Initial states refer to source inspection of the starting PR, not its old description
+or Issue publication statuses. Final `complete` means author-verified implementation,
+not independent review, QA acceptance, integration into main or deployment.
+
+| Checkpoint | Initial | Final source | Executed evidence |
+| --- | --- | --- | --- |
+| IN20.courses: hidden/published, literal case-insensitive substring, status filter | Implemented; PostgreSQL unverified | `AdminCourseService.list` → `CourseManagementService.listCoursesForAdministration` → `CourseRepositoryImpl.findForAdministration` | `AdminCourses.listingUsesLiteralSubstringCOrderingPagingAndFormerInstructorNames` |
+| CT12 C-collation title/UUID order, paging/defaults/totals | Implemented; incomplete verification | Same public list chain; `AdminCourseSearch` | Same integration case (case and title ties, beyond-last-page totals); service/DTO tests |
+| One read-only REPEATABLE READ snapshot for Course and names | Implemented; unverified | `AdminCourseService.list`, joining Course/Auth reads | `courseRowsAndAuthNamesShareOneReadOnlyRepeatableReadSnapshot`: concurrent committed rename/title change between reads, old coherent projections retained |
+| Distinct page-only IDs, ≤100, one Auth summaries call | Implemented; incomplete verification | `instructorNames` → CT01 `userSummaries` | Service 100-ID and repeated-ID cases; Auth five-case user-summary suite; snapshot spy |
+| Nullable and former-Instructor names; no catalogue name lookup | Implemented; incomplete verification | `AdminCourseItem`, `AdminResponses.AdminCourse` | Unit missing-name case; PostgreSQL former-role list/hide; never-call catalogue lookup assertion |
+| Administrator only, no inheritance, Course public boundaries | Implemented at service, REST default-denied | Admin role admission and Course public seams only | Service denial tests, real denied/read cases, HTTP Learner/Instructor matrix; boundary source inspection |
+| IN20.audit: one READ COMMITTED unit, Course root first, fresh state | Implemented; unverified | `AdminCourseService.hideCourse` → Course `participateInRoot` | Observed PostgreSQL blocker barrier, committed authoring title read after wait; root participant tests |
+| CT21 no cascade, CT22 reconciliation, owner republish | Implemented; unverified | Existing Course hide/reconciliation and Instructor publication | `hideCommitsExactlyOneCanonicalAuditRowAndNoOpDoesNotAudit`, `ownerCanRepublishAndHideHasNoLessonCascade` |
+| Exactly one canonical course_hidden audit per change, none for no-op/read/denial/missing | Implemented; incomplete verification | `hideCourse` → `AuditLogService.record` | Real changed/no-op, read, denial/missing cases; actor/action/type/UUID/time and microsecond assertions |
+| Atomic rollback including reconciliation/audit and subsequent provider failure | Weak ghost-principal oracle | Same caller transaction, MANDATORY audit; no new transaction | Actual audit INSERT trigger raises P2001 only after Course hidden and Enrollment reconciled; independent committed reads prove rollback; summary failure after audit also rolls back |
+| Concurrent hide, authoring, coverage and progress serialization | Missing verification | Existing Course root protocol, unchanged | Simultaneous hides yield exactly one change/audit; bounded barriers observe hide waiting for guard, real authoring, graph/lesson mapping and progress writers |
+| IN20.rest: exact authenticated GET/PUT activation and default deny | Missing route bindings | `SecurityConfig.ADMIN_COURSE_OPERATIONS` | 34 HTTP cases through actual security; unrelated Admin methods/paths remain denied |
+| Authentication before transport validation | Pre-security form decoder not excluded | Same exact operations excluded from form decoding | Invalid/revoked/locked sessions; actual form filter before security with malformed form data |
+| Role/resource before body; missing+invalid body 404 | Defective 400 before missing 404 | `requireCourseForHiding` → Course-owned `requireCourseForAdministration` | Existing/missing × malformed/empty/invalid-value HTTP bodies; admission does not mutate |
+| Strict JSON, escapes, UUID, media/query validation | Regex rejected valid escapes; empty-media and shortened-UUID gaps | `AdminRequests` strict mapper, media/UUID parser; query prevalidation | DTO matrix; HTTP duplicate/unknown/null/coercion/trailing JSON, valid escapes, overflow/duplicates/invalid params, media/path matrix |
+| Safe ProblemDetail, exact response fields, no-store | Success only explicitly; HTTP unverified | Exact security header writer, shared errors, `AdminResponses` | 200/400/401/403/404/415/500 headers and safe 500 body; exact page/course/change field sets |
+| CT17 runtime-role sufficiency and containment | Grants already present; unverified | Existing executable matrix, unchanged | Real role copied from deploy.sh: list, admission, root lock, hide, reconciliation and audit work; audit UPDATE/DELETE/TRUNCATE, identity writes, DDL fail 42501; matrix-contract script passes |
+| Placement and contract/document synchronization | Three new test paths unresolved; implementation markers stale | ADR012 §22; CT14 IN20 placement; OpenAPI; existing frontend types | Two suites consolidated without loss; one justified service suite; JSON/schema-preservation check; focused TypeScript check |
+
+### Exact local validation
+
+From `backend/`:
+
+```bash
+./mvnw '-Dtest=AdminCourseServiceTest,AdminRequestsTest,CourseServiceTest,AuthServiceTest$UserSummaries,AuditLogServiceTest' '-Dit.test=InteractionAdminIntegrationTest,InteractionAdminIntegrationTest$AdminCourses,AuthorizationIntegrationTest$AdminCourseEndpoints,AuthorizationIntegrationTest$AuditLogReadEndpoint' verify
+```
+
+Final run: **123 unit, 86 integration, 0 failures, 0 errors, 0 skipped; BUILD SUCCESS**
+(38.107 seconds). Unit counts: CourseServiceTest 85, Auth UserSummaries 5,
+AdminRequestsTest 11, AuditLogServiceTest 10, AdminCourseServiceTest 12.
+Integration counts: AdminCourseEndpoints 34, AuditLogReadEndpoint 30, shared
+InteractionAdmin suite 22 (13 IN20 cases plus 9 existing IN10/CO12 cases). Surefire/
+Failsafe nested-suite summary lines include enclosing tests; do not add the XML
+aggregate again. Explicit `$UserSummaries` selects the existing Auth nested suite.
+The shared AbstractIntegrationTest built the DP01-hardened PostgreSQL image, ran
+Flyway and used a disposable container, with scheduler disabled and synthetic data.
+
+Earlier focused run, before the three extra closure cases: **123 unit + 83 integration**,
+all successful. An earlier parser run executed 15 tests and failed one old assertion
+that incorrectly rejected a legitimate JSON escape; the assertion was corrected to
+accept valid JSON while retaining duplicate/unknown/type/trailing rejection. Test
+consolidation also exposed preparatory compilation errors (unclosed test class and
+an ambiguous boxed-number assertion); both were corrected before successful execution.
+The 17-case focused unit run also passed. These are distinct runs, not additive totals.
+
+The reported `CourseServiceTest.notificationContextHasOnlyTheApprovedProductionCallers`
+passed on macOS before and after the compatibility change. Inspection confirmed the
+Windows mismatch: platform-separated relative paths were compared with slash-only
+allowlist entries. Normalizing `File.separatorChar` to `/` preserves that exact
+allowlist. Windows execution was **not** performed.
+
+From the repository root:
+
+```bash
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+node /Users/nguyenchithanh/CodeProjects/codemastery/frontend/node_modules/typescript/bin/tsc --noEmit --strict --target ES2022 --module ESNext --moduleResolution bundler frontend/src/features/admin/course-management/types/adminCourseTypes.ts
+git diff --check
+```
+
+All passed. The TypeScript check uses the existing installed compiler and follows
+only the changed wire types and their shared API import; no frontend build ran.
+OpenAPI remains JSON-compatible YAML: parsing and comparison with the base verify
+unchanged schemas and only the two IN20 operation status/description updates.
+
+### Upstream disposition and remaining acceptance
+
+CO06 (#172) already provides list/hide, root enforcement and CT22 reconciliation.
+Its only required addition is one Course-owned read admission responsibility (ADR012
+§22), estimated about **5%** of CO06's aggregate implementation responsibilities:
+compare one plain existence read with Course/Chapter/Lesson authoring, ordered
+structure, publication, transactional reconciliation and fourteen REST operations.
+This is a functional/complexity estimate, not a line-count calculation, and below the
+30% delegation ceiling. IN10 (#184) recording and Auth CT01 providers need **0%**
+additional production capability. Security activation is directly authorized IN20
+integration. CT17's existing r17 matrix suffices: no redundant revision or wider grant.
+
+The readiness application service is still an empty scaffold on this main baseline;
+this task does not implement the whole AD08 readiness/settings consumer or AS18
+coverage provider. Their eventual full readiness/coverage race acceptance remains
+with those consumers and QA06. IN20's root participation is verified against the
+actual shared guard, actual graph mapping/authoring and progress writers; no claim
+of executing a missing readiness service is made. This leaves no missing IN20
+production-code checkpoint, and does not prove whole Batch 7 acceptance.
+
+Author-side self-audit remediated route activation, precedence, legitimate JSON
+escapes, transport/query/media/UUID handling, weak rollback/concurrency/runtime
+verification, placement and stale documentation. Cleanup fails closed if a bounded
+worker cannot stop. No migration, dependency, audit mutability, unrelated IN11/IN21
+behavior or Administrator publish/unhide operation is introduced. AI use: OpenAI
+Codex assisted this remediation and self-audit under the Leader's delegation, in
+addition to the original contributor's disclosed Claude-assisted drafting.
+Independent CODEOWNER review, protected integration/checks, QA06 acceptance,
+shared/production privilege application and deployment remain external gates.

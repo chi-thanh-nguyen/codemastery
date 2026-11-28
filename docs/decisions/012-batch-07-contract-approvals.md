@@ -1223,3 +1223,47 @@ Checkpoint count and dispositions are unchanged: twenty-seven checkpoints,
 traceable as superseded open-PR drafts; none was integrated. Retained gates (§17)
 are unchanged. Apart from the SQL-level demonstration above, no test was run: no
 application code exists for these contracts, and B7-O14–O18 are specified, NOT_RUN.
+
+## 22. IN20 Course admission refinement — 28 November 2026
+
+**`CT12-COURSE-ADMISSION-2026-11-28-r1` — DELEGATED_APPROVED.** Authority:
+Project Leader @chi-thanh-nguyen's explicit instruction **“CodeMastery — PR #312:
+IN20 Full Implementation Completion, Bounded Upstream Remediation and Comprehensive
+Final Self-Audit”** (28 November 2026, Asia/Ho_Chi_Minh) delegates investigation,
+selection, documentation and implementation of the smallest necessary compatible
+technical decisions, and upstream additions below approximately 30% of their Issue.
+This is that delegated selection, not independent owner review or protected integration.
+
+Section 12 requires a missing Course's 404 before body 400. The existing §10.2
+mutation cannot be used for admission: it would hide a Course before validating the
+body. Add exactly one public method in existing `CourseManagementService.java`:
+
+```java
+public void requireCourseForAdministration(UUID courseId);
+```
+
+Only caller: `AdminCourseService.requireCourseForHiding`. Both services require the
+request's authenticated Administrator through CT01.identity. Course owns the plain
+existence read and the missing 404; no entity, persistence handle or extra data crosses
+the boundary. It acquires no row lock and makes no write. It participates in an existing
+transaction, or performs a read-only snapshot when called alone. After successful
+admission, the controller validates the body. The actual hide still starts Admin's
+READ COMMITTED read-write unit, locks the root first and re-reads authoritative state.
+A concurrent change or disappearance between admission and mutation is checked again;
+admission is no promise of later mutation success.
+
+Alternatives rejected: mutating to discover existence (invalid requests would write),
+Admin persistence access (boundary violation), and parsing the body first (the known
+400/404 precedence defect). This is one read-side responsibility within CO06.admin,
+well below 30% of CO06's authoring, publication, structure and REST responsibilities.
+It leaves `CT12-COURSE-2026-11-15-r2`, CT12.rest r1, §3.4, CT31, CT21, CT22 and
+ADR005 §13.3 semantics effective. No general callback, new endpoint, publish/unhide
+power, architecture change, migration or runtime privilege expansion is approved.
+
+IN20 also uses the existing strict Jackson parsing pattern with duplicate detection
+and trailing-token refusal; ordinary JSON escapes remain valid. Exact authenticated
+GET-list and PUT-publication Security matchers leave stage-3 role checks to Admin.
+The same exact operations bypass pre-security form decoding and receive no-store
+headers on success and failure. These implement §§10.3/12 without changing them.
+Test placement is recorded as `CT14-IN20-PLACEMENT-2026-11-28-r1` in the repository
+structure record. Author-side tests do not constitute independent QA06 or owner review.
