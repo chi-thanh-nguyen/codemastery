@@ -92,7 +92,8 @@ and the public catalogue must never see them.
   pass hashes as `-v` command-line arguments on a shared machine: other local users
   can read process arguments. The commands below pass them through environment
   variables instead.
-- **Dataset selection.** `01` and `02` load `interim-v1` unless the input
+- **Dataset selection.** The validated selector overrides inherited session, role and database dataset GUCs.
+  `01` and `02` load `interim-v1` unless the input
   `CODEMASTERY_SEED_DATASET` is `final-v1`. Only `final-v1` takes the four extra
   password hashes and the adaptive policy; a `final-v1` input supplied without the
   selector stops the run, so a forgotten selector cannot silently load only
@@ -111,7 +112,7 @@ and the public catalogue must never see them.
   started at least once so the backend has applied the Flyway migrations (V001–V009 at the time of writing).
   Seeds never create or change schema.
 - JDK 25 (for `jshell`) and the backend Maven Wrapper, to generate password hashes.
-- bash or zsh. Run every command from the repository root.
+- bash or zsh, and Python 3 (standard library only) for the protected PDF procedure. Run every command from the repository root.
 
 The commands run `psql` (PostgreSQL 17) inside the Compose `postgres` container as
 the local `POSTGRES_USER`. The seed files need psql 15 or later.
@@ -208,11 +209,11 @@ Type each synthetic password when prompted. Nothing is echoed, and each hash tak
 about one second:
 
 ```bash
-printf 'Instructor password: '; read -rs CODEMASTERY_SEED_PASSWORD; echo
+printf 'Instructor password: '; IFS= read -rs CODEMASTERY_SEED_PASSWORD; echo
 export CODEMASTERY_SEED_PASSWORD
 CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH="$(seed_hash)" && export CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH
 
-printf 'Learner password: '; read -rs CODEMASTERY_SEED_PASSWORD; echo
+printf 'Learner password: '; IFS= read -rs CODEMASTERY_SEED_PASSWORD; echo
 CODEMASTERY_SEED_LEARNER_PASSWORD_HASH="$(seed_hash)" && export CODEMASTERY_SEED_LEARNER_PASSWORD_HASH
 unset CODEMASTERY_SEED_PASSWORD
 ```
@@ -224,17 +225,17 @@ accounts, but it cannot see the passwords, so choosing six different ones is you
 responsibility:
 
 ```bash
-printf 'Administrator password: '; read -rs CODEMASTERY_SEED_PASSWORD; echo
+printf 'Administrator password: '; IFS= read -rs CODEMASTERY_SEED_PASSWORD; echo
 export CODEMASTERY_SEED_PASSWORD
 CODEMASTERY_SEED_ADMIN_PASSWORD_HASH="$(seed_hash)" && export CODEMASTERY_SEED_ADMIN_PASSWORD_HASH
 
-printf 'P1 password: '; read -rs CODEMASTERY_SEED_PASSWORD; echo
+printf 'P1 password: '; IFS= read -rs CODEMASTERY_SEED_PASSWORD; echo
 CODEMASTERY_SEED_P1_PASSWORD_HASH="$(seed_hash)" && export CODEMASTERY_SEED_P1_PASSWORD_HASH
 
-printf 'P2 password: '; read -rs CODEMASTERY_SEED_PASSWORD; echo
+printf 'P2 password: '; IFS= read -rs CODEMASTERY_SEED_PASSWORD; echo
 CODEMASTERY_SEED_P2_PASSWORD_HASH="$(seed_hash)" && export CODEMASTERY_SEED_P2_PASSWORD_HASH
 
-printf 'P3 password: '; read -rs CODEMASTERY_SEED_PASSWORD; echo
+printf 'P3 password: '; IFS= read -rs CODEMASTERY_SEED_PASSWORD; echo
 CODEMASTERY_SEED_P3_PASSWORD_HASH="$(seed_hash)" && export CODEMASTERY_SEED_P3_PASSWORD_HASH
 unset CODEMASTERY_SEED_PASSWORD
 ```
@@ -381,53 +382,270 @@ the material ID and the object key, stores the bytes in MinIO before it commits 
 row, and enforces access on download. Never write the object to MinIO directly or
 insert a `file` row yourself.
 
-This needs the Compose stack with MinIO and the backend running (see
-[docs/setup.md](../docs/setup.md)), and the `final-v1` seeds loaded. The commands
-keep the password and the access token out of process arguments: the request body
-and the header are read from standard input. The password must not contain `"` or
-`\`, which this simple JSON body does not escape.
+This needs the disposable Compose backend and MinIO from [docs/setup.md](../docs/setup.md)
+and the `final-v1` seeds. Run one operator invocation at a time per database.
+The Python 3 procedure below uses JSON encoding, preserves passwords exactly and
+keeps passwords, access tokens and refresh cookies in process memory only. It
+never prints request/response bodies, follows redirects, uses environment proxies,
+retries a mutation, or writes credentials or PDF downloads to temporary files.
+The existing input file is read; readback and checksum verification happen in memory.
+
+The default action is **inspect** (no material mutation). For an initial upload,
+select `upload` explicitly. The procedure first reads the owning Instructor's L01
+and refuses to upload when a file material already exists. It prints the returned
+application-generated material ID before publication; this ID is not a credential.
+For a failed publication or download, select `resume` with that exact existing ID:
+owner-preview bytes are verified before publication and P1 readback afterwards.
+A published material is verified without another publication write.
 
 ```bash
-api=http://localhost:8080
-course=68ea4540-e9da-5605-9054-28b29afa0992   # course/python
-l01=28a0dcbc-cc05-59f7-bcf2-7ab591581299      # course/python/chapter/1/lesson/1
-
-sign_in() {  # $1 = email; prints the access token
-  local password
-  printf 'Password for %s: ' "$1" >&2; read -rs password; echo >&2
-  printf '{"email":"%s","password":"%s"}' "$1" "$password" \
-    | curl -sS --fail -H 'Content-Type: application/json' --data-binary @- "$api/api/auth/login" \
-    | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p'
-}
-authorized() {  # $1 = token, then curl arguments
-  local token="$1"; shift
-  printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS --fail --config - "$@"
-}
-
-instructor_token="$(sign_in instructor@example.test)"
-material="$(authorized "$instructor_token" \
-  -F 'title=Slides: Variable Declaration and Naming Conventions' \
-  -F 'file=@sample-data/materials/sample-slides.pdf' \
-  "$api/api/instructor/courses/$course/lessons/$l01/file-materials" \
-  | sed -n 's/^{"id":"\([^"]*\)".*/\1/p')"
-echo "material: $material"
-authorized "$instructor_token" -X PUT -H 'Content-Type: application/json' \
-  --data '{"publicationStatus":"published"}' \
-  "$api/api/instructor/courses/$course/lessons/$l01/file-materials/$material/publication"; echo
-
-p1_token="$(sign_in p1@example.test)"
-slides="${TMPDIR:-/tmp}/l01-slides.pdf"
-authorized "$p1_token" -o "$slides" \
-  "$api/api/courses/$course/lessons/$l01/materials/$material/file"
-shasum -a 256 "$slides"; rm -f "$slides"
-unset instructor_token p1_token
+export CODEMASTERY_SEED_PDF_ACTION=inspect
+# Initial operation only, after inspection: export CODEMASTERY_SEED_PDF_ACTION=upload
+# Recovery of an existing material:
+# export CODEMASTERY_SEED_PDF_ACTION=resume CODEMASTERY_SEED_MATERIAL_ID=<returned UUID>
 ```
 
-The upload returns the new material, hidden; publishing makes it visible to
-enrolled Learners. The downloaded file's SHA-256 must be
-`c4b05622b87a9b45e46563a87fba220e27c7da6a89340cd0c3f409bcadb9935d`. Run the step
-once per database: a second upload creates a second file material. If the upload
-fails, nothing is stored and you can retry.
+The script prompts without echo. Automated local verification may instead supply
+`CODEMASTERY_SEED_INSTRUCTOR_PASSWORD` and `CODEMASTERY_SEED_P1_PASSWORD` through the
+environment; never put their values in argv, files, reports or shell tracing.
+`CODEMASTERY_SEED_API_URL` may override the default `http://localhost:8080` only with
+this operator's loopback HTTP backend. Each request has a 30-second local timeout
+and a 1 MiB response budget, sufficient for the recorded PDF; these are procedure
+bounds, not API or production configuration.
+
+<!-- SD-F-IR-03-05: executable provisioning procedure, regression-tested verbatim. -->
+```bash
+python3 - <<'PY'
+import getpass
+import hashlib
+import json
+import os
+import re
+import sys
+import signal
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from pathlib import Path
+
+# One operator at a time per disposable database. No HTTP mutation is retried.
+API = os.environ.get("CODEMASTERY_SEED_API_URL", "http://localhost:8080")
+COURSE = "68ea4540-e9da-5605-9054-28b29afa0992"
+LESSON = "28a0dcbc-cc05-59f7-bcf2-7ab591581299"
+TITLE = "Slides: Variable Declaration and Naming Conventions"
+SHA256 = "c4b05622b87a9b45e46563a87fba220e27c7da6a89340cd0c3f409bcadb9935d"
+ACTION = os.environ.get("CODEMASTERY_SEED_PDF_ACTION", "inspect")
+
+class Stop(Exception):
+    pass
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, response, code, message, headers, target):
+        return None
+
+# Do not forward passwords/tokens through an environment proxy or a redirect.
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+
+def request(path, operation, token=None, method="GET", data=None,
+            content_type="application/json", expected=200, upload=False):
+    headers = {"Content-Type": content_type}
+    if token is not None:
+        headers["Authorization"] = "Bearer " + token
+    try:
+        with opener.open(urllib.request.Request(API + path, data=data, headers=headers,
+                                               method=method), timeout=30) as response:
+            if response.status != expected:
+                raise Stop(operation + " returned an unexpected status; stopped.")
+            body = response.read(1024 * 1024 + 1)
+            if len(body) > 1024 * 1024:
+                raise Stop(operation + " exceeded the local response budget; stopped.")
+            return response.headers, body
+    except urllib.error.HTTPError as failure:
+        if upload and not 400 <= failure.code < 500:
+            raise Stop("Upload outcome UNKNOWN. Run inspect; do not upload again.") from None
+        raise Stop(operation + " rejected (HTTP " + str(failure.code) + "); stopped.") from None
+    except Stop:
+        if upload:
+            raise Stop("Upload outcome UNKNOWN. Run inspect; do not upload again.") from None
+        raise
+    except Exception:
+        if upload:
+            raise Stop("Upload outcome UNKNOWN. Run inspect; do not upload again.") from None
+        raise Stop(operation + " transport failed; stopped. Reconcile any earlier mutation.") from None
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+def json_response(response, operation, upload=False):
+    headers, body = response
+    try:
+        if headers.get_content_type() != "application/json":
+            raise ValueError("JSON media type")
+        value = json.loads(body.decode("utf-8"), object_pairs_hook=unique_object)
+        if not isinstance(value, dict):
+            raise ValueError("JSON object")
+        return value
+    except Exception:
+        if upload:
+            raise Stop("Upload outcome UNKNOWN: invalid response. Run inspect; do not upload again.") from None
+        raise Stop(operation + " returned invalid JSON; stopped.") from None
+
+def identifier(value):
+    try:
+        parsed = uuid.UUID(value)
+        if str(parsed) != value or parsed.version != 4:
+            raise ValueError("canonical application UUID")
+        return value
+    except Exception:
+        raise Stop("Invalid material identity; stopped. Reconcile before any upload retry.") from None
+
+def material(value, publication=None):
+    if (not isinstance(value, dict)
+            or set(value) != {"id", "title", "materialType", "publicationStatus"}
+            or value["title"] != TITLE or value["materialType"] != "file"
+            or not isinstance(value["publicationStatus"], str)
+            or value["publicationStatus"] not in {"hidden", "published"}
+            or publication is not None and value["publicationStatus"] != publication):
+        raise Stop("Unexpected file metadata; stopped. Inspect the owning Lesson before retrying.")
+    identifier(value["id"])
+    return value
+
+def sign_in(account, expected_id, role):
+    name = "CODEMASTERY_SEED_" + account.upper() + "_PASSWORD"
+    password = os.environ[name] if name in os.environ else getpass.getpass("Password for " + account + ": ")
+    body = json.dumps({"email": account + "@example.test", "password": password}, ensure_ascii=False).encode("utf-8")
+    value = json_response(request("/api/auth/login", "Sign-in", method="POST", data=body), "Sign-in")
+    token = value.get("accessToken")
+    user = value.get("user")
+    if (not isinstance(token, str) or len(token) > 16384
+            or re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", token) is None
+            or not isinstance(user, dict) or user.get("id") != expected_id or user.get("role") != role):
+        raise Stop("Invalid sign-in response; stopped.")
+    return token
+
+def verify_file(path, token):
+    headers, body = request(path, "Protected download", token)
+    try:
+        valid = (headers.get_content_type() == "application/pdf"
+                 and headers.get("Cache-Control") == "no-store"
+                 and headers.get("X-Content-Type-Options") == "nosniff"
+                 and headers.get("Content-Disposition", "").startswith("attachment;")
+                 and "filename=" in headers.get("Content-Disposition", "")
+                 and "filename*=UTF-8''" in headers.get("Content-Disposition", "")
+                 and int(headers.get("Content-Length", "-1")) == len(body)
+                 and hashlib.sha256(body).hexdigest() == SHA256)
+    except Exception:
+        valid = False
+    if not valid:
+        raise Stop("Protected PDF headers/bytes failed verification; stopped.")
+
+def main():
+    parsed = urllib.parse.urlsplit(API)
+    if (parsed.scheme != "http" or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+            or parsed.username is not None or parsed.password is not None
+            or parsed.path or parsed.query or parsed.fragment or ACTION not in {"inspect", "upload", "resume"}):
+        raise Stop("Use the documented loopback API and inspect/upload/resume action.")
+    pdf = Path("sample-data/materials/sample-slides.pdf").read_bytes()
+    if hashlib.sha256(pdf).hexdigest() != SHA256:
+        raise Stop("The source PDF checksum is wrong; no request was sent.")
+    instructor = sign_in("instructor", "1eacfb14-e494-596c-bb53-3d012e7caf72", "Instructor")
+    learner = sign_in("p1", "f53df771-d0d4-535d-ba42-4179e90806c9", "Learner")
+    owned_path = "/api/instructor/courses/" + COURSE + "/lessons/" + LESSON
+    lesson = json_response(request(owned_path, "Owned Lesson read", instructor), "Owned Lesson read")
+    if lesson.get("id") != LESSON or not isinstance(lesson.get("materials"), list):
+        raise Stop("Unexpected owned Lesson; stopped.")
+    if any(not isinstance(row, dict) for row in lesson["materials"]):
+        raise Stop("Invalid material list; stopped.")
+    files = [material(row) for row in lesson["materials"] if row.get("materialType") == "file"]
+    if len(files) > 1:
+        raise Stop("Multiple file materials exist. Reconcile manually; no upload was performed.")
+    if ACTION == "inspect":
+        if not files:
+            print("No file material is currently listed. Select upload only for an initial, serialized operation.")
+        else:
+            row = files[0]
+            print("Material ID: " + row["id"] + " (" + row["publicationStatus"] + ").")
+            print("To resume this existing material, select resume and its exact material ID.")
+        return
+    if ACTION == "upload":
+        if files:
+            raise Stop("A file already exists. Use inspect/resume; no second upload was performed.")
+        boundary = "codemastery-" + uuid.uuid4().hex
+        data = ("--" + boundary + '\r\nContent-Disposition: form-data; name="title"\r\n\r\n' + TITLE
+                + "\r\n--" + boundary + '\r\nContent-Disposition: form-data; name="file"; filename="sample-slides.pdf"'
+                + "\r\nContent-Type: application/pdf\r\n\r\n").encode("utf-8") + pdf + ("\r\n--" + boundary + "--\r\n").encode("ascii")
+        value = json_response(request(owned_path + "/file-materials", "Upload", instructor,
+                                      "POST", data, "multipart/form-data; boundary=" + boundary, 201, True), "Upload", True)
+        try:
+            row = material(value, "hidden")
+        except Stop:
+            raise Stop("Upload outcome UNKNOWN: invalid metadata. Run inspect; do not upload again.") from None
+        print("Material ID: " + row["id"] + " (hidden).", flush=True)
+    else:
+        selected = identifier(os.environ.get("CODEMASTERY_SEED_MATERIAL_ID", ""))
+        if len(files) != 1 or files[0]["id"] != selected:
+            raise Stop("Resume identity does not match the owned Lesson. No mutation was performed.")
+        row = files[0]
+    path = "/api/courses/" + COURSE + "/lessons/" + LESSON + "/materials/" + row["id"] + "/file"
+    verify_file(path, instructor)
+    if row["publicationStatus"] == "hidden":
+        value = json_response(request(owned_path + "/file-materials/" + row["id"] + "/publication",
+                                      "Publication", instructor, "PUT", b'{"publicationStatus":"published"}'), "Publication")
+        published = material(value, "published")
+        if published["id"] != row["id"]:
+            raise Stop("Publication identity changed; stopped.")
+    verify_file(path, learner)
+    print("Protected P1 PDF verified: SHA-256 " + SHA256)
+
+def interrupted(signum, frame):
+    raise KeyboardInterrupt
+
+signal.signal(signal.SIGTERM, interrupted)
+try:
+    main()
+except KeyboardInterrupt:
+    print("Interrupted: an in-flight mutation may have an UNKNOWN outcome. Run inspect; do not upload again.", file=sys.stderr)
+    sys.exit(130)
+except Stop as failure:
+    print(str(failure), file=sys.stderr)
+    sys.exit(1)
+except Exception:
+    print("Provisioning failed; diagnostics withheld. Inspect and reconcile before retrying.", file=sys.stderr)
+    sys.exit(1)
+PY
+```
+
+A verified upload returns **201, hidden**; the script uses that returned ID, verifies
+the bytes through owner preview, explicitly publishes and checks enrolled P1's
+protected readback, required download headers and the recorded SHA-256.
+
+**Unknown upload outcome:** a network failure, 5xx or unvalidated response does
+not prove that no material was committed. Stop; do not select `upload` again.
+Run `inspect` after the operation has settled. If exactly one expected file exists,
+select `resume` with its returned ID; the script checks its bytes before publishing.
+Multiple files, unexpected content or an uncertain absence need manual reconciliation
+through the existing owning API, or a fresh disposable database. An empty read while
+a prior operation may still be in flight is not permission to retry. There is no new
+API idempotency contract: a second POST can create a second material, and separate
+operators/machines must serialize this once-per-database provisioning themselves.
+A known HTTP rejection also stops the procedure; no subsequent step runs implicitly.
+
+On every error, the process exits nonzero with safe diagnostics. No predictable
+temporary filename, secret file or download file is created, so interruption and
+concurrent verification invocations cannot overwrite or remove another local file.
+Do not enable shell/Python tracing while handling credentials. Clear optional inputs
+when finished:
+
+```bash
+unset CODEMASTERY_SEED_INSTRUCTOR_PASSWORD CODEMASTERY_SEED_P1_PASSWORD \
+  CODEMASTERY_SEED_PDF_ACTION CODEMASTERY_SEED_MATERIAL_ID CODEMASTERY_SEED_API_URL
+```
 
 ## Re-running and conflicts
 
@@ -463,8 +681,18 @@ database instead. The destructive local reset in
 [docs/setup.md](../docs/setup.md#persistence-shutdown-and-reset) removes **all**
 local data; use it only if you intend to discard everything.
 
-Error messages never include passwords, hashes or full rows: the seeds set psql
-`VERBOSITY terse`, which suppresses constraint `DETAIL` lines.
+`01` first verifies the disposable target, then applies transaction-local PostgreSQL
+logging controls before any credential-bearing statement. Built-in statement,
+duration, parameter, debug and ordinary server-error logging are disabled only for
+that seed transaction; psql retains terse client errors. Commit/rollback restores
+the connection's previous settings. The operator needs permission to set these
+privileged session parameters; otherwise `01` fails before interpolating any hash.
+Database-wide, role-wide and production logging are never changed. The supported
+target is the repository's standard PostgreSQL 17 image without extra auditing or
+tracing extensions; privileged server/host instrumentation remains outside this
+procedure's trust boundary. Do not run psql/shell tracing or SQL-capturing extensions
+around credential loading. Regression tests examine both actual client output and
+PostgreSQL container logs under injected failures and confirm logging restoration.
 
 ## Removing the attestation
 

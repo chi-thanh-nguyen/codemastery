@@ -4149,6 +4149,118 @@ README states it.
 - QA13 acceptance, CODEOWNER reviews and protected integration; deployment-target
   seeding stays unauthorized (ADR013 §3).
 
+## SD01–SD03 targeted remediation of SD-F-IR-01–IR-06 — 28 November 2026
+
+### Authority and preserved independent-review baseline
+
+The Project Leader's **“Targeted Remediation — PR #310, SD-F-IR-01–IR-06”**
+instruction explicitly authorizes implementation, focused verification, commit,
+push to `feature/sd03-adaptive-graph-profiles` and PR-description updates. Codex
+(OpenAI) performed this remediation with AI assistance. The original contributor's
+Git author/committer identity is preserved with both parties' explicit consent;
+the authenticated pusher is `chi-thanh-nguyen`. No global Git configuration,
+existing history, production logging, application API, schema or upstream feature
+is changed. Human CODEOWNER acceptance, protected integration, QA05/QA13 and
+production/deployment authorization remain separate.
+
+**Historical evidence remains historical.** The independent comprehensive review
+of `535cc6cc289e0a11b973bf362f8d204c9eff38bc` returned `REQUEST_CHANGES` with six P2
+findings. It independently ran 94 seed cases, a 460-case seed/storage/Enrollment/
+catalogue/authorization cross-suite run and contract-derived rule-level oracles.
+Its GUC, pre-existing-record, lost-response, password, symlink and server-log
+probes demonstrated gaps despite green existing tests. The preceding author
+self-audit and its 94/223 counts are retained above as evidence for that earlier
+revision; its “no other actionable finding” conclusion is not the current verdict.
+The inherited server-log issue was not introduced by PR #310.
+
+The author of this remediation now verifies their own work. All six dispositions
+below mean **FIXED_AUTHOR_VERIFIED**, never independently `VERIFIED_FIXED`.
+
+### Findings and bounded remediation
+
+| Finding | Remediation | Durable discriminating evidence |
+| --- | --- | --- |
+| SD-F-IR-01 (P2) | `01` sets the transaction-local dataset from the validated selector for both modes; no ambient GUC controls validation | Six inherited-setting cases (default/explicit Interim, PGOPTIONS, session/repeated invocation, role and database); equal Interim hashes remain accepted and Final duplicate hashes remain rejected |
+| SD-F-IR-02 (P2) | Consumer tests use a private UUID-named database, private bucket/application identity and their own Spring context. No fixed-ID cleanup or attestation mutation touches the shared harness database. Database/role catalog OIDs bind cleanup ownership; unresolved CREATE acknowledgements stay in a pending registry that forbids successful teardown. Tracked partial bootstrap, orphan-object enumeration, writer completion and sanitized failure boundaries cover teardown | Pre-existing Users/Course/Chapter/Lesson/material/Enrollment/session/token identities and row versions/settings survive; zero-to-four committed-file partial loads; actual closed-connection outer failure, unacknowledged creation and database replacement; MinIO bootstrap collision/nonempty-bucket deletion failure; context shutdown and partial bootstrap failures; later shared-test admission refuses isolation loss |
+| SD-F-IR-03 (P2) | Literal README Python procedure uses checked HTTP statuses, strict JSON/identity/metadata validation, no redirects/proxies or mutation replay, and explicit inspect/upload/resume actions. Unknown uploads require reconciliation; existing hidden bytes are verified before publication | 24 HTTP/parsing/metadata/publication/download/digest/header fault cases, explicit recovery without a second POST, interrupted upload, and real CT09 upload/inspect/resume/duplicate refusal |
+| SD-F-IR-04 (P2) | Every interactive hash read preserves IFS whitespace; JSON encoding preserves exact passwords. Passwords/tokens travel through process memory/stdin/environment, never argv or credential files | Literal README hash blocks round-trip six exact passwords, including 15 spaces, quotes/backslashes, Unicode, a 15-code-point emoji value and 72 UTF-8 bytes; fake and real HTTP clients exercise exact special-character passwords |
+| SD-F-IR-05 (P2) | PDF readback is checked in memory; the procedure creates no download, credential or temporary files | Existing symlink/sentinel target and directory contents survive every procedure fault; concurrent existing-material verification and interruption create no files |
+| SD-F-IR-06 (P2, inherited) | After target attestation and before credential-bearing SQL, `01` applies privileged transaction-local built-in PostgreSQL diagnostic controls and disables psql echo. It fails before hash interpolation if those controls are not permitted; commit/rollback restores settings | Real PostgreSQL client/container logs under inherited statement/duration/debug logging: constraint and statement DETAIL faults, successful load/rerun, insufficient privilege, non-vacuous before/after log markers and same-session restoration |
+
+The diagnostic controls are limited to the attested disposable seed transaction.
+They do not alter database/role/global settings, production logging or another
+connection. The supported image is the repository's standard PostgreSQL 17 image;
+extra audit/tracing extensions and a privileged observer are outside this local
+procedure's trust boundary. The actual credential leak is prevented under the
+supported configuration, rather than merely removed from the documentation.
+
+### Verification and one focused adversarial delta self-audit
+
+The delta self-audit inspected only changed SQL, fixture lifecycle and README
+procedure boundaries against the six findings. It tightened worker joining,
+sanitary exception retention, bootstrap/context-shutdown failure handling and
+pre-existing descendant/session sentinels and unresolved creation tracking before final verification. Test-only PostgreSQL connections and administrator storage calls have bounded connect/read/request budgets; production settings are unchanged. All dataset
+identities, graph/mapping/profile records, policy and CT09 authorization remain
+unchanged. The existing 52 P/G/G-prime/P2-R rule scenarios additionally check ordered
+skip reasons and preservation of Unknown inputs; they remain constructed-state
+rule evidence, not real submitted-Quiz evidence.
+
+Environment: Temurin 25.0.4.1, Docker Engine 29.8.1, Testcontainers 2.0.5;
+PostgreSQL 17.11 from the reviewed hardened Dockerfile; MinIO and mc use the exact
+Compose digests asserted by the suite. Test containers are not reused across JVMs.
+
+Executed from `backend/` (the Surefire selection intentionally matches no unit
+case; Failsafe execution/counts are checked separately):
+
+```bash
+./mvnw -B verify -Dtest=NoSuchUnitTest -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dit.test='SampleDataSeedIntegrationTest#validatedSelectorOverridesInheritedDatasetSettings+credentialStatementsProtectActualServerLogsAndRestoreLogging+seededRecordsAreServedByTheAuthAndCatalogueConsumers+outerConnectionFailureInvalidatesLaterSharedTestsAndPreservesOwnedDatabases+databaseReplacementAtOuterTeardownIsPreservedAndFailsClosed'
+
+./mvnw -B verify -Dtest=NoSuchUnitTest -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dit.test='SampleDataSeedIntegrationTest#readmeProcedure*+literalReadmeProcedure*+documentedInteractiveHashBlocks*+partialConsumer*+privateConsumer*+minio*+contextShutdown*+isolationFailures*'
+
+./mvnw -B verify -Dtest=NoSuchUnitTest -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dit.test=SampleDataSeedIntegrationTest
+
+./mvnw -B verify -Dtest=NoSuchUnitTest -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dit.test=SampleDataSeedIntegrationTest,EnrollmentIntegrationTest,CourseCatalogueIntegrationTest,FileStorageIntegrationTest,AuthorizationIntegrationTest \
+  -Dfailsafe.runOrder=reversealphabetical
+```
+
+Results (final behavioral source recorded by Git blob hashes before execution):
+
+- Initial targeted core regression: **13 run, 0 failures/errors/skips**.
+- README/password/private-resource regression: **37 run, 0 failures/errors/skips**.
+- Seed suite before the last pending-creation qualification: **145 run, 0 failures/errors/skips**.
+- Pending-creation/outer-teardown/bootstrap qualification: **4 run, 0 failures/errors/skips**.
+- Delta mutation probe, isolated and removed afterwards: **1 run, 0 failures/errors/skips**;
+  the new assertions reject the original `535cc6c` selector behavior and actual
+  PostgreSQL server-log disclosure at their intended assertion boundaries.
+- Final affected cross-suite: **512 run, 0 failures/errors/skips**, in confirmed order: seed **146**, storage **116**, Enrollment **115**, catalogue **14**, authorization **121**. Failsafe completed-count and actual XML testcase elements agree; the Authorization XML header alone undercounts its nested cases and is not used as the total.
+
+Additional real-PostgreSQL probe: an event-trigger fault adds a rejecting constraint
+to the temporary credential table, so the credential-bearing INSERT itself fails.
+With inherited statement-all, zero-duration, error-statement DEBUG5 and parse/plan/
+rewrite logging, actual client/server output contains no supplied hash, salt or
+checksum; public Users remain zero and before/after server-log markers prove capture.
+The independently owned probe database, event trigger and container-local source
+copy are removed. No tracked source modification is needed for this probe.
+
+The first core compile attempt had a test-helper type mismatch, corrected before
+execution. One preliminary cross-suite run was intentionally interrupted to add
+pending CREATE-acknowledgement tracking found during the delta self-audit; it is
+not counted as a completed verification. No functional source changes followed
+the final cross-suite start. Behavioral Git blobs: `01` `25da71735b7398b1ffc39b08e9e6a514c5b3fd73`; seed test `51075cce2909276228073cc47402c2e7d7d1d3b3`; README `21e3db6f8b2b7e961a282f3b782e927b263c8a9d`. The delivered commit must contain these same blobs.
+
+No hosted CI was dispatched, rerun, awaited or used as a substitute for local
+verification. No unrelated full backend, frontend, E2E, VM, release or deployment
+suite ran. No SD04, AD13, AD10 or AD08 implementation was absorbed. A successful
+local author verification is not an independent approving review, QA05 integrated
+CT36 evaluation, QA13 operational acceptance, protected merge or production seeding
+permission. The smallest next review is an independent delta review of these six
+remediations and their focused regression evidence.
+
+
 ## DP01 private health probe verification — 1 November 2026
 
 Scope: the change in

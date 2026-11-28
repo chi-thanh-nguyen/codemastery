@@ -38,6 +38,8 @@
 \set ON_ERROR_STOP on
 -- Constraint-error DETAIL can include the complete row and its password hash.
 \set VERBOSITY terse
+\set ECHO none
+\set ECHO_HIDDEN off
 
 \if :{?seed_target_system_identifier}
 \else
@@ -219,6 +221,31 @@ BEGIN
 END
 $sd01_target$;
 
+-- SD-F-IR-01: the validated selector overrides every inherited session/role/database GUC.
+SET LOCAL codemastery.seed_dataset = :'seed_dataset';
+
+-- SD-F-IR-06: credential-bearing statements run only after the disposable-target
+-- guard and with transaction-local built-in server diagnostics suppressed. An
+-- operator lacking permission fails here, before any hash reaches an SQL statement.
+-- No database/role/global logging configuration changes; commit/rollback restores
+-- every setting, including after a constraint failure. The client retains terse errors.
+SET LOCAL log_min_messages = 'panic';
+SET LOCAL log_statement = 'none';
+SET LOCAL log_duration = off;
+SET LOCAL log_min_duration_statement = -1;
+SET LOCAL log_min_duration_sample = -1;
+SET LOCAL log_transaction_sample_rate = 0;
+SET LOCAL log_parameter_max_length = 0;
+SET LOCAL log_parameter_max_length_on_error = 0;
+SET LOCAL log_error_verbosity = 'terse';
+SET LOCAL debug_print_parse = off;
+SET LOCAL debug_print_rewritten = off;
+SET LOCAL debug_print_plan = off;
+SET LOCAL log_statement_stats = off;
+SET LOCAL log_parser_stats = off;
+SET LOCAL log_planner_stats = off;
+SET LOCAL log_executor_stats = off;
+
 -- Serialize loaders and other User writers before taking a data snapshot.
 LOCK TABLE public.users IN SHARE ROW EXCLUSIVE MODE;
 
@@ -248,7 +275,6 @@ VALUES
     ('f21a06a2-0ee9-50e9-8b38-c87275d3b6c6', 'p2@example.test', :'p2_password_hash', 'Profile P2 Loops Gap', 'learner', 'active'),
     -- user/p3
     ('e2b24374-aa01-58ea-bd0f-be1e11bd6a79', 'p3@example.test', :'p3_password_hash', 'Profile P3 Complete Beginner', 'learner', 'active');
-SET LOCAL codemastery.seed_dataset = 'final-v1';
 \endif
 
 DO $sd01$
