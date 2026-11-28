@@ -2018,7 +2018,7 @@ verification is separate work.
 | `AdaptiveLearningFlowIntegrationTest` | CO14, PR #262 | The Course part of B1-O14/B1-O15: the configuration guard's real transactions, root lock lifetime, outer joining, incompatible contexts, stale managed state, contention with enrollment and NOWAIT, plus the Course storage handoff. Adaptive (AD08) cases are not implemented ([record](#co03-and-co14-course-persistence-and-configuration-guard-verification--21-november-2026)) |
 | `CourseCatalogueIntegrationTest` | CO04/CO05, PRs #96 and #113 | Course access assertions bound to real Auth account checks, catalogue ordering and pagination, hidden-content concealment and snapshot consistency under concurrent publication changes |
 | `EnrollmentIntegrationTest` | FE07, PR #101; CO08, PR #248; CO06; CO15 and bounded AD11 Course read, PR #285 | Catalogue search/filter/paging validation, login binding and JWT, role and authentication precedence, hidden-versus-missing concealment, membership join/leave idempotency and concurrency, rollback, My Courses and CORS for the membership methods. CO08 additions: V009 column shape; CT22 progress calculation, idempotent completion, completion reconciliation and zero-Lesson Courses; admission precedence and concealment without writes; the ACTIVE-only progress summary; per-Course and account-level resume; rollback of progress, status, pointer and visit time together; concurrent completion; Course-root serialization against leave and publication ([record](#co08-progress-completion-and-resume-verification--17-november-2026)). CO06 additions: Instructor authoring over HTTP, Course and Lesson publication reconciliation, the CT12.course Administrator handoff as a Course-root participant, and authoring, Administrator and Learner races on the Course root ([record](#co06-instructor-authoring-and-administrator-course-handoff-verification--22-november-2026)); after the independent re-review, text the database rejects or cannot store, the JSON-only 415 for empty requests, owner success paths, settings NOWAIT versus authoring, and the CT40 structure projection ([record](#pr-265-independent-re-review-remediation-and-ct40-structure-projection--22-november-2026)). CO15/AD11: held-root skips, rollback, restricted runtime privileges, admitted read-only snapshots and concurrent manual completion ([record](#co15-atomic-lessonprogress-participant-verification--24-november-2026)) |
-| `SampleDataSeedIntegrationTest` | SD01/SD02, PR #116 | Seed loading, reruns, conflicts, target attestation and its consumers ([record](#sd01sd02-seed-verification--30-october-2026)) |
+| `SampleDataSeedIntegrationTest` | SD01/SD02, PR #116; SD01–SD03 Final, PR #310 | `interim-v1` and `final-v1` seed loading, reruns, conflicts, target attestation, concurrency, rule-level CT36 routes and its consumers, including the CT09 L01 slide upload and protected readback against an isolated MinIO ([record](#sd01sd02-seed-verification--30-october-2026), [Final record](#sd01sd03-final-dataset-completion-and-author-self-audit--28-november-2026)) |
 | `repository/AssessmentPersistenceIntegrationTest` | AS05/AS06; AS07, PR #287; AS09 owner slice, PR #273 | PostgreSQL persistence, constraints, locks and runtime column-privilege ceilings for `questions`, `quizzes`, `quiz_questions`, `assignments` and `submissions` (`COLLATE "C"` + UUID paging, native `SELECT ... FOR UPDATE` blocking concurrent `INSERT INTO submissions` with `55P03`, `AS07` practice quiz profile snapshots, and `ADR012 §19.2` column-privilege checks) |
 | `SharedRestInfrastructureIntegrationTest` | SH01, PR #78 | Spring MVC ProblemDetail, validation and paging with test-only routes; it does not start PostgreSQL or the security chain |
 
@@ -3996,6 +3996,270 @@ QA13 acceptance on the team's verification environment, frontend sign-in, MinIO
 object provisioning or file-material delivery. Those gates remain open. This
 implementation and its verification were AI-assisted under the Leader's
 delegation; review remains with the CODEOWNERs.
+
+## SD01–SD03 Final dataset completion and author self-audit — 28 November 2026
+
+Scope: SD01 #59, SD02 #60 and SD03 #190 in PR #310, under the Project Leader's
+“Comprehensive Implementation Completion and Remediation Audit — PR #310”
+instruction, which authorizes completing SD01–SD03 in full and delegates bounded
+technical decisions. Implemented and audited with AI assistance (Claude Code). This
+is an author self-audit, not independent CODEOWNER review, QA13 acceptance or Issue
+closure. Incoming PR HEAD `f2e8ede` (contributor commit kept unchanged), based on
+`main` `e76b375`, which was still current; no integration was needed.
+
+**Effective contracts.** `CT15-F-ADMIN-ACCOUNT-2026-11-15-r1` (ADR013 §3),
+`CT15-F-ADAPTIVE-2026-11-15-r1` completed by r2 (ADR013 §§4.1–4.2, §16.1), ADR002
+CT15.I-data and `CT15-SD-2026-10-30-r3` (T1–T3, M1, M2, V1) for `interim-v1`, ADR005
+§6.2 (policy schema), ADR010 §§4, 11 (CT09 authorization and REST), CT36.F-scenarios
+(ADR013 §5) as the rule-level oracle, and CT01 hashing (`$2b$`, cost 14).
+
+### Incoming assessment (PR #310 at `f2e8ede`)
+
+| ID | Severity | Finding | Disposition |
+| --- | --- | --- | --- |
+| IN-01 | P1 | `02` required the three adaptive-policy inputs on every run. The unchanged ADR002 `interim-v1` invocation (target identifier only) now failed with `Required input adaptive_weak is missing.`; the test hid it by always supplying the policy and by filtering `course/python` out of the Interim assertions | Fixed: dataset selector (decision below); Interim tests restored to their `main` form |
+| IN-02 | P1 | The SD01 `final-v1` extension (Administrator, P1–P3) was missing, so `05` could not load from the real seeds; the positive tests inserted the three profiles by direct SQL, all with one shared hash | Fixed: four accounts in `01-users.sql`; the substitute fixture is removed |
+| IN-03 | P2 | L01's PDF provisioning (ADR013 §4.2) was neither documented nor verified; the README still said CT09 was not implemented, although SH05 (#289) and CO09 (#291) are on `main` | Fixed: README Step 6 and an automated CT09 upload/readback |
+| IN-04 | P2 | No concurrency, Final process-argument or Final untrusted-target coverage for the new code paths | Fixed: tests below |
+| IN-05 | P3 | README Step 1 listed migrations V001–V006; `main` has V001–V009 | Fixed |
+
+The PR's `course/python`, graph and Enrollment rows were re-derived independently
+(every UUIDv5, all 20 Lessons and skills, 24 edges, 20 mappings, 3 Enrollments) and
+match ADR013 §4.2; the twenty text materials were checked for technical accuracy.
+They are kept unchanged.
+
+### Delegated decision `SD-F-DATASET-SELECTOR-2026-11-28-r1`
+
+`01` and `02` take one optional input, `seed_dataset` /
+`CODEMASTERY_SEED_DATASET`. Unset or `interim-v1`: exactly the ADR002 inputs and
+rows, unchanged. `final-v1`: additionally the four hashes
+(`CODEMASTERY_SEED_ADMIN_PASSWORD_HASH`, `..._P1_...`, `..._P2_...`, `..._P3_...`)
+and the three policy inputs are required. Any other value is rejected, and so is any
+`final-v1` input supplied without the selector, so a forgotten selector cannot
+silently load only `interim-v1`. `final-v1` also rejects a hash reused for two
+accounts (ADR013 §3: a distinct password per account). The selection is a literal
+comparison before the transaction; it reads no table and takes no lock, and the
+T1 guard order (READ COMMITTED, guard, locks, writes) is unchanged.
+
+Alternatives: always requiring the Final inputs (IN-01, breaks ADR002 T2); inferring
+the dataset from which inputs are present (a forgotten input silently loads
+`interim-v1`); separate Final files (ADR013 places the rows in the existing files and
+excludes new loaders). Authority: the Leader's delegation for SD01/SD02 inputs; it
+changes no schema, API, ADR or application behavior. `03` and `05` are
+`final-v1`-only and unchanged except `05`'s message naming the SD01 selector.
+
+### Implemented
+
+- `01-users.sql`: `user/admin` `admin@example.test` “Administrator Demo” `admin`;
+  `user/p1`–`p3` with the ADR013 display names, all `active`, UUIDv5 in the `final-v1`
+  namespace (`db59a121-…`, `f53df771-…`, `f21a06a2-…`, `e2b24374-…`); the
+  `interim-v1` Instructor and Learner are reused, never duplicated.
+- `02-course-python-fundamentals.sql`: the selector; `course/python` and its policy
+  only in `final-v1`.
+- `sample-data/README.md`: both loading procedures, Final hash generation, Step 6
+  (CT09 upload, publication and protected download with SHA-256), SD04 handoff IDs,
+  messages and limitations.
+
+### Automated test
+
+`SampleDataSeedIntegrationTest` (existing V1 file): **94 cases**. Every positive
+`final-v1` load uses the real `01-users.sql`; no profile account is inserted by a
+fixture.
+
+| Group | Cases | What is asserted |
+| --- | --- | --- |
+| `interim-v1` load, rerun, conflicts | 1 + 1 + 9 | Unchanged from `main`: exactly the Interim rows (3 Courses, no `course/python`) with the ADR002 inputs only; identical reruns by environment and psql variables keep values and `xmin` |
+| Inputs | 18 | The nine Interim cases plus unknown and empty selector, a `final-v1` hash without the selector, missing admin/P3 hashes, `$2a$` and truncated Final hashes, a hash reused from the Interim Learner and one shared by two profiles; each rejected before any write |
+| Upgrade and reload | 1 | `interim-v1` then `final-v1`: every Interim row keeps its values and `xmin`; exact six Users (hashes as supplied, six distinct), `course/python`, 6 Chapters, L01–L20, 20 materials, S01–S20, 24 edges, 20 mappings, 3 Enrollments with NULL resume and visit; every other table empty (no mastery, attempt, answer, progress or recommendation); Final reruns by both input mechanisms and an Interim rerun change nothing |
+| Policy | 1 + 16 | Reduction to canonical pairs; ADR005 §6.2 rejections, a changed policy, a policy without the selector and a wrongly cased selector |
+| Final conflicts | 15 | Admin email taken, P3 ID taken, changed P2 hash, graph without Course, renamed skill, extra skill/edge/mapping, cross-Course mapping, hidden Lesson, profiles without Course, without SD01 profiles (Interim `01`), wrong role, locked profile, left Enrollment; each rolls back completely |
+| Rule level (CT36) | 1 | The graph read back from the database, given to the existing `AdaptiveDecisionEngine`: P1 `skip` L01–L10 then `continue` L11; P2 `skip` L01–L07 then `remedial` L08 with the exact ADR013 §5 reason; P2-R; P3 `remedial` L01; G01–G24 and G′01–G′24 `remedial` to L(p) |
+| Untrusted targets | 14 | As on `main` for all four files, plus `01`/`02` in `final-v1`, all rejected while `ACCESS EXCLUSIVE` locks are held |
+| Concurrency | 6 | READ COMMITTED, REPEATABLE READ and SERIALIZABLE inherited defaults × both datasets (`final-v1` covers `03` on `skills` and `05` on `enrollments`); exact counts `2/3/2/4/5` and `6/4/8/24/25/20/24/20/3` |
+| Process arguments, detector, diagnostics | 2 + 4 + 3 | No password, hash, salt or checksum in any argv, Interim and Final; detector non-vacuity cases and redaction unchanged |
+| Consumers (harness database, isolated MinIO) | 1 | Sign-in of all six accounts with ID, role (`Administrator` for admin) and display name; 401 for another account's password; skill graph 20/24/20; membership `active` for P1–P3 and `none` for the Interim Learner; Interim catalogue still exactly two Courses. CT09: the instructor uploads `sample-slides.pdf` to L01 (201, hidden, no key or filename in JSON, application-chosen ID); P1 gets 404 while hidden; publication; P1's Lesson read lists it; P1's download is `application/pdf`, `no-store` and byte-identical (SHA-256); the Interim Learner gets 403 (ADR010 §4) and anonymous 401. All rows, sessions and the object are removed afterwards; a cleanup failure records isolation loss |
+| Slides | 1 | Recorded SHA-256, PDF markers, 12 pages, author |
+
+The MinIO server and client are the pinned Compose images (the test asserts it),
+with an application identity limited to its own bucket, as in
+`FileStorageIntegrationTest`.
+
+### Executed commands and results
+
+Executed on 28 November 2026 (ICT) with OpenJDK 25.0.4.1 and Docker 29.8.1 on
+macOS, in a separate worktree of the PR branch.
+
+- `cd backend && ./mvnw -B verify -Dtest=NoSuchUnitTest -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=SampleDataSeedIntegrationTest`:
+  run 1 had 2 failures, both test defects (a case whose name selected the Final
+  environment, and a 404 oracle where ADR010 §4 specifies 403); after correcting them,
+  94/94 passed (runs 2 and 3, the latter with the Final untrusted-target cases),
+  0 skipped.
+- Fault injection, reverted afterwards: reversing edge S10 → S08 in `03` failed the
+  upgrade and rule-level tests (P2 routed to L10 instead of L08); removing the
+  distinct-hash check failed the two reused-hash cases; removing the selector guard
+  failed the forgotten-selector case.
+- `-Dit.test=SampleDataSeedIntegrationTest,EnrollmentIntegrationTest,CourseCatalogueIntegrationTest -Dfailsafe.runOrder=reversealphabetical`:
+  223/223 passed (seed test first, 94; then `EnrollmentIntegrationTest` 115 and
+  `CourseCatalogueIntegrationTest` 14), so the harness cleanup leaves their exact totals intact.
+- README walkthrough over real HTTP: a disposable PostgreSQL 17 container, the
+  pinned MinIO with a bucket-scoped identity, and the backend jar of this revision
+  (`./mvnw -DskipTests package`) on a free loopback port. The README's bash blocks
+  for Steps 1–6 were extracted and run verbatim, with `compose` mapped to the
+  container and Step 6's `api=` pointed at the port. Flyway applied V001–V009;
+  six `$2b$14$` hashes from six distinct random passwords; the `final-v1` load and an
+  identical rerun exited 0; Step 5 matched (four Courses, six accounts, 20/24/20/3/0);
+  Step 6 uploaded and published the PDF, and P1's download had SHA-256
+  `c4b05622…935d`. The backend logged no error. Containers, volumes and passwords
+  were removed. The `interim-v1` commands were not walked through by hand; the
+  automated tests run the same files with the same inputs.
+
+Not run: the full backend, frontend, E2E, browser, VM or release suites (no
+production, schema, API or frontend change); hosted CI.
+
+### Post-implementation self-audit
+
+The final diff was re-read adversarially against the contracts above: SQL and schema
+consistency, UUIDv5 references, target guard order, isolation and locking, exact-match
+idempotence, credential handling, graph ancestry and direction, Enrollment identity,
+Interim compatibility, policy representation, CT09 lifecycle, documentation and test
+oracles. Confirmed findings, all remediated in this PR:
+
+| ID | Severity | Finding | Remediation and verification |
+| --- | --- | --- | --- |
+| SA-01 | P2 | The README's Final hash block ran after the Interim block's `unset CODEMASTERY_SEED_PASSWORD`, which drops the export, so `jshell` would see no password | `export` added; the README walkthrough generated all six hashes |
+| SA-02 | P3 | The README told operators to unset only the selector before a later Interim load, but the still-exported Final inputs would trip the forgotten-selector guard | The complete `unset` command is documented |
+| SA-03 | P3 | Two test oracles were wrong in run 1 (case naming; 404 instead of ADR010 §4's 403) | Corrected; runs 2–3 pass |
+
+No other actionable finding remains within this scope. Observation, not a defect:
+ADR013 §4.2 places the slides on L01 “Program Output”, while the deck covers
+variables and naming (closer to L02); the approved placement is followed and the
+README states it.
+
+### Remaining dependencies and limits
+
+- **SD04 #191** (`04`, empty): questions, quizzes and assignments. The handoff IDs
+  are in the README.
+- **AD13 #169** (quiz listener and mastery/progress orchestration; empty
+  `QuizSubmittedEventListener`, `MasteryUpdateService`), **AD10 #167** (placement;
+  open PR #304) and **AD08 #166** (settings REST): needed before P1–P3 acquire their
+  states through real Quiz submissions. Each is a substantial Issue and is not
+  absorbed here.
+- **QA05 #217**: the integrated CT36 evaluation and its independently reviewed
+  scenario files; the rule-level check above does not replace it.
+- QA13 acceptance, CODEOWNER reviews and protected integration; deployment-target
+  seeding stays unauthorized (ADR013 §3).
+
+## SD01–SD03 targeted remediation of SD-F-IR-01–IR-06 — 28 November 2026
+
+### Authority and preserved independent-review baseline
+
+The Project Leader's **“Targeted Remediation — PR #310, SD-F-IR-01–IR-06”**
+instruction explicitly authorizes implementation, focused verification, commit,
+push to `feature/sd03-adaptive-graph-profiles` and PR-description updates. Codex
+(OpenAI) performed this remediation with AI assistance. The original contributor's
+Git author/committer identity is preserved with both parties' explicit consent;
+the authenticated pusher is `chi-thanh-nguyen`. No global Git configuration,
+existing history, production logging, application API, schema or upstream feature
+is changed. Human CODEOWNER acceptance, protected integration, QA05/QA13 and
+production/deployment authorization remain separate.
+
+**Historical evidence remains historical.** The independent comprehensive review
+of `535cc6cc289e0a11b973bf362f8d204c9eff38bc` returned `REQUEST_CHANGES` with six P2
+findings. It independently ran 94 seed cases, a 460-case seed/storage/Enrollment/
+catalogue/authorization cross-suite run and contract-derived rule-level oracles.
+Its GUC, pre-existing-record, lost-response, password, symlink and server-log
+probes demonstrated gaps despite green existing tests. The preceding author
+self-audit and its 94/223 counts are retained above as evidence for that earlier
+revision; its “no other actionable finding” conclusion is not the current verdict.
+The inherited server-log issue was not introduced by PR #310.
+
+The author of this remediation now verifies their own work. All six dispositions
+below mean **FIXED_AUTHOR_VERIFIED**, never independently `VERIFIED_FIXED`.
+
+### Findings and bounded remediation
+
+| Finding | Remediation | Durable discriminating evidence |
+| --- | --- | --- |
+| SD-F-IR-01 (P2) | `01` sets the transaction-local dataset from the validated selector for both modes; no ambient GUC controls validation | Six inherited-setting cases (default/explicit Interim, PGOPTIONS, session/repeated invocation, role and database); equal Interim hashes remain accepted and Final duplicate hashes remain rejected |
+| SD-F-IR-02 (P2) | Consumer tests use a private UUID-named database, private bucket/application identity and their own Spring context. No fixed-ID cleanup or attestation mutation touches the shared harness database. Database/role catalog OIDs bind cleanup ownership; unresolved CREATE acknowledgements stay in a pending registry that forbids successful teardown. Tracked partial bootstrap, orphan-object enumeration, writer completion and sanitized failure boundaries cover teardown | Pre-existing Users/Course/Chapter/Lesson/material/Enrollment/session/token identities and row versions/settings survive; zero-to-four committed-file partial loads; actual closed-connection outer failure, unacknowledged creation and database replacement; MinIO bootstrap collision/nonempty-bucket deletion failure; context shutdown and partial bootstrap failures; later shared-test admission refuses isolation loss |
+| SD-F-IR-03 (P2) | Literal README Python procedure uses checked HTTP statuses, strict JSON/identity/metadata validation, no redirects/proxies or mutation replay, and explicit inspect/upload/resume actions. Unknown uploads require reconciliation; existing hidden bytes are verified before publication | 24 HTTP/parsing/metadata/publication/download/digest/header fault cases, explicit recovery without a second POST, interrupted upload, and real CT09 upload/inspect/resume/duplicate refusal |
+| SD-F-IR-04 (P2) | Every interactive hash read preserves IFS whitespace; JSON encoding preserves exact passwords. Passwords/tokens travel through process memory/stdin/environment, never argv or credential files | Literal README hash blocks round-trip six exact passwords, including 15 spaces, quotes/backslashes, Unicode, a 15-code-point emoji value and 72 UTF-8 bytes; fake and real HTTP clients exercise exact special-character passwords |
+| SD-F-IR-05 (P2) | PDF readback is checked in memory; the procedure creates no download, credential or temporary files | Existing symlink/sentinel target and directory contents survive every procedure fault; concurrent existing-material verification and interruption create no files |
+| SD-F-IR-06 (P2, inherited) | After target attestation and before credential-bearing SQL, `01` applies privileged transaction-local built-in PostgreSQL diagnostic controls and disables psql echo. It fails before hash interpolation if those controls are not permitted; commit/rollback restores settings | Real PostgreSQL client/container logs under inherited statement/duration/debug logging: constraint and statement DETAIL faults, successful load/rerun, insufficient privilege, non-vacuous before/after log markers and same-session restoration |
+
+The diagnostic controls are limited to the attested disposable seed transaction.
+They do not alter database/role/global settings, production logging or another
+connection. The supported image is the repository's standard PostgreSQL 17 image;
+extra audit/tracing extensions and a privileged observer are outside this local
+procedure's trust boundary. The actual credential leak is prevented under the
+supported configuration, rather than merely removed from the documentation.
+
+### Verification and one focused adversarial delta self-audit
+
+The delta self-audit inspected only changed SQL, fixture lifecycle and README
+procedure boundaries against the six findings. It tightened worker joining,
+sanitary exception retention, bootstrap/context-shutdown failure handling and
+pre-existing descendant/session sentinels and unresolved creation tracking before final verification. Test-only PostgreSQL connections and administrator storage calls have bounded connect/read/request budgets; production settings are unchanged. All dataset
+identities, graph/mapping/profile records, policy and CT09 authorization remain
+unchanged. The existing 52 P/G/G-prime/P2-R rule scenarios additionally check ordered
+skip reasons and preservation of Unknown inputs; they remain constructed-state
+rule evidence, not real submitted-Quiz evidence.
+
+Environment: Temurin 25.0.4.1, Docker Engine 29.8.1, Testcontainers 2.0.5;
+PostgreSQL 17.11 from the reviewed hardened Dockerfile; MinIO and mc use the exact
+Compose digests asserted by the suite. Test containers are not reused across JVMs.
+
+Executed from `backend/` (the Surefire selection intentionally matches no unit
+case; Failsafe execution/counts are checked separately):
+
+```bash
+./mvnw -B verify -Dtest=NoSuchUnitTest -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dit.test='SampleDataSeedIntegrationTest#validatedSelectorOverridesInheritedDatasetSettings+credentialStatementsProtectActualServerLogsAndRestoreLogging+seededRecordsAreServedByTheAuthAndCatalogueConsumers+outerConnectionFailureInvalidatesLaterSharedTestsAndPreservesOwnedDatabases+databaseReplacementAtOuterTeardownIsPreservedAndFailsClosed'
+
+./mvnw -B verify -Dtest=NoSuchUnitTest -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dit.test='SampleDataSeedIntegrationTest#readmeProcedure*+literalReadmeProcedure*+documentedInteractiveHashBlocks*+partialConsumer*+privateConsumer*+minio*+contextShutdown*+isolationFailures*'
+
+./mvnw -B verify -Dtest=NoSuchUnitTest -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dit.test=SampleDataSeedIntegrationTest
+
+./mvnw -B verify -Dtest=NoSuchUnitTest -Dsurefire.failIfNoSpecifiedTests=false \
+  -Dit.test=SampleDataSeedIntegrationTest,EnrollmentIntegrationTest,CourseCatalogueIntegrationTest,FileStorageIntegrationTest,AuthorizationIntegrationTest \
+  -Dfailsafe.runOrder=reversealphabetical
+```
+
+Results (final behavioral source recorded by Git blob hashes before execution):
+
+- Initial targeted core regression: **13 run, 0 failures/errors/skips**.
+- README/password/private-resource regression: **37 run, 0 failures/errors/skips**.
+- Seed suite before the last pending-creation qualification: **145 run, 0 failures/errors/skips**.
+- Pending-creation/outer-teardown/bootstrap qualification: **4 run, 0 failures/errors/skips**.
+- Delta mutation probe, isolated and removed afterwards: **1 run, 0 failures/errors/skips**;
+  the new assertions reject the original `535cc6c` selector behavior and actual
+  PostgreSQL server-log disclosure at their intended assertion boundaries.
+- Final affected cross-suite: **512 run, 0 failures/errors/skips**, in confirmed order: seed **146**, storage **116**, Enrollment **115**, catalogue **14**, authorization **121**. Failsafe completed-count and actual XML testcase elements agree; the Authorization XML header alone undercounts its nested cases and is not used as the total.
+
+Additional real-PostgreSQL probe: an event-trigger fault adds a rejecting constraint
+to the temporary credential table, so the credential-bearing INSERT itself fails.
+With inherited statement-all, zero-duration, error-statement DEBUG5 and parse/plan/
+rewrite logging, actual client/server output contains no supplied hash, salt or
+checksum; public Users remain zero and before/after server-log markers prove capture.
+The independently owned probe database, event trigger and container-local source
+copy are removed. No tracked source modification is needed for this probe.
+
+The first core compile attempt had a test-helper type mismatch, corrected before
+execution. One preliminary cross-suite run was intentionally interrupted to add
+pending CREATE-acknowledgement tracking found during the delta self-audit; it is
+not counted as a completed verification. No functional source changes followed
+the final cross-suite start. Behavioral Git blobs: `01` `25da71735b7398b1ffc39b08e9e6a514c5b3fd73`; seed test `51075cce2909276228073cc47402c2e7d7d1d3b3`; README `21e3db6f8b2b7e961a282f3b782e927b263c8a9d`. The delivered commit must contain these same blobs.
+
+No hosted CI was dispatched, rerun, awaited or used as a substitute for local
+verification. No unrelated full backend, frontend, E2E, VM, release or deployment
+suite ran. No SD04, AD13, AD10 or AD08 implementation was absorbed. A successful
+local author verification is not an independent approving review, QA05 integrated
+CT36 evaluation, QA13 operational acceptance, protected merge or production seeding
+permission. The smallest next review is an independent delta review of these six
+remediations and their focused regression evidence.
+
 
 ## DP01 private health probe verification — 1 November 2026
 
