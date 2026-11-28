@@ -13929,9 +13929,10 @@ integration, CI success, release, runtime grant or deployment is implied.
 
 Course reuses its existing internal scalar Lesson → Chapter → Course query. No
 hidden projection, Instructor impersonation or cross-module repository access is
-introduced. An empty target set still requires admission. Missing targets and
-incompatible outer transactions fail before a sensitive read; existing owner and
-learner structural projections retain their audiences. CT17 r18 and every grant,
+introduced. An empty target set still requires admission. Incompatible outer
+transactions fail before admission or ancestry reads; missing targets fail
+integrity validation inside the admitted snapshot. Existing owner and learner
+structural projections retain their audiences. CT17 r18 and every grant,
 column inventory, ownership rule and infrastructure script are unchanged: existing
 SELECT covers the query's Lesson/Chapter ancestry columns.
 
