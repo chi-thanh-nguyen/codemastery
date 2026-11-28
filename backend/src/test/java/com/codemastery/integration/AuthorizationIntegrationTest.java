@@ -146,18 +146,23 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
 
     @AfterEach
     void cleanCommittedUsersAndSecurityContext() {
-        for (String email : testEmails) {
-            jdbc.update("DELETE FROM public.password_reset_tokens WHERE user_id IN "
-                    + "(SELECT id FROM public.users WHERE email = ?)", email);
-            jdbc.update("DELETE FROM public.refresh_tokens WHERE session_id IN (SELECT s.id FROM "
-                    + "public.refresh_sessions s JOIN public.users u ON u.id = s.user_id WHERE u.email = ?)", email);
-            jdbc.update("DELETE FROM public.refresh_sessions WHERE user_id IN "
-                    + "(SELECT id FROM public.users WHERE email = ?)", email);
-            jdbc.update("DELETE FROM public.users WHERE email = ?", email);
+        try {
+            cleanupSharedPostgresql(() -> {
+                for (String email : testEmails) {
+                    jdbc.update("DELETE FROM public.password_reset_tokens WHERE user_id IN "
+                            + "(SELECT id FROM public.users WHERE email = ?)", email);
+                    jdbc.update("DELETE FROM public.refresh_tokens WHERE session_id IN (SELECT s.id FROM "
+                            + "public.refresh_sessions s JOIN public.users u ON u.id = s.user_id WHERE u.email = ?)", email);
+                    jdbc.update("DELETE FROM public.refresh_sessions WHERE user_id IN "
+                            + "(SELECT id FROM public.users WHERE email = ?)", email);
+                    jdbc.update("DELETE FROM public.users WHERE email = ?", email);
+                }
+                testEmails.clear();
+            });
+        } finally {
+            REQUIRED_DEPENDENCY.set(Health.up().build());
+            SecurityContextHolder.clearContext();
         }
-        testEmails.clear();
-        REQUIRED_DEPENDENCY.set(Health.up().build());
-        SecurityContextHolder.clearContext();
     }
 
     @Test
@@ -2989,8 +2994,9 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
         }
 
         @AfterEach void removeFixtures() {
-            jdbc.update("DELETE FROM public.audit_logs WHERE actor_id=?", admin);
-            jdbc.update("DELETE FROM public.courses WHERE id=?", course);
+            cleanupSharedPostgresql(
+                    () -> jdbc.update("DELETE FROM public.audit_logs WHERE actor_id=?", admin),
+                    () -> jdbc.update("DELETE FROM public.courses WHERE id=?", course));
         }
 
         private String path(Object id) { return PATH + "/" + id + "/publication"; }
@@ -3082,6 +3088,57 @@ class AuthorizationIntegrationTest extends AbstractIntegrationTest {
                 mvc.perform(put(path(id)).header("Authorization", auth).contentType("application/json").content(HIDDEN))
                         .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
             }
+        }
+
+        @Test void charsetAndMalformedMediaAreStageTwoEvenForEmptyBodiesAndRefusedRoles() throws Exception {
+            for (String type : List.of("application/json; charset=not-a-charset", "application/json; charset=", "application/json; charset=\"bad", "not a media type")) {
+                for (String auth : List.of("", bearer(owner), bearer(admin))) {
+                    for (String body : List.of("", HIDDEN)) {
+                        mvc.perform(put(path(UUID.randomUUID())).header("Authorization", auth)
+                                        .header("Content-Type", type).content(body))
+                                .andExpect(auth.isEmpty() ? status().isUnauthorized() : status().isUnsupportedMediaType())
+                                .andExpect(header().string("Cache-Control", "no-store"))
+                                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
+                    }
+                }
+            }
+        }
+
+        @Test void encodedUuidAndQueryNamesRetainStrictAdmissionAndDefaultDeny() throws Exception {
+            String encoded = course.toString().replace("-", "%2D");
+            mvc.perform(put(java.net.URI.create(path(encoded))).header("Authorization", bearer(owner))
+                            .contentType("application/json").content("not json"))
+                    .andExpect(status().isForbidden()).andExpect(header().string("Cache-Control", "no-store"));
+            mvc.perform(put(java.net.URI.create(path(encoded))).header("Authorization", bearer(admin))
+                            .contentType("application/json").content(HIDDEN))
+                    .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.course.courseId").value(course.toString()));
+            mvc.perform(get(java.net.URI.create(PATH + "?%71uery=IN20%20HTTP&%70age=0")).header("Authorization", bearer(admin)))
+                    .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                    .andExpect(jsonPath("$.totalElements").value(1));
+            mvc.perform(get(java.net.URI.create(PATH + "?page=0&%70age=1")).header("Authorization", bearer(owner)))
+                    .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
+            mvc.perform(put(java.net.URI.create(path(encoded) + "?%75nknown=1")).header("Authorization", bearer(owner))
+                            .contentType("application/json").content(HIDDEN))
+                    .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
+            mvc.perform(put(java.net.URI.create(path("1%2D1%2D1%2D1%2D1"))).header("Authorization", bearer(owner))
+                            .contentType("application/json").content(HIDDEN))
+                    .andExpect(status().isBadRequest()).andExpect(header().string("Cache-Control", "no-store"));
+            mvc.perform(put(java.net.URI.create(path(encoded) + "/extra")).header("Authorization", bearer(admin))
+                            .contentType("application/json").content(HIDDEN))
+                    .andExpect(status().isForbidden());
+            assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE actor_id=?", Integer.class, admin));
+        }
+
+        @Test void disappearanceAfterAdmissionIsRecheckedByTheRealMutation() throws Exception {
+            org.mockito.Mockito.doAnswer(call -> {
+                call.callRealMethod();
+                jdbc.update("DELETE FROM courses WHERE id=?", course);
+                return null;
+            }).when(adminCourses).requireCourseForHiding(course);
+            mvc.perform(put(path(course)).header("Authorization", bearer(admin)).contentType("application/json").content(HIDDEN))
+                    .andExpect(status().isNotFound()).andExpect(header().string("Cache-Control", "no-store"));
+            assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM audit_logs WHERE actor_id=?", Integer.class, admin));
         }
 
         @Test void successUsesExactOpenApiShapesJsonEscapesAndOneAuditForRepeatedHide() throws Exception {

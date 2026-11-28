@@ -77,6 +77,14 @@ class AdminCourseServiceTest {
         verify(courses, never()).hideCourseAsAdministrator(any());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value = IdentityRole.class, names = {"LEARNER", "INSTRUCTOR"})
+    void admissionRefusesOtherRolesBeforeTheCourseRead(IdentityRole role) {
+        signedInAs(role);
+        assertThrows(AccessDeniedException.class, () -> service.requireCourseForHiding(COURSE));
+        verifyNoInteractions(courses, audit);
+    }
+
     @Test
     void invalidDatabaseTextIs400BeforeRoleLookupAndValidUnicodeIsPreserved() {
         for (String query : List.of("nul" + (char) 0, "bad" + (char) 0xd800, "bad" + (char) 0xdc00)) {

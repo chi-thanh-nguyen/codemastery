@@ -1267,3 +1267,16 @@ The same exact operations bypass pre-security form decoding and receive no-store
 headers on success and failure. These implement §§10.3/12 without changing them.
 Test placement is recorded as `CT14-IN20-PLACEMENT-2026-11-28-r1` in the repository
 structure record. Author-side tests do not constitute independent QA06 or owner review.
+
+**Independent IN20 review, 28 November 2026.** Under the Project Leader's later
+“PR #312: Comprehensive Independent Review” delegation, Codex independently
+checked this admission/placement decision against incoming `3e914119` and the
+effective contracts, retaining the exact scope and exclusions above. No additional
+public seam, production capability, privilege or structural placement is selected.
+The admission's sole production caller is now enforced at method level by an AST
+regression, and real PostgreSQL contention proves the read succeeds while the
+Course root is held elsewhere. The actual hide rechecks disappearance after
+admission. Test-isolation/oracle findings and their self-verified fixes are recorded
+in `docs/testing.md`; independent technical review of an incoming revision and
+self-verification of this review's fixes do not confer human/CODEOWNER acceptance,
+protected integration, whole QA06 acceptance or deployment authority.

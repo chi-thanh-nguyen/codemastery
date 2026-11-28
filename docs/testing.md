@@ -13801,3 +13801,163 @@ Codex assisted this remediation and self-audit under the Leader's delegation, in
 addition to the original contributor's disclosed Claude-assisted drafting.
 Independent CODEOWNER review, protected integration/checks, QA06 acceptance,
 shared/production privilege application and deployment remain external gates.
+
+## IN20 PR #312 independent review and remediation — 28 November 2026
+
+**Incoming verdict: REQUEST_CHANGES. Final technical disposition:
+APPROVE_AFTER_GATES_WITH_EXPLICIT_VERIFICATION_LIMITATION.** This is a fresh
+independent technical review of the incoming author revision, followed by fixes
+and verification by the same Codex reviewer. The fixes are self-verified; this is
+not an independent human/CODEOWNER approval of those fixes.
+
+Authority: the Project Leader/Owner's “PR #312: Comprehensive Independent Review”
+instruction authorizes bounded corrections, targeted local tests, contributor
+metadata attribution, normal publication to the existing branch and PR-body
+synchronization. No merge, Issue closure, protection change, deployment, production
+infrastructure access or privilege grant is authorized by this review.
+
+### Baseline, scope and provenance
+
+Incoming/reviewed HEAD: `3e9141196621b495ad222a07309bc1023c5a54ee`.
+Refreshed main and merge base: `e76b375caf10603c0e121b1eb3ba028b001e4610`.
+The complete effective 16-file PR diff was examined, including all four existing
+commits, not just the author's remediation delta. Root instructions, CONTRIBUTING,
+CODEOWNERS, Issue #188, effective ADR012 §§3.4/7/10.2/10.3/12/15/19.2/19.3/21/22,
+CT01.identity, CT18.minimum, CT21/CT22, ADR005 §13.3, CT14 placement and executable
+CT17-P6 r17 were checked against their actual implementations and callers.
+Graphify's older graph was queried for orientation; current source, not graph edges,
+establishes the conclusions. No historical session archive was needed.
+
+The admission and test-placement refinements record the original Leader delegation,
+exact additive scope, alternatives and exclusions. This review independently
+reaffirms those same bounded decisions under the current explicit delegation:
+one non-mutating Course-owned admission read, one justified Admin service test
+location, and existing DTO/PostgreSQL/HTTP suite placements. No new upstream
+production capability is required. AD08's entire absent readiness/settings service
+would exceed the upstream cap and remains a separate consumer acceptance gate.
+The four original commits and attribution are preserved. The remediation commit
+retains verified Git author/committer fields `tihh647-ui <tihh647@gmail.com>` under
+the Leader-confirmed arrangement. Both GitHub connector and CLI authenticated as
+`chi-thanh-nguyen`; metadata establishes attribution, not legal identity or a human
+signature. The final commit SHA is available in this record's Git history and the
+PR's delivery record, avoiding a self-referential commit hash in its own contents.
+
+### Incoming findings and closure
+
+Locations below refer to incoming HEAD; production behavior was not changed merely
+to satisfy a test. Both findings concern test isolation or verification integrity.
+
+| ID | Severity / incoming evidence | Reproduction, impact and remediation |
+| --- | --- | --- |
+| IN20-IR-01 | P2; `InteractionAdminIntegrationTest` lines 638–644, 480–483 and runtime-role teardown; shared user teardown in both affected suites | Interrupting `awaitTermination` could escape before the isolation-loss fence while a worker remained active. Failed trigger/function/role cleanup likewise did not fence later classes; the first DROP failure skipped the second DROP. Worker termination now has one bounded deadline, continues through interruption, preserves the interrupt and fences an unproved outcome. `AbstractIntegrationTest.cleanupSharedPostgresql` attempts each required teardown step, preserves failures and fences subsequent shared-DB tests/cleanup. DDL creation is inside protected teardown scope. Two qualification cases exercise these failures; only their exact simulated losses are cleared after the simulated worker is joined. **FIXED_SELF_VERIFIED.** |
+| IN20-IR-02 | P2; `InteractionAdminIntegrationTest` lines 508–509 and 517–524; incomplete republish, coverage/runtime and admission assertions | The literal-search assertion discarded unexpected rows and could pass with wildcard search. The later-provider rollback case could pass on an earlier IllegalStateException without reaching audit insertion, and omitted Enrollment rollback. Exact rows/totals now reject wildcard broadening; the provider fault asserts all three uncommitted effects and their independent pre-commit invisibility, then checks complete rollback. Rehide after owner republish yields a second audit. Concurrency distinguishes mapping from actual Assessment question coverage, observes the exact blocking holder PID and Course FOR UPDATE SQL, and proves admission succeeds while the root is held. Runtime checks prove current role, non-superuser/nonownership, transaction-local reset and audit reads under r17; all containment refusals require 42501. AST tests enforce the sole approved admission method caller and retain exact CT40 allowlists. **FIXED_SELF_VERIFIED.** |
+
+Mutation qualification deliberately removed each fence, omitted audit insertion,
+and substituted unescaped SQL LIKE for literal search. All four selected cases
+failed (4 failures, 0 errors/skips; expected Maven exit 1); the wildcard mutant
+returned 3 rows instead of 1 and the missing-audit mutant failed the post-insert
+assertion. Every mutated source byte was restored before final verification. These
+are negative controls, not unexplained failures of the delivered implementation.
+
+### Requirement and previous-remediation dispositions
+
+| Requirement | Independent evidence / disposition |
+| --- | --- |
+| IN20.courses | Exact Admin/Course public seams; both statuses; SQL `strpos(lower(title),lower(?))`, C-title/UUID ordering, count/page in the same transaction; actual PostgreSQL literal/order/paging tests. Complete. |
+| Snapshot and identity | One read-only REPEATABLE READ transaction joins Course count/rows and one bounded distinct page-local Auth summary call. Concurrent committed Course/name rename retains the old coherent projection. Former-Instructor and absent-summary names are preserved/null; response fields expose no Auth credentials/email. Complete. |
+| IN20.rest / CT18 | Real Spring Security and MockMvc controller/converter/advice chains over PostgreSQL establish authentication, media/path/query, role/resource, body and provider precedence; malformed/empty charset/media, encoded UUID/query keys, duplicate decoded keys, unknown query, no-store, safe ProblemDetail, strict JSON/escapes and unrelated-method/path default deny. Disappearance after admission is rechecked by actual mutation. Complete. MockMvc is not a network/server qualification. |
+| IN20.audit / CT31 | Actual hide/no-op/read/denial, canonical actor/action/type/UUID and UTC microsecond time; changed→no-op→owner republish→changed audit cardinality; P2001 only after Course/Enrollment writes; independent rollback reads; post-audit provider fault; simultaneous hides. Complete. |
+| Course root / CT21 / CT22 | Actual root compatibility, root-first acquisition and fresh JDBC state inspected; no new transaction, stale managed-state overwrite or lock-order inversion introduced. Exact holder contention covers the existing guard, authoring, mapping, real AS18 coverage composition and progress. No child cascade; owning Instructor may republish. Complete for IN20; absent AD08 consumer execution is not claimed. |
+| CT17 | Existing 27-relation r17 matrix suffices for admission, listing, Course root/status UPDATE, Enrollment reconciliation, Auth reads and audit INSERT/SELECT. Effective restricted role/nonownership verified; audit UPDATE/DELETE, identity writes, TRUNCATE and DDL fail 42501. Matrix-contract regression passes. No matrix, migration or grant expansion. |
+| Shared regression / governance | Existing IN10 service/HTTP/repository behavior passes, including a separate audit repository suite after Interaction/Admin in the same JVM. OpenAPI schemas and frontend wire types are preserved. Admission and placement authority/exclusions remain explicit. No IN11/IN21, Admin screen, QA06 entirety or applied migration changes. |
+
+| Previous finding | Independent incoming disposition and final closure |
+| --- | --- |
+| IN20-R01 | Verified: exact authenticated GET/PUT activation, application role checks and unrelated default deny. |
+| IN20-R02 | Verified: plain read admission before body validation, no mutation/row lock, missing+invalid body 404, locked authoritative mutation rechecks existence. |
+| IN20-R03 | Verified: strict parser rejects duplicate/unknown/null/coerced/trailing shapes and accepts valid escaped property/value text. |
+| IN20-R04 | Verified for prior cases; additional malformed charset and encoded path/query combinations passed. |
+| IN20-R05 | Ordinary cases reproduced; incoming lifecycle/oracle closure was incomplete (IR-01/02). Corrected and qualified here. |
+| IN20-R06 | Verified: consolidated DTO/PostgreSQL cases, justified service placement, accurate markers and wire types. |
+| IN20-R07 | Verified original native-separator fix, unchanged exact CT40 caller set; strengthened native-path/CRLF scanner controls. Actual Windows execution unavailable. |
+
+### Repository-wide targeted path compatibility audit
+
+Searches covered `relativize`, native Path/string conversions and matching,
+`getSourceFile`, source allowlists/AST scans, Node path/URL conversions and relevant
+Java/TypeScript/JavaScript development utilities. All three Java `relativize`
+comparisons are already normalized: `CourseServiceTest` uses File.separatorChar;
+`AuthServiceTest` and `AttemptServiceTest` replace backslashes. Other Course,
+Assessment and Adaptive caller suites compare structured Path/URI objects or only
+separator-independent `.java` extensions. The learning import-boundary test uses
+`resolve` plus native `sep`; URL pathname matching has URL semantics.
+
+The POSIX E2E inventory helper's `split('/')` is coupled to the fcntl/Linux/macOS
+lifecycle and process-identity implementation; it is not a supported-Windows
+caller-allowlist defect. It was not modernized. No additional confirmed same-class
+separator defect was found, so no new XPLAT-IR defect is invented. Focused scanner
+controls use native nested filesystem paths and CRLF source, accept approved calls
+and references, and reject other files/methods for both CT40 reads and admission.
+The CT40 allowlist remains exactly its original six paths. macOS arm64 was tested;
+these controls are not proof of actual Windows execution or whole-repository OS
+compatibility certification.
+
+### Executed verification and limitations
+
+Environment: macOS arm64, Temurin 25.0.4.1, Maven Wrapper 3.9.16, Docker Desktop
+29.8.1, disposable DP01-hardened PostgreSQL 17.11 with Flyway and disabled scheduler.
+Initial sandbox DNS and Docker-socket inspection were denied; authorized execution
+provided the required access. No production/shared infrastructure was contacted.
+
+From `backend/`:
+
+```bash
+# Incoming baseline: 123 unit + 86 integration; 0 failures/errors/skips; SUCCESS.
+./mvnw -B -o '-Dtest=AdminCourseServiceTest,AdminRequestsTest,CourseServiceTest,AuthServiceTest$UserSummaries,AuditLogServiceTest' '-Dit.test=InteractionAdminIntegrationTest,InteractionAdminIntegrationTest$AdminCourses,AuthorizationIntegrationTest$AdminCourseEndpoints,AuthorizationIntegrationTest$AuditLogReadEndpoint' verify
+
+# Final complete targeted set: 131 unit + 106 integration; 0 failures/errors/skips; SUCCESS.
+./mvnw -B -o '-Dtest=AdminCourseServiceTest,AdminRequestsTest,CourseServiceTest,AuthServiceTest$UserSummaries,AuditLogServiceTest' '-Dit.test=InteractionAdminIntegrationTest,InteractionAdminIntegrationTest$AdminCourses,AuthorizationIntegrationTest$AdminCourseEndpoints,AuthorizationIntegrationTest$AuditLogReadEndpoint,AuditLogRepositoryIntegrationTest' -Dfailsafe.runOrder=alphabetical verify
+
+# Temporary mutations only: all 4 selected cases FAIL as intended; sources then restored.
+./mvnw -B -o -Dtest=NoSuchTest -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=InteractionAdminIntegrationTest$AdminCourses#listingUsesLiteralSubstringCOrderingPagingAndFormerInstructorNames+aNameProviderFailureAfterAuditInsertAlsoRollsBackTheWholeHide+teardownFailureAttemptsRemainingStepsAndFencesLaterTests+interruptedShutdownStillFencesAnUnterminatedWorkerAndPreservesInterrupt' verify
+
+# Added encoded-URI/query case only: 1 integration; 0 failures/errors/skips; SUCCESS.
+./mvnw -B -o -Dtest=NoSuchTest -Dsurefire.failIfNoSpecifiedTests=false '-Dit.test=AuthorizationIntegrationTest$AdminCourseEndpoints#encodedUuidAndQueryNamesRetainStrictAdmissionAndDefaultDeny' verify
+```
+
+The 131 unit cases are CourseServiceTest 91, Auth UserSummaries 5, AdminRequestsTest
+11, AuditLogServiceTest 10 and AdminCourseServiceTest 14. The 106 integration cases
+are AdminCourseEndpoints 36, AuditLogReadEndpoint 30, shared Interaction/Admin 25
+(including the 9 enclosing existing tests), and AuditLogRepository 15. The one
+subsequently added HTTP case makes 107 distinct integration cases validated across
+the final two commands, not 107 cases in one Maven invocation. Nested aggregate
+XML counts are not added twice. Source-hash comparison establishes that only the
+one added HTTP test changed after the 131/106 run; no production source changed.
+An intermediate amendment run also passed 11 unit + 61 integration; counts from
+separate runs are not additive. Four intentional mutation failures are described
+above; no unintentional test failure or skip remains.
+
+From repository root, also passed:
+
+```bash
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+node /Users/nguyenchithanh/CodeProjects/codemastery/frontend/node_modules/typescript/bin/tsc --noEmit --strict --target ES2022 --module ESNext --moduleResolution bundler frontend/src/features/admin/course-management/types/adminCourseTypes.ts
+git diff --check
+```
+
+OpenAPI JSON parsing/comparison confirms unchanged components/schemas and only the
+two authorized IN20 path descriptions/markers differ from main. No full repository
+suite, frontend build, browser/E2E or release qualification ran. Hosted CI was not
+queried, polled, triggered, monitored or rerun. Reading current branch rules is not
+a CI query: the live rules still require an approving review/CODEOWNERS, resolved
+threads, strict up-to-date checks, CodeQL scanning and protected integration.
+
+Final focused review found no remaining actionable IN20 production or test finding.
+IN20.courses, IN20.audit and IN20.rest have 100% authorized code completion with the
+explicit Windows execution limitation. Another automated review is not technically
+required to close the identified findings. Independent eligible CODEOWNER/module-owner
+acceptance of the delivered delta, required protected checks/integration, AD08-specific
+consumer acceptance, whole QA06 acceptance and authorized deployment/runtime
+qualification remain separate. Issue #188 remains open (`Refs #188`). AI assistance:
+OpenAI Codex performed this independent incoming review, test remediation and
+self-verification; the original Claude-assisted drafting disclosure remains intact.
