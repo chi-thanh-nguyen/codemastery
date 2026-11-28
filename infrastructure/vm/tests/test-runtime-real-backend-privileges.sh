@@ -435,6 +435,15 @@ call GET "$assigned/owned-assignments" "$token_a"; check "a Learner cannot read 
 # AS09 r16: backend queries execute as the configured non-owner runtime login.
 call PUT "$assigned/membership" "$token_a"
 check "learner joins the authored Course" "$STATUS" 200
+call GET "$assigned/adaptive-guidance" "$token_a"
+check "AD16 guidance under runtime role" "$STATUS/$(field adaptiveEnabled)/$(field placementOffered)" "200/False/False"
+# Bootstrap-only synthetic stored configuration: AD08 settings writes are a separate capability.
+psql_admin >/dev/null <<<"UPDATE public.courses SET adaptive_enabled=true, adaptive_settings='{\"weak\":{\"numerator\":1,\"denominator\":2},\"mastered\":{\"numerator\":4,\"denominator\":5},\"minimumQuestionsPerSkill\":6}'::jsonb WHERE id='$authored';"
+call GET "$assigned/adaptive-guidance" "$token_a"
+check "AD16 current history SELECT under runtime role" "$STATUS/$(field adaptiveEnabled)" "200/True"
+psql_admin >/dev/null <<<"UPDATE public.courses SET adaptive_enabled=false, adaptive_settings=null WHERE id='$authored';"
+
+
 call GET "$assigned/assignments" "$token_a"
 check "learner assignment page (real schema joins)" "$STATUS/$(field totalElements)" "200/1"
 call GET "$assigned/assignments/$assignment" "$token_a"

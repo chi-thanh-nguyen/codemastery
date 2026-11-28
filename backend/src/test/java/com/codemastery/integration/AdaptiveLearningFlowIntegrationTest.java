@@ -1,5 +1,9 @@
 package com.codemastery.integration;
 
+import com.codemastery.modules.adaptive.application.mastery.PlacementDiagnosticService;
+import com.codemastery.modules.adaptive.application.mastery.MasteryQueryService;
+import com.codemastery.modules.course.application.service.LessonProgressService;
+import com.codemastery.modules.course.application.service.LessonProgressService.LearnerCourseState;
 import com.codemastery.common.exception.BusinessRuleException;
 import com.codemastery.common.exception.ResourceNotFoundException;
 import com.codemastery.modules.adaptive.application.decision.AdaptiveDecisionEngine;
@@ -208,6 +212,9 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     @Autowired PlatformTransactionManager transactions;
     @PersistenceContext EntityManager entityManager;
     @Autowired RecommendationService recommendationService;
+    @Autowired PlacementDiagnosticService placement;
+    @Autowired MasteryQueryService masteryQueries;
+    @Autowired LessonProgressService learnerStates;
     @Autowired AdaptiveDecisionService adaptiveDecisionService;
     @Autowired RecommendationEventProbe recommendationEvents;
 
@@ -2407,6 +2414,287 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
     }
 
     /** COURSE adaptive with L1 (Loops, Arrays), L2 (Strings), an unmapped L3 and a hidden mapped Lesson; LEARNER active. */
+
+    // AD10/CT25 and the bounded AD16 course-guidance composition, real proxies and PostgreSQL.
+    @Test void ad10GuidanceHasTheCompleteWireShapeAndSkipWritesNothing() throws Exception {
+        var f = guidanceFixture();
+        UUID diagnostic = practiceQuiz(COURSE, "Placement", "diagnostic", "published", question(f.loops(), "easy"));
+        String token = bearer(LEARNER);
+        String before = mutableState();
+        var first = guidanceJson(COURSE, token);
+        assertEquals(Set.of("courseId", "adaptiveEnabled", "placementOffered", "placementQuizId",
+                "currentRecommendation", "lessons"), fieldNames(first));
+        assertTrue(first.get("adaptiveEnabled").asBoolean());
+        assertTrue(first.get("placementOffered").asBoolean());
+        assertEquals(diagnostic.toString(), first.get("placementQuizId").asString());
+        assertTrue(first.get("currentRecommendation").isNull(), "no fabricated recommendation");
+        assertEquals(List.of(f.l1().toString(), f.l2().toString(), f.unmapped().toString()),
+                first.get("lessons").valueStream().map(l -> l.get("lessonId").asString()).toList());
+        for (var lesson : first.get("lessons")) {
+            assertEquals(Set.of("lessonId", "unmasteredPrerequisiteSkillIds"), fieldNames(lesson));
+        }
+        // Skip is navigation to Course's canonical path, followed by a later revisit.
+        assertEquals(f.l1(), as(LEARNER, Role.LEARNER, () -> learnerStates.progress(COURSE).nextLessonId()));
+        assertEquals(first, guidanceJson(COURSE, token), "offer reappears; no dismissal marker");
+        assertEquals(before.replaceAll("refresh_sessions=\\d+", ""), mutableState().replaceAll("refresh_sessions=\\d+", ""));
+        assertTrue(recommendationEvents.received().isEmpty());
+    }
+
+    @ParameterizedTest @ValueSource(strings = {"unknown", "weak", "learning", "mastered"})
+    void ad10EveryStoredStateSuppressesTheOfferIncludingExplicitUnknown(String state) throws Exception {
+        var f = guidanceFixture();
+        practiceQuiz(COURSE, "Placement", "diagnostic", "published", question(f.loops(), "easy"));
+        mastery(f.arrays(), state);
+        var body = guidanceJson(COURSE, bearer(LEARNER));
+        assertFalse(body.get("placementOffered").asBoolean());
+        assertTrue(body.get("placementQuizId").isNull());
+    }
+
+    @Test void ad10OtherLearnersAndOtherCoursesDoNotSuppressTheOffer() throws Exception {
+        var f = guidanceFixture();
+        UUID diagnostic = practiceQuiz(COURSE, "Placement", "diagnostic", "published", question(f.loops(), "easy"));
+        UUID foreignSkill = skillRow(SECOND, "Foreign");
+        mastery(foreignSkill, "mastered");
+        jdbc.update("INSERT INTO public.learner_skill_masteries (id,user_id,skill_id,state) VALUES (?,?,?,'unknown')",
+                UUID.randomUUID(), OWNER, f.loops());
+        assertEquals(diagnostic.toString(), guidanceJson(COURSE, bearer(LEARNER)).get("placementQuizId").asString());
+    }
+
+    @Test void ad10OfferRefusalsAndCompletedMembershipUseStoredConfiguration() throws Exception {
+        var f = guidanceFixture();
+        String token = bearer(LEARNER);
+        assertFalse(guidanceJson(COURSE, token).get("placementOffered").asBoolean(), "no diagnostic");
+        practiceQuiz(COURSE, "Hidden", "diagnostic", "hidden", question(f.loops(), "easy"));
+        assertFalse(guidanceJson(COURSE, token).get("placementOffered").asBoolean(), "hidden diagnostic");
+        UUID diagnostic = practiceQuiz(COURSE, "Placement", "diagnostic", "published", question(f.arrays(), "easy"));
+        jdbc.update("UPDATE public.enrollments SET status = 'completed' WHERE user_id = ? AND course_id = ?", LEARNER, COURSE);
+        assertEquals(diagnostic.toString(), guidanceJson(COURSE, token).get("placementQuizId").asString());
+        jdbc.update("UPDATE public.courses SET adaptive_enabled = false, adaptive_settings = null WHERE id = ?", COURSE);
+        var disabled = guidanceJson(COURSE, token);
+        assertFalse(disabled.get("adaptiveEnabled").asBoolean());
+        assertFalse(disabled.get("placementOffered").asBoolean());
+        assertTrue(disabled.get("currentRecommendation").isNull());
+        for (var lesson : disabled.get("lessons")) assertEquals(0, lesson.get("unmasteredPrerequisiteSkillIds").size());
+    }
+
+    @Test void ad10ServerSelectionResumesD2AndRefusesOverdueHiddenAndSubmittedAttempts() throws Exception {
+        var f = guidanceFixture();
+        UUID q = question(f.loops(), "easy");
+        UUID d2 = practiceQuiz(COURSE, "Z diagnostic", "diagnostic", "published", q);
+        String token = bearer(LEARNER);
+        String start = "/api/courses/" + COURSE + "/quizzes/" + d2 + "/attempts";
+        var started = json(call(new Operation(HttpMethod.POST, start, null), token), 201);
+        UUID attempt = UUID.fromString(started.get("attemptId").asString());
+        UUID d1 = practiceQuiz(COURSE, "A diagnostic", "diagnostic", "published", q);
+        assertProblem(call(new Operation(HttpMethod.POST, "/api/courses/" + COURSE + "/quizzes/" + d1 + "/attempts", null), token), 409, null);
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM public.attempts WHERE user_id = ?", Integer.class, LEARNER));
+        assertEquals(d2.toString(), guidanceJson(COURSE, token).get("placementQuizId").asString());
+        assertEquals(attempt.toString(), json(call(new Operation(HttpMethod.POST, start, null), token), 200).get("attemptId").asString());
+        jdbc.update("UPDATE public.quizzes SET publication_status = 'hidden' WHERE id = ?", d2);
+        assertFalse(guidanceJson(COURSE, token).get("placementOffered").asBoolean());
+        jdbc.update("UPDATE public.quizzes SET publication_status = 'published' WHERE id = ?", d2);
+        jdbc.update("UPDATE public.attempts SET started_at = now() - interval '2 hours', expires_at = now() - interval '1 hour' WHERE id = ?", attempt);
+        assertFalse(guidanceJson(COURSE, token).get("placementOffered").asBoolean());
+        jdbc.update("UPDATE public.attempts SET submitted_at = expires_at, score_percentage = 0 WHERE id = ?", attempt);
+        assertFalse(guidanceJson(COURSE, token).get("placementOffered").asBoolean());
+    }
+
+    @Test void ad10ServerSelectsFirstPublishedDiagnosticByAssessmentOrder() throws Exception {
+        var f = guidanceFixture();
+        UUID q = question(f.loops(), "easy");
+        practiceQuiz(COURSE, "A hidden", "diagnostic", "hidden", q);
+        practiceQuiz(COURSE, "A practice", "practice", "published", q);
+        practiceQuiz(COURSE, "Z diagnostic", "diagnostic", "published", q);
+        UUID first = practiceQuiz(COURSE, "B diagnostic", "diagnostic", "published", q);
+        assertEquals(first.toString(), guidanceJson(COURSE, bearer(LEARNER)).get("placementQuizId").asString());
+    }
+
+    @Test void ad10GuidanceAdmissionAndErrorsAreSafeAndNoStore() throws Exception {
+        guidanceFixture();
+        String base = "/api/courses/" + COURSE + "/adaptive-guidance";
+        for (var c : List.of(new Object[]{null, base, 401}, new Object[]{bearer(OWNER), base, 403},
+                new Object[]{bearer(ADMIN), base, 403}, new Object[]{bearer(LEARNER), "/api/courses/" + SECOND + "/adaptive-guidance", 403},
+                new Object[]{bearer(LEARNER), "/api/courses/" + HIDDEN + "/adaptive-guidance", 404},
+                new Object[]{bearer(LEARNER), "/api/courses/1-1-1-1-1/adaptive-guidance", 400},
+                new Object[]{bearer(LEARNER), base + "?learnerId=" + OWNER, 400})) {
+            List<String> sql = new ArrayList<>(); RECORDED_SQL.set(sql);
+            MvcResult result;
+            try { result = call(new Operation(HttpMethod.GET, (String)c[1], null), (String)c[0]); }
+            finally { RECORDED_SQL.remove(); }
+            assertProblem(result, (int)c[2], null);
+            assertEquals("no-store", result.getResponse().getHeader("Cache-Control"));
+            assertTrue(sql.stream().noneMatch(q -> q.contains("learner_skill_masteries") || q.contains("path_recommendations")), sql.toString());
+        }
+        jdbc.update("UPDATE public.enrollments SET status = 'left' WHERE user_id = ? AND course_id = ?", LEARNER, COURSE);
+        assertProblem(call(new Operation(HttpMethod.GET, base, null), bearer(LEARNER)), 403, null);
+    }
+
+    @Test void ad10BothPlacementEntriesEnforceRealTransactionAdmissionAndRejectUntrustedStatesBeforeMastery() {
+        guidanceFixture();
+        assertTrue(AopUtils.isAopProxy(placement));
+        assertThrows(IllegalTransactionStateException.class, () -> placement.readPlacementOffer((LearnerCourseState)null));
+        for (boolean stateEntry : List.of(false, true)) {
+            for (int isolation : List.of(TransactionDefinition.ISOLATION_READ_COMMITTED, TransactionDefinition.ISOLATION_REPEATABLE_READ)) {
+                for (boolean readOnly : List.of(false, true)) {
+                    if (readOnly && isolation == TransactionDefinition.ISOLATION_REPEATABLE_READ) continue;
+                    assertThrows(IllegalStateException.class, () -> outer(isolation, readOnly).execute(status ->
+                            as(LEARNER, Role.LEARNER, () -> stateEntry ? placement.readPlacementOffer(
+                                    new LearnerCourseState(COURSE, LEARNER, UUID.randomUUID(), "active", true, Map.of(), List.of()))
+                                    : placement.readPlacementOffer(COURSE))));
+                }
+            }
+        }
+        var admitted = outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(status ->
+                as(LEARNER, Role.LEARNER, () -> learnerStates.readLearnerState(COURSE)));
+        var foreign = new LearnerCourseState(COURSE, OWNER, admitted.enrollmentId(), "active", true,
+                admitted.adaptiveSettings(), admitted.lessons());
+        List<String> sql = new ArrayList<>(); RECORDED_SQL.set(sql);
+        try {
+            assertThrows(IllegalStateException.class, () -> outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true)
+                    .execute(status -> as(LEARNER, Role.LEARNER, () -> placement.readPlacementOffer(foreign))));
+            jdbc.update("UPDATE public.courses SET adaptive_enabled = false WHERE id = ?", COURSE);
+            assertThrows(IllegalStateException.class, () -> outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true)
+                    .execute(status -> as(LEARNER, Role.LEARNER, () -> placement.readPlacementOffer(admitted))));
+        } finally { RECORDED_SQL.remove(); }
+        assertTrue(sql.stream().noneMatch(q -> q.contains("learner_skill_masteries")), sql.toString());
+    }
+
+    @Test void ad10PlacementStateAndGuidanceJoinTheActualPostgresSnapshotWithoutWrites() throws Exception {
+        var f = guidanceFixture();
+        UUID diagnostic = practiceQuiz(COURSE, "Placement", "diagnostic", "published", question(f.loops(), "easy"));
+        var offer = outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(status -> as(LEARNER, Role.LEARNER, () -> {
+            var state = learnerStates.readLearnerState(COURSE);
+            commitSqlElsewhere("UPDATE public.courses SET adaptive_enabled = false WHERE id = ?", COURSE);
+            commitSqlElsewhere("INSERT INTO public.learner_skill_masteries (id,user_id,skill_id,state) VALUES (?,?,?,'unknown')",
+                    UUID.randomUUID(), LEARNER, f.loops());
+            assertEquals("repeatable read", jdbc.queryForObject("SHOW transaction_isolation", String.class));
+            assertEquals("on", jdbc.queryForObject("SHOW transaction_read_only", String.class));
+            assertNull(jdbc.queryForObject("SELECT pg_current_xact_id_if_assigned()", Object.class));
+            assertTrue(masteryQueries.readAdaptiveGuidance(COURSE).placementOffered());
+            return placement.readPlacementOffer(state);
+        }));
+        assertEquals(diagnostic, offer.placementQuizId());
+        assertFalse(guidanceJson(COURSE, bearer(LEARNER)).get("placementOffered").asBoolean());
+    }
+
+    @Test void ad10GuidanceVisibilityUsesTheRealEngineLatestRowAndExactReason() throws Exception {
+        var f = guidanceFixture();
+        UUID enrollmentId = jdbc.queryForObject("SELECT id FROM public.enrollments WHERE user_id = ? AND course_id = ?",
+                UUID.class, LEARNER, COURSE);
+        String reason = "Continue with the next lesson in the course order.";
+        guidanceHistory(enrollmentId, f.l1(), "continue", reason, 0);
+        String token = bearer(LEARNER);
+        var current = guidanceJson(COURSE, token).get("currentRecommendation");
+        assertEquals(Set.of("type", "targetLessonId", "reason", "recommendedAt", "targetCompleted"), fieldNames(current));
+        assertEquals(reason, current.get("reason").asString()); assertFalse(current.get("targetCompleted").asBoolean());
+        guidanceHistory(enrollmentId, f.l2(), "skip", "Skip history must not determine current guidance.", 1);
+        assertEquals(current, guidanceJson(COURSE, token).get("currentRecommendation"));
+        guidanceHistory(enrollmentId, f.l2(), "continue", reason, 2);
+        assertTrue(guidanceJson(COURSE, token).get("currentRecommendation").isNull(), "never fall back to valid older row");
+        jdbc.update("DELETE FROM public.path_recommendations WHERE enrollment_id = ? AND lesson_id = ?", enrollmentId, f.l2());
+        jdbc.update("UPDATE public.skills SET name = 'Unrelated renamed' WHERE id = ?", f.strings());
+        assertEquals(current, guidanceJson(COURSE, token).get("currentRecommendation"), "unrelated rename preserves draft");
+        jdbc.update("UPDATE public.lessons SET publication_status = 'hidden' WHERE id = ?", f.l1());
+        assertTrue(guidanceJson(COURSE, token).get("currentRecommendation").isNull());
+    }
+
+    @Test void ad10CompletedRemedialReviewRemainsVisibleAndSelectedRenameInvalidatesIt() throws Exception {
+        var f = guidanceFixture();
+        jdbc.update("INSERT INTO public.skill_prerequisites (id,course_id,skill_id,prerequisite_skill_id) VALUES (?,?,?,?)",
+                UUID.randomUUID(), COURSE, f.strings(), f.loops());
+        mastery(f.strings(), "weak"); mastery(f.loops(), "learning");
+        UUID enrollmentId = jdbc.queryForObject("SELECT id FROM public.enrollments WHERE user_id = ? AND course_id = ?",
+                UUID.class, LEARNER, COURSE);
+        for (UUID lesson : List.of(f.l1(), f.l2(), f.unmapped())) jdbc.update(
+                "INSERT INTO public.lesson_progress (id,enrollment_id,lesson_id,completed,mastery_skipped) VALUES (?,?,?,true,false)",
+                UUID.randomUUID(), enrollmentId, lesson);
+        jdbc.update("UPDATE public.enrollments SET status = 'completed' WHERE id = ?", enrollmentId);
+        guidanceHistory(enrollmentId, f.l1(), "remedial",
+                com.codemastery.modules.adaptive.application.recommendation.RecommendationReasonBuilder.remedial("Strings", "Loops"), 0);
+        String token = bearer(LEARNER);
+        var body = guidanceJson(COURSE, token);
+        assertEquals("remedial", body.get("currentRecommendation").get("type").asString());
+        assertTrue(body.get("currentRecommendation").get("targetCompleted").asBoolean());
+        assertEquals(List.of(f.loops().toString()), body.get("lessons").get(1).get("unmasteredPrerequisiteSkillIds")
+                .valueStream().map(JsonNode::asString).toList());
+        jdbc.update("UPDATE public.skills SET name = 'Selected renamed' WHERE id = ?", f.loops());
+        assertTrue(guidanceJson(COURSE, token).get("currentRecommendation").isNull());
+    }
+
+    @Test void ad10DuplicateLatestGuidanceInstantFailsSafelyRatherThanChoosingRandomUuid() throws Exception {
+        var f = guidanceFixture();
+        UUID enrollmentId = jdbc.queryForObject("SELECT id FROM public.enrollments WHERE user_id = ? AND course_id = ?", UUID.class, LEARNER, COURSE);
+        guidanceHistory(enrollmentId, f.l1(), "continue", "Continue with the next lesson in the course order.", 0);
+        guidanceHistory(enrollmentId, f.l2(), "remedial", "Different guidance at the same instant", 0);
+        MvcResult result = call(new Operation(HttpMethod.GET, "/api/courses/" + COURSE + "/adaptive-guidance", null), bearer(LEARNER));
+        assertProblem(result, 500, null); assertEquals("no-store", result.getResponse().getHeader("Cache-Control"));
+        assertFalse(result.getResponse().getContentAsString().contains(enrollmentId.toString()));
+    }
+
+    @Test void ad10GuidanceSnapshotRemainsCoherentAcrossACommittedConcurrentWriter() throws Exception {
+        var f = guidanceFixture();
+        UUID diagnostic = practiceQuiz(COURSE, "Placement", "diagnostic", "published", question(f.loops(), "easy"));
+        AtomicInteger hooks = new AtomicInteger();
+        BEFORE_MASTERY_READ.set(() -> {
+            hooks.incrementAndGet();
+            commitSqlElsewhere("UPDATE public.quizzes SET publication_status = 'hidden' WHERE id = ?", diagnostic);
+            commitSqlElsewhere("INSERT INTO public.learner_skill_masteries (id,user_id,skill_id,state) VALUES (?,?,?,'unknown')",
+                    UUID.randomUUID(), LEARNER, f.loops());
+        });
+        String token = bearer(LEARNER);
+        assertEquals(diagnostic.toString(), guidanceJson(COURSE, token).get("placementQuizId").asString());
+        assertEquals(1, hooks.get());
+        assertFalse(guidanceJson(COURSE, token).get("placementOffered").asBoolean());
+    }
+
+    @Test void ad10GuidanceUsesOnlyTheRuntimeReadGrantsAndActuallyNeedsHistorySelect() throws Exception {
+        var f = guidanceFixture();
+        UUID enrollmentId = jdbc.queryForObject("SELECT id FROM public.enrollments WHERE user_id = ? AND course_id = ?", UUID.class, LEARNER, COURSE);
+        guidanceHistory(enrollmentId, f.l1(), "continue", "Continue with the next lesson in the course order.", 0);
+        String role = "ad10_read_" + UUID.randomUUID().toString().replace("-", "");
+        jdbc.execute("CREATE ROLE " + role + " NOLOGIN");
+        try {
+            jdbc.execute("GRANT USAGE ON SCHEMA public TO " + role);
+            jdbc.execute("GRANT SELECT ON public.users, public.courses, public.chapters, public.lessons, public.enrollments, "
+                    + "public.lesson_progress, public.skills, public.skill_prerequisites, public.lesson_skills, public.quizzes, "
+                    + "public.attempts, public.path_recommendations TO " + role);
+            jdbc.execute("GRANT SELECT (user_id,skill_id,state) ON public.learner_skill_masteries TO " + role);
+            jdbc.execute("GRANT SELECT (id,lesson_id,publication_status) ON public.learning_materials TO " + role);
+            outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(status -> {
+                jdbc.execute("SET LOCAL ROLE " + role);
+                var result = as(LEARNER, Role.LEARNER, () -> masteryQueries.readAdaptiveGuidance(COURSE));
+                assertEquals(f.l1(), result.currentRecommendation().targetLessonId());
+                assertNull(jdbc.queryForObject("SELECT pg_current_xact_id_if_assigned()", Object.class));
+                return null;
+            });
+            jdbc.execute("REVOKE SELECT ON public.path_recommendations FROM " + role);
+            assertThrows(DataAccessException.class, () -> outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(status -> {
+                jdbc.execute("SET LOCAL ROLE " + role);
+                return as(LEARNER, Role.LEARNER, () -> masteryQueries.readAdaptiveGuidance(COURSE));
+            }));
+        } finally {
+            jdbc.execute("DROP OWNED BY " + role);
+            jdbc.execute("DROP ROLE " + role);
+        }
+    }
+
+    private PracticeFixture guidanceFixture() {
+        var f = practiceFixture();
+        jdbc.update("UPDATE public.courses SET adaptive_settings = ?::jsonb WHERE id = ?",
+                "{\"weak\":{\"numerator\":1,\"denominator\":2},\"mastered\":{\"numerator\":4,\"denominator\":5},\"minimumQuestionsPerSkill\":6}", COURSE);
+        return f;
+    }
+    private JsonNode guidanceJson(UUID course, String token) throws Exception {
+        var result = call(new Operation(HttpMethod.GET, "/api/courses/" + course + "/adaptive-guidance", null), token);
+        assertEquals("no-store", result.getResponse().getHeader("Cache-Control"));
+        return json(result, 200);
+    }
+    private void guidanceHistory(UUID enrollmentId, UUID lesson, String type, String reason, int second) {
+        jdbc.update("INSERT INTO public.path_recommendations (id,enrollment_id,lesson_id,recommendation_type,reason,recommended_at) "
+                + "VALUES (?,?,?,?,?,?)", UUID.randomUUID(), enrollmentId, lesson, type, reason,
+                OffsetDateTime.parse("2026-11-28T00:00:00Z").plusSeconds(second));
+    }
+
     private record PracticeFixture(UUID l1, UUID l2, UUID unmapped, UUID hidden, UUID loops, UUID arrays, UUID strings) { }
 
     private PracticeFixture practiceFixture() {

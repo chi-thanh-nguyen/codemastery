@@ -5837,3 +5837,25 @@ restricted role to prove parent locks and targeted moderation writes. IN21's Adm
 REST/orchestration/audit remains a downstream responsibility. Provisioning on actual
 hosts, independent infrastructure/CODEOWNER review, hosted CI and protected integration
 remain separate gates. Execution results are recorded in `docs/testing.md`.
+
+
+### CT17-P6-PRIVILEGES-2026-11-28-r18 — AD16 current guidance (28 November 2026)
+
+**DELEGATED_APPROVED.** The Project Leader's PR #304 full-scope AD10 instruction
+explicitly authorizes bounded upstream implementation and the technical decisions
+needed for it. OpenAI Codex selected this one-relation consumer revision under that
+authority, within ADR012 §19.2's existing SELECT/INSERT ceiling. It supersedes only
+r8's `path_recommendations` row; all other r1–r17 rows and reviewed columns remain.
+
+| Relation | Privileges | Consumer and rationale |
+|---|---|---|
+| `path_recommendations` (adaptive) | SELECT, INSERT | AD16 finds the unique newest continue/remedial row for an admitted Enrollment; AD06 keeps append-only INSERT |
+
+The read uses the caller's read-only REPEATABLE READ snapshot. Two equal greatest
+guidance instants fail as integrity corruption, never a UUID tie-break. No UPDATE,
+DELETE, DDL, future-object grant or migration is added. The matrix, contract check,
+containment read probe and real-backend HTTP consumer case change together. Local
+PostgreSQL qualification also executes the Spring composition under a restricted
+role and checks the absence of write/transaction effects. Actual shared/production
+grants, Linux VM qualification, infrastructure review and deployment remain separate.
+See `docs/testing.md` for executed checks and limits.

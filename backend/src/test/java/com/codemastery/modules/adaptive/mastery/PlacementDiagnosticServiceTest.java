@@ -11,6 +11,7 @@ import com.codemastery.modules.assessment.application.service.AttemptService;
 import com.codemastery.modules.course.application.service.LessonProgressService;
 import com.codemastery.modules.course.application.service.LessonProgressService.LearnerCourseState;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -58,6 +59,13 @@ class PlacementDiagnosticServiceTest {
     private final AttemptService attempts = mock(AttemptService.class);
     private final PlacementDiagnosticService service =
             new PlacementDiagnosticService(learnerStates, skills, masteries, attempts);
+
+    @BeforeEach
+    void reportingSnapshot() {
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+        TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
+        TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(Isolation.REPEATABLE_READ.value());
+    }
 
     @AfterEach
     void clearTransactionSynchronization() {
@@ -208,6 +216,7 @@ class PlacementDiagnosticServiceTest {
 
         @Test
         void refusesCallFromStateWithoutReadOnlyRepeatableReadSnapshot() {
+            clearTransactionSynchronization();
             LearnerCourseState admitted = state("active", true, POLICY);
 
             assertThrows(IllegalStateException.class, () -> service.readPlacementOffer(admitted));
@@ -225,11 +234,12 @@ class PlacementDiagnosticServiceTest {
         }
 
         @Test
-        void joinsCallerRepeatableReadSnapshotWithoutReReadingLearnerState() {
+        void joinsCallerSnapshotAndReAdmitsPublicStateBeforeReadingMastery() {
             TransactionSynchronizationManager.setActualTransactionActive(true);
             TransactionSynchronizationManager.setCurrentTransactionReadOnly(true);
             TransactionSynchronizationManager.setCurrentTransactionIsolationLevel(Isolation.REPEATABLE_READ.value());
 
+            when(learnerStates.readLearnerState(COURSE)).thenReturn(state("active", true, POLICY));
             when(skills.findSkills(COURSE)).thenReturn(List.of(new Skill(SKILL_1, COURSE, "Variables", null)));
             when(masteries.findStates(LEARNER, Set.of(SKILL_1))).thenReturn(Map.of());
             when(attempts.readMyPlacementQuizId(COURSE)).thenReturn(DIAGNOSTIC_QUIZ);
@@ -237,7 +247,86 @@ class PlacementDiagnosticServiceTest {
             PlacementOffer offer = service.readPlacementOffer(state("active", true, POLICY));
 
             assertEquals(new PlacementOffer(true, DIAGNOSTIC_QUIZ), offer);
-            verifyNoInteractions(learnerStates);
+            org.mockito.Mockito.verify(learnerStates).readLearnerState(COURSE);
+        }
+    }
+
+    @Test
+    void publicStateCannotReadAnotherLearnerOrStaleConfiguration() {
+        when(learnerStates.readLearnerState(COURSE)).thenReturn(state("active", true, POLICY));
+        for (var supplied : List.of(
+                new LearnerCourseState(COURSE, SKILL_1, ENROLLMENT, "active", true, POLICY, List.of()),
+                new LearnerCourseState(COURSE, LEARNER, SKILL_1, "active", true, POLICY, List.of()),
+                state("completed", true, POLICY), state("active", false, POLICY), state("active", true, null))) {
+            assertThrows(IllegalStateException.class, () -> service.readPlacementOffer(supplied));
+        }
+        verifyNoInteractions(skills, masteries, attempts);
+    }
+
+    @Test
+    void publicStateRechecksAdmissionEvenWhenSuppliedStateWouldSuppressOffer() {
+        doThrow(new AccessDeniedException("Access denied")).when(learnerStates).readLearnerState(COURSE);
+        assertThrows(AccessDeniedException.class, () -> service.readPlacementOffer(state("active", false, null)));
+        verifyNoInteractions(skills, masteries, attempts);
+    }
+
+    @Test
+    void courseEntryRefusesAnIncompatibleExistingTransactionBeforeAnyProviderRead() {
+        clearTransactionSynchronization();
+        assertThrows(IllegalStateException.class, () -> service.readPlacementOffer(COURSE));
+        reportingSnapshot();
+        TransactionSynchronizationManager.setCurrentTransactionReadOnly(false);
+        assertThrows(IllegalStateException.class, () -> service.readPlacementOffer(COURSE));
+        verifyNoInteractions(learnerStates, skills, masteries, attempts);
+    }
+
+    @Test
+    void placementAndGuidanceHaveOnlyTheApprovedProductionCallers() throws Exception {
+        var root = java.nio.file.Path.of("src/main/java/com/codemastery");
+        var allowed = Map.of(
+                "readMyPlacementQuizId", Set.of("modules/adaptive/application/mastery/PlacementDiagnosticService.java"),
+                "readPlacementOffer", Set.of("modules/adaptive/application/mastery/MasteryQueryService.java"),
+                "readAdaptiveGuidance", Set.of("modules/adaptive/api/controller/MasteryController.java"),
+                "findCurrentGuidance", Set.of("modules/adaptive/application/mastery/MasteryQueryService.java"));
+        Map<String, Set<String>> actual = new HashMap<>();
+        allowed.keySet().forEach(name -> actual.put(name, new java.util.TreeSet<>()));
+        try (var files = java.nio.file.Files.walk(root)) {
+            for (var file : files.filter(p -> p.toString().endsWith(".java")).toList()) {
+                for (var call : calledMethods(java.nio.file.Files.readString(file))) {
+                    if (actual.containsKey(call)) actual.get(call).add(root.relativize(file).toString());
+                }
+            }
+        }
+        assertEquals(allowed, actual);
+        assertTrue(calledMethods("class C { void x(){ service.readPlacementOffer(s); } }").contains("readPlacementOffer"));
+        assertTrue(calledMethods("class C { Object x = service::readPlacementOffer; }").contains("readPlacementOffer"));
+        assertFalse(calledMethods("class C { void readPlacementOffer(){} String x = \"readPlacementOffer()\"; }").contains("readPlacementOffer"));
+    }
+
+    private static Set<String> calledMethods(String code) throws Exception {
+        var compiler = javax.tools.ToolProvider.getSystemJavaCompiler();
+        var source = new javax.tools.SimpleJavaFileObject(java.net.URI.create("string:///Caller.java"),
+                javax.tools.JavaFileObject.Kind.SOURCE) {
+            @Override public CharSequence getCharContent(boolean ignoreErrors) { return code; }
+        };
+        try (var manager = compiler.getStandardFileManager(null, null, java.nio.charset.StandardCharsets.UTF_8)) {
+            var task = (com.sun.source.util.JavacTask) compiler.getTask(null, manager, null,
+                    List.of("-proc:none"), null, List.of(source));
+            Set<String> calls = new java.util.HashSet<>();
+            var scanner = new com.sun.source.util.TreeScanner<Void, Void>() {
+                @Override public Void visitMethodInvocation(com.sun.source.tree.MethodInvocationTree node, Void unused) {
+                    var select = node.getMethodSelect();
+                    calls.add(select instanceof com.sun.source.tree.MemberSelectTree member
+                            ? member.getIdentifier().toString() : select.toString());
+                    return super.visitMethodInvocation(node, unused);
+                }
+                @Override public Void visitMemberReference(com.sun.source.tree.MemberReferenceTree node, Void unused) {
+                    calls.add(node.getName().toString());
+                    return super.visitMemberReference(node, unused);
+                }
+            };
+            for (var tree : task.parse()) scanner.scan(tree, null);
+            return calls;
         }
     }
 

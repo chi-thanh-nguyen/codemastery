@@ -9,6 +9,10 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * Adapter for {@link PathRecommendationRepository} (AD06.history-writes;
@@ -42,6 +46,23 @@ public class PathRecommendationRepositoryImpl implements PathRecommendationRepos
     public PathRecommendationRepositoryImpl(PathRecommendationJpaRepository recommendations, RecommendationMapper mapper) {
         this.recommendations = Objects.requireNonNull(recommendations);
         this.mapper = Objects.requireNonNull(mapper);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public Optional<PathRecommendation> findCurrentGuidance(UUID enrollmentId) {
+        Objects.requireNonNull(enrollmentId, "enrollmentId");
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isCurrentTransactionReadOnly()
+                || !Objects.equals(TransactionSynchronizationManager.getCurrentTransactionIsolationLevel(),
+                        Isolation.REPEATABLE_READ.value())) {
+            throw new IllegalStateException("Guidance reads require a read-only REPEATABLE READ transaction");
+        }
+        var rows = recommendations.findLatestGuidance(enrollmentId);
+        if (rows.size() > 1 && rows.get(0).getRecommendedAt().equals(rows.get(1).getRecommendedAt())) {
+            throw new IllegalStateException("Current recommendation is not unique");
+        }
+        return rows.isEmpty() ? Optional.empty() : Optional.of(mapper.toDomain(rows.getFirst()));
     }
 
     @Override

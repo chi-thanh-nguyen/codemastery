@@ -4,6 +4,18 @@
 
 > **Current Batch 1 contract, 8 November 2026:** [ADR005](decisions/005-batch-01-contract-approvals.md) technically approves CT40’s three boundaries, CT05’s four graph checkpoints and CT06.production/enablement under explicit Leader delegation (DELEGATED_APPROVED; integrated via PR #228 on 9 November 2026). Its §§3–8 supply the formerly deferred graph/policy/settings/coverage choices within that scope. Numeric thresholds and n are explicit per-Course configuration with no defaults. Unrelated routing, event/progress execution, diagnostic and evaluation decisions remain with their owning contracts. Historical text below is retained; this notice and ADR005 §9 identify the exact precedence.
 
+> **PR #304 implementation boundary — 28 November 2026:** Placement offer composition
+> and the complete `GET /api/courses/{courseId}/adaptive-guidance` read are implemented
+> on the AD10 branch as a bounded AD16 slice. Reads use one admitted read-only
+> REPEATABLE READ snapshot, Assessment's server-selected diagnostic, stored-row
+> absence (an explicit Unknown row suppresses the offer), CT07 prerequisite warnings
+> and the latest history row only while the current engine reproduces its draft.
+> Skip is client navigation and writes nothing. AD13's listener and mastery update
+> orchestration remain unimplemented: diagnostic submission does **not** yet
+> initialize mastery through the approved path. AD08 settings operations, the Mastery
+> Map and Home/insight reads, frontend delivery, independent acceptance, protected
+> integration and deployment are separate. See the PR #304 record in `testing.md`.
+
 ## 1. Purpose and Scope
 
 Mastery-Based Adaptive Learning is CodeMastery's selected advanced component:

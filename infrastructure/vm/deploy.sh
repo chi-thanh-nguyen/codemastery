@@ -1362,7 +1362,8 @@ SQL
 # CT17-P6-PRIVILEGES-2026-11-26-r14 CO09 material-write row and
 # CT17-P6-PRIVILEGES-2026-11-26-r15 AS08 timed-attempt rows and
 # CT17-P6-PRIVILEGES-2026-11-27-r16 AS09 submission row and
-# CT17-P6-PRIVILEGES-2026-11-27-r17 IN06 discussion/report rows
+# CT17-P6-PRIVILEGES-2026-11-27-r17 IN06 discussion/report rows and
+# CT17-P6-PRIVILEGES-2026-11-28-r18 AD16 current-guidance history reads
 # (all within the ADR012 §19.2 ceiling):
 # the complete runtime privilege matrix for the reviewed V001-V009 schema. Every relation in schema
 # public must be listed, and its reviewed columns are pinned, so a later migration
@@ -1389,7 +1390,7 @@ attempt_answers          SELECT,INSERT  UPDATE(selected_options,is_correct)     
 assignments              SELECT,INSERT  UPDATE(lesson_id,title,instructions,deadline_at,publication_status) id,course_id,lesson_id,title,instructions,deadline_at,publication_status
 submissions              SELECT,INSERT  UPDATE(object_key,original_filename,submitted_at,grade_percentage,feedback,graded_at)       id,assignment_id,user_id,object_key,original_filename,submitted_at,grade_percentage,feedback,graded_at
 learner_skill_masteries  INSERT         SELECT(user_id,skill_id,state)+UPDATE(state) id,user_id,skill_id,state
-path_recommendations     INSERT         -                                        id,enrollment_id,lesson_id,recommendation_type,reason,recommended_at
+path_recommendations     SELECT,INSERT  -                                        id,enrollment_id,lesson_id,recommendation_type,reason,recommended_at
 discussion_posts         SELECT,INSERT  UPDATE(is_hidden)                                        id,lesson_id,author_id,parent_post_id,content,created_at,is_hidden
 notifications            SELECT,INSERT  UPDATE(is_read)                          id,user_id,message,is_read,created_at
 content_reports          SELECT,INSERT  UPDATE(status,resolved_at)                                        id,reporter_id,discussion_post_id,lesson_id,reason,status,created_at,resolved_at

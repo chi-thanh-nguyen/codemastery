@@ -60,6 +60,7 @@ public class PlacementDiagnosticService {
         if (courseId == null) {
             throw new IllegalArgumentException("Course identifier must not be null");
         }
+        requireReportingSnapshot();
         LearnerCourseState state = learnerStates.readLearnerState(courseId);
         if (state == null || !courseId.equals(state.courseId())) {
             throw new IllegalStateException("Invalid CT33 learner state");
@@ -69,7 +70,8 @@ public class PlacementDiagnosticService {
 
     /**
      * Evaluates the placement offer from an already-admitted {@link LearnerCourseState} inside the
-     * caller's read-only {@code REPEATABLE READ} snapshot (ADR011 §§11, 15).
+     * caller's read-only {@code REPEATABLE READ} snapshot (ADR011 §§11, 15). The public
+     * record is re-admitted and compared in that snapshot before any Adaptive repository read.
      *
      * @throws IllegalStateException    without a read-only {@code REPEATABLE READ} transaction or on
      *                                  invalid stored state
@@ -78,10 +80,16 @@ public class PlacementDiagnosticService {
     @Transactional(propagation = Propagation.MANDATORY, readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public PlacementOffer readPlacementOffer(LearnerCourseState state) {
         requireReportingSnapshot();
-        if (state == null) {
-            throw new IllegalArgumentException("Learner course state must not be null");
+        if (state == null || state.courseId() == null) {
+            throw new IllegalArgumentException("Learner course state and Course identifier must not be null");
         }
-        return evaluateOffer(state);
+        // A public record is data, not proof of admission. Re-admit in this same snapshot before
+        // using its learner ID or configuration, including when the offer would otherwise be false.
+        LearnerCourseState admitted = learnerStates.readLearnerState(state.courseId());
+        if (!state.equals(admitted)) {
+            throw new IllegalStateException("Placement state does not match the admitted Course snapshot");
+        }
+        return evaluateOffer(admitted);
     }
 
     private PlacementOffer evaluateOffer(LearnerCourseState state) {

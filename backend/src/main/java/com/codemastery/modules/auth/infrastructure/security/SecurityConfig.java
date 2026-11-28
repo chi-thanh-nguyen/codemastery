@@ -202,7 +202,8 @@ public class SecurityConfig {
                         // authentication: malformed UUIDs are 400 (order 2) before the role 403 (order 3),
                         // which CT03 inside CT33 readLearnerState decides before any lookup.
                         .requestMatchers(HttpMethod.GET,
-                                "/api/courses/{courseId}/lessons/{lessonId}/practice-recommendation").authenticated()
+                                "/api/courses/{courseId}/lessons/{lessonId}/practice-recommendation",
+                                "/api/courses/{courseId}/adaptive-guidance").authenticated()
                         // CT09/CT10: request shape precedes CT03 admission in the application.
                         .requestMatchers(ASSIGNMENT_OPERATIONS).authenticated()
                         // CT09/CT21 material operations: exact paths only; stage 2 precedes application role checks.
