@@ -59,14 +59,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
 
 /**
- * SD01/SD02 seed SQL executed by real psql against disposable, Flyway-migrated PostgreSQL databases,
- * and read back through the real Auth and catalogue REST consumers. Never touches a non-test database.
+ * SD01/SD02/SD03 seed SQL executed by real psql against disposable, Flyway-migrated PostgreSQL databases,
+ * and read back through the real Auth, catalogue and skill-graph REST consumers. Never touches a non-test database.
  */
 class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
     private static final Path SEED_DIR = Path.of("..", "sample-data", "seed");
     private static final Path SLIDES = Path.of("..", "sample-data", "materials", "sample-slides.pdf");
     private static final String SLIDES_SHA256 = "c4b05622b87a9b45e46563a87fba220e27c7da6a89340cd0c3f409bcadb9935d";
     private static final String USERS = "01-users.sql", COURSES = "02-course-python-fundamentals.sql";
+    private static final String GRAPH = "03-skill-graph-and-lesson-mapping.sql", PROFILES = "05-learner-profiles.sql";
     private static final String KEY = HexFormat.of().formatHex(randomBytes(32));
     private static final BCryptPasswordEncoder BCRYPT = new BCryptPasswordEncoder(BCryptPasswordEncoder.BCryptVersion.$2B, 14);
     private static final String INSTRUCTOR_PASSWORD = password(), LEARNER_PASSWORD = password();
@@ -120,6 +121,21 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
 
     private static final UUID INSTRUCTOR = uuid5("user/instructor"), LEARNER = uuid5("user/learner");
     private static final UUID INTRO = uuid5("course/intro"), PRACTICE = uuid5("course/practice"), DRAFT = uuid5("course/draft");
+    /** ADR013 §4.2 final-v1 Course, its six Chapters, Lessons L01-L20 (Lk titled and mapped to Sk) and skill names. */
+    private static final UUID PYTHON = final5("course/python");
+    private static final List<String> CHAPTER_TITLES = List.of("Basics", "Decisions", "Loops", "Collections", "Functions",
+            "Text, errors and files");
+    private static final int[] CHAPTER_SIZES = {5, 2, 3, 4, 3, 3};
+    private static final List<String> SKILLS = List.of("Program Output", "Variables and Assignment", "Numbers and Arithmetic",
+            "Strings", "Input and Type Conversion", "Booleans and Comparisons", "Conditionals", "While Loops", "For Loops",
+            "Loop Control", "Lists", "List Iteration Patterns", "Tuples and Sets", "Dictionaries", "Functions",
+            "Parameters and Return Values", "Variable Scope", "String Methods and Formatting", "Exceptions", "File Input and Output");
+    /** Edge skill>prerequisite, both 1-based skill numbers, in the ADR013 §4.2 table order. */
+    private static final List<String> EDGES = List.of("2>1", "3>2", "4>2", "5>3", "5>4", "6>3", "7>6", "8>7", "9>7", "10>8",
+            "10>9", "11>9", "12>9", "12>11", "13>11", "14>11", "15>7", "16>15", "17>16", "18>4", "18>9", "19>15", "20>9", "20>19");
+    private static final List<String> PROFILE_KEYS = List.of("p1", "p2", "p3");
+    private static final List<String> PROFILE_NAMES = List.of("Profile P1 Strong Foundation", "Profile P2 Loops Gap",
+            "Profile P3 Complete Beginner");
 
     @Autowired WebApplicationContext context;
 
@@ -127,7 +143,8 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
 
     @BeforeAll static void copySeedsAndReadIndependentIdentity() throws Exception {
         POSTGRES.copyFileToContainer(MountableFile.forHostPath(SEED_DIR.resolve(USERS)), "/seed/" + USERS);
-        POSTGRES.copyFileToContainer(MountableFile.forHostPath(SEED_DIR.resolve(COURSES)), "/seed/" + COURSES);
+        for (String file : List.of(COURSES, GRAPH, PROFILES))
+            POSTGRES.copyFileToContainer(MountableFile.forHostPath(SEED_DIR.resolve(file)), "/seed/" + file);
         // Read the control file directly, independently of any SQL connection, as operators do.
         ExecResult control = POSTGRES.execInContainerWithUser("postgres", "pg_controldata");
         assertEquals(0, control.getExitCode(), "pg_controldata failed: " + redact(control.getStderr()));
@@ -158,11 +175,11 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
                         INTRO + course.formatted("Introduction to Programming", "published"),
                         PRACTICE + course.formatted("Programming Practice", "published")),
                 rows(db, "SELECT id, instructor_id, title, description, prerequisite_description, publication_status, "
-                        + "adaptive_enabled, adaptive_settings FROM public.courses ORDER BY title"));
+                        + "adaptive_enabled, adaptive_settings FROM public.courses WHERE id <> '" + PYTHON + "' ORDER BY title"));
         assertEquals(List.of(uuid5("course/intro/chapter/1") + "|" + INTRO + "|Getting Started|1",
                         uuid5("course/practice/chapter/1") + "|" + PRACTICE + "|Getting Started|1"),
                 rows(db, "SELECT ch.id, ch.course_id, ch.title, ch.position FROM public.chapters ch "
-                        + "JOIN public.courses c ON c.id = ch.course_id ORDER BY c.title"));
+                        + "JOIN public.courses c ON c.id = ch.course_id WHERE c.id <> '" + PYTHON + "' ORDER BY c.title"));
         List<String> lessons = new ArrayList<>();
         for (String key : List.of("course/intro", "course/practice"))
             for (int position = 1; position <= 2; position++)
@@ -170,7 +187,7 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
                         + (position == 1 ? "Concepts" : "Practice") + "|NULL|" + position + "|published");
         assertEquals(lessons, rows(db, "SELECT l.id, l.chapter_id, l.title, l.content_markdown, l.position, l.publication_status "
                 + "FROM public.lessons l JOIN public.chapters ch ON ch.id = l.chapter_id JOIN public.courses c ON c.id = ch.course_id "
-                + "ORDER BY c.title, l.position"));
+                + "WHERE c.id <> '" + PYTHON + "' ORDER BY c.title, l.position"));
         assertEquals(List.of(
                 material("course/intro/chapter/1/lesson/1/material/1", "What a Program Is", "published"),
                 material("course/intro/chapter/1/lesson/2/material/1", "Practice: Variables and Output", "published"),
@@ -181,7 +198,7 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
                         + "m.text_content ~ '^[[:print:][:space:]]+$' AND m.text_content ~ '[^[:space:]]', "
                         + "m.object_key, m.original_filename, m.external_video_url FROM public.learning_materials m "
                         + "JOIN public.lessons l ON l.id = m.lesson_id JOIN public.chapters ch ON ch.id = l.chapter_id "
-                        + "JOIN public.courses c ON c.id = ch.course_id ORDER BY c.title, l.position, m.title"));
+                        + "JOIN public.courses c ON c.id = ch.course_id WHERE c.id <> '" + PYTHON + "' ORDER BY c.title, l.position, m.title"));
         assertEquals(List.of("0"), rows(db, "SELECT count(*) FROM public.chapters WHERE course_id = '" + DRAFT + "'"));
         assertEquals(List.of(), rows(db, unrelatedRowsQuery()), "no enrolment, progress, skill, assessment or mastery data");
     }
@@ -280,10 +297,210 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
         assertRejected(psql(db, USERS, environment), message);
         assertSafeEquals(before, snapshot(db), "database after the rejected SD01 run");
         if (input.endsWith("target")) {
-            assertRejected(psql(db, COURSES, environment), message.replace("SD01", "SD02"));
-            assertSafeEquals(before, snapshot(db), "database after the rejected SD02 run");
+            for (var seed : List.of(Map.entry(COURSES, "SD02"), Map.entry(GRAPH, "SD03"), Map.entry(PROFILES, "SD05"))) {
+                assertRejected(psql(db, seed.getKey(), environment), message.replace("SD01", seed.getValue()));
+                assertSafeEquals(before, snapshot(db), "database after the rejected " + seed.getValue() + " run");
+            }
         }
     }
+
+    // SD03 (ADR013 §4.2, CT15.F-adaptive): course/python, its skill graph and the three profile Enrollments.
+
+    @Test void loadsTheApprovedAdaptiveDatasetAndReloadsItUnchanged() throws Exception {
+        String db = attested(freshDatabase());
+        assertLoaded(db, USERS);
+        assertLoaded(db, COURSES);
+        insertProfileLearners(db);
+        assertLoaded(db, GRAPH);
+        assertLoaded(db, PROFILES);
+
+        assertEquals(List.of(PYTHON + "|" + INSTRUCTOR + "|Python Fundamentals|published|true|No prerequisites"),
+                rows(db, "SELECT id, instructor_id, title, publication_status, adaptive_enabled, prerequisite_description "
+                        + "FROM public.courses WHERE id = '" + PYTHON + "'"));
+        assertEquals(List.of("{\"weak\": {\"numerator\": 1, \"denominator\": 2}, \"mastered\": {\"numerator\": 4, \"denominator\": 5}, "
+                        + "\"minimumQuestionsPerSkill\": 6}"),
+                rows(db, "SELECT adaptive_settings::text FROM public.courses WHERE id = '" + PYTHON + "'"));
+
+        List<String> chapters = new ArrayList<>(), lessons = new ArrayList<>(), materials = new ArrayList<>(), mappings = new ArrayList<>();
+        int skill = 0;
+        for (int chapter = 1; chapter <= CHAPTER_SIZES.length; chapter++) {
+            String chapterKey = "course/python/chapter/" + chapter;
+            chapters.add(final5(chapterKey) + "|" + CHAPTER_TITLES.get(chapter - 1) + "|" + chapter);
+            for (int position = 1; position <= CHAPTER_SIZES[chapter - 1]; position++) {
+                String lessonKey = chapterKey + "/lesson/" + position;
+                lessons.add(final5(lessonKey) + "|" + final5(chapterKey) + "|" + SKILLS.get(skill) + "|NULL|" + position + "|published");
+                materials.add(final5(lessonKey + "/material/1") + "|" + final5(lessonKey) + "|text|published|true|NULL|NULL|NULL");
+                mappings.add(final5(lessonKey + "/skill/" + sk(skill + 1)) + "|" + final5(lessonKey) + "|" + final5("course/python/skill/" + sk(skill + 1)));
+                skill++;
+            }
+        }
+        assertEquals(20, skill);
+        assertEquals(chapters, rows(db, "SELECT id, title, position FROM public.chapters WHERE course_id = '" + PYTHON + "' ORDER BY position"));
+        String inCourse = " JOIN public.chapters ch ON ch.id = l.chapter_id WHERE ch.course_id = '" + PYTHON + "' ORDER BY ch.position, l.position";
+        assertEquals(lessons, rows(db, "SELECT l.id, l.chapter_id, l.title, l.content_markdown, l.position, l.publication_status "
+                + "FROM public.lessons l" + inCourse));
+        assertEquals(materials, rows(db, "SELECT m.id, m.lesson_id, m.material_type, m.publication_status, "
+                + "m.text_content ~ '^[[:print:][:space:]]+$' AND m.text_content ~ '[^[:space:]]' AND m.title ~ '[^[:space:]]', "
+                + "m.object_key, m.original_filename, m.external_video_url "
+                + "FROM public.learning_materials m JOIN public.lessons l ON l.id = m.lesson_id" + inCourse));
+
+        List<String> skills = new ArrayList<>();
+        for (int k = 1; k <= 20; k++) skills.add(final5("course/python/skill/" + sk(k)) + "|" + SKILLS.get(k - 1) + "|NULL");
+        assertEquals(skills.stream().sorted().toList(), rows(db, "SELECT id, name, description FROM public.skills "
+                + "WHERE course_id = '" + PYTHON + "' ORDER BY id"));
+        List<String> edges = new ArrayList<>();
+        for (String edge : EDGES) {
+            int s = Integer.parseInt(edge.split(">")[0]), p = Integer.parseInt(edge.split(">")[1]);
+            assertTrue(p < s, "every prerequisite is an earlier skill, so the graph is acyclic: " + edge);
+            edges.add(final5("course/python/skill/" + sk(s) + "/prerequisite/" + sk(p)) + "|" + final5("course/python/skill/" + sk(s))
+                    + "|" + final5("course/python/skill/" + sk(p)));
+        }
+        assertEquals(edges.stream().sorted().toList(), rows(db, "SELECT id, skill_id, prerequisite_skill_id "
+                + "FROM public.skill_prerequisites WHERE course_id = '" + PYTHON + "' ORDER BY id"));
+        assertEquals(mappings.stream().sorted().toList(), rows(db, "SELECT ls.id, ls.lesson_id, ls.skill_id FROM public.lesson_skills ls "
+                + "JOIN public.skills s ON s.id = ls.skill_id WHERE s.course_id = '" + PYTHON + "' ORDER BY ls.id"));
+
+        List<String> enrollments = new ArrayList<>();
+        for (String profile : PROFILE_KEYS)
+            enrollments.add(final5("user/" + profile + "/enrollment/course/python") + "|" + final5("user/" + profile) + "|active|NULL|NULL");
+        assertEquals(enrollments.stream().sorted().toList(), rows(db, "SELECT id, user_id, status, resume_lesson_id, last_visited_at "
+                + "FROM public.enrollments WHERE course_id = '" + PYTHON + "' ORDER BY id"));
+        assertEquals(List.of("0|0|0|0"), rows(db, "SELECT (SELECT count(*) FROM public.learner_skill_masteries), "
+                + "(SELECT count(*) FROM public.lesson_progress), (SELECT count(*) FROM public.path_recommendations), "
+                + "(SELECT count(*) FROM public.attempts)"), "no mastery, progress, recommendation or attempt is seeded");
+
+        String loaded = snapshot(db);
+        for (String file : List.of(USERS, COURSES, GRAPH, PROFILES)) assertLoaded(db, file);
+        for (String file : List.of(COURSES, GRAPH, PROFILES)) assertSucceeded(psqlWithVariables(db, file));
+        assertSafeEquals(loaded, snapshot(db), "row values and row versions after identical reruns");
+    }
+
+    @Test void aNonCanonicalPolicyIsStoredReducedAndItsCanonicalFormReloadsUnchanged() throws Exception {
+        String db = attested(freshDatabase());
+        assertLoaded(db, USERS);
+        Map<String, String> environment = seedEnvironment();
+        environment.putAll(Map.of("CODEMASTERY_SEED_ADAPTIVE_WEAK", "2/4", "CODEMASTERY_SEED_ADAPTIVE_MASTERED", "8/10"));
+        assertSucceeded(psql(db, COURSES, environment));
+        assertEquals(List.of("1|2|4|5|6"), rows(db, "SELECT adaptive_settings #>> '{weak,numerator}', adaptive_settings #>> '{weak,denominator}', "
+                + "adaptive_settings #>> '{mastered,numerator}', adaptive_settings #>> '{mastered,denominator}', "
+                + "adaptive_settings ->> 'minimumQuestionsPerSkill' FROM public.courses WHERE id = '" + PYTHON + "'"));
+        String loaded = snapshot(db);
+        assertLoaded(db, COURSES);
+        assertSafeEquals(loaded, snapshot(db), "the reduced policy equals the canonical one");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"missing-weak", "missing-mastered", "missing-minimum", "zero-weak", "weak-above-one",
+            "zero-denominator", "weak-equals-mastered", "weak-above-mastered", "decimal", "leading-zero", "zero-minimum",
+            "minimum-overflow", "denominator-overflow", "changed-policy"})
+    void invalidOrChangedPoliciesAreRejectedWithoutAnyWrite(String input) throws Exception {
+        String db = attested(freshDatabase());
+        assertLoaded(db, USERS);
+        Map<String, String> environment = seedEnvironment();
+        String weak = "CODEMASTERY_SEED_ADAPTIVE_WEAK", mastered = "CODEMASTERY_SEED_ADAPTIVE_MASTERED",
+                minimum = "CODEMASTERY_SEED_ADAPTIVE_MINIMUM_QUESTIONS_PER_SKILL";
+        String message = "SD02 requires a valid adaptive policy (ADR005 6.2)";
+        switch (input) {
+            case "missing-weak" -> { environment.remove(weak); message = "Required input adaptive_weak is missing."; }
+            case "missing-mastered" -> { environment.remove(mastered); message = "Required input adaptive_mastered is missing."; }
+            case "missing-minimum" -> { environment.remove(minimum); message = "Required input adaptive_minimum_questions_per_skill is missing."; }
+            case "zero-weak" -> environment.put(weak, "0/2");
+            case "weak-above-one" -> environment.put(weak, "3/2");
+            case "zero-denominator" -> environment.put(mastered, "4/0");
+            case "weak-equals-mastered" -> environment.put(weak, "8/10");
+            case "weak-above-mastered" -> environment.put(weak, "9/10");
+            case "decimal" -> environment.put(mastered, "0.8/1");
+            case "leading-zero" -> environment.put(minimum, "06");
+            case "zero-minimum" -> environment.put(minimum, "0");
+            case "minimum-overflow" -> environment.put(minimum, "2147483648");
+            case "denominator-overflow" -> environment.put(weak, "1/2147483648");
+            case "changed-policy" -> {
+                assertLoaded(db, COURSES);
+                environment.put(minimum, "5");
+                message = "SD02 Course " + PYTHON + " conflicts with an existing Course";
+            }
+            default -> throw new IllegalArgumentException(input);
+        }
+        String before = snapshot(db);
+        assertRejected(psql(db, COURSES, environment), message);
+        assertSafeEquals(before, snapshot(db), "database after the rejected SD02 run");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"graph-without-course", "renamed-skill", "extra-skill", "extra-prerequisite", "extra-mapping",
+            "hidden-lesson", "profiles-without-course", "profiles-without-learners", "profile-learner-role", "left-enrollment"})
+    void graphAndProfileConflictsStopTheWholeTransactionWithoutPartialWrites(String conflict) throws Exception {
+        String db = attested(freshDatabase());
+        assertLoaded(db, USERS);
+        String file = GRAPH, message;
+        UUID s01 = final5("course/python/skill/S01"), s02 = final5("course/python/skill/S02");
+        UUID l01 = final5("course/python/chapter/1/lesson/1");
+        switch (conflict) {
+            case "graph-without-course" -> message = "SD03 requires the SD02 course/python Lessons; load 02-course-python-fundamentals.sql first";
+            case "renamed-skill" -> {
+                assertLoaded(db, COURSES);
+                assertLoaded(db, GRAPH);
+                execute(db, "UPDATE public.skills SET name = 'Printing' WHERE id = '" + s01 + "'");
+                message = "SD03 Skill " + s01 + " conflicts with an existing Skill ID or Course skill name";
+            }
+            case "extra-skill", "extra-prerequisite", "extra-mapping" -> {
+                assertLoaded(db, COURSES);
+                assertLoaded(db, GRAPH);
+                execute(db, switch (conflict) {
+                    case "extra-skill" -> "INSERT INTO public.skills VALUES ('" + UUID.randomUUID() + "','" + PYTHON + "','Recursion',NULL)";
+                    case "extra-prerequisite" -> "INSERT INTO public.skill_prerequisites VALUES ('" + UUID.randomUUID() + "','" + PYTHON + "','" + s02
+                            + "','" + final5("course/python/skill/S20") + "')";
+                    default -> "INSERT INTO public.lesson_skills VALUES ('" + UUID.randomUUID() + "','" + l01 + "','" + s02 + "')";
+                });
+                message = "SD03 course/python already has skills, prerequisites or mappings outside the approved graph";
+            }
+            case "hidden-lesson" -> {
+                assertLoaded(db, COURSES);
+                execute(db, "UPDATE public.lessons SET publication_status = 'hidden' WHERE id = '" + l01 + "'");
+                message = "SD03 requires the SD02 course/python Lessons; load 02-course-python-fundamentals.sql first";
+            }
+            case "profiles-without-course" -> {
+                insertProfileLearners(db);
+                file = PROFILES;
+                message = "SD05 requires the SD02 course/python Course; load 02-course-python-fundamentals.sql first";
+            }
+            case "profiles-without-learners", "profile-learner-role" -> {
+                assertLoaded(db, COURSES);
+                if (conflict.equals("profile-learner-role")) {
+                    insertProfileLearners(db);
+                    execute(db, "UPDATE public.users SET role = 'instructor' WHERE id = '" + final5("user/p2") + "'");
+                }
+                file = PROFILES;
+                message = "SD05 requires the three final-v1 profile Learners of 01-users.sql (SD01 extension)";
+            }
+            case "left-enrollment" -> {
+                assertLoaded(db, COURSES);
+                insertProfileLearners(db);
+                assertLoaded(db, PROFILES);
+                UUID enrollment = final5("user/p2/enrollment/course/python");
+                execute(db, "UPDATE public.enrollments SET status = 'left' WHERE id = '" + enrollment + "'");
+                file = PROFILES;
+                message = "SD05 Enrollment " + enrollment + " conflicts with an existing Enrollment ID or membership";
+            }
+            default -> throw new IllegalArgumentException(conflict);
+        }
+        String before = snapshot(db);
+        assertRejected(psql(db, file, seedEnvironment()), message);
+        assertSafeEquals(before, snapshot(db), "database after the failed transaction (no partial write)");
+    }
+
+    /**
+     * Stand-in for the ADR013 §3 SD01 extension, which is another Issue's scope and not in 01-users.sql yet:
+     * the three approved final-v1 profile Learners, inserted directly into the disposable database.
+     */
+    private static void insertProfileLearners(String db) throws SQLException {
+        for (int i = 0; i < PROFILE_KEYS.size(); i++)
+            execute(db, "INSERT INTO public.users (id,email,password_hash,display_name,role,account_status) VALUES ('"
+                    + final5("user/" + PROFILE_KEYS.get(i)) + "','" + PROFILE_KEYS.get(i) + "@example.test','" + OTHER_HASH + "','"
+                    + PROFILE_NAMES.get(i) + "','learner','active')");
+    }
+
+    private static String sk(int number) { return "S%02d".formatted(number); }
 
     static Stream<Arguments> untrustedTargetsUnderEachIsolationLevel() {
         return Stream.of("unattested", "wrong-expected-identifier", "attested-for-another-cluster", "unbound-attestation",
@@ -328,6 +545,8 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
             holder.createStatement().execute("LOCK TABLE public.users, public.courses IN ACCESS EXCLUSIVE MODE");
             assertRejected(psql(db, USERS, environment), "SD01 " + message);
             assertRejected(psql(db, COURSES, environment), "SD02 " + message);
+            assertRejected(psql(db, GRAPH, environment), "SD03 " + message);
+            assertRejected(psql(db, PROFILES, environment), "SD05 " + message);
             holder.rollback();
         }
         assertSafeEquals(before, snapshot(db), "database after the rejected runs");
@@ -359,7 +578,7 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
         } finally {
             pool.shutdownNow();
         }
-        assertEquals(List.of("2|3|2|4|5"), rows(db, "SELECT (SELECT count(*) FROM public.users), (SELECT count(*) FROM public.courses), "
+        assertEquals(List.of("2|4|8|24|25"), rows(db, "SELECT (SELECT count(*) FROM public.users), (SELECT count(*) FROM public.courses), "
                 + "(SELECT count(*) FROM public.chapters), (SELECT count(*) FROM public.lessons), (SELECT count(*) FROM public.learning_materials)"));
         String loaded = snapshot(db);
         assertLoaded(db, USERS);
@@ -603,11 +822,20 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
         try {
             assertLoaded(db, USERS);
             assertLoaded(db, COURSES);
+            assertLoaded(db, GRAPH);
 
-            mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
-                            .content(login("instructor@example.test", INSTRUCTOR_PASSWORD)))
+            String instructorToken = com.jayway.jsonpath.JsonPath.read(mvc.perform(post("/api/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON).content(login("instructor@example.test", INSTRUCTOR_PASSWORD)))
                     .andExpect(status().isOk()).andExpect(jsonPath("$.user.id").value(INSTRUCTOR.toString()))
-                    .andExpect(jsonPath("$.user.role").value("Instructor")).andExpect(jsonPath("$.user.displayName").value("Instructor Demo"));
+                    .andExpect(jsonPath("$.user.role").value("Instructor")).andExpect(jsonPath("$.user.displayName").value("Instructor Demo"))
+                    .andReturn().getResponse().getContentAsString(), "$.accessToken");
+            // AD07's owner read re-validates the stored graph and proves every mapping against CO06's structure.
+            mvc.perform(get("/api/courses/" + PYTHON + "/skill-graph").header("Authorization", "Bearer " + instructorToken))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.skills[*].name", containsInAnyOrder(SKILLS.toArray())))
+                    .andExpect(jsonPath("$.prerequisites.length()").value(24)).andExpect(jsonPath("$.mappings.length()").value(20));
+            mvc.perform(get("/api/courses/" + PYTHON)).andExpect(status().isOk())
+                    .andExpect(jsonPath("$.syllabus[*].title", contains(CHAPTER_TITLES.toArray())))
+                    .andExpect(jsonPath("$.syllabus[2].lessons[*].title", contains("While Loops", "For Loops", "Loop Control")));
             mvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON)
                             .content(login("learner@example.test", LEARNER_PASSWORD)))
                     .andExpect(status().isOk()).andExpect(jsonPath("$.user.role").value("Learner"));
@@ -626,10 +854,14 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
                     .andExpect(jsonPath("$.syllabus[0].lessons[*].position", contains(1, 2)));
             mvc.perform(get("/api/courses/" + DRAFT)).andExpect(status().isNotFound());
         } finally {
-            execute(db, "DELETE FROM public.learning_materials WHERE lesson_id IN (SELECT l.id FROM public.lessons l JOIN public.chapters ch ON ch.id = l.chapter_id WHERE ch.course_id IN ('" + INTRO + "','" + PRACTICE + "'))");
-            execute(db, "DELETE FROM public.lessons WHERE chapter_id IN (SELECT id FROM public.chapters WHERE course_id IN ('" + INTRO + "','" + PRACTICE + "'))");
-            execute(db, "DELETE FROM public.chapters WHERE course_id IN ('" + INTRO + "','" + PRACTICE + "')");
-            execute(db, "DELETE FROM public.courses WHERE id IN ('" + INTRO + "','" + PRACTICE + "','" + DRAFT + "')");
+            String seeded = "('" + INTRO + "','" + PRACTICE + "','" + PYTHON + "')";
+            execute(db, "DELETE FROM public.lesson_skills WHERE skill_id IN (SELECT id FROM public.skills WHERE course_id = '" + PYTHON + "')");
+            execute(db, "DELETE FROM public.skill_prerequisites WHERE course_id = '" + PYTHON + "'");
+            execute(db, "DELETE FROM public.skills WHERE course_id = '" + PYTHON + "'");
+            execute(db, "DELETE FROM public.learning_materials WHERE lesson_id IN (SELECT l.id FROM public.lessons l JOIN public.chapters ch ON ch.id = l.chapter_id WHERE ch.course_id IN " + seeded + ")");
+            execute(db, "DELETE FROM public.lessons WHERE chapter_id IN (SELECT id FROM public.chapters WHERE course_id IN " + seeded + ")");
+            execute(db, "DELETE FROM public.chapters WHERE course_id IN " + seeded);
+            execute(db, "DELETE FROM public.courses WHERE id IN ('" + INTRO + "','" + PRACTICE + "','" + DRAFT + "','" + PYTHON + "')");
             // ADR014: the sign-ins above created refresh sessions for the seeded accounts.
             execute(db, "DELETE FROM public.refresh_tokens WHERE session_id IN (SELECT id FROM public.refresh_sessions WHERE user_id IN ('" + INSTRUCTOR + "','" + LEARNER + "'))");
             execute(db, "DELETE FROM public.refresh_sessions WHERE user_id IN ('" + INSTRUCTOR + "','" + LEARNER + "')");
@@ -663,7 +895,10 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
 
     private static Map<String, String> seedEnvironment() {
         return new HashMap<>(Map.of("CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER", systemIdentifier,
-                "CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH", INSTRUCTOR_HASH, "CODEMASTERY_SEED_LEARNER_PASSWORD_HASH", LEARNER_HASH));
+                "CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH", INSTRUCTOR_HASH, "CODEMASTERY_SEED_LEARNER_PASSWORD_HASH", LEARNER_HASH,
+                // ADR013 §16.1 approved demonstration policy of course/python.
+                "CODEMASTERY_SEED_ADAPTIVE_WEAK", "1/2", "CODEMASTERY_SEED_ADAPTIVE_MASTERED", "4/5",
+                "CODEMASTERY_SEED_ADAPTIVE_MINIMUM_QUESTIONS_PER_SKILL", "6"));
     }
 
     /** One psql run. {@code toString()} deliberately omits the output, which could carry credentials. */
@@ -701,14 +936,22 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
         command.addAll(List.of("-X", "-q", "-U", POSTGRES.getUsername(), "-d", db,
                 "-c", "\\getenv seed_target_system_identifier RUN_TARGET",
                 "-c", "\\getenv instructor_password_hash RUN_INSTRUCTOR",
-                "-c", "\\getenv learner_password_hash RUN_LEARNER"));
+                "-c", "\\getenv learner_password_hash RUN_LEARNER",
+                "-c", "\\getenv adaptive_weak RUN_WEAK",
+                "-c", "\\getenv adaptive_mastered RUN_MASTERED",
+                "-c", "\\getenv adaptive_minimum_questions_per_skill RUN_MINIMUM"));
         command.addAll(extraArguments);
         command.addAll(List.of("-f", "/seed/" + file));
-        Map<String, String> environment = new HashMap<>(Map.of(
-                "RUN_TARGET", systemIdentifier, "RUN_INSTRUCTOR", INSTRUCTOR_HASH, "RUN_LEARNER", LEARNER_HASH,
-                "CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER", "invalid",
-                "CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH", "invalid",
-                "CODEMASTERY_SEED_LEARNER_PASSWORD_HASH", "invalid"));
+        Map<String, String> environment = new HashMap<>(Map.ofEntries(
+                Map.entry("RUN_TARGET", systemIdentifier), Map.entry("RUN_INSTRUCTOR", INSTRUCTOR_HASH),
+                Map.entry("RUN_LEARNER", LEARNER_HASH), Map.entry("RUN_WEAK", "1/2"), Map.entry("RUN_MASTERED", "4/5"),
+                Map.entry("RUN_MINIMUM", "6"),
+                Map.entry("CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER", "invalid"),
+                Map.entry("CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH", "invalid"),
+                Map.entry("CODEMASTERY_SEED_LEARNER_PASSWORD_HASH", "invalid"),
+                Map.entry("CODEMASTERY_SEED_ADAPTIVE_WEAK", "invalid"),
+                Map.entry("CODEMASTERY_SEED_ADAPTIVE_MASTERED", "invalid"),
+                Map.entry("CODEMASTERY_SEED_ADAPTIVE_MINIMUM_QUESTIONS_PER_SKILL", "invalid")));
         environment.putAll(extraEnvironment);
         ExecResult result = POSTGRES.execInContainer(ExecConfig.builder()
                 .command(command.toArray(String[]::new)).envVars(environment).build());
@@ -818,7 +1061,11 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
                 + "SELECT 'courses', xmin::text, row_to_json(r)::text FROM public.courses r UNION ALL "
                 + "SELECT 'chapters', xmin::text, row_to_json(r)::text FROM public.chapters r UNION ALL "
                 + "SELECT 'lessons', xmin::text, row_to_json(r)::text FROM public.lessons r UNION ALL "
-                + "SELECT 'learning_materials', xmin::text, row_to_json(r)::text FROM public.learning_materials r) s "
+                + "SELECT 'learning_materials', xmin::text, row_to_json(r)::text FROM public.learning_materials r UNION ALL "
+                + "SELECT 'skills', xmin::text, row_to_json(r)::text FROM public.skills r UNION ALL "
+                + "SELECT 'skill_prerequisites', xmin::text, row_to_json(r)::text FROM public.skill_prerequisites r UNION ALL "
+                + "SELECT 'lesson_skills', xmin::text, row_to_json(r)::text FROM public.lesson_skills r UNION ALL "
+                + "SELECT 'enrollments', xmin::text, row_to_json(r)::text FROM public.enrollments r) s "
                 + "ORDER BY relation, data"));
     }
 
@@ -848,11 +1095,15 @@ class SampleDataSeedIntegrationTest extends AbstractIntegrationTest {
 
     private static String url(String db) { return POSTGRES.getJdbcUrl().replaceFirst("/[^/?]+(\\?|$)", "/" + db + "$1"); }
 
-    static UUID uuid5(String logicalKey) {
+    static UUID uuid5(String logicalKey) { return datasetUuid("interim-v1", logicalKey); }
+
+    static UUID final5(String logicalKey) { return datasetUuid("final-v1", logicalKey); }
+
+    private static UUID datasetUuid(String dataset, String logicalKey) {
         try {
             var sha1 = MessageDigest.getInstance("SHA-1");
             sha1.update(ByteBuffer.allocate(16).putLong(0x6ba7b8119dad11d1L).putLong(0x80b400c04fd430c8L).array());
-            sha1.update(("https://codemastery.test/interim-v1/" + logicalKey).getBytes(StandardCharsets.UTF_8));
+            sha1.update(("https://codemastery.test/" + dataset + "/" + logicalKey).getBytes(StandardCharsets.UTF_8));
             byte[] hash = Arrays.copyOf(sha1.digest(), 16);
             hash[6] = (byte) ((hash[6] & 0x0f) | 0x50);
             hash[8] = (byte) ((hash[8] & 0x3f) | 0x80);

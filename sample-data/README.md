@@ -5,9 +5,11 @@ Synthetic English seed data for local development and disposable test databases.
 **Purpose and scope.** The dataset supports demonstration and verification of the
 implemented Learner slice: sign-in with synthetic accounts, the public course
 catalogue, course detail and course membership. It implements the Interim dataset
-approved as ADR002 CT15.I-data (SD01 Users, SD02 Courses and materials). Skill
-graphs, questions and adaptive learner profiles are Final-scope datasets and are
-not included.
+approved as ADR002 CT15.I-data (SD01 Users, SD02 Courses and materials), plus the
+SD03 part of the Final dataset `final-v1` (ADR013 §4.2): the adaptive Course
+"Python Fundamentals", its skill graph and Lesson mapping, and the learner-profile
+Enrollments. Questions and quizzes (SD04) and the Final accounts (SD01 extension)
+are not included yet; see [Final dataset `final-v1`](#final-dataset-final-v1).
 
 > **Local and test databases only.** Never load these files into a shared, staging
 > or production database; production seeding is forbidden. Each seed file refuses
@@ -27,10 +29,10 @@ Automated verification is described in
 | Path | Content | Status |
 | --- | --- | --- |
 | `seed/01-users.sql` | SD01: synthetic Instructor and Learner | Implemented |
-| `seed/02-course-python-fundamentals.sql` | SD02: Courses, Chapters, Lessons and text LearningMaterials | Implemented |
-| `seed/03-skill-graph-and-lesson-mapping.sql` | Skill graph | Empty; not part of this dataset |
-| `seed/04-questions-quizzes-assignments.sql` | Questions, quizzes, assignments | Empty; not part of this dataset |
-| `seed/05-learner-profiles.sql` | Adaptive learner profiles | Empty; not part of this dataset |
+| `seed/02-course-python-fundamentals.sql` | SD02: Courses, Chapters, Lessons and text LearningMaterials; SD03: `final-v1` Course `course/python` | Implemented |
+| `seed/03-skill-graph-and-lesson-mapping.sql` | SD03: skills S01–S20, prerequisites and Lesson mapping of `course/python` | Implemented |
+| `seed/04-questions-quizzes-assignments.sql` | SD04: questions, quizzes, assignments | Empty; not part of this dataset |
+| `seed/05-learner-profiles.sql` | SD03 (historical SD05): one active Enrollment in `course/python` per profile Learner | Implemented; needs the SD01 profile accounts, not yet in `01-users.sql` |
 | `materials/sample-slides.pdf` | Sample lesson slides (12 pages) | Repository file with recorded permission; not uploaded to object storage or referenced by a seed row |
 
 The 02 filename is its approved repository location. It does not rename the
@@ -84,8 +86,10 @@ and the public catalogue must never see them.
   pass hashes as `-v` command-line arguments on a shared machine: other local users
   can read process arguments. The commands below pass them through environment
   variables instead.
-- **Order.** Load `01-users.sql` before `02-course-python-fundamentals.sql`.
-  Every Course references the synthetic Instructor.
+- **Order.** Load `01-users.sql`, `02-course-python-fundamentals.sql`,
+  `03-skill-graph-and-lesson-mapping.sql`, then `05-learner-profiles.sql`. Every
+  Course references the synthetic Instructor, the graph references `course/python`
+  and the Enrollments reference `course/python` and the profile Learners.
 
 ## Prerequisites
 
@@ -210,9 +214,28 @@ compose exec -T -e CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER \
   -e CODEMASTERY_SEED_INSTRUCTOR_PASSWORD_HASH -e CODEMASTERY_SEED_LEARNER_PASSWORD_HASH postgres \
   sh -c 'psql -X -q -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < sample-data/seed/01-users.sql
 
-compose exec -T -e CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER postgres \
+export CODEMASTERY_SEED_ADAPTIVE_WEAK=1/2 CODEMASTERY_SEED_ADAPTIVE_MASTERED=4/5 \
+  CODEMASTERY_SEED_ADAPTIVE_MINIMUM_QUESTIONS_PER_SKILL=6
+
+compose exec -T -e CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER -e CODEMASTERY_SEED_ADAPTIVE_WEAK \
+  -e CODEMASTERY_SEED_ADAPTIVE_MASTERED -e CODEMASTERY_SEED_ADAPTIVE_MINIMUM_QUESTIONS_PER_SKILL postgres \
   sh -c 'psql -X -q -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < sample-data/seed/02-course-python-fundamentals.sql
+
+compose exec -T -e CODEMASTERY_SEED_TARGET_SYSTEM_IDENTIFIER postgres \
+  sh -c 'psql -X -q -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < sample-data/seed/03-skill-graph-and-lesson-mapping.sql
 ```
+
+The three adaptive values are the approved demonstration policy of
+`course/python` (ADR013 §16.1); they are not secrets and no number is committed in
+the seed. `weak` and `mastered` are `numerator/denominator`; the seed checks the
+ADR005 §6.2 rules (`0 < weak < mastered <= 1`, integers up to 2147483647) and
+stores each fraction reduced. Reuse the same values on a re-run: another policy
+conflicts with the stored Course.
+
+`05-learner-profiles.sql` takes only the target identifier, like `03`. It requires
+the three profile Learners `p1@`, `p2@` and `p3@example.test`, which ADR013 §3
+assigns to the SD01 extension of `01-users.sql`; until that extension exists the
+file stops with the SD05 message below and writes nothing.
 
 `-e NAME` without a value passes your shell's value to the container without
 placing it on a command line. Each file runs in one READ COMMITTED transaction,
@@ -221,7 +244,9 @@ exits with status 0. On any error psql stops with status 3 and the
 transaction is rolled back.
 
 The files also accept psql variables (`-v seed_target_system_identifier=...`,
-`-v instructor_password_hash=...`, `-v learner_password_hash=...`). A psql
+`-v instructor_password_hash=...`, `-v learner_password_hash=...`,
+`-v adaptive_weak=...`, `-v adaptive_mastered=...`,
+`-v adaptive_minimum_questions_per_skill=...`). A psql
 variable takes precedence over the environment variable of the same input.
 
 ## Step 5 — Verify the result
@@ -251,7 +276,12 @@ Expected output:
  Instructor Draft            | hidden             |       0 |                   0
  Introduction to Programming | published          |       2 |                   2
  Programming Practice        | published          |       2 |                   2
+ Python Fundamentals         | published          |      20 |                  20
 ```
+
+After `03`, `course/python` has 20 skills, 24 prerequisite edges and 20 Lesson
+mappings; the seed itself rejects a cycle, an unmapped published Lesson or any
+skill, edge or mapping of the Course outside the approved graph.
 
 Application check, with the backend running:
 
@@ -282,7 +312,13 @@ Learner.
 | `SD01 User seed conflicts with an existing ID or canonical email` | A User with the same ID or email differs, often because the hash changed. Reuse the original hashes or use a new disposable database. |
 | `SD02 requires the SD01 synthetic Instructor; load 01-users.sql first` | Load `01-users.sql` first. |
 | `SD02 Instructor reference does not match the approved SD01 identity` | The Instructor row exists but is not the approved synthetic identity. |
-| `SD02 Course / Chapter / Lesson / LearningMaterial <id> conflicts ...` | Existing content with that ID, or another row at the same Chapter or Lesson position, differs from the seed. |
+| `SD02 Course / Chapter / Lesson / LearningMaterial <id> conflicts ...` | Existing content with that ID, or another row at the same Chapter or Lesson position, differs from the seed. For `course/python` this includes a different adaptive policy. |
+| `Required input adaptive_... is missing.` / `SD02 requires a valid adaptive policy (ADR005 6.2)` | Export the three adaptive values of Step 4 and pass them with `-e`. |
+| `SD03 requires the SD02 course/python Lessons; load 02-course-python-fundamentals.sql first` | `course/python` or one of its twenty published Lessons is missing. |
+| `SD03 Skill / prerequisite / Lesson mapping <id> conflicts ...` | A row with that ID, the same skill name or the same edge or pair differs from the seed. |
+| `SD03 course/python already has skills, prerequisites or mappings outside the approved graph` | The Course was edited after loading. Use a new disposable database. |
+| `SD05 requires the SD02 course/python Course ...` / `SD05 requires the three final-v1 profile Learners ...` | Load `02` first, and the SD01 profile accounts. |
+| `SD05 Enrollment <id> conflicts ...` | A profile already has a different Enrollment in `course/python`. |
 
 Do not edit or delete rows to make a seed pass. Start from a new disposable
 database instead. The destructive local reset in
@@ -376,13 +412,15 @@ domain and cannot reach a real mailbox.
 - **Environments.** Nothing here provisions object storage, deploys an environment
   or authorizes seeding outside your own disposable database.
 
-## Final dataset `final-v1` — approved contract, not yet authored
+## Final dataset `final-v1`
 
 [ADR013 §§3–4](../docs/decisions/013-batch-08-contract-approvals.md#3-ct15f-admin-account--trial-accounts-per-role)
 approves the Final dataset contract (`CT15-F-ADMIN-ACCOUNT-2026-11-15-r1`,
 `CT15-F-ASSESSMENT-2026-11-15-r2` and, except its demonstration policy values,
-`CT15-F-ADAPTIVE-2026-11-15-r1`). **None of it is in the seed files yet**; the
-`interim-v1` instructions above are unchanged and remain the only loadable dataset.
+`CT15-F-ADAPTIVE-2026-11-15-r1`, completed by r2 in §16.1). **SD03 is authored**:
+`course/python` in `02`, its graph in `03` and the profile Enrollments in `05`. The
+SD01 extension (Administrator and profile accounts) and SD04 (`04`) are not yet in
+the seed files.
 
 - **IDs.** UUIDv5 in the URL namespace for
   `https://codemastery.test/final-v1/<logical-key>`, insert-only and no-overwrite as
