@@ -335,9 +335,18 @@ class AdaptiveDecisionEngineTest {
             "Tested out: you have mastered every skill in this lesson (\"Loops\").";
     private static final String REMEDIAL_REASON = RecommendationReasonBuilder.remedial("Loops", "Basics");
 
+    private static PathRecommendationRepository appendOnly(java.util.function.Consumer<PathRecommendation> append) {
+        return new PathRecommendationRepository() {
+            public void append(PathRecommendation row) { append.accept(row); }
+            public Optional<PathRecommendation> findCurrentGuidance(UUID enrollmentId) {
+                throw new AssertionError("Write orchestration must not use the reporting read");
+            }
+        };
+    }
+
     private final List<PathRecommendation> appended = new ArrayList<>();
     private final List<Object> published = new ArrayList<>();
-    private final PathRecommendationRepository repository = appended::add;
+    private final PathRecommendationRepository repository = appendOnly(appended::add);
     private final ApplicationEventPublisher publisher = published::add;
 
     @Test
@@ -478,10 +487,10 @@ class AdaptiveDecisionEngineTest {
     @Test
     void aPersistenceFailurePropagatesAndPublishesNothing() {
         var failure = new IllegalStateException("insert failed");
-        var failingService = service(row -> {
+        var failingService = service(appendOnly(row -> {
             if (row.lessonId().equals(L2)) throw failure;
             appended.add(row);
-        }, Clock.fixed(LATEST, ZoneOffset.UTC));
+        }), Clock.fixed(LATEST, ZoneOffset.UTC));
 
         var thrown = assertThrows(IllegalStateException.class, () -> failingService.recordAndPublish(
                 CONTEXT, ENROLLMENT, decision(skip(L1), skip(L2)), Optional.empty(), Optional.empty()));
