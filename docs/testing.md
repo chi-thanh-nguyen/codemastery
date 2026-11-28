@@ -13904,3 +13904,115 @@ implement actual navigation/display. QA03/QA04, independent CODEOWNER review,
 current-head protected checks, any operational-risk acceptance required by ADR011
 §5 and authorized runtime grants/deployment remain separate gates. No CI result
 is awaited or asserted for this delivery.
+
+## PR #304 targeted AD10-IR-01/02 remediation — 28 November 2026
+
+### Authority, baseline and dispositions
+
+The Project Leader's "Targeted Remediation — AD10-IR-01 & AD10-IR-02, Course
+Mapping Integrity and Contract Consistency" instruction supersedes the preceding
+read-only restriction and authorizes implementation, bounded necessary technical
+decisions, tests, documentation, commit/push and the PR-description update.
+Incoming reviewed HEAD is `2b4ae3d2f591bdb9568a3857757bf407ec668e5a`; refreshed main
+is `e76b375caf10603c0e121b1eb3ba028b001e4610`, already its ancestor, so no new
+synchronization merge is needed. Existing user worktrees are preserved; work and
+temporary controls use the isolated review clone.
+
+Both findings are **FIXED_AUTHOR_VERIFIED**, not independent closure. OpenAI Codex
+now acts as remediation author. No full AD10 acceptance, GitHub approval, protected
+integration, CI success, release, runtime grant or deployment is implied.
+
+| Finding | Change and discriminating evidence |
+|---|---|
+| AD10-IR-01 (P2) | `MasteryQueryService` validates every stored mapping target through Course before publication filtering. ADR011 §22 records `CT33-MAPPING-ANCESTRY-2026-11-28-r1`, a void assertion in existing `CourseStructureService`, with MANDATORY read-only REPEATABLE READ and its explicit guard, current-Learner CT03 re-admission, and the sole allowlisted guidance caller. Foreign published/hidden targets both return safe no-store 500; valid hidden same-Course mappings remain accepted and excluded from guidance. |
+| AD10-IR-02 (P3) | Guidance's OpenAPI response-200 description now states the implemented read and retains the explicit AD13, frontend, independent-acceptance, protected-integration and deployment limits. All approved operation/schema shapes remain identical. |
+
+Course reuses its existing internal scalar Lesson → Chapter → Course query. No
+hidden projection, Instructor impersonation or cross-module repository access is
+introduced. An empty target set still requires admission. Missing targets and
+incompatible outer transactions fail before a sensitive read; existing owner and
+learner structural projections retain their audiences. CT17 r18 and every grant,
+column inventory, ownership rule and infrastructure script are unchanged: existing
+SELECT covers the query's Lesson/Chapter ancestry columns.
+
+### PostgreSQL controls and snapshot evidence
+
+Five new PostgreSQL invocations in `AdaptiveLearningFlowIntegrationTest` cover:
+
+- Foreign-Course targets with each publication status: safe 500, no-store, no
+  foreign identifiers/exception text and unchanged persisted state (two cases).
+- Valid hidden same-Course mapping: 200, canonical published population and valid
+  stored current guidance unchanged; removing only the hidden mapping leaves the
+  complete response identical. GET writes nothing.
+- The real Course proxy: no caller transaction, wrong isolation/read-only state,
+  non-Learner and non-member refusal, missing target integrity failure, and actual
+  PostgreSQL repeatable-read/read-only facts with no assigned write transaction ID.
+- An already established snapshot while another connection commits a deliberately
+  corrupt hidden-Lesson move to a foreign Chapter. The bounded writer statement
+  commits before the reader continues; the existing snapshot accepts the old
+  ancestry, an independent committed read sees the move, and a fresh HTTP read
+  fails 500. No sleep or scheduling assumption is used.
+
+Negative controls use the same final regression tests in the disposable checkout:
+
+1. Restore only incoming `MasteryQueryService` production bytes: the two foreign
+   mapping cases fail **2/2**, actual 200 instead of required 500 (exit 1, no
+   errors/skips).
+2. Mutate the fixed composition to reject any non-published mapping: the valid
+   hidden-mapping positive control fails **1/1** (exit 1, no errors/skips).
+
+Each control restores the exact fixed production bytes in a `finally` block.
+The final passing verification below runs after restoration. A first test-compile
+attempt passed the suite's long wait constant to JDBC's int query-timeout argument;
+it ran no tests and is not a negative-control result. The test-only conversion was
+corrected with `Math.toIntExact`; only freshly generated reports are counted.
+
+### Executed focused verification and limits
+
+Environment: macOS arm64, Java Temurin 25.0.4.1, Maven Wrapper 3.9.16,
+Docker Desktop 29.8.1 and repository-built disposable PostgreSQL 17.11.
+
+```sh
+# backend/: final fixed production/test bytes, sequential runs
+./mvnw -B -q -Dtest=PlacementDiagnosticServiceTest test
+# PASS: 17 tests, 0 failures/errors/skips; AST allowlist includes the new assertion.
+
+./mvnw -B -q test-compile failsafe:integration-test failsafe:verify '-Dit.test=AdaptiveLearningFlowIntegrationTest#ad10*+b8*'
+# PASS: 28 PostgreSQL tests, 0 failures/errors/skips.
+# Existing 17 AD10 + 6 practice cases, plus 5 targeted mapping-remediation cases.
+
+# repository root
+bash infrastructure/vm/tests/test-deploy-privilege-matrix-contract.sh
+# PASS: 27 relations, unchanged r1-r18 matrix, malformed inputs rejected.
+bash -n infrastructure/vm/deploy.sh infrastructure/vm/tests/test-runtime-real-backend-privileges.sh infrastructure/vm/tests/test-postgres-privilege-matrix-containment.sh
+# PASS; no infrastructure source changed.
+git diff --check
+# PASS.
+```
+
+The selected flow cases retain placement admission and diagnostic semantics,
+latest-history visibility/tie handling, exact reasons, non-mutation, coherent
+snapshots and practice behavior. The existing restricted-role case executes the
+complete guidance including its valid hidden mapping under SET LOCAL ROLE with
+only the approved reads; revoking history SELECT still fails. This verifies the
+new assertion without widening runtime privileges. OpenAPI duplicate-key checking
+passes and all 946 references resolve; comparison with incoming HEAD proves that
+only the guidance response-200 description changed.
+
+The focused post-remediation author audit found no remaining actionable defect in
+this delta. Production/test hashes are checked against the final remediation
+commit and retained with logs/reports in the delivery evidence. Earlier independent
+255-unit/147-PostgreSQL and real-backend results apply to their reviewed SHA and
+are not re-counted as new remediation evidence. No unrelated suite, full repository
+verify, browser/E2E run or CI dispatch/query/wait was performed. The complete Linux
+qualification scripts and backend image were not rerun for unchanged grants/SQL;
+local restricted-role proof does not establish VM-host acceptance or real grants.
+
+`Refs #167` remains: CT25.init and the ordinary synchronous AD13 mastery/progress/
+history execution are still blocked, as are full AD10 completion and diagnostic
+activation. AD08 settings/policy parsing, remaining AD16 functionality, frontend,
+QA03/QA04, independent delta review and CODEOWNER/protected gates remain separate.
+Git author and committer retain the exact task-authorized original contributor
+fields; authenticated pusher is `chi-thanh-nguyen`. AI-assisted implementation,
+tests and this author audit are attributed to OpenAI Codex. Declared Git fields
+are not legal-identity or personal-implementation proof.

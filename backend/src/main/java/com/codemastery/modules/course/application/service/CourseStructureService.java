@@ -16,7 +16,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -106,6 +108,33 @@ public class CourseStructureService {
         visible.sort(Comparator.comparingInt(LessonReference::chapterPosition)
                 .thenComparingInt(LessonReference::lessonPosition));
         return new StructureSnapshot(courseId, visible);
+    }
+
+    /**
+     * CT33-MAPPING-ANCESTRY-2026-11-28-r1 (ADR011 §22): assertion-only companion for
+     * MasteryQueryService's admitted guidance snapshot. Hidden same-Course Lessons are valid
+     * mapping targets, but no hidden identity or content is returned. Persisted missing/foreign
+     * targets are integrity failures, not client resource errors. Only this Course-owned
+     * participant reads Lesson → Chapter → Course ancestry.
+     */
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public void requireLearnerMappedLessonsInCourse(UUID courseId, Set<UUID> lessonIds) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isCurrentTransactionReadOnly()
+                || !Objects.equals(TransactionSynchronizationManager.getCurrentTransactionIsolationLevel(),
+                        Isolation.REPEATABLE_READ.value())) {
+            throw new IllegalStateException("Mapping ancestry requires the caller's read-only REPEATABLE READ snapshot");
+        }
+        if (courseId == null || lessonIds == null || lessonIds.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("Course and mapped Lesson identifiers are required");
+        }
+        Set<UUID> requested = Set.copyOf(lessonIds);
+        access.requireLearnerCourseAccess(courseId);
+        for (UUID lessonId : requested) {
+            if (!courseId.equals(content.findLessonCourseId(lessonId).orElse(null))) {
+                throw new IllegalStateException("Persisted Lesson mapping is outside the Course");
+            }
+        }
     }
 
     /** CT03 owner admission plus Chapter ancestry, for callers that reject a body after admission. */

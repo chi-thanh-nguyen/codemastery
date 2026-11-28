@@ -15,6 +15,10 @@
 > initialize mastery through the approved path. AD08 settings operations, the Mastery
 > Map and Home/insight reads, frontend delivery, independent acceptance, protected
 > integration and deployment are separate. See the PR #304 record in `testing.md`.
+> The AD10-IR-01 remediation validates every stored mapped-Lesson target through
+> Course's assertion-only participant in that same admitted snapshot before
+> publication filtering (ADR011 §22). Valid hidden same-Course mappings stay
+> excluded from guidance; foreign or missing targets fail integrity validation.
 
 ## 1. Purpose and Scope
 

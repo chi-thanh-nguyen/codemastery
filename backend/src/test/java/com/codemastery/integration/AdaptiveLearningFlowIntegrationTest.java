@@ -2678,6 +2678,104 @@ class AdaptiveLearningFlowIntegrationTest extends AbstractIntegrationTest {
         }
     }
 
+    @ParameterizedTest @ValueSource(strings = {"published", "hidden"})
+    void ad10Ir01ForeignMappedLessonFailsClosedBeforePublicationFiltering(String publication) throws Exception {
+        var f = guidanceFixture();
+        UUID foreign = "published".equals(publication) ? lesson(chapter(SECOND, 1), 1)
+                : hiddenLesson(chapter(SECOND, 1), 1);
+        jdbc.update("INSERT INTO public.lesson_skills (id,lesson_id,skill_id) VALUES (?,?,?)",
+                UUID.randomUUID(), foreign, f.loops());
+        String token = bearer(LEARNER), before = mutableState();
+        var result = call(new Operation(HttpMethod.GET, "/api/courses/" + COURSE + "/adaptive-guidance", null), token);
+        assertProblem(result, 500, null);
+        assertEquals("no-store", result.getResponse().getHeader("Cache-Control"));
+        String body = result.getResponse().getContentAsString();
+        assertFalse(body.contains(foreign.toString()));
+        assertFalse(body.contains(SECOND.toString()));
+        assertFalse(body.contains("Persisted Lesson mapping"));
+        assertEquals(before, mutableState());
+    }
+
+    @Test void ad10Ir01ValidHiddenSameCourseMappingIsAcceptedWithoutBecomingGuidance() throws Exception {
+        var f = guidanceFixture(); // Includes a real hidden Lesson mapped to Loops.
+        UUID enrollmentId = jdbc.queryForObject("SELECT id FROM public.enrollments WHERE user_id=? AND course_id=?",
+                UUID.class, LEARNER, COURSE);
+        guidanceHistory(enrollmentId, f.l1(), "continue", "Continue with the next lesson in the course order.", 0);
+        String token = bearer(LEARNER), before = mutableState();
+        var withHidden = guidanceJson(COURSE, token);
+        assertEquals(List.of(f.l1().toString(), f.l2().toString(), f.unmapped().toString()),
+                withHidden.get("lessons").valueStream().map(l -> l.get("lessonId").asString()).toList());
+        assertEquals(f.l1().toString(), withHidden.get("currentRecommendation").get("targetLessonId").asString());
+        assertFalse(withHidden.toString().contains(f.hidden().toString()));
+        assertEquals(before, mutableState());
+        jdbc.update("DELETE FROM public.lesson_skills WHERE lesson_id=?", f.hidden());
+        assertEquals(withHidden, guidanceJson(COURSE, token), "hidden mappings are valid but never routing inputs");
+    }
+
+    @Test void ad10Ir01CourseAssertionRequiresSnapshotAndLearnerAdmissionEvenForEmptyTargets() {
+        var f = guidanceFixture();
+        assertTrue(AopUtils.isAopProxy(structure));
+        assertThrows(IllegalTransactionStateException.class,
+                () -> structure.requireLearnerMappedLessonsInCourse(COURSE, Set.of(f.hidden())));
+        for (int isolation : List.of(TransactionDefinition.ISOLATION_READ_COMMITTED, TransactionDefinition.ISOLATION_REPEATABLE_READ)) {
+            for (boolean readOnly : List.of(false, true)) {
+                if (readOnly && isolation == TransactionDefinition.ISOLATION_REPEATABLE_READ) continue;
+                assertThrows(IllegalStateException.class, () -> outer(isolation, readOnly).execute(status ->
+                        as(LEARNER, Role.LEARNER, () -> {
+                            // SECOND would be 403 if admission ran before the transaction guard.
+                            structure.requireLearnerMappedLessonsInCourse(SECOND, Set.of());
+                            return null;
+                        })));
+            }
+        }
+        for (var actor : List.of(new Object[]{OWNER, Role.INSTRUCTOR}, new Object[]{ADMIN, Role.ADMIN})) {
+            assertThrows(AccessDeniedException.class, () -> outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true)
+                    .execute(status -> as((UUID) actor[0], (Role) actor[1], () -> {
+                        structure.requireLearnerMappedLessonsInCourse(COURSE, Set.of(f.hidden())); return null;
+                    })));
+        }
+        assertThrows(AccessDeniedException.class, () -> outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true)
+                .execute(status -> as(LEARNER, Role.LEARNER, () -> {
+                    structure.requireLearnerMappedLessonsInCourse(SECOND, Set.of()); return null;
+                })));
+        assertThrows(IllegalStateException.class, () -> outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true)
+                .execute(status -> as(LEARNER, Role.LEARNER, () -> {
+                    structure.requireLearnerMappedLessonsInCourse(COURSE, Set.of(UUID.randomUUID())); return null;
+                })));
+        outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(status -> as(LEARNER, Role.LEARNER, () -> {
+            structure.requireLearnerMappedLessonsInCourse(COURSE, Set.of(f.l1(), f.hidden()));
+            assertEquals("repeatable read", jdbc.queryForObject("SHOW transaction_isolation", String.class));
+            assertEquals("on", jdbc.queryForObject("SHOW transaction_read_only", String.class));
+            assertNull(jdbc.queryForObject("SELECT pg_current_xact_id_if_assigned()", Object.class));
+            return null;
+        }));
+    }
+
+    @Test void ad10Ir01MappingAncestryUsesTheEstablishedSnapshotAcrossCommittedLessonMove() throws Exception {
+        var f = guidanceFixture();
+        UUID foreignChapter = chapter(SECOND, 1);
+        outer(TransactionDefinition.ISOLATION_REPEATABLE_READ, true).execute(status -> as(LEARNER, Role.LEARNER, () -> {
+            learnerStates.readLearnerState(COURSE); // Establish the PostgreSQL snapshot before the writer commits.
+            try (Connection writer = dataSource.getConnection();
+                    PreparedStatement update = writer.prepareStatement("UPDATE public.lessons SET chapter_id=? WHERE id=?")) {
+                writer.setAutoCommit(true);
+                update.setQueryTimeout(Math.toIntExact(WAIT_SECONDS));
+                update.setObject(1, foreignChapter); update.setObject(2, f.hidden());
+                assertEquals(1, update.executeUpdate());
+            } catch (SQLException failure) {
+                throw new AssertionError("Disposable corrupt-writer fixture did not commit", failure);
+            }
+            var during = masteryQueries.readAdaptiveGuidance(COURSE);
+            assertEquals(List.of(f.l1(), f.l2(), f.unmapped()), during.lessons().stream().map(MasteryQueryService.LessonGuidance::lessonId).toList());
+            assertNull(jdbc.queryForObject("SELECT pg_current_xact_id_if_assigned()", Object.class));
+            return null;
+        }));
+        assertEquals(foreignChapter, jdbc.queryForObject("SELECT chapter_id FROM public.lessons WHERE id=?", UUID.class, f.hidden()));
+        var fresh = call(new Operation(HttpMethod.GET, "/api/courses/" + COURSE + "/adaptive-guidance", null), bearer(LEARNER));
+        assertProblem(fresh, 500, null);
+        assertEquals("no-store", fresh.getResponse().getHeader("Cache-Control"));
+    }
+
     private PracticeFixture guidanceFixture() {
         var f = practiceFixture();
         jdbc.update("UPDATE public.courses SET adaptive_settings = ?::jsonb WHERE id = ?",

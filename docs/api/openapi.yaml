@@ -6446,7 +6446,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Read-only REPEATABLE READ snapshot; specification only, NOT IMPLEMENTED.",
+            "description": "Implemented admitted read-only REPEATABLE READ guidance snapshot. CT25 initialization remains blocked on AD13; frontend delivery, independent acceptance, protected integration and deployment remain separate.",
             "headers": {
               "Cache-Control": {
                 "$ref": "#/components/headers/AuthenticationNoStore"

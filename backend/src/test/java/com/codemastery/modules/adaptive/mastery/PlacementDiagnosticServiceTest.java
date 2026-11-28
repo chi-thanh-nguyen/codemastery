@@ -287,6 +287,7 @@ class PlacementDiagnosticServiceTest {
                 "readMyPlacementQuizId", Set.of("modules/adaptive/application/mastery/PlacementDiagnosticService.java"),
                 "readPlacementOffer", Set.of("modules/adaptive/application/mastery/MasteryQueryService.java"),
                 "readAdaptiveGuidance", Set.of("modules/adaptive/api/controller/MasteryController.java"),
+                "requireLearnerMappedLessonsInCourse", Set.of("modules/adaptive/application/mastery/MasteryQueryService.java"),
                 "findCurrentGuidance", Set.of("modules/adaptive/application/mastery/MasteryQueryService.java"));
         Map<String, Set<String>> actual = new HashMap<>();
         allowed.keySet().forEach(name -> actual.put(name, new java.util.TreeSet<>()));

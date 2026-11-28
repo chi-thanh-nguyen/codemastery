@@ -4,6 +4,7 @@ import com.codemastery.modules.adaptive.domain.model.MasteryState;
 import com.codemastery.modules.adaptive.domain.repository.LearnerSkillMasteryRepository;
 import org.springframework.stereotype.Service;
 import com.codemastery.modules.course.application.service.LessonProgressService;
+import com.codemastery.modules.course.application.service.CourseStructureService;
 import com.codemastery.modules.adaptive.application.decision.AdaptiveDecisionEngine;
 import com.codemastery.modules.adaptive.application.decision.AdaptiveDecisionEngine.DecisionContext;
 import com.codemastery.modules.adaptive.application.decision.AdaptiveDecisionEngine.LessonInput;
@@ -44,15 +45,18 @@ public class MasteryQueryService {
     private final PlacementDiagnosticService placement;
     private final SkillRepository skills;
     private final PathRecommendationRepository history;
+    private final CourseStructureService structure;
     private final AdaptiveDecisionEngine engine = new AdaptiveDecisionEngine();
 
     public MasteryQueryService(LearnerSkillMasteryRepository masteries, LessonProgressService learnerStates,
-            PlacementDiagnosticService placement, SkillRepository skills, PathRecommendationRepository history) {
+            PlacementDiagnosticService placement, SkillRepository skills, PathRecommendationRepository history,
+            CourseStructureService structure) {
         this.masteries = Objects.requireNonNull(masteries);
         this.learnerStates = Objects.requireNonNull(learnerStates);
         this.placement = Objects.requireNonNull(placement);
         this.skills = Objects.requireNonNull(skills);
         this.history = Objects.requireNonNull(history);
+        this.structure = Objects.requireNonNull(structure);
     }
 
     /** CT33.rest: complete guidance, with no readiness evaluation or write, in one admitted snapshot. */
@@ -86,11 +90,18 @@ public class MasteryQueryService {
             }
         }
         Set<String> pairs = new HashSet<>();
-        for (var mapping : Objects.requireNonNull(skills.findMappingsForSkills(names.keySet()), "Lesson mappings")) {
+        var storedMappings = Objects.requireNonNull(skills.findMappingsForSkills(names.keySet()), "Lesson mappings");
+        Set<UUID> mappedLessons = new HashSet<>();
+        for (var mapping : storedMappings) {
             if (mapping == null || mapping.lessonId() == null || !names.containsKey(mapping.skillId())
                     || !pairs.add(mapping.lessonId() + "/" + mapping.skillId())) {
                 throw new IllegalStateException("Invalid stored Lesson mapping");
             }
+            mappedLessons.add(mapping.lessonId());
+        }
+        // Prove all persisted targets first: valid hidden mappings must not conceal foreign ones.
+        structure.requireLearnerMappedLessonsInCourse(courseId, mappedLessons);
+        for (var mapping : storedMappings) {
             if (mappings.containsKey(mapping.lessonId())) mappings.get(mapping.lessonId()).add(mapping.skillId());
         }
         var edges = Objects.requireNonNull(skills.findPrerequisites(courseId), "Prerequisites").stream().map(edge -> {

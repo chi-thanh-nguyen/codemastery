@@ -5859,3 +5859,9 @@ PostgreSQL qualification also executes the Spring composition under a restricted
 role and checks the absence of write/transaction effects. Actual shared/production
 grants, Linux VM qualification, infrastructure review and deployment remain separate.
 See `docs/testing.md` for executed checks and limits.
+
+The AD10-IR-01 follow-up (ADR011 §22) reuses Course's existing scalar ancestry
+query over `lessons` and `chapters` inside the admitted snapshot. Its required
+SELECT columns are already granted by the effective matrix; r18 and every other
+privilege row remain unchanged. Restricted-role regression evidence belongs to
+the remediation record in `docs/testing.md`, not to actual VM provisioning.
